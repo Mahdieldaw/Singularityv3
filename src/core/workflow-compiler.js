@@ -133,6 +133,7 @@ export class WorkflowCompiler {
         providers: request.providers,
         providerContexts:
           context.type === "extend" ? context.providerContexts : undefined,
+        previousContext: context.previousContext || null,
         providerMeta: request.providerMeta || {},
         hidden: !!(request.includeSynthesis && request.providers.length > 1),
         useThinking: !!request.useThinking,
@@ -303,7 +304,7 @@ export class WorkflowCompiler {
     try {
       const stored = localStorage.getItem("htos_mapping_provider");
       if (stored) return stored;
-    } catch {}
+    } catch { }
     return request.providers?.[0] || "claude";
   }
 
@@ -311,7 +312,7 @@ export class WorkflowCompiler {
     try {
       const stored = localStorage.getItem("htos_last_synthesis_model");
       if (stored) return stored;
-    } catch {}
+    } catch { }
     return request.providers?.[0] || "claude";
   }
 

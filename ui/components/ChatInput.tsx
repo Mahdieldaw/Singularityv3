@@ -226,6 +226,11 @@ const ChatInput = ({
               }
             }}
             disabled={isLoading}
+            onFocus={() => {
+              if (activeTarget) {
+                onCancelTarget?.();
+              }
+            }}
           />
         </div>
 

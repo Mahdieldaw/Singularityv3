@@ -163,6 +163,18 @@ const ChatInputConnected = () => {
     [refinePrompt],
   );
 
+  // Clear active target when clicking outside (unless clicked inside a provider card which stops propagation)
+  React.useEffect(() => {
+    if (!activeTarget) return;
+
+    const handleClickOutside = () => {
+      setActiveTarget(null);
+    };
+
+    document.addEventListener("click", handleClickOutside);
+    return () => document.removeEventListener("click", handleClickOutside);
+  }, [activeTarget, setActiveTarget]);
+
   return (
     <ChatInput
       onSendPrompt={handleSend}

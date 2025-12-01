@@ -73,7 +73,9 @@ Your synthesis should feel inevitable in hindsight, yet unseen before now. It sh
 ${otherResults}
 </model_outputs>
 
-Begin`;
+Begin.
+
+When outputting your synthesis, be sure to start with a "The Short Answer" title which gives a brief overview of your whole response in no more than a paragraph or two, before writing a "The Long Answer" header which contains your actual response.`;
 
   return finalPrompt;
 }
@@ -1049,10 +1051,31 @@ export class WorkflowEngine {
    */
   async executePromptStep(step, context) {
     const artifactProcessor = new ArtifactProcessor();
-    const { prompt, providers, useThinking, providerContexts } = step.payload;
+    const {
+      prompt,
+      providers,
+      useThinking,
+      providerContexts,
+      previousContext, // ← NEW
+    } = step.payload;
+
+    // Inject Council Framing if context exists
+    let enhancedPrompt = prompt;
+    if (previousContext) {
+      enhancedPrompt = `You are part of the council. Here's the context from our previous discussion:
+
+${previousContext}
+
+Now respond to the user's new message: 
+<user_prompt>
+${prompt}
+</user_prompt>
+
+Your job is to address what the user is actually asking, informed by but not focused on the previous context.`;
+    }
 
     return new Promise((resolve, reject) => {
-      this.orchestrator.executeParallelFanout(prompt, providers, {
+      this.orchestrator.executeParallelFanout(enhancedPrompt, providers, {
         sessionId: context.sessionId,
         useThinking,
         providerContexts,

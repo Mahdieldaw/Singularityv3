@@ -101,6 +101,7 @@ export class ContextResolver {
       sessionId,
       lastTurnId: lastTurn.id,
       providerContexts: resolvedContexts,
+      previousContext: lastTurn.lastContextSummary || null,
     };
   }
 

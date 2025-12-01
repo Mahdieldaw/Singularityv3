@@ -118,6 +118,7 @@ export class SessionManager {
       batchResponseCount: this.countResponses(result.batchOutputs),
       synthesisResponseCount: this.countResponses(result.synthesisOutputs),
       mappingResponseCount: this.countResponses(result.mappingOutputs),
+      lastContextSummary: null, // Initial turn has no previous context
       meta: await this._attachRunIdMeta(aiTurnId),
     };
     await this.adapter.put("turns", aiTurnRecord);
@@ -458,6 +459,15 @@ export class SessionManager {
         completedAt: now,
       });
     }
+
+    // NEW: Asynchronously extract and store context summary
+    // Fire-and-forget to avoid blocking the main persistence flow
+    setTimeout(() => {
+      const contextSummary = this._buildContextSummary(result);
+      if (contextSummary) {
+        this._updateTurnContextSummary(aiTurnId, contextSummary);
+      }
+    }, 0);
   }
 
   /**
@@ -973,6 +983,121 @@ export class SessionManager {
   // saveTurn() removed. Use persist() primitives.
 
   // saveTurnWithPersistence() removed. Use persist() primitives.
+
+  /**
+   * Extract "The Short Answer" section or fallback to intro paragraphs from synthesis text
+   * @param {string} text 
+   */
+  _extractContextFromSynthesis(text) {
+    if (!text) return "";
+
+    // 1. Look for "The Short Answer" delimiter
+    const shortAnswerMatch = text.match(/#+\s*The Short Answer/i);
+    if (shortAnswerMatch) {
+      const startIndex = shortAnswerMatch.index + shortAnswerMatch[0].length;
+      const remaining = text.slice(startIndex).trim();
+      // Extract until next header or formatting change
+      const nextHeaderMatch = remaining.match(/\n#+\s/);
+      let content = remaining;
+      if (nextHeaderMatch) {
+        content = remaining.slice(0, nextHeaderMatch.index).trim();
+      }
+      // CLEANUP: Remove "The Long Answer" if it leaked in
+      return content.replace(/#+\s*The Long Answer/i, "").trim();
+    }
+
+    // 2. Fallback: If text starts with header, take text between first and second header
+    if (text.trim().match(/^#+\s/)) {
+      const headers = [...text.matchAll(/\n#+\s/g)];
+      if (headers.length > 0) {
+        // Text starts with header (index 0 implied), find next header
+        const end = headers[0].index;
+        // If the first match is actually later in the text (not at 0), we take text before it
+        // But the regex checks if text STARTS with header.
+        // Let's simplify: split by headers and take the first non-empty content block
+        const parts = text.split(/\n#+\s/).map(p => p.trim()).filter(p => p.length > 0);
+        return parts[0] || "";
+      }
+    }
+
+    // 3. Fallback: Take first few paragraphs before any header
+    const firstHeaderIndex = text.search(/\n#+\s/);
+    const preHeaderText = firstHeaderIndex > -1 ? text.slice(0, firstHeaderIndex) : text;
+
+    const paragraphs = preHeaderText.split(/\n\s*\n/).filter(p => p.trim().length > 0);
+    return paragraphs.slice(0, 3).join("\n\n").trim();
+  }
+
+  /**
+   * Extract decision map context (consensus + divergence) from narrative section
+   * @param {string} text - Narrative section only (pre-parsed)
+   */
+  _extractContextFromMapping(text) {
+    if (!text) return "";
+
+    // Look for "Consensus:" section
+    const consensusMatch = text.match(/Consensus:/i);
+    if (consensusMatch) {
+      return text.slice(consensusMatch.index).trim();
+    }
+
+    return text.trim();
+  }
+
+  /**
+   * Combine synthesis + mapping extracts into context blob
+   */
+  _buildContextSummary(result) {
+    let summary = "";
+
+    // 1. Synthesis (Preferred)
+    const synthesisOutputs = result?.synthesisOutputs || {};
+    const synthProvider = Object.keys(synthesisOutputs)[0];
+    if (synthProvider && synthesisOutputs[synthProvider]?.text) {
+      const synthText = synthesisOutputs[synthProvider].text;
+      const extracted = this._extractContextFromSynthesis(synthText);
+      if (extracted) {
+        summary += `<previous_synthesis>\n${extracted}\n</previous_synthesis>\n\n`;
+      }
+    }
+
+    // 2. Mapping (Narrative)
+    const mappingOutputs = result?.mappingOutputs || {};
+    const mapProvider = Object.keys(mappingOutputs)[0];
+    if (mapProvider && mappingOutputs[mapProvider]?.text) {
+      const mapText = mappingOutputs[mapProvider].text;
+      const parts = mapText.split("===ALL_AVAILABLE_OPTIONS===");
+      const narrative = parts[0] || "";
+
+      const extracted = this._extractContextFromMapping(narrative);
+      if (extracted) {
+        summary += `<council_views>\n${extracted}\n</council_views>`;
+      }
+    }
+
+    const finalSummary = summary.trim();
+    console.log("[SessionManager] Built Context Summary:", {
+      length: finalSummary.length,
+      preview: finalSummary.slice(0, 100).replace(/\n/g, "\\n") + "...",
+      hasSynthesis: finalSummary.includes("<previous_synthesis>"),
+      hasMapping: finalSummary.includes("<council_views>")
+    });
+
+    return finalSummary;
+  }
+
+  async _updateTurnContextSummary(turnId, contextSummary) {
+    try {
+      const turn = await this.adapter.get("turns", turnId);
+      if (turn) {
+        turn.lastContextSummary = contextSummary;
+        await this.adapter.put("turns", turn);
+        console.log(`[SessionManager] Updated context summary for turn ${turnId}`);
+      }
+    } catch (e) {
+      console.warn(`[SessionManager] Failed to update turn context summary:`, e);
+    }
+  }
 
   /**
    * Get persistence adapter status
