@@ -1,0 +1,352 @@
+@import 'tailwindcss/base';
+@import 'tailwindcss/components';
+@import 'tailwindcss/utilities';
+
+/* Import Math Styles (Lazy-loaded logic handled by component, but styles here for now) */
+@import './styles/math-styles.css';
+
+/* CSS Custom Properties */
+:root {
+  --font-dm-mono: 'DM Mono';
+}
+
+@layer base {
+
+  /* Font Face Declarations */
+  @font-face {
+    font-family: 'Inter';
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url('./fonts/Inter-Regular.woff2') format('woff2');
+  }
+
+  @font-face {
+    font-family: 'Inter';
+    font-style: normal;
+    font-weight: 600;
+    font-display: swap;
+    src: url('./fonts/Inter-SemiBold.woff2') format('woff2');
+  }
+
+  @font-face {
+    font-family: 'DM Mono';
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url('./fonts/DMMono-Regular.ttf') format('truetype');
+  }
+
+  /* CSS Custom Properties */
+  :root {
+    --font-dm-mono: 'DM Mono';
+  }
+
+  /* Base Styles */
+  body {
+    @apply font-sans text-text-primary bg-surface text-base leading-relaxed;
+  }
+
+  #root {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+  }
+
+  header {
+    background-color: #2c3e50;
+    color: #ecf0f1;
+    padding: 15px 20px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  header h1 {
+    margin: 0;
+    font-size: 24px;
+  }
+
+  nav ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+  }
+
+  nav li {
+    margin-left: 20px;
+  }
+
+  nav a {
+    color: #ecf0f1;
+    text-decoration: none;
+    font-weight: bold;
+    transition: color 0.3s ease;
+  }
+
+  nav a:hover {
+    color: #3498db;
+  }
+
+  main {
+    flex-grow: 1;
+    padding: 20px;
+  }
+
+  footer {
+    background-color: #2c3e50;
+    color: #ecf0f1;
+    text-align: center;
+    padding: 10px 20px;
+    box-shadow: 0 -2px 4px rgba(0, 0, 0, 0.1);
+    font-size: 14px;
+  }
+
+  /* Layout clamps */
+  html,
+  body,
+  #root {
+    max-width: 100%;
+    overflow-x: hidden;
+  }
+
+  .singularity-app-container,
+  .main-content-wrapper,
+  .chat-area {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    overflow-x: hidden;
+  }
+
+  /* Ensure long words/content wrap within the editor */
+  .ProseMirror {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+}
+
+@layer components {
+  .batch-filler {
+    overflow: hidden;
+  }
+
+  .primaries {
+    overflow: visible;
+  }
+
+  .user-turn-block pre,
+  .ai-turn-block pre {
+    max-width: 100%;
+    overflow-x: auto;
+  }
+
+  .container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0 15px;
+  }
+
+  .card {
+    background-color: #fff;
+    border-radius: 8px;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+    padding: 20px;
+    margin-bottom: 20px;
+  }
+
+  .button {
+    display: inline-block;
+    background-color: #3498db;
+    color: #fff;
+    padding: 10px 15px;
+    border-radius: 5px;
+    text-decoration: none;
+    transition: background-color 0.3s ease;
+  }
+
+  .button:hover {
+    background-color: #2980b9;
+  }
+
+  .streaming-dots::after {
+    content: "● ● ●";
+    font-size: 12px;
+    letter-spacing: 0.1em;
+    color: #c084fc;
+    animation: pulse 1.2s infinite;
+  }
+
+  .copy-button-wrapper {
+    opacity: 0;
+    transition: opacity 0.2s ease-in-out;
+  }
+
+  .provider-block:hover .copy-button-wrapper {
+    opacity: 1;
+  }
+
+  .truncated-content {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-clamp: 3;
+  }
+
+  .composer-toolbar {
+    width: 100%;
+  }
+
+  .chat-view,
+  .chat-input-wrapper,
+  .chat-main,
+  main {
+    min-height: 0 !important;
+  }
+
+  .chat-input-wrapper {
+    flex: 0 0 auto !important;
+    z-index: 10;
+  }
+
+  .htos-citation-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 0 6px;
+    margin-left: 4px;
+    margin-right: 4px;
+    background-color: #2563eb;
+    border: 1px solid #1d4ed8;
+    border-radius: 9999px;
+    color: #ffffff;
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1.4;
+    cursor: pointer;
+    user-select: none;
+    box-shadow: 0 0 0 1px rgba(29, 78, 216, 0.6);
+    transition: transform 0.1s ease, background-color 0.1s ease;
+  }
+
+  .htos-citation-pill:hover {
+    background-color: #1d4ed8;
+    transform: translateY(-1px);
+  }
+
+  .htos-citation-pill:active {
+    transform: translateY(0);
+  }
+
+  /* Reset block code inside pre to prevent bubble styling */
+  .markdown-body pre code {
+    background: transparent;
+    border: none;
+    padding: 0;
+    display: inline;
+    white-space: pre;
+  }
+}
+
+@layer utilities {
+  @keyframes pulse {
+
+    0%,
+    100% {
+      opacity: 1;
+    }
+
+    50% {
+      opacity: 0.5;
+    }
+  }
+
+  @keyframes synthesisGlow {
+    0% {
+      opacity: 0.5;
+    }
+
+    100% {
+      opacity: 1;
+    }
+  }
+
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  @keyframes slideUp {
+    from {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+    }
+
+    to {
+      opacity: 1;
+    }
+  }
+
+  @keyframes slideDown {
+    from {
+      opacity: 0;
+      transform: translateY(-10px);
+    }
+
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  /* Lightweight Math Styling */
+  .math-inline {
+    font-style: italic;
+    font-family: 'Times New Roman', 'Georgia', serif;
+    white-space: nowrap;
+  }
+
+  .math-text {
+    font-style: normal;
+    font-family: inherit;
+  }
+
+  .math-sup {
+    font-size: 0.75em;
+    vertical-align: super;
+    line-height: 0;
+  }
+
+  .math-sub {
+    font-size: 0.75em;
+    vertical-align: sub;
+    line-height: 0;
+  }
+
+  /* 
+     FIX: Global Safety Net for Math Scrollbars
+     Ensure the parent chat bubble allows the child to handle scrolling.
+     We target the markdown body and the turn block to ensure no overflow: hidden clips the scrollbar.
+  */
+  .markdown-body,
+  .ai-turn-block,
+  .user-turn-block {
+    overflow-wrap: break-word;
+    /* overflow: hidden;  <-- DO NOT USE THIS, it clips the scrollbar */
+  }
+}
