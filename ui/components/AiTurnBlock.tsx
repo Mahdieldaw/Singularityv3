@@ -13,6 +13,8 @@ import MarkdownDisplay from "./MarkdownDisplay";
 import { LLM_PROVIDERS_CONFIG } from "../constants";
 import ClipsCarousel from "./ClipsCarousel";
 import { ChevronDownIcon, ChevronUpIcon, ListIcon } from "./Icons";
+import DecisionGraph from "./experimental/DecisionGraph";
+import { GraphTopology } from "../types";
 import {
   normalizeResponseArray,
   getLatestResponse,
@@ -98,6 +100,8 @@ interface AiTurnBlockProps {
   primaryView?: "synthesis" | "decision-map";
   onSetPrimaryView?: (view: "synthesis" | "decision-map") => void;
   mapStatus?: "idle" | "streaming" | "ready" | "error";
+  graphTopology?: GraphTopology | null;
+  aiTurnId?: string;
   children?: React.ReactNode;
 }
 
@@ -226,6 +230,8 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
   primaryView = "synthesis",
   onSetPrimaryView,
   mapStatus = "idle",
+  graphTopology = null,
+  aiTurnId,
   children,
 }) => {
   const setSynthExpanded = onSetSynthExpanded || (() => { });
@@ -1061,6 +1067,11 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                             </div>
                             <div style={{ display: mappingTab === "map" ? "block" : "none" }}>
                               {mapInner}
+                              {/* Experimental Decision Graph */}
+                              <DecisionGraph
+                                topology={graphTopology}
+                                aiTurnId={aiTurnId}
+                              />
                             </div>
                           </>
                         );

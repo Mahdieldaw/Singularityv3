@@ -1,8 +1,9 @@
 // ui/components/AiTurnBlockConnected.tsx
-import React, { useCallback } from "react";
+import React, { useCallback, useMemo } from "react";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import AiTurnBlock from "./AiTurnBlock";
 import ProviderResponseBlockConnected from "./ProviderResponseBlockConnected";
+import DecisionGraph from "./experimental/DecisionGraph";
 
 import {
   isReducedMotionAtom,
@@ -105,13 +106,37 @@ export default function AiTurnBlockConnected({
     return "idle";
   })();
 
+  // Extract graph topology from mapping response metadata (if available)
+  const graphTopology = useMemo(() => {
+    if (!activeMappingClipProviderId) return null;
+
+    const mappingResponsesForProvider = aiTurn.mappingResponses?.[activeMappingClipProviderId];
+    if (!mappingResponsesForProvider || mappingResponsesForProvider.length === 0) {
+      return null;
+    }
+
+    const latestMapping = Array.isArray(mappingResponsesForProvider)
+      ? mappingResponsesForProvider[mappingResponsesForProvider.length - 1]
+      : mappingResponsesForProvider;
+
+    // Check if topology exists in meta
+    return (latestMapping as any)?.meta?.graphTopology || null;
+  }, [activeMappingClipProviderId, aiTurn.mappingResponses]);
+
+  // Filter activeRecomputeState to only include synthesis/mapping (AiTurnBlock doesn't handle batch)
+  const filteredRecomputeState = useMemo(() => {
+    if (!activeRecomputeState) return null;
+    if (activeRecomputeState.stepType === 'batch') return null;
+    return activeRecomputeState as { aiTurnId: string; stepType: "synthesis" | "mapping"; providerId: string; };
+  }, [activeRecomputeState]);
+
   return (
     <AiTurnBlock
       aiTurn={aiTurn}
       isLive={isLive}
       isReducedMotion={isReducedMotion}
       isLoading={isLoading}
-      activeRecomputeState={activeRecomputeState}
+      activeRecomputeState={filteredRecomputeState}
       currentAppStep={currentAppStep}
       showSourceOutputs={showSourceOutputs}
       onToggleSourceOutputs={useCallback(
@@ -157,6 +182,8 @@ export default function AiTurnBlockConnected({
         [setPrimaryView],
       )}
       mapStatus={mapStatus}
+      graphTopology={graphTopology}
+      aiTurnId={aiTurn.id}
     >
       <ProviderResponseBlockConnected aiTurnId={aiTurn.id}
         expectedProviders={aiTurn.meta?.expectedProviders} // ✅ Pass metadata

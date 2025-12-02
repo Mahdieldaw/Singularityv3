@@ -150,6 +150,38 @@ For each option:
 - Deduplicate
 - Order by prevalence
 
+**Task 3: Topology (for visualization)**
+After the options list, add exactly:
+"===GRAPH_TOPOLOGY==="
+
+Output a JSON object with this structure:
+{
+  "nodes": [
+    {
+      "id": "opt_1",
+      "label": "<option summary, max 10 words>",
+      "theme": "<theme name>",
+      "supporters": [<model numbers>],
+      "support_count": <number>
+    }
+  ],
+  "edges": [
+    {
+      "source": "<node id>",
+      "target": "<node id>",
+      "type": "conflicts" | "complements" | "prerequisite",
+      "reason": "<one phrase explaining relationship>"
+    }
+  ]
+}
+
+Rules for edges:
+- "conflicts": These options are mutually exclusive or represent opposing philosophies
+- "complements": These options work well together or one enables the other
+- "prerequisite": This option should be done before the other
+- Only include edges where a clear relationship exists
+- Every node should have at least one edge
+
 Begin.`;
 }
 
@@ -909,11 +941,6 @@ export class WorkflowEngine {
     }
   }
 
-  // Legacy _persistCriticalTurnData removed; consolidated persistence happens in execute()
-
-  // Legacy _persistNonCriticalData removed; consolidated persistence happens in execute()
-
-  // Legacy _persistCompletedTurn removed; consolidated persistence happens in execute()
 
   _generateId(prefix = "turn") {
     return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -1745,6 +1772,31 @@ Your job is to address what the user is actually asking, informed by but not foc
               finalResult.artifacts = artifacts;
             }
 
+            // ✅ Parse graph topology from mapping response
+            let graphTopology = null;
+            if (finalResult?.text) {
+              try {
+                const topologyDelimiter = '===GRAPH_TOPOLOGY===';
+                const topologyIndex = finalResult.text.indexOf(topologyDelimiter);
+
+                if (topologyIndex !== -1) {
+                  // Extract JSON after delimiter
+                  const jsonSection = finalResult.text.substring(topologyIndex + topologyDelimiter.length).trim();
+
+                  // Try to parse JSON
+                  graphTopology = JSON.parse(jsonSection);
+
+                  wdbg('[WorkflowEngine] Parsed graph topology:', {
+                    nodes: graphTopology?.nodes?.length || 0,
+                    edges: graphTopology?.edges?.length || 0,
+                  });
+                }
+              } catch (e) {
+                logger.warn('[WorkflowEngine] Failed to parse graph topology JSON:', e);
+                // Continue gracefully without topology
+              }
+            }
+
             // ✅ Ensure final emission for mapping
             if (finalResult?.text) {
               this._dispatchPartialDelta(
@@ -1776,6 +1828,7 @@ Your job is to address what the user is actually asking, informed by but not foc
               meta: {
                 ...(finalResult?.meta || {}),
                 citationSourceOrder,
+                ...(graphTopology ? { graphTopology } : {}), // ✅ Add topology to meta
               },
             };
 

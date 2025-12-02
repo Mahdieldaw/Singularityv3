@@ -9,6 +9,7 @@
  * Build-phase safe: emitted to dist/adapters/*
  */
 import { BusController } from "../core/vendor-exports.js";
+import { ArtifactProcessor } from "../../shared/artifact-processor.ts";
 
 // =============================================================================
 // GEMINI MODELS CONFIGURATION
@@ -270,14 +271,24 @@ export class GeminiSessionApi {
     // --- Immersive Content Extraction ---
     // Look for hidden markdown content (stories, code, etc) in the response tree
     const immersiveContent = [];
+    const images = [];
+
     for (const L of parsedLines) {
       L.forEach((entry) => {
         try {
           if (typeof entry[2] !== "string") return;
           const t = JSON.parse(entry[2]);
           this._findImmersiveContent(t, immersiveContent);
+          this._findImages(t, images);
         } catch (e) { }
       });
+    }
+
+    // Replace Image Placeholders with Markdown Images
+    // Use shared ArtifactProcessor for consistent handling
+    const processor = new ArtifactProcessor();
+    if (images.length > 0 && u.text) {
+      u.text = processor.injectImages(u.text, images);
     }
 
     // Append extracted content as Claude-style artifacts
@@ -285,7 +296,7 @@ export class GeminiSessionApi {
       immersiveContent.forEach((item) => {
         // Avoid duplicates if multiple chunks contain the same item
         if (!u.text.includes(`identifier="${item.identifier}"`)) {
-          u.text += `\n\n<document title="${item.title}" identifier="${item.identifier}">\n${item.content}\n</document>`;
+          u.text += processor.formatArtifact(item);
         }
       });
     }
@@ -295,6 +306,7 @@ export class GeminiSessionApi {
         hasText: !!u?.text,
         textLength: u?.text?.length || 0,
         immersiveItems: immersiveContent.length,
+        images: images.length,
         status: response?.status || "unknown",
         model: modelConfig.name,
       });
@@ -305,6 +317,39 @@ export class GeminiSessionApi {
       token,
       modelName: modelConfig.name, // Include model name in response
     };
+  }
+
+  /**
+   * Recursively search for images
+   * Structure: [URL, null, width, height, "Title", URL, ID, ...]
+   */
+  _findImages(obj, results) {
+    if (!obj || typeof obj !== "object") return;
+
+    if (Array.isArray(obj)) {
+      // Check signature for Image Data
+      if (
+        obj.length >= 5 &&
+        typeof obj[0] === "string" &&
+        obj[0].startsWith("http") &&
+        typeof obj[2] === "number" && // Width
+        typeof obj[3] === "number" && // Height
+        typeof obj[4] === "string"    // Title
+      ) {
+        // Check if already added
+        if (!results.find((r) => r.url === obj[0])) {
+          results.push({
+            url: obj[0],
+            width: obj[2],
+            height: obj[3],
+            title: obj[4],
+            id: obj[6] // Optional ID
+          });
+        }
+      }
+      // Continue search
+      obj.forEach((child) => this._findImages(child, results));
+    }
   }
 
   /**
@@ -321,6 +366,7 @@ export class GeminiSessionApi {
         obj.length >= 5 &&
         typeof obj[0] === "string" &&
         (obj[0].includes(".") || obj[0].length > 0) && // Basic filename check
+        !obj[0].includes("_image_") && // EXCLUDE internal image references
         typeof obj[2] === "string" && // Title
         typeof obj[4] === "string" // Content
       ) {

@@ -148,3 +148,30 @@ export interface FullSessionPayload {
   turns: TurnMessage[];
   providerContexts: Record<string, any>;
 }
+
+// =============================================================================
+// DECISION GRAPH TOPOLOGY
+// =============================================================================
+
+/** Represents a node in the decision graph topology. */
+export interface GraphNode {
+  id: string;
+  label: string;
+  theme: string;
+  supporters: number[];
+  support_count: number;
+}
+
+/** Represents an edge in the decision graph topology. */
+export interface GraphEdge {
+  source: string;
+  target: string;
+  type: 'conflicts' | 'complements' | 'prerequisite';
+  reason: string;
+}
+
+/** The complete graph topology structure from mapper output. */
+export interface GraphTopology {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+}

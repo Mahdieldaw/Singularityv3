@@ -104,4 +104,40 @@ export class ArtifactProcessor {
 
         return 'text/plain';
     }
+
+    /**
+     * Format a single artifact into the <document> XML format
+     */
+    formatArtifact(artifact: { title: string; identifier: string; content: string }): string {
+        return `\n\n<document title="${artifact.title}" identifier="${artifact.identifier}">\n${artifact.content}\n</document>`;
+    }
+
+    /**
+     * Inject images into text by replacing placeholders or appending
+     * @param text - The text containing placeholders like [Image of Title]
+     * @param images - Array of image objects { url, title }
+     */
+    injectImages(text: string, images: Array<{ url: string; title: string }>): string {
+        if (!text || !images || images.length === 0) return text;
+
+        let newText = text;
+        images.forEach((img) => {
+            // Pattern: [Image of Title]
+            // We escape the title for regex safety
+            const escapedTitle = img.title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const pattern = new RegExp(`\\[Image of ${escapedTitle}\\]`, 'g');
+
+            const markdownImage = `![${img.title}](${img.url})`;
+
+            // If the placeholder exists, replace it
+            if (pattern.test(newText)) {
+                newText = newText.replace(pattern, markdownImage);
+            } else {
+                // If placeholder not found, append to bottom
+                newText += `\n\n${markdownImage}`;
+            }
+        });
+
+        return newText;
+    }
 }
