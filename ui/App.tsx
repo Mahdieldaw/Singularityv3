@@ -15,6 +15,7 @@ import { isHistoryPanelOpenAtom } from "./state/atoms";
 import { useInitialization } from "./hooks/useInitialization"; // Import the new hook
 import { useOnClickOutside } from "usehooks-ts";
 import { useKey } from "./hooks/useKey";
+import TestGraph from "./components/experimental/TestGraph"; // TEMP: For testing graph
 
 export default function App() {
   // This is now the entry point for all startup logic.
@@ -56,6 +57,8 @@ export default function App() {
       {/* Main content area */}
       <div className="flex flex-1 relative min-h-0">
         <main className="chat-main flex-1 flex flex-col relative min-h-0">
+          {/* TEMP: Testing graph in isolation */}
+          <TestGraph />
           <ChatView />
         </main>
 

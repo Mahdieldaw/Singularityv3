@@ -13,7 +13,8 @@ import MarkdownDisplay from "./MarkdownDisplay";
 import { LLM_PROVIDERS_CONFIG } from "../constants";
 import ClipsCarousel from "./ClipsCarousel";
 import { ChevronDownIcon, ChevronUpIcon, ListIcon } from "./Icons";
-import DecisionGraph from "./experimental/DecisionGraph";
+import DecisionMapGraph from "./experimental/DecisionMapGraph";
+import { adaptGraphTopology } from "./experimental/graphAdapter";
 import { GraphTopology } from "../types";
 import {
   normalizeResponseArray,
@@ -1068,9 +1069,11 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                             <div style={{ display: mappingTab === "map" ? "block" : "none" }}>
                               {mapInner}
                               {/* Experimental Decision Graph */}
-                              <DecisionGraph
-                                topology={graphTopology}
-                                aiTurnId={aiTurnId}
+                              <DecisionMapGraph
+                                {...adaptGraphTopology(graphTopology)}
+                                isStreaming={mapStatus === "streaming"}
+                                width={800}
+                                height={500}
                               />
                             </div>
                           </>
