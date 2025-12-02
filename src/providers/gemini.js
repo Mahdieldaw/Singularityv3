@@ -9,7 +9,7 @@
  * Build-phase safe: emitted to dist/adapters/*
  */
 import { BusController } from "../core/vendor-exports.js";
-import { ArtifactProcessor } from "../../shared/artifact-processor.ts";
+import { ArtifactProcessor } from "../../shared/artifact-processor.js";
 
 // =============================================================================
 // GEMINI MODELS CONFIGURATION
@@ -331,7 +331,7 @@ export class GeminiSessionApi {
       if (
         obj.length >= 5 &&
         typeof obj[0] === "string" &&
-        obj[0].startsWith("http") &&
+        (obj[0].startsWith("http") || obj[0].startsWith("data:image")) &&
         typeof obj[2] === "number" && // Width
         typeof obj[3] === "number" && // Height
         typeof obj[4] === "string"    // Title

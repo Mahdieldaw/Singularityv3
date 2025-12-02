@@ -3,7 +3,7 @@ import React, { useCallback, useMemo } from "react";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import AiTurnBlock from "./AiTurnBlock";
 import ProviderResponseBlockConnected from "./ProviderResponseBlockConnected";
-import DecisionGraph from "./experimental/DecisionGraph";
+
 
 import {
   isReducedMotionAtom,
@@ -165,7 +165,7 @@ export default function AiTurnBlockConnected({
       )}
       mappingTab={mappingTab}
       onSetMappingTab={useCallback(
-        (t: "map" | "options") => setMappingTab(t),
+        (t: "map" | "options" | "graph") => setMappingTab(t),
         [setMappingTab],
       )}
       activeSynthesisClipProviderId={activeSynthesisClipProviderId}

@@ -27,7 +27,6 @@ interface Props {
     nodes: ClaimNode[];
     edges: ClaimEdge[];
     onNodeClick?: (node: ClaimNode) => void;
-    isStreaming?: boolean;
     width?: number;
     height?: number;
 }
@@ -36,7 +35,6 @@ const DecisionMapGraph: React.FC<Props> = ({
     nodes: inputNodes,
     edges: inputEdges,
     onNodeClick,
-    isStreaming = false,
     width = 400,
     height = 250,
 }) => {
@@ -116,7 +114,7 @@ const DecisionMapGraph: React.FC<Props> = ({
                     }
                 });
             })
-            .alphaDecay(isStreaming ? 0.01 : 0.02);
+            .alphaDecay(0.02);
 
         simulation.on('tick', () => {
             setNodes([...simNodes]);
@@ -128,14 +126,7 @@ const DecisionMapGraph: React.FC<Props> = ({
         return () => {
             simulation.stop();
         };
-    }, [inputNodes, inputEdges, width, height, isStreaming]);
-
-    // Reheat simulation when streaming adds new nodes
-    useEffect(() => {
-        if (isStreaming && simulationRef.current) {
-            simulationRef.current.alpha(0.3).restart();
-        }
-    }, [inputNodes.length, isStreaming]);
+    }, [inputNodes, inputEdges, width, height]);
 
     // Get edge coordinates
     const getEdgeCoords = useCallback((edge: ClaimEdge) => {
@@ -231,12 +222,7 @@ const DecisionMapGraph: React.FC<Props> = ({
                     fontWeight: 500,
                     textAlign: 'center',
                 }}>
-                    {isStreaming ? (
-                        <div>
-                            <div style={{ fontSize: 28, marginBottom: 8 }}>✨</div>
-                            <div>Mapping decision space...</div>
-                        </div>
-                    ) : 'No claims visualized'}
+                    No claims visualized
                 </div>
             </div>
         );
@@ -324,34 +310,6 @@ const DecisionMapGraph: React.FC<Props> = ({
 
             <rect width="100%" height="100%" fill="url(#decisionGrid)" opacity={0.5} />
 
-            {/* Floating particles for streaming */}
-            {isStreaming && (
-                <g className="particles" opacity={0.4}>
-                    {Array.from({ length: 15 }).map((_, i) => (
-                        <circle
-                            key={`particle-${i}`}
-                            cx={Math.random() * width}
-                            cy={Math.random() * height}
-                            r="2.5"
-                            fill={`hsl(${240 + Math.random() * 80}, 75%, 65%)`}
-                        >
-                            <animate
-                                attributeName="opacity"
-                                values="0;0.7;0"
-                                dur={`${2 + Math.random() * 4}s`}
-                                repeatCount="indefinite"
-                            />
-                            <animate
-                                attributeName="cy"
-                                values={`${Math.random() * height};${Math.random() * height}`}
-                                dur={`${5 + Math.random() * 5}s`}
-                                repeatCount="indefinite"
-                            />
-                        </circle>
-                    ))}
-                </g>
-            )}
-
             {/* Edges with enhanced visuals */}
             <g className="edges">
                 {edges.map((edge, i) => {
@@ -393,16 +351,7 @@ const DecisionMapGraph: React.FC<Props> = ({
                                         edge.type === 'conflicts' ? 'url(#edgeGlowRed)' :
                                             'url(#edgeGlowBlue)'
                                 }
-                            >
-                                {isStreaming && (
-                                    <animate
-                                        attributeName="stroke-opacity"
-                                        values="0.6;1;0.6"
-                                        dur="2.5s"
-                                        repeatCount="indefinite"
-                                    />
-                                )}
-                            </line>
+                            />
                         </g>
                     );
                 })
@@ -434,19 +383,6 @@ const DecisionMapGraph: React.FC<Props> = ({
                             onMouseLeave={() => setHoveredNode(null)}
                             onClick={() => onNodeClick?.(node)}
                         >
-                            {/* Streaming pulse waves */}
-                            {isStreaming && (
-                                <>
-                                    <circle r={radius + 10} fill={color} opacity={0.12}>
-                                        <animate attributeName="r" values={`${radius + 10};${radius + 25};${radius + 10}`} dur="3.5s" repeatCount="indefinite" />
-                                        <animate attributeName="opacity" values="0.12;0.02;0.12" dur="3.5s" repeatCount="indefinite" />
-                                    </circle>
-                                    <circle r={radius + 6} fill={color} opacity={0.18}>
-                                        <animate attributeName="r" values={`${radius + 6};${radius + 18};${radius + 6}`} dur="3s" repeatCount="indefinite" />
-                                        <animate attributeName="opacity" values="0.18;0.04;0.18" dur="3s" repeatCount="indefinite" />
-                                    </circle>
-                                </>
-                            )}
 
                             {/* Hover aura */}
                             {isHovered && (
@@ -537,30 +473,6 @@ const DecisionMapGraph: React.FC<Props> = ({
                     );
                 })}
             </g>
-
-            {/* Enhanced streaming indicator */}
-            {
-                isStreaming && (
-                    <g transform={`translate(${width - 85}, 22)`}>
-                        <rect
-                            x={-8}
-                            y={-10}
-                            width={82}
-                            height={24}
-                            fill="rgba(17,24,39,0.85)"
-                            stroke="rgba(16,185,129,0.5)"
-                            strokeWidth={1.5}
-                            rx={12}
-                        />
-                        <circle r="5.5" fill="#10b981" filter="url(#nodeGlow)">
-                            <animate attributeName="opacity" values="1;0.3;1" dur="1.3s" repeatCount="indefinite" />
-                        </circle>
-                        <text x="14" y="5" fill="rgba(16,185,129,1)" fontSize={12} fontWeight={700}>
-                            LIVE
-                        </text>
-                    </g>
-                )
-            }
         </svg >
     );
 };

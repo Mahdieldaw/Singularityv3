@@ -248,7 +248,7 @@ export const aiTurnMapExpandedFamily = atomFamily(
   (a, b) => a === b,
 );
 export const aiTurnMappingTabFamily = atomFamily(
-  (_turnId: string) => atom<"map" | "options">("map"),
+  (_turnId: string) => atom<"map" | "options" | "graph">("map"),
   (a, b) => a === b,
 );
 export const aiTurnPrimaryViewFamily = atomFamily(

@@ -358,7 +358,20 @@ export class WorkflowEngine {
     isFinal = false,
   ) {
     try {
-      const delta = makeDelta(sessionId, stepId, providerId, text);
+      let delta;
+
+      // For final emissions, bypass makeDelta regression detection
+      // This is critical when we strip sections (like GRAPH_TOPOLOGY) from the text
+      if (isFinal) {
+        // Force-replace with final text
+        const key = `${sessionId}:${stepId}:${providerId}`;
+        lastStreamState.set(key, text);
+        delta = text; // Send complete final text
+        logger.stream("Final emission (force-replace):", { stepId, providerId, len: text?.length || 0 });
+      } else {
+        delta = makeDelta(sessionId, stepId, providerId, text);
+      }
+
       if (delta && delta.length > 0) {
         const chunk = isFinal
           ? { text: delta, isFinal: true }
@@ -370,8 +383,7 @@ export class WorkflowEngine {
           providerId,
           chunk,
         });
-        const logLabel = label ? `${label} delta:` : "Delta dispatched:";
-        logger.stream(logLabel, { stepId, providerId, len: delta.length });
+        logger.stream(label || "Delta", { stepId, providerId, len: delta.length });
         return true;
       } else {
         logger.stream("Delta skipped (empty):", { stepId, providerId });
@@ -1772,28 +1784,44 @@ Your job is to address what the user is actually asking, informed by but not foc
               finalResult.artifacts = artifacts;
             }
 
-            // ✅ Parse graph topology from mapping response
+            // ✅ Parse graph topology from mapping response AND remove from text
             let graphTopology = null;
             if (finalResult?.text) {
               try {
-                const topologyDelimiter = '===GRAPH_TOPOLOGY===';
-                const topologyIndex = finalResult.text.indexOf(topologyDelimiter);
+                const topologyRegex = /={3,}\s*GRAPH_TOPOLOGY\s*={3,}/i;
+                const match = finalResult.text.match(topologyRegex);
+                const topologyStartIndex = match ? match.index : -1;
+                const topologyDelimiter = match ? match[0] : '===GRAPH_TOPOLOGY===';
 
-                if (topologyIndex !== -1) {
-                  // Extract JSON after delimiter
-                  const jsonSection = finalResult.text.substring(topologyIndex + topologyDelimiter.length).trim();
+                if (topologyStartIndex !== -1) {
+                  // Extract JSON from AFTER delimiter to end of text
+                  const jsonStartIndex = topologyStartIndex + topologyDelimiter.length;
+                  const jsonText = finalResult.text.substring(jsonStartIndex).trim();
 
-                  // Try to parse JSON
-                  graphTopology = JSON.parse(jsonSection);
+                  wdbg('[WorkflowEngine] Found topology section at index:', topologyStartIndex);
+                  wdbg('[WorkflowEngine] Topology JSON length:', jsonText.length);
 
-                  wdbg('[WorkflowEngine] Parsed graph topology:', {
+                  // Parse the JSON
+                  graphTopology = JSON.parse(jsonText);
+
+                  wdbg('[WorkflowEngine] ✅ Parsed graph topology:', {
                     nodes: graphTopology?.nodes?.length || 0,
                     edges: graphTopology?.edges?.length || 0,
                   });
+
+                  // 🔥 CRITICAL: Remove topology section from text so UI parsing works
+                  // Keep everything BEFORE the topology delimiter
+                  const textBeforeTopology = finalResult.text.substring(0, topologyStartIndex).trim();
+                  const originalLength = finalResult.text.length;
+
+                  finalResult.text = textBeforeTopology;
+
+                  wdbg('[WorkflowEngine] ✂️ Stripped topology section from response text');
+                  wdbg('[WorkflowEngine] Text length before:', originalLength, '→ after:', finalResult.text.length);
                 }
               } catch (e) {
-                logger.warn('[WorkflowEngine] Failed to parse graph topology JSON:', e);
-                // Continue gracefully without topology
+                logger.warn('[WorkflowEngine] ❌ Failed to parse graph topology JSON:', e.message);
+                // Continue gracefully without topology (text remains unchanged)
               }
             }
 

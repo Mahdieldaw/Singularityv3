@@ -29,6 +29,11 @@ function parseMappingResponse(response?: string | null) {
 
   const separator = "===ALL_AVAILABLE_OPTIONS===";
   const optionsPatterns = [
+    /={3,}\s*ALL_AVAILABLE_OPTIONS\s*={3,}/i,
+    /={3,}\s*ALL\s+AVAILABLE\s+OPTIONS\s*={3,}/i,
+    /={3,}\s*ALL\s+OPTIONS\s*={3,}/i,
+    /\*\*\s*={3,}\s*ALL_AVAILABLE_OPTIONS\s*={3,}\s*\*\*/i,
+    /###\s*={3,}\s*ALL_AVAILABLE_OPTIONS\s*={3,}/i,
     /\*\*All Available Options:?\*\*/i,
     /## All Available Options:?/i,
     /All Available Options:/i,
@@ -96,8 +101,8 @@ interface AiTurnBlockProps {
   onSetSynthExpanded?: (v: boolean) => void;
   mapExpanded?: boolean;
   onSetMapExpanded?: (v: boolean) => void;
-  mappingTab?: "map" | "options";
-  onSetMappingTab?: (t: "map" | "options") => void;
+  mappingTab?: "map" | "options" | "graph";
+  onSetMappingTab?: (t: "map" | "options" | "graph") => void;
   primaryView?: "synthesis" | "decision-map";
   onSetPrimaryView?: (view: "synthesis" | "decision-map") => void;
   mapStatus?: "idle" | "streaming" | "ready" | "error";
@@ -1052,7 +1057,13 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                                     onClick={() => onSetMappingTab && onSetMappingTab("map")}
                                     className={`px-2 py-0.5 text-xs font-medium rounded-md transition-all ${mappingTab === "map" ? "bg-chip-active text-text-primary shadow-card-sm" : "text-text-muted hover:text-text-secondary"}`}
                                   >
-                                    landscape
+                                    Narrative
+                                  </button>
+                                  <button
+                                    onClick={() => onSetMappingTab && onSetMappingTab("graph")}
+                                    className={`px-2 py-0.5 text-xs font-medium rounded-md transition-all ${mappingTab === "graph" ? "bg-chip-active text-text-primary shadow-card-sm" : "text-text-muted hover:text-text-secondary"}`}
+                                  >
+                                    Graph
                                   </button>
                                   <button
                                     onClick={() => onSetMappingTab && onSetMappingTab("options")}
@@ -1068,13 +1079,22 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                             </div>
                             <div style={{ display: mappingTab === "map" ? "block" : "none" }}>
                               {mapInner}
-                              {/* Experimental Decision Graph */}
-                              <DecisionMapGraph
-                                {...adaptGraphTopology(graphTopology)}
-                                isStreaming={mapStatus === "streaming"}
-                                width={800}
-                                height={500}
-                              />
+                            </div>
+                            <div style={{ display: mappingTab === "graph" ? "block" : "none" }}>
+                              {/* Experimental Decision Graph - only show if we have topology data */}
+                              {graphTopology && graphTopology.nodes && graphTopology.nodes.length > 0 ? (
+                                <div className="mt-4 flex justify-center">
+                                  <DecisionMapGraph
+                                    {...adaptGraphTopology(graphTopology)}
+                                    width={Math.min(800, typeof window !== 'undefined' ? window.innerWidth - 100 : 800)}
+                                    height={450}
+                                  />
+                                </div>
+                              ) : (
+                                <div className="flex items-center justify-center h-40 text-text-muted italic">
+                                  No graph topology available.
+                                </div>
+                              )}
                             </div>
                           </>
                         );

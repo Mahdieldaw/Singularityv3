@@ -232,7 +232,17 @@ const MarkdownDisplay: React.FC<MarkdownDisplayProps> = React.memo(
             h1: ({ children }) => <h1 className="text-2xl font-semibold mt-4 mb-2 text-text-primary">{children}</h1>,
             h2: ({ children }) => <h2 className="text-xl font-semibold mt-3 mb-2 text-text-primary">{children}</h2>,
             h3: ({ children }) => <h3 className="text-lg font-semibold mt-2 mb-1.5 text-text-secondary">{children}</h3>,
+            h3: ({ children }) => <h3 className="text-lg font-semibold mt-2 mb-1.5 text-text-secondary">{children}</h3>,
             blockquote: ({ children }) => <blockquote className="border-l-4 border-border-subtle pl-4 ml-0 text-text-muted italic">{children}</blockquote>,
+            img: ({ src, alt, ...props }: any) => (
+              <img
+                src={src}
+                alt={alt}
+                referrerPolicy="no-referrer"
+                className="rounded-lg max-w-full h-auto my-2 border border-border-subtle"
+                {...props}
+              />
+            ),
 
             // --- TABLE STYLING (Restored) ---
             table: ({ children }) => (
