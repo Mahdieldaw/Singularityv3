@@ -74,6 +74,14 @@ function parseMappingResponse(response?: string | null) {
   return { mapping: response, options: null };
 }
 
+function stripTopologySection(response?: string | null) {
+  if (!response) return "";
+  const match = response.match(/={3,}\s*GRAPH_TOPOLOGY\s*={3,}/i);
+  const idx = match && typeof match.index === "number" ? match.index : -1;
+  if (idx === -1) return response;
+  return response.substring(0, idx).trim();
+}
+
 // extractClaudeArtifacts removed - handled by backend
 
 
@@ -344,17 +352,18 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
     (!activeMappingPid || activeRecomputeState.providerId === activeMappingPid)
   );
 
-  const getMappingAndOptions = useCallback(
-    (take: ProviderResponse | undefined) => {
-      if (!take?.text) return { mapping: "", options: null };
-      return parseMappingResponse(String(take.text));
-    },
-    []
-  );
+  const getMappingAndOptions = useCallback((take: ProviderResponse | undefined) => {
+    const raw = take?.text ? String(take.text) : "";
+    if (!raw) return { mapping: "", options: null };
+    const cleaned = stripTopologySection(raw);
+    return parseMappingResponse(cleaned);
+  }, []);
 
   const getOptions = useCallback((): string | null => {
     if (!activeMappingPid) return null;
     const take = getLatestResponse(mappingResponses[activeMappingPid]);
+    const direct = (take as any)?.meta?.allAvailableOptions;
+    if (direct) return String(direct);
     const { options } = getMappingAndOptions(take);
     return options;
   }, [activeMappingPid, mappingResponses, getMappingAndOptions]);

@@ -1,5 +1,89 @@
 // src/core/workflow-engine.js - FIXED VERSION
 import { ArtifactProcessor } from '../../shared/artifact-processor.ts';
+function extractGraphTopologyAndStrip(text) {
+  if (!text || typeof text !== 'string') return { text, topology: null };
+  const match = text.match(/={3,}\s*GRAPH_TOPOLOGY\s*={3,}/i);
+  if (!match || typeof match.index !== 'number') return { text, topology: null };
+  const start = match.index + match[0].length;
+  const rest = text.slice(start).trim();
+  let i = 0;
+  while (i < rest.length && rest[i] !== '{') i++;
+  if (i >= rest.length) return { text, topology: null };
+  let depth = 0;
+  let inStr = false;
+  let esc = false;
+  let jsonStart = i;
+  let jsonEnd = -1;
+  for (let j = jsonStart; j < rest.length; j++) {
+    const ch = rest[j];
+    if (inStr) {
+      if (esc) {
+        esc = false;
+      } else if (ch === '\\') {
+        esc = true;
+      } else if (ch === '"') {
+        inStr = false;
+      }
+      continue;
+    }
+    if (ch === '"') {
+      inStr = true;
+      continue;
+    }
+    if (ch === '{') {
+      depth++;
+    } else if (ch === '}') {
+      depth--;
+      if (depth === 0) {
+        jsonEnd = j;
+        break;
+      }
+    }
+  }
+  if (jsonEnd === -1) return { text, topology: null };
+  const jsonText = rest.slice(jsonStart, jsonEnd + 1);
+  let topology = null;
+  try {
+    topology = JSON.parse(jsonText);
+  } catch (_) {
+    return { text, topology: null };
+  }
+  const before = text.slice(0, match.index).trim();
+  const after = rest.slice(jsonEnd + 1).trim();
+  const newText = after ? `${before}\n${after}` : before;
+  return { text: newText, topology };
+}
+function extractOptionsAndStrip(text) {
+  if (!text || typeof text !== 'string') return { text, options: null };
+  const patterns = [
+    /={3,}\s*ALL_AVAILABLE_OPTIONS\s*={3,}/i,
+    /={3,}\s*ALL\s+AVAILABLE\s+OPTIONS\s*={3,}/i,
+    /={3,}\s*ALL\s+OPTIONS\s*={3,}/i,
+    /\*\*\s*={3,}\s*ALL_AVAILABLE_OPTIONS\s*={3,}\s*\*\*/i,
+    /###\s*={3,}\s*ALL_AVAILABLE_OPTIONS\s*={3,}/i,
+    /\*\*All Available Options:?\*\*/i,
+    /## All Available Options:?/i,
+    /All Available Options:/i,
+    /\*\*Options:?\*\*/i,
+    /## Options:?/i,
+    /^Options:/im,
+  ];
+  let idx = -1;
+  let len = 0;
+  for (const re of patterns) {
+    const m = text.match(re);
+    if (m && typeof m.index === 'number') {
+      if (idx === -1 || m.index < idx) {
+        idx = m.index;
+        len = m[0].length;
+      }
+    }
+  }
+  if (idx === -1) return { text, options: null };
+  const before = text.slice(0, idx).trim();
+  const after = text.slice(idx + len).trim();
+  return { text: before, options: after };
+}
 
 // =============================================================================
 // HELPER FUNCTIONS FOR PROMPT BUILDING
@@ -1178,15 +1262,13 @@ Your job is to address what the user is actually asking, informed by but not foc
           const formattedResults = {};
 
           results.forEach((result, providerId) => {
-            // ✅ Extract artifacts once during completion
-            const { cleanText, artifacts } = artifactProcessor.process(result.text || '');
-
+            const processed = artifactProcessor.process(result.text || '');
             formattedResults[providerId] = {
               providerId: providerId,
-              text: cleanText, // Store cleaned text
+              text: processed.cleanText,
               status: "completed",
               meta: result.meta || {},
-              artifacts: artifacts, // Store extracted artifacts
+              artifacts: processed.artifacts,
               ...(result.softError ? { softError: result.softError } : {}),
             };
           });
@@ -1777,52 +1859,17 @@ Your job is to address what the user is actually asking, informed by but not foc
           onAllComplete: (results) => {
             const finalResult = results.get(payload.mappingProvider);
 
-            // ✅ Extract artifacts from mapping response
             if (finalResult?.text) {
-              const { cleanText, artifacts } = artifactProcessor.process(finalResult.text);
-              finalResult.text = cleanText;
-              finalResult.artifacts = artifacts;
+              const processed = artifactProcessor.process(finalResult.text);
+              finalResult.text = processed.cleanText;
+              finalResult.artifacts = processed.artifacts;
             }
 
-            // ✅ Parse graph topology from mapping response AND remove from text
-            let graphTopology = null;
+            let allOptions = null;
             if (finalResult?.text) {
-              try {
-                const topologyRegex = /={3,}\s*GRAPH_TOPOLOGY\s*={3,}/i;
-                const match = finalResult.text.match(topologyRegex);
-                const topologyStartIndex = match ? match.index : -1;
-                const topologyDelimiter = match ? match[0] : '===GRAPH_TOPOLOGY===';
-
-                if (topologyStartIndex !== -1) {
-                  // Extract JSON from AFTER delimiter to end of text
-                  const jsonStartIndex = topologyStartIndex + topologyDelimiter.length;
-                  const jsonText = finalResult.text.substring(jsonStartIndex).trim();
-
-                  wdbg('[WorkflowEngine] Found topology section at index:', topologyStartIndex);
-                  wdbg('[WorkflowEngine] Topology JSON length:', jsonText.length);
-
-                  // Parse the JSON
-                  graphTopology = JSON.parse(jsonText);
-
-                  wdbg('[WorkflowEngine] ✅ Parsed graph topology:', {
-                    nodes: graphTopology?.nodes?.length || 0,
-                    edges: graphTopology?.edges?.length || 0,
-                  });
-
-                  // 🔥 CRITICAL: Remove topology section from text so UI parsing works
-                  // Keep everything BEFORE the topology delimiter
-                  const textBeforeTopology = finalResult.text.substring(0, topologyStartIndex).trim();
-                  const originalLength = finalResult.text.length;
-
-                  finalResult.text = textBeforeTopology;
-
-                  wdbg('[WorkflowEngine] ✂️ Stripped topology section from response text');
-                  wdbg('[WorkflowEngine] Text length before:', originalLength, '→ after:', finalResult.text.length);
-                }
-              } catch (e) {
-                logger.warn('[WorkflowEngine] ❌ Failed to parse graph topology JSON:', e.message);
-                // Continue gracefully without topology (text remains unchanged)
-              }
+              const opt = extractOptionsAndStrip(finalResult.text);
+              allOptions = opt.options;
+              finalResult.text = opt.text;
             }
 
             // ✅ Ensure final emission for mapping
@@ -1856,7 +1903,7 @@ Your job is to address what the user is actually asking, informed by but not foc
               meta: {
                 ...(finalResult?.meta || {}),
                 citationSourceOrder,
-                ...(graphTopology ? { graphTopology } : {}), // ✅ Add topology to meta
+                ...(allOptions ? { allAvailableOptions: allOptions } : {}),
               },
             };
 
@@ -1889,3 +1936,4 @@ Your job is to address what the user is actually asking, informed by but not foc
     });
   }
 }
+export { extractGraphTopologyAndStrip };
