@@ -636,7 +636,8 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                     onOrbClick={(pid) => setActiveSplitPanel({ turnId: aiTurn.id, providerId: pid })}
                     onCrownMove={handleCrownMove}
                     onTrayExpand={() => setIsDecisionMapOpen({ turnId: aiTurn.id })}
-                    isTrayExpanded={isDecisionMapOpen !== null}
+                    isTrayExpanded={isDecisionMapOpen?.turnId === aiTurn.id}
+                    variant="tray"
                   />
                 </div>
               </div>

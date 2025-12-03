@@ -249,9 +249,107 @@
     display: inline;
     white-space: pre;
   }
+
+  /* Council Orbs Styles (Migrated from module) */
+  .council-orb {
+    width: 28px;
+    height: 28px;
+    /* remove reliance on Tailwind w-2/w-3 */
+    border-radius: 50%;
+    background: #475569;
+    /* Fallback slate-600 */
+    background: radial-gradient(circle at 30% 30%, #ffffff44, #00000066);
+    box-shadow: 0 0 12px rgba(255, 255, 255, 0.4);
+    transition: all 0.3s cubic-bezier(0.17, 0.67, 0.12, 1.34);
+    position: relative;
+    overflow: hidden;
+    z-index: 1;
+  }
+
+  .council-orb::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: conic-gradient(from var(--rotation, 0deg),
+        var(--model-color),
+        transparent 80%);
+    opacity: 0.8;
+    animation: spin 8s linear infinite, breathe 4s infinite alternate;
+  }
+
+  .council-orb:hover {
+    transform: scale(1.35) translateY(-4px);
+    box-shadow: 0 0 24px var(--model-color);
+    z-index: 10;
+  }
+
+  .council-orb-voice {
+    transform: scale(1.2);
+    box-shadow: 0 0 20px var(--model-color), 0 0 0 3px #ffffff44;
+    animation: pulse 2s infinite;
+  }
+
+  .council-orb-streaming::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(circle, var(--model-color) 0%, transparent 70%);
+    opacity: 0.3;
+    animation: fillPulse 1.5s infinite;
+  }
+
+  .council-orb-error {
+    background: radial-gradient(circle at 30% 30%, #ff000022, #00000044);
+    box-shadow: 0 0 12px rgba(255, 0, 0, 0.5);
+  }
+
+  .council-orb-error::before {
+    background: conic-gradient(from var(--rotation, 0deg),
+        #ef4444,
+        transparent 80%);
+  }
+
+  /* Variant-specific styles */
+  .council-tray {
+    width: auto;
+  }
+
+  .council-divider {
+    max-width: 80%;
+  }
+
+  .council-historical {
+    max-width: 80%;
+  }
+
+  .council-historical-dimmed {
+    opacity: 0.5;
+  }
 }
 
 @layer utilities {
+  @keyframes breathe {
+    from {
+      opacity: 0.4;
+    }
+
+    to {
+      opacity: 0.8;
+    }
+  }
+
+  @keyframes fillPulse {
+
+    0%,
+    100% {
+      opacity: 0.2;
+    }
+
+    50% {
+      opacity: 0.5;
+    }
+  }
+
   @keyframes pulse {
 
     0%,

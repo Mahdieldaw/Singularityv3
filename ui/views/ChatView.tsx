@@ -200,7 +200,7 @@ export default function ChatView() {
       ) : (
         <PanelGroup direction="horizontal" className="flex-1">
           {/* LEFT: Main Thread */}
-          <Panel defaultSize={isSplitOpen ? 60 : 100} minSize={35}>
+          <Panel defaultSize={60} minSize={35}>
             <Virtuoso
               className="h-full"
               data={turnIds}
@@ -222,13 +222,15 @@ export default function ChatView() {
             <>
               {/* Divider with Orbs */}
               <PanelResizeHandle className="w-1.5 bg-border-subtle hover:bg-brand-500/50 transition-colors cursor-col-resize relative z-10">
-                {/* Adjacent Orb Column */}
-                <div className="absolute top-1/2 -translate-y-1/2 left-0 -translate-x-full w-10 flex flex-col items-center justify-center gap-2 bg-surface-raised border-y border-l border-border-subtle rounded-l-xl shadow-sm z-20">
-                  <CouncilOrbsVertical />
+                {/* Adjacent Orb Column - pointer-events-none wrapper */}
+                <div className="absolute top-1/2 -translate-y-1/2 left-0 -translate-x-full w-10 flex flex-col items-center justify-center gap-2 bg-surface-raised border-y border-l border-border-subtle rounded-l-xl shadow-sm z-20 pointer-events-none">
+                  <div className="pointer-events-auto">
+                    <CouncilOrbsVertical />
+                  </div>
                 </div>
               </PanelResizeHandle>
 
-              <Panel defaultSize={40} minSize={25}>
+              <Panel defaultSize={40} minSize={0}>
                 <SplitPaneRightPanel />
               </Panel>
             </>

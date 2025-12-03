@@ -1,0 +1,112 @@
+.orb {
+    /* Width and height controlled by Tailwind classes (w-2 h-2 or w-3 h-3) */
+    border-radius: 50%;
+    background: #475569;
+    /* Fallback slate-600 */
+    background: radial-gradient(circle at 30% 30%, #ffffff44, #00000066);
+    box-shadow: 0 0 12px rgba(255, 255, 255, 0.4);
+    transition: all 0.3s cubic-bezier(0.17, 0.67, 0.12, 1.34);
+    position: relative;
+    overflow: hidden;
+    z-index: 1;
+}
+
+.orb::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: conic-gradient(from var(--rotation, 0deg),
+            var(--model-color),
+            transparent 80%);
+    opacity: 0.8;
+    /* Increased from 0.6 */
+    animation: breathe 4s infinite alternate;
+}
+
+.orb:hover {
+    transform: scale(1.35) translateY(-4px);
+    box-shadow: 0 0 24px var(--model-color);
+    z-index: 10;
+}
+
+.orb.voice {
+    transform: scale(1.2);
+    box-shadow: 0 0 20px var(--model-color), 0 0 0 3px #ffffff44;
+    animation: pulse 2s infinite;
+}
+
+@keyframes breathe {
+    from {
+        opacity: 0.4;
+    }
+
+    to {
+        opacity: 0.8;
+    }
+}
+
+@keyframes pulse {
+
+    0%,
+    100% {
+        box-shadow: 0 0 20px var(--model-color);
+    }
+
+    50% {
+        box-shadow: 0 0 32px var(--model-color);
+    }
+}
+
+/* Variant-specific styles */
+.tray {
+    /* Default tray styling - current behavior */
+    width: auto;
+}
+
+.divider {
+    /* Positioned on divider, compact */
+    max-width: 80%;
+}
+
+.historical {
+    /* Compact version for past turns */
+    max-width: 80%;
+}
+
+.historical.dimmed {
+    opacity: 0.5;
+}
+
+/* Streaming state - gradual fill */
+.orb.streaming::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(circle, var(--model-color) 0%, transparent 70%);
+    opacity: 0.3;
+    animation: fillPulse 1.5s infinite;
+}
+
+@keyframes fillPulse {
+
+    0%,
+    100% {
+        opacity: 0.2;
+    }
+
+    50% {
+        opacity: 0.5;
+    }
+}
+
+/* Error state */
+.orb.error {
+    background: radial-gradient(circle at 30% 30%, #ff000022, #00000044);
+    box-shadow: 0 0 12px rgba(255, 0, 0, 0.5);
+}
+
+.orb.error::before {
+    background: conic-gradient(from var(--rotation, 0deg),
+            #ef4444,
+            transparent 80%);
+}

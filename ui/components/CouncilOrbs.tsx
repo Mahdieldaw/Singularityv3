@@ -1,7 +1,8 @@
 import React, { useState, useCallback } from "react";
 import { useAtomValue } from "jotai";
-import { providerEffectiveStateFamily } from "../state/atoms";
+import { providerEffectiveStateFamily, isSplitOpenAtom } from "../state/atoms";
 import { LLMProvider } from "../types";
+import { PROVIDER_COLORS } from "../constants";
 import clsx from "clsx";
 
 interface CouncilOrbsProps {
@@ -12,6 +13,7 @@ interface CouncilOrbsProps {
     onCrownMove: (providerId: string) => void;
     onTrayExpand: () => void;
     isTrayExpanded: boolean;
+    variant?: "tray" | "divider" | "historical"; // NEW: variant support
 }
 
 export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
@@ -21,10 +23,12 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
     onOrbClick,
     onCrownMove,
     onTrayExpand,
-    isTrayExpanded
+    isTrayExpanded,
+    variant = "tray" // Default to tray variant
 }) => {
     const [hoveredOrb, setHoveredOrb] = useState<string | null>(null);
     const [isCrownMode, setIsCrownMode] = useState(false);
+    const isSplitOpen = useAtomValue(isSplitOpenAtom);
 
     // Filter out system provider if present
     const displayProviders = providers.filter(p => p.id !== 'system');
@@ -45,6 +49,9 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
         setIsCrownMode(!isCrownMode);
     };
 
+    // Determine if this should be dimmed (historical variant when split is open)
+    const shouldDim = variant === "historical" && isSplitOpen;
+
     return (
         <div
             className={clsx(
@@ -52,7 +59,11 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
                 "bg-surface-raised border border-border-subtle rounded-full",
                 "flex items-center justify-center gap-4 px-6 py-2",
                 "cursor-pointer hover:bg-surface-highlight hover:shadow-md",
-                isTrayExpanded ? "opacity-0 pointer-events-none h-0 py-0 overflow-hidden" : "opacity-100 h-auto"
+                isTrayExpanded ? "opacity-0 pointer-events-none h-0 py-0 overflow-hidden" : "opacity-100 h-auto",
+                variant === "tray" && "council-tray",
+                variant === "divider" && "council-divider",
+                variant === "historical" && "council-historical",
+                shouldDim && "council-historical-dimmed"
             )}
             onClick={onTrayExpand}
         >
@@ -71,6 +82,7 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
                         onClick={(e) => handleOrbClickInternal(e, pid)}
                         onCrownClick={handleCrownClick}
                         hoveredOrb={hoveredOrb}
+                        variant={variant}
                     />
                 );
             })}
@@ -94,6 +106,7 @@ interface OrbProps {
     onClick: (e: React.MouseEvent) => void;
     onCrownClick: (e: React.MouseEvent) => void;
     hoveredOrb: string | null;
+    variant?: "tray" | "divider" | "historical";
 }
 
 const Orb: React.FC<OrbProps> = ({
@@ -104,7 +117,8 @@ const Orb: React.FC<OrbProps> = ({
     onHover,
     onClick,
     onCrownClick,
-    hoveredOrb
+    hoveredOrb,
+    variant = "tray"
 }) => {
     const pid = String(provider.id);
     const state = useAtomValue(providerEffectiveStateFamily({ turnId, providerId: pid }));
@@ -112,6 +126,9 @@ const Orb: React.FC<OrbProps> = ({
     const isStreaming = state.latestResponse?.status === 'streaming';
     const hasError = state.latestResponse?.status === 'error';
     const isHovered = hoveredOrb === pid;
+
+    // Get model color
+    const modelColor = PROVIDER_COLORS[pid] || PROVIDER_COLORS['default'];
 
     return (
         <div className="relative flex items-center justify-center">
@@ -132,22 +149,19 @@ const Orb: React.FC<OrbProps> = ({
             <button
                 type="button"
                 className={clsx(
-                    "orb rounded-full transition-all duration-300 relative",
-                    // Size & Base Style
-                    isVoice ? "w-3 h-3 opacity-100" : "w-2 h-2 opacity-40 hover:opacity-80 hover:scale-125",
-
-                    // Color States
-                    hasError ? "bg-intent-danger" : "bg-text-secondary",
-
-                    // Streaming Animation
-                    isStreaming && "animate-pulse bg-intent-warning",
-
-                    // Voice Ring
-                    isVoice && "ring-2 ring-amber-400/50 ring-offset-1 ring-offset-surface",
-
+                    "council-orb",
+                    // Size & Base Style (Tailwind)
+                    isVoice ? "opacity-100" : "opacity-70 hover:opacity-100",
+                    isVoice && "council-orb-voice",
+                    isStreaming && "council-orb-streaming",
+                    hasError && "council-orb-error",
                     // Crown Mode Selection Target
                     isCrownMode && !isVoice && "ring-2 ring-brand-500/50 ring-offset-1 ring-offset-surface cursor-crosshair animate-pulse"
                 )}
+                style={{
+                    '--model-color': modelColor,
+                    '--rotation': `${Math.random() * 360}deg`
+                } as React.CSSProperties}
                 onMouseEnter={() => onHover(pid)}
                 onMouseLeave={() => onHover(null)}
                 onClick={onClick}

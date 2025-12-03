@@ -20,3 +20,22 @@ export const PRIMARY_STREAMING_PROVIDER_IDS: string[] = [
   "claude",
   "qwen",
 ];
+
+// Provider color mapping for orb animations
+export const PROVIDER_COLORS: Record<string, string> = {
+  'claude-sonnet': '#d946ef',        // fuchsia-purple
+  'claude': '#d946ef',               // fuchsia-purple
+  'gemini-flash': '#8b5cf6',         // violet
+  'gemini-exp': '#8b5cf6',           // violet
+  'gemini': '#8b5cf6',               // violet
+  'grok': '#10b981',                 // emerald
+  'openai-4o': '#f59e0b',            // amber
+  'o1': '#f59e0b',                   // amber
+  'o3': '#f59e0b',                   // amber
+  'deepseek': '#06b6d4',             // cyan
+  'qwen': '#06b6d4',                 // cyan
+  'llama': '#06b6d4',                // cyan
+  'mistral': '#06b6d4',              // cyan
+  'default': '#64748b'               // slate fallback
+};
+
