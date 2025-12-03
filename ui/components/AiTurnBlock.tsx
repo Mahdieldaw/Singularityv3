@@ -6,16 +6,14 @@ import React, {
   useRef,
   useEffect,
 } from "react";
-import { useSetAtom } from "jotai";
-import { toastAtom } from "../state/atoms";
+import { useSetAtom, useAtomValue } from "jotai";
+import { toastAtom, activeSplitPanelAtom, isDecisionMapOpenAtom } from "../state/atoms";
 import { AiTurn, ProviderResponse, AppStep } from "../types";
 import MarkdownDisplay from "./MarkdownDisplay";
 import { LLM_PROVIDERS_CONFIG } from "../constants";
 import ClipsCarousel from "./ClipsCarousel";
 import { ChevronDownIcon, ChevronUpIcon, ListIcon } from "./Icons";
-import DecisionMapGraph from "./experimental/DecisionMapGraph";
 import { CouncilOrbs } from "./CouncilOrbs";
-import { ModelResponsePanel } from "./ModelResponsePanel";
 import { adaptGraphTopology } from "./experimental/graphAdapter";
 import { GraphTopology } from "../types";
 import {
@@ -265,14 +263,9 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
   const setSynthExpanded = onSetSynthExpanded || (() => { });
   const setMapExpanded = onSetMapExpanded || (() => { });
   const setToast = useSetAtom(toastAtom);
-
-  // --- NEW STATE ---
-  const [activeOrbPanel, setActiveOrbPanel] = useState<{
-    turnId: string;
-    providerId: string;
-  } | null>(null);
-
-  const [isDecisionMapOpen, setIsDecisionMapOpen] = useState(false);
+  const setActiveSplitPanel = useSetAtom(activeSplitPanelAtom);
+  const setIsDecisionMapOpen = useSetAtom(isDecisionMapOpenAtom);
+  const isDecisionMapOpen = useAtomValue(isDecisionMapOpenAtom);
 
   // State for Claude artifact overlay
   const [selectedArtifact, setSelectedArtifact] = useState<{
@@ -429,7 +422,7 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
         if (!providerId) return;
 
         // NEW: Open slide-in panel instead of scrolling
-        setActiveOrbPanel({ turnId: aiTurn.id, providerId });
+        setActiveSplitPanel({ turnId: aiTurn.id, providerId });
 
       } catch (e) {
         console.warn("[AiTurnBlock] Citation click failed", e);
@@ -440,6 +433,7 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
       mappingResponses,
       aiTurn.id,
       aiTurn.batchResponses,
+      setActiveSplitPanel
     ]
   );
 
@@ -531,7 +525,7 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
 
           {/* SHARED LAYOUT CONTAINER */}
           <div className="flex justify-center w-full transition-all duration-300">
-            <div className={`flex gap-6 transition-all duration-300 ${activeOrbPanel ? 'w-[66vw] max-w-none' : 'w-full max-w-3xl'}`}>
+            <div className="w-full max-w-3xl">
 
               {/* LEFT: Synthesis Block + Tray */}
               <div className="flex-1 flex flex-col relative min-w-0">
@@ -633,103 +627,19 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                   })()}
                 </div>
 
-                {/* BOTTOM TRAY: Council Orbs + Decision Map */}
+                {/* BOTTOM TRAY: Council Orbs */}
                 <div className="relative mt-4">
-                  {/* Decision Map Drawer (Slides Up) */}
-                  <div
-                    className={clsx(
-                      "decision-map-drawer overflow-hidden transition-all duration-300 ease-out border-border-subtle bg-surface-raised rounded-2xl mb-2",
-                      isDecisionMapOpen ? "max-h-[800px] border opacity-100 shadow-lg" : "max-h-0 border-0 opacity-0"
-                    )}
-                  >
-                    <div className="p-4">
-                      <div className="flex items-center justify-between mb-4">
-                        <div className="flex items-center gap-2">
-                          <button
-                            onClick={() => onSetMappingTab && onSetMappingTab("map")}
-                            className={`px-3 py-1 text-xs font-medium rounded-full transition-all ${mappingTab === "map" ? "bg-chip-active text-text-primary shadow-sm" : "text-text-muted hover:text-text-secondary"}`}
-                          >
-                            Narrative
-                          </button>
-                          <button
-                            onClick={() => onSetMappingTab && onSetMappingTab("graph")}
-                            className={`px-3 py-1 text-xs font-medium rounded-full transition-all ${mappingTab === "graph" ? "bg-chip-active text-text-primary shadow-sm" : "text-text-muted hover:text-text-secondary"}`}
-                          >
-                            Graph
-                          </button>
-                          <button
-                            onClick={() => onSetMappingTab && onSetMappingTab("options")}
-                            className={`px-3 py-1 text-xs font-medium rounded-full transition-all ${mappingTab === "options" ? "bg-chip-active text-text-primary shadow-sm" : "text-text-muted hover:text-text-secondary"}`}
-                          >
-                            All Options
-                          </button>
-                        </div>
-                        <button
-                          onClick={() => setIsDecisionMapOpen(false)}
-                          className="text-text-muted hover:text-text-primary p-1"
-                        >
-                          ✕ Close Map
-                        </button>
-                      </div>
-
-                      {/* Map Content */}
-                      <div className="min-h-[300px]">
-                        {mappingTab === "map" && (
-                          <div className="prose prose-sm max-w-none dark:prose-invert">
-                            <MarkdownDisplay
-                              content={transformCitations(displayedMappingText)}
-                              components={markdownComponents}
-                            />
-                          </div>
-                        )}
-                        {mappingTab === "graph" && (
-                          <div className="flex justify-center">
-                            {graphTopology && graphTopology.nodes && graphTopology.nodes.length > 0 ? (
-                              <DecisionMapGraph
-                                {...adaptGraphTopology(graphTopology)}
-                                width={800}
-                                height={450}
-                              />
-                            ) : (
-                              <div className="text-text-muted italic py-10">No graph topology available.</div>
-                            )}
-                          </div>
-                        )}
-                        {mappingTab === "options" && (
-                          <div className="prose prose-sm max-w-none dark:prose-invert">
-                            <MarkdownDisplay
-                              content={transformCitations(getOptions() || "No options found.")}
-                              components={markdownComponents}
-                            />
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Council Orbs (The Handle) */}
                   <CouncilOrbs
                     turnId={aiTurn.id}
                     providers={LLM_PROVIDERS_CONFIG}
                     voiceProviderId={activeSynthPid || ""}
-                    onOrbClick={(pid) => setActiveOrbPanel({ turnId: aiTurn.id, providerId: pid })}
+                    onOrbClick={(pid) => setActiveSplitPanel({ turnId: aiTurn.id, providerId: pid })}
                     onCrownMove={handleCrownMove}
-                    onTrayExpand={() => setIsDecisionMapOpen(true)}
-                    isTrayExpanded={isDecisionMapOpen}
+                    onTrayExpand={() => setIsDecisionMapOpen({ turnId: aiTurn.id })}
+                    isTrayExpanded={isDecisionMapOpen !== null}
                   />
                 </div>
               </div>
-
-              {/* RIGHT: Slide-in Panel */}
-              {activeOrbPanel && (
-                <div className="flex-1 min-w-[300px] max-w-[400px]">
-                  <ModelResponsePanel
-                    turnId={activeOrbPanel.turnId}
-                    providerId={activeOrbPanel.providerId}
-                    onClose={() => setActiveOrbPanel(null)}
-                  />
-                </div>
-              )}
             </div>
           </div>
 

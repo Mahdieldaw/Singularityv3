@@ -43,14 +43,10 @@ export default function Header() {
             alt=""
             className="w-5 h-5"
           />
-          {/* Wordmark - Desktop only */}
-          <span className="hidden sm:block font-semibold text-base tracking-wide">
+          {/* Wordmark - ALWAYS VISIBLE */}
+          <span className="font-semibold text-base tracking-wide">
             <span className="text-text-primary">SINGULAR</span>
             <span className="text-brand-400">ITY</span>
-          </span>
-          {/* Compact - Mobile */}
-          <span className="sm:hidden font-semibold text-base text-text-primary">
-            S
           </span>
         </div>
       </div>

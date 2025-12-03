@@ -1,12 +1,17 @@
 import React, { useMemo, useEffect, useRef } from "react";
 import { Virtuoso, VirtuosoHandle } from "react-virtuoso";
-import { useAtom } from "jotai";
+import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import {
   turnIdsAtom,
   isLoadingAtom,
   showWelcomeAtom,
   currentSessionIdAtom,
+  isSplitOpenAtom,
+  activeSplitPanelAtom,
+  isDecisionMapOpenAtom
 } from "../state/atoms";
+import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
+import clsx from "clsx";
 
 import MessageRow from "../components/MessageRow";
 import ChatInputConnected from "../components/ChatInputConnected";
@@ -14,6 +19,9 @@ import WelcomeScreen from "../components/WelcomeScreen";
 import { useScrollPersistence } from "../hooks/useScrollPersistence";
 import CompactModelTrayConnected from "../components/CompactModelTrayConnected";
 import { useChat } from "../hooks/useChat";
+import { SplitPaneRightPanel } from "../components/SplitPaneRightPanel";
+import { DecisionMapSheet } from "../components/DecisionMapSheet";
+import { CouncilOrbsVertical } from "../components/CouncilOrbsVertical";
 
 export default function ChatView() {
   const [turnIds] = useAtom(turnIdsAtom as any) as [string[], any];
@@ -23,11 +31,31 @@ export default function ChatView() {
     string | null,
     any,
   ];
-  // Note: Avoid subscribing to uiPhase in ChatView to reduce unnecessary re-renders during streaming
+
+  // Split Pane State
+  const isSplitOpen = useAtomValue(isSplitOpenAtom);
+  const setActiveSplitPanel = useSetAtom(activeSplitPanelAtom);
+  const isDecisionMapOpen = useAtomValue(isDecisionMapOpenAtom);
+  const setDecisionMapOpen = useSetAtom(isDecisionMapOpenAtom);
 
   const scrollerRef = useScrollPersistence();
   const virtuosoRef = useRef<VirtuosoHandle | null>(null);
   const { selectChat } = useChat();
+
+  // ESC Key Handler
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (isDecisionMapOpen) {
+          setDecisionMapOpen(null);
+        } else if (isSplitOpen) {
+          setActiveSplitPanel(null);
+        }
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [isDecisionMapOpen, isSplitOpen, setDecisionMapOpen, setActiveSplitPanel]);
 
   const itemContent = useMemo(
     () => (index: number, turnId: string) => {
@@ -170,23 +198,54 @@ export default function ChatView() {
       {showWelcome ? (
         <WelcomeScreen />
       ) : (
-        <Virtuoso
-          className="flex-1"
-          data={turnIds}
-          followOutput={(isAtBottom: boolean) =>
-            isAtBottom ? "smooth" : false
-          }
-          increaseViewportBy={{ top: 300, bottom: 200 }}
-          components={{
-            Scroller: ScrollerComponent as unknown as React.ComponentType<any>,
-          }}
-          itemContent={itemContent}
-          computeItemKey={(index, turnId) => turnId || `fallback-${index}`}
-          ref={virtuosoRef as any}
-        />
+        <PanelGroup direction="horizontal" className="flex-1">
+          {/* LEFT: Main Thread */}
+          <Panel defaultSize={isSplitOpen ? 60 : 100} minSize={35}>
+            <Virtuoso
+              className="h-full"
+              data={turnIds}
+              followOutput={(isAtBottom: boolean) =>
+                isAtBottom ? "smooth" : false
+              }
+              increaseViewportBy={{ top: 300, bottom: 200 }}
+              components={{
+                Scroller: ScrollerComponent as unknown as React.ComponentType<any>,
+              }}
+              itemContent={itemContent}
+              computeItemKey={(index, turnId) => turnId || `fallback-${index}`}
+              ref={virtuosoRef as any}
+            />
+          </Panel>
+
+          {/* RIGHT: Model Response Panel (only when open) */}
+          {isSplitOpen && (
+            <>
+              {/* Divider with Orbs */}
+              <PanelResizeHandle className="w-1.5 bg-border-subtle hover:bg-brand-500/50 transition-colors cursor-col-resize relative z-10">
+                {/* Adjacent Orb Column */}
+                <div className="absolute top-1/2 -translate-y-1/2 left-0 -translate-x-full w-10 flex flex-col items-center justify-center gap-2 bg-surface-raised border-y border-l border-border-subtle rounded-l-xl shadow-sm z-20">
+                  <CouncilOrbsVertical />
+                </div>
+              </PanelResizeHandle>
+
+              <Panel defaultSize={40} minSize={25}>
+                <SplitPaneRightPanel />
+              </Panel>
+            </>
+          )}
+        </PanelGroup>
       )}
+
+      {/* Decision Map - Fixed Overlay */}
+      <DecisionMapSheet />
+
       {/* Bottom Dock: Tray + Input */}
-      <div className="sticky bottom-0 left-0 w-full z-[2001] flex flex-col items-center gap-1 pointer-events-none pb-2 bg-transparent">
+      <div
+        className={clsx(
+          "sticky bottom-0 left-0 w-full z-[2001] flex flex-col items-center gap-1 pointer-events-none pb-2 bg-transparent transition-opacity duration-300",
+          isDecisionMapOpen && "opacity-0"
+        )}
+      >
         <CompactModelTrayConnected />
         <ChatInputConnected />
       </div>
