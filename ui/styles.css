@@ -277,6 +277,24 @@
     animation: spin 8s linear infinite, breathe 4s infinite alternate;
   }
 
+  /* Logo backdrop - fades in on hover */
+  .council-orb::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image: var(--logo-src);
+    background-size: 60%;
+    background-position: center;
+    background-repeat: no-repeat;
+    opacity: 0;
+    transition: opacity 0.4s ease-in-out;
+    z-index: 1;
+  }
+
+  .council-orb:hover::after {
+    opacity: 0.6;
+  }
+
   .council-orb:hover {
     transform: scale(1.35) translateY(-4px);
     box-shadow: 0 0 24px var(--model-color);

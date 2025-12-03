@@ -3,6 +3,7 @@ import { useAtomValue } from "jotai";
 import { providerEffectiveStateFamily, isSplitOpenAtom } from "../state/atoms";
 import { LLMProvider } from "../types";
 import { PROVIDER_COLORS } from "../constants";
+import { getProviderById } from "../providers/providerRegistry";
 import clsx from "clsx";
 
 interface CouncilOrbsProps {
@@ -127,8 +128,10 @@ const Orb: React.FC<OrbProps> = ({
     const hasError = state.latestResponse?.status === 'error';
     const isHovered = hoveredOrb === pid;
 
-    // Get model color
+    // Get model color and logo
     const modelColor = PROVIDER_COLORS[pid] || PROVIDER_COLORS['default'];
+    const providerConfig = getProviderById(pid);
+    const logoSrc = providerConfig?.logoSrc || '';
 
     return (
         <div className="relative flex items-center justify-center">
@@ -160,7 +163,8 @@ const Orb: React.FC<OrbProps> = ({
                 )}
                 style={{
                     '--model-color': modelColor,
-                    '--rotation': `${Math.random() * 360}deg`
+                    '--rotation': `${Math.random() * 360}deg`,
+                    '--logo-src': logoSrc ? `url(${logoSrc})` : 'none'
                 } as React.CSSProperties}
                 onMouseEnter={() => onHover(pid)}
                 onMouseLeave={() => onHover(null)}

@@ -524,8 +524,8 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
         <div className="ai-turn-content flex flex-col gap-3">
 
           {/* SHARED LAYOUT CONTAINER */}
-          <div className="flex justify-center w-full transition-all duration-300">
-            <div className="w-full max-w-3xl">
+          <div className="flex justify-center w-full transition-all duration-300 px-4">
+            <div className="w-full">
 
               {/* LEFT: Synthesis Block + Tray */}
               <div className="flex-1 flex flex-col relative min-w-0">
