@@ -4,7 +4,6 @@ import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import AiTurnBlock from "./AiTurnBlock";
 import ProviderResponseBlockConnected from "./ProviderResponseBlockConnected";
 
-
 import {
   isReducedMotionAtom,
   showSourceOutputsFamily,
@@ -21,19 +20,6 @@ import {
 import { useClipActions } from "../hooks/useClipActions";
 import { useEligibility } from "../hooks/useEligibility";
 import type { AiTurn } from "../types";
-
-function parseTopologyFromText(text?: string | null) {
-  if (!text) return null;
-  const m = text.match(/={3,}\s*GRAPH_TOPOLOGY\s*={3,}/i);
-  const idx = m && typeof m.index === "number" ? m.index : -1;
-  if (idx === -1) return null;
-  const json = text.substring(idx + m![0].length).trim();
-  try {
-    return JSON.parse(json);
-  } catch {
-    return null;
-  }
-}
 
 interface AiTurnBlockConnectedProps {
   aiTurn: AiTurn;
@@ -122,13 +108,18 @@ export default function AiTurnBlockConnected({
   // Extract graph topology from mapping response metadata (if available)
   const graphTopology = useMemo(() => {
     if (!activeMappingClipProviderId) return null;
-    const list = aiTurn.mappingResponses?.[activeMappingClipProviderId];
-    if (!list || (Array.isArray(list) && list.length === 0)) return null;
-    const latest = Array.isArray(list) ? list[list.length - 1] : list;
-    const fromMeta = (latest as any)?.meta?.graphTopology || null;
-    if (fromMeta) return fromMeta;
-    const fallback = parseTopologyFromText((latest as any)?.text);
-    return fallback;
+
+    const mappingResponsesForProvider = aiTurn.mappingResponses?.[activeMappingClipProviderId];
+    if (!mappingResponsesForProvider || mappingResponsesForProvider.length === 0) {
+      return null;
+    }
+
+    const latestMapping = Array.isArray(mappingResponsesForProvider)
+      ? mappingResponsesForProvider[mappingResponsesForProvider.length - 1]
+      : mappingResponsesForProvider;
+
+    // Check if topology exists in meta
+    return (latestMapping as any)?.meta?.graphTopology || null;
   }, [activeMappingClipProviderId, aiTurn.mappingResponses]);
 
   // Filter activeRecomputeState to only include synthesis/mapping (AiTurnBlock doesn't handle batch)
@@ -173,7 +164,7 @@ export default function AiTurnBlockConnected({
       )}
       mappingTab={mappingTab}
       onSetMappingTab={useCallback(
-        (t: "map" | "options" | "graph") => setMappingTab(t),
+        (t: "map" | "options") => setMappingTab(t),
         [setMappingTab],
       )}
       activeSynthesisClipProviderId={activeSynthesisClipProviderId}
@@ -190,8 +181,6 @@ export default function AiTurnBlockConnected({
         [setPrimaryView],
       )}
       mapStatus={mapStatus}
-      graphTopology={graphTopology}
-      aiTurnId={aiTurn.id}
     >
       <ProviderResponseBlockConnected aiTurnId={aiTurn.id}
         expectedProviders={aiTurn.meta?.expectedProviders} // ✅ Pass metadata

@@ -13,50 +13,68 @@ import MarkdownDisplay from "./MarkdownDisplay";
 import { LLM_PROVIDERS_CONFIG } from "../constants";
 import ClipsCarousel from "./ClipsCarousel";
 import { ChevronDownIcon, ChevronUpIcon, ListIcon } from "./Icons";
-import DecisionMapGraph from "./experimental/DecisionMapGraph";
-import { adaptGraphTopology } from "./experimental/graphAdapter";
-import { GraphTopology } from "../types";
 import {
   normalizeResponseArray,
   getLatestResponse,
 } from "../utils/turn-helpers";
 
 // --- Helper Functions ---
+function debugChars(text?: string | null) {
+  const s = String(text || "");
+  const idx = s.indexOf("ALL_AVAILABLE");
+  if (idx === -1) {
+    console.log("Delimiter not found");
+    return "Delimiter not found";
+  }
+  const start = Math.max(0, idx - 10);
+  const end = idx + 30;
+  const context = s.slice(start, end);
+  const codes = Array.from(context)
+    .map((c) => `${c}(${c.charCodeAt(0).toString(16)})`)
+    .join(" ");
+  console.log("Character codes around delimiter:", codes);
+  return codes;
+}
+;(window as any).__htosDebugChars = debugChars;
 function parseMappingResponse(response?: string | null) {
-  // NOTE: This function is SPECIFICALLY for the "Decision Map" / "Options" split.
-  // It should NOT be used on the Synthesis text, which is pure markdown.
   if (!response) return { mapping: "", options: null };
 
-  const separator = "===ALL_AVAILABLE_OPTIONS===";
+  let normalized = response
+    .replace(/\\=/g, '=')      // \= → =
+    .replace(/\\_/g, '_')      // \_ → _
+    .replace(/\\\*/g, '*')     // \* → *
+    .replace(/\\-/g, '-')     // \- → -
+    .replace(/[＝═⁼˭꓿﹦]/g, '=')
+    .replace(/[‗₌]/g, '=')
+    .replace(/\u2550/g, '=')
+    .replace(/\uFF1D/g, '=');
+
+  const topoMatch = normalized.match(/={3,}\s*GRAPH[_\s]*TOPOLOGY\s*={3,}/i);
+  if (topoMatch && typeof topoMatch.index === 'number') {
+    normalized = normalized.slice(0, topoMatch.index).trim();
+  }
+
   const optionsPatterns = [
-    /={3,}\s*ALL_AVAILABLE_OPTIONS\s*={3,}/i,
-    /={3,}\s*ALL\s+AVAILABLE\s+OPTIONS\s*={3,}/i,
-    /={3,}\s*ALL\s+OPTIONS\s*={3,}/i,
-    /\*\*\s*={3,}\s*ALL_AVAILABLE_OPTIONS\s*={3,}\s*\*\*/i,
-    /###\s*={3,}\s*ALL_AVAILABLE_OPTIONS\s*={3,}/i,
-    /\*\*All Available Options:?\*\*/i,
-    /## All Available Options:?/i,
-    /All Available Options:/i,
-    /\*\*Options:?\*\*/i,
-    /## Options:?/i,
-    /^Options:/im,
+    /={3,}\s*ALL[_\s]*AVAILABLE[_\s]*OPTIONS\s*={3,}/i,
+    /\*{0,2}={3,}\s*ALL[_\s]*AVAILABLE[_\s]*OPTIONS\s*={3,}\*{0,2}/i,
+    /#{1,3}\s*All\s+Available\s+Options:?/i,
+    /\*{2}All\s+Available\s+Options:?\*{2}/i,
+    /All\s+Available\s+Options:?/i,
   ];
+  const universal = /[=\-─━═＝]{3,}\s*ALL[_\s]*AVAILABLE[_\s]*OPTIONS\s*[=\-─━═＝]{3,}/i;
 
   let bestIndex = -1;
   let splitLength = 0;
 
-  // 1. Check strict separator
-  const separatorIndex = response.indexOf(separator);
-  if (separatorIndex !== -1) {
-    bestIndex = separatorIndex;
-    splitLength = separator.length;
+  const uni = normalized.match(universal);
+  if (uni && typeof uni.index === 'number') {
+    bestIndex = uni.index;
+    splitLength = uni[0].length;
   }
 
-  // 2. Check regex patterns for an EARLIER match
   for (const pattern of optionsPatterns) {
-    const match = response.match(pattern);
-    if (match && typeof match.index === "number") {
-      // If we haven't found a match yet, OR this one is earlier
+    const match = normalized.match(pattern);
+    if (match && typeof match.index === 'number') {
       if (bestIndex === -1 || match.index < bestIndex) {
         bestIndex = match.index;
         splitLength = match[0].length;
@@ -65,21 +83,12 @@ function parseMappingResponse(response?: string | null) {
   }
 
   if (bestIndex !== -1) {
-    return {
-      mapping: response.substring(0, bestIndex).trim(),
-      options: response.substring(bestIndex + splitLength).trim(), // Skip the header itself
-    };
+    const mapping = normalized.substring(0, bestIndex).trim();
+    const options = normalized.substring(bestIndex + splitLength).trim() || null;
+    return { mapping, options };
   }
 
-  return { mapping: response, options: null };
-}
-
-function stripTopologySection(response?: string | null) {
-  if (!response) return "";
-  const match = response.match(/={3,}\s*GRAPH_TOPOLOGY\s*={3,}/i);
-  const idx = match && typeof match.index === "number" ? match.index : -1;
-  if (idx === -1) return response;
-  return response.substring(0, idx).trim();
+  return { mapping: normalized, options: null };
 }
 
 // extractClaudeArtifacts removed - handled by backend
@@ -109,13 +118,11 @@ interface AiTurnBlockProps {
   onSetSynthExpanded?: (v: boolean) => void;
   mapExpanded?: boolean;
   onSetMapExpanded?: (v: boolean) => void;
-  mappingTab?: "map" | "options" | "graph";
-  onSetMappingTab?: (t: "map" | "options" | "graph") => void;
+  mappingTab?: "map" | "options";
+  onSetMappingTab?: (t: "map" | "options") => void;
   primaryView?: "synthesis" | "decision-map";
   onSetPrimaryView?: (view: "synthesis" | "decision-map") => void;
   mapStatus?: "idle" | "streaming" | "ready" | "error";
-  graphTopology?: GraphTopology | null;
-  aiTurnId?: string;
   children?: React.ReactNode;
 }
 
@@ -244,8 +251,6 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
   primaryView = "synthesis",
   onSetPrimaryView,
   mapStatus = "idle",
-  graphTopology = null,
-  aiTurnId,
   children,
 }) => {
   const setSynthExpanded = onSetSynthExpanded || (() => { });
@@ -352,18 +357,17 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
     (!activeMappingPid || activeRecomputeState.providerId === activeMappingPid)
   );
 
-  const getMappingAndOptions = useCallback((take: ProviderResponse | undefined) => {
-    const raw = take?.text ? String(take.text) : "";
-    if (!raw) return { mapping: "", options: null };
-    const cleaned = stripTopologySection(raw);
-    return parseMappingResponse(cleaned);
-  }, []);
+  const getMappingAndOptions = useCallback(
+    (take: ProviderResponse | undefined) => {
+      if (!take?.text) return { mapping: "", options: null };
+      return parseMappingResponse(String(take.text));
+    },
+    []
+  );
 
   const getOptions = useCallback((): string | null => {
     if (!activeMappingPid) return null;
     const take = getLatestResponse(mappingResponses[activeMappingPid]);
-    const direct = (take as any)?.meta?.allAvailableOptions;
-    if (direct) return String(direct);
     const { options } = getMappingAndOptions(take);
     return options;
   }, [activeMappingPid, mappingResponses, getMappingAndOptions]);
@@ -378,7 +382,6 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
     return String(getMappingAndOptions(displayedMappingTake).mapping ?? "");
   }, [displayedMappingTake, getMappingAndOptions]);
 
-  const optionsText = useMemo(() => String(getOptions() || ""), [getOptions]);
 
   const hasMapping = !!(activeMappingPid && displayedMappingTake?.text);
   const hasSynthesis = !!(
@@ -912,23 +915,35 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                             );
                           return (
                             <div className="mx-auto max-w-3xl">
-                              <div className="flex items-center justify-between gap-2 mb-2">
-                                <div className="text-xs text-text-muted">
-                                  All Available Options • via {activeMappingPid}
-                                </div>
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    navigator.clipboard.writeText(options);
-                                  }}
-                                  className="bg-surface-raised border border-border-subtle rounded-md
-                                               px-2 py-1 text-text-muted text-xs cursor-pointer
-                                               hover:bg-surface-highlight transition-all flex items-center gap-1"
-                                >
-                                  📋 Copy
-                                </button>
-                              </div>
+                          <div className="flex items-center justify-between gap-2 mb-2">
+                            <div className="text-xs text-text-muted">
+                              All Available Options • via {activeMappingPid}
+                            </div>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                navigator.clipboard.writeText(options);
+                              }}
+                              className="bg-surface-raised border border-border-subtle rounded-md
+                                           px-2 py-1 text-text-muted text-xs cursor-pointer
+                                           hover:bg-surface-highlight transition-all flex items-center gap-1"
+                            >
+                              📋 Copy
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                debugChars(displayedMappingTake?.text || "");
+                              }}
+                              className="bg-surface-raised border border-border-subtle rounded-md
+                                           px-2 py-1 text-text-muted text-xs cursor-pointer
+                                           hover:bg-surface-highlight transition-all flex items-center gap-1"
+                            >
+                              🔎 Debug
+                            </button>
+                          </div>
                               <div
                                 className="text-base leading-relaxed text-text-primary"
                               >
@@ -1066,13 +1081,7 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                                     onClick={() => onSetMappingTab && onSetMappingTab("map")}
                                     className={`px-2 py-0.5 text-xs font-medium rounded-md transition-all ${mappingTab === "map" ? "bg-chip-active text-text-primary shadow-card-sm" : "text-text-muted hover:text-text-secondary"}`}
                                   >
-                                    Narrative
-                                  </button>
-                                  <button
-                                    onClick={() => onSetMappingTab && onSetMappingTab("graph")}
-                                    className={`px-2 py-0.5 text-xs font-medium rounded-md transition-all ${mappingTab === "graph" ? "bg-chip-active text-text-primary shadow-card-sm" : "text-text-muted hover:text-text-secondary"}`}
-                                  >
-                                    Graph
+                                    landscape
                                   </button>
                                   <button
                                     onClick={() => onSetMappingTab && onSetMappingTab("options")}
@@ -1088,22 +1097,6 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                             </div>
                             <div style={{ display: mappingTab === "map" ? "block" : "none" }}>
                               {mapInner}
-                            </div>
-                            <div style={{ display: mappingTab === "graph" ? "block" : "none" }}>
-                              {/* Experimental Decision Graph - only show if we have topology data */}
-                              {graphTopology && graphTopology.nodes && graphTopology.nodes.length > 0 ? (
-                                <div className="mt-4 flex justify-center">
-                                  <DecisionMapGraph
-                                    {...adaptGraphTopology(graphTopology)}
-                                    width={Math.min(800, typeof window !== 'undefined' ? window.innerWidth - 100 : 800)}
-                                    height={450}
-                                  />
-                                </div>
-                              ) : (
-                                <div className="flex items-center justify-center h-40 text-text-muted italic">
-                                  No graph topology available.
-                                </div>
-                              )}
                             </div>
                           </>
                         );

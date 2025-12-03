@@ -55,6 +55,11 @@ function extractGraphTopologyAndStrip(text) {
 }
 function extractOptionsAndStrip(text) {
   if (!text || typeof text !== 'string') return { text, options: null };
+  let normalized = text
+    .replace(/[＝═⁼˭꓿﹦]/g, '=')
+    .replace(/[‗₌]/g, '=')
+    .replace(/\u2550/g, '=')
+    .replace(/\uFF1D/g, '=');
   const patterns = [
     /={3,}\s*ALL_AVAILABLE_OPTIONS\s*={3,}/i,
     /={3,}\s*ALL\s+AVAILABLE\s+OPTIONS\s*={3,}/i,
@@ -71,7 +76,7 @@ function extractOptionsAndStrip(text) {
   let idx = -1;
   let len = 0;
   for (const re of patterns) {
-    const m = text.match(re);
+    const m = normalized.match(re);
     if (m && typeof m.index === 'number') {
       if (idx === -1 || m.index < idx) {
         idx = m.index;
@@ -79,9 +84,9 @@ function extractOptionsAndStrip(text) {
       }
     }
   }
-  if (idx === -1) return { text, options: null };
-  const before = text.slice(0, idx).trim();
-  const after = text.slice(idx + len).trim();
+  if (idx === -1) return { text: normalized, options: null };
+  const before = normalized.slice(0, idx).trim();
+  const after = normalized.slice(idx + len).trim();
   return { text: before, options: after };
 }
 
@@ -1859,17 +1864,20 @@ Your job is to address what the user is actually asking, informed by but not foc
           onAllComplete: (results) => {
             const finalResult = results.get(payload.mappingProvider);
 
-            if (finalResult?.text) {
-              const processed = artifactProcessor.process(finalResult.text);
-              finalResult.text = processed.cleanText;
-              finalResult.artifacts = processed.artifacts;
-            }
-
+            let graphTopology = null;
             let allOptions = null;
             if (finalResult?.text) {
+              const topo = extractGraphTopologyAndStrip(finalResult.text);
+              graphTopology = topo.topology;
+              finalResult.text = topo.text;
+
               const opt = extractOptionsAndStrip(finalResult.text);
               allOptions = opt.options;
               finalResult.text = opt.text;
+
+              const processed = artifactProcessor.process(finalResult.text);
+              finalResult.text = processed.cleanText;
+              finalResult.artifacts = processed.artifacts;
             }
 
             // ✅ Ensure final emission for mapping
@@ -1904,6 +1912,7 @@ Your job is to address what the user is actually asking, informed by but not foc
                 ...(finalResult?.meta || {}),
                 citationSourceOrder,
                 ...(allOptions ? { allAvailableOptions: allOptions } : {}),
+                ...(graphTopology ? { graphTopology } : {}),
               },
             };
 
