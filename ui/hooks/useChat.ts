@@ -87,13 +87,9 @@ export function useChat() {
       setUiPhase("streaming");
       setCurrentAppStep("initial");
 
-      const activeProviders = LLM_PROVIDERS_CONFIG.filter(
-        (p) => selectedModels[p.id],
-      ).map((p) => p.id as ProviderKey);
-      if (activeProviders.length === 0) {
-        setIsLoading(false);
-        return;
-      }
+      const activeProviders = LLM_PROVIDERS_CONFIG
+        .filter((p) => selectedModels[p.id])
+        .map((p) => p.id as ProviderKey);
 
       const ts = Date.now();
       const userTurnId = `user-${ts}-${Math.random().toString(36).slice(2, 8)}`;
@@ -115,9 +111,7 @@ export function useChat() {
       // No pending cache: rely on Jotai atom serialization across updaters
 
       try {
-        const shouldUseSynthesis = !!(
-          synthesisProvider && activeProviders.length > 1
-        );
+        const shouldUseSynthesis = true;
 
         const fallbackMapping = (() => {
           try {
@@ -131,8 +125,7 @@ export function useChat() {
         // Uniform behavior: allow Map to run even if its provider is not in the witness selection
         const shouldUseMapping = !!(
           mappingEnabled &&
-          effectiveMappingProvider &&
-          activeProviders.length > 1
+          effectiveMappingProvider
         );
 
         const isInitialize =

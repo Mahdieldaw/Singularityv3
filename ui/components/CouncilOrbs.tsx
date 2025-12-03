@@ -1,6 +1,6 @@
-import React, { useState, useCallback } from "react";
-import { useAtomValue } from "jotai";
-import { providerEffectiveStateFamily, isSplitOpenAtom } from "../state/atoms";
+import React, { useState, useCallback, useMemo, useRef } from "react";
+import { useAtom, useAtomValue } from "jotai";
+import { providerEffectiveStateFamily, isSplitOpenAtom, voiceProviderAtom, synthesisProviderAtom, mappingProviderAtom, composerModelAtom, analystModelAtom, providerAuthStatusAtom, selectedModelsAtom } from "../state/atoms";
 import { LLMProvider } from "../types";
 import { PROVIDER_COLORS } from "../constants";
 import { getProviderById } from "../providers/providerRegistry";
@@ -29,7 +29,17 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
 }) => {
     const [hoveredOrb, setHoveredOrb] = useState<string | null>(null);
     const [isCrownMode, setIsCrownMode] = useState(false);
+    const [isMenuOpen, setIsMenuOpen] = useState(false);
+    const [menuTarget, setMenuTarget] = useState<string | null>(null);
+    const longPressRef = useRef<any>(null);
     const isSplitOpen = useAtomValue(isSplitOpenAtom);
+    const authStatus = useAtomValue(providerAuthStatusAtom);
+    const [voiceProvider, setVoiceProvider] = useAtom(voiceProviderAtom);
+    const [, setSynthProvider] = useAtom(synthesisProviderAtom);
+    const [mapProviderVal, setMapProvider] = useAtom(mappingProviderAtom);
+    const [composerVal, setComposer] = useAtom(composerModelAtom);
+    const [analystVal, setAnalyst] = useAtom(analystModelAtom);
+    const [selectedModels, setSelectedModels] = useAtom(selectedModelsAtom);
 
     // Filter out system provider if present
     const displayProviders = providers.filter(p => p.id !== 'system');
@@ -62,7 +72,7 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
     };
 
     // Separate voice and non-voice providers
-    const voiceProvider = displayProviders.find(p => String(p.id) === voiceProviderId);
+    const voiceProviderObj = displayProviders.find(p => String(p.id) === voiceProviderId);
     const otherProviders = displayProviders
         .filter(p => String(p.id) !== voiceProviderId)
         .sort((a, b) => getPriority(String(a.id)) - getPriority(String(b.id)));
@@ -87,6 +97,58 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
     // Determine if this tray should be dimmed when split is open
     const shouldDimInSplitMode = isSplitOpen && variant === "tray";
 
+    const handleLongPressStart = (pid: string | null) => {
+        if (longPressRef.current) clearTimeout(longPressRef.current);
+        longPressRef.current = setTimeout(() => {
+            setMenuTarget(pid);
+            setIsMenuOpen(true);
+        }, 500);
+    };
+
+    const handleLongPressCancel = () => {
+        if (longPressRef.current) {
+            clearTimeout(longPressRef.current);
+            longPressRef.current = null;
+        }
+    };
+
+    const handleSelectSynth = (pid: string) => {
+        setVoiceProvider(pid);
+        setSynthProvider(pid);
+        try {
+            localStorage.setItem('htos_voice_locked', 'true');
+            chrome?.storage?.local?.set?.({ provider_lock_settings: { voice_locked: true } });
+        } catch {}
+        setIsMenuOpen(false);
+    };
+
+    const handleSelectMap = (pid: string) => {
+        setMapProvider(pid);
+        try {
+            localStorage.setItem('htos_mapper_locked', 'true');
+            chrome?.storage?.local?.set?.({ provider_lock_settings: { mapper_locked: true } });
+        } catch {}
+        setIsMenuOpen(false);
+    };
+
+    const handleSelectComposer = (pid: string) => {
+        setComposer(pid);
+        try {
+            localStorage.setItem('htos_composer_locked', 'true');
+            chrome?.storage?.local?.set?.({ provider_lock_settings: { composer_locked: true } });
+        } catch {}
+        setIsMenuOpen(false);
+    };
+
+    const handleSelectAnalyst = (pid: string) => {
+        setAnalyst(pid);
+        try {
+            localStorage.setItem('htos_analyst_locked', 'true');
+            chrome?.storage?.local?.set?.({ provider_lock_settings: { analyst_locked: true } });
+        } catch {}
+        setIsMenuOpen(false);
+    };
+
     return (
         <div
             className={clsx(
@@ -98,6 +160,9 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
                 shouldDim && "council-historical-dimmed",
                 shouldDimInSplitMode && "council-tray-dimmed-split"
             )}
+            onMouseDown={() => handleLongPressStart(null)}
+            onMouseUp={handleLongPressCancel}
+            onMouseLeave={handleLongPressCancel}
         >
             {/* Orb bar with centered voice and fanned others */}
             <div className="council-orb-bar flex items-center justify-center relative" style={{ maxWidth: '480px', margin: '0 auto', height: '60px' }}>
@@ -117,6 +182,9 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
                                 onCrownClick={handleCrownClick}
                                 hoveredOrb={hoveredOrb}
                                 variant={variant}
+                                disabled={authStatus && authStatus[pid] === false}
+                                onLongPressStart={() => handleLongPressStart(pid)}
+                                onLongPressCancel={handleLongPressCancel}
                             />
                         );
                     })}
@@ -127,25 +195,30 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
                     className="council-voice-zone relative flex items-center justify-center cursor-pointer"
                     style={{ width: '80px', height: '80px', flexShrink: 0 }}
                     onClick={onTrayExpand}
+                    onMouseDown={() => handleLongPressStart(String(voiceProviderId))}
+                    onMouseUp={handleLongPressCancel}
                 >
                     {/* Subtle glass ring indicator */}
                     <div className="council-glass-ring" />
 
-                    {voiceProvider && (
+                    {voiceProviderObj && (
                         <Orb
-                            key={String(voiceProvider.id)}
+                            key={String(voiceProviderObj.id)}
                             turnId={turnId}
-                            provider={voiceProvider}
+                            provider={voiceProviderObj}
                             isVoice={true}
                             isCrownMode={isCrownMode}
                             onHover={setHoveredOrb}
                             onClick={(e) => {
                                 e.stopPropagation();
-                                handleOrbClickInternal(e, String(voiceProvider.id));
+                                handleOrbClickInternal(e, String(voiceProviderObj.id));
                             }}
                             onCrownClick={handleCrownClick}
                             hoveredOrb={hoveredOrb}
                             variant={variant}
+                            onLongPressStart={() => handleLongPressStart(String(voiceProviderId))}
+                            onLongPressCancel={handleLongPressCancel}
+                            disabled={authStatus && authStatus[String(voiceProviderObj.id)] === false}
                         />
                     )}
                 </div>
@@ -166,6 +239,9 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
                                 onCrownClick={handleCrownClick}
                                 hoveredOrb={hoveredOrb}
                                 variant={variant}
+                                disabled={authStatus && authStatus[pid] === false}
+                                onLongPressStart={() => handleLongPressStart(pid)}
+                                onLongPressCancel={handleLongPressCancel}
                             />
                         );
                     })}
@@ -176,6 +252,125 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
             {isCrownMode && (
                 <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-surface-raised border border-brand-500 text-brand-500 text-xs px-2 py-1 rounded-md shadow-sm animate-bounce">
                     Select new voice
+                </div>
+            )}
+
+            {isMenuOpen && (
+                <div className="absolute left-1/2 -translate-x-1/2 bottom-[72px] bg-surface-raised border border-border-subtle rounded-xl shadow-elevated p-3 z-[100] min-w-[640px]">
+                    <div className="text-xs text-text-muted mb-2">Council Menu</div>
+                    <div className="grid grid-cols-2 gap-4">
+                        <div>
+                            <div className="flex items-center gap-2 mb-2 text-sm"><span>👑</span><span>Synthesizer</span></div>
+                            <div className="flex flex-wrap gap-2">
+                                {displayProviders.map(p => {
+                                    const pid = String(p.id);
+                                    const selected = String(voiceProvider || '') === pid;
+                                    return (
+                                        <button
+                                            key={`s-${pid}`}
+                                            onClick={() => handleSelectSynth(pid)}
+                                            className={clsx("px-2 py-2 rounded-md text-xs border flex flex-col items-center gap-1 min-w-[96px]",
+                                                selected ? "bg-brand-500/15 border-brand-500 text-text-primary" : "bg-chip border-border-subtle text-text-secondary",
+                                                authStatus && authStatus[pid] === false && "opacity-50"
+                                            )}
+                                        >
+                                            {selected && <span>👑</span>}
+                                            <span>{p.name}</span>
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                        <div>
+                            <div className="flex items-center gap-2 mb-2 text-sm"><span>🧩</span><span>Mapper</span></div>
+                            <div className="flex flex-wrap gap-2">
+                                {displayProviders.map(p => {
+                                    const pid = String(p.id);
+                                    const selected = String(mapProviderVal || '') === pid;
+                                    return (
+                                        <button
+                                            key={`m-${pid}`}
+                                            onClick={() => handleSelectMap(pid)}
+                                            className={clsx("px-2 py-2 rounded-md text-xs border flex flex-col items-center gap-1 min-w-[96px]",
+                                                selected ? "bg-brand-500/15 border-brand-500 text-text-primary" : "bg-chip border-border-subtle text-text-secondary",
+                                                authStatus && authStatus[pid] === false && "opacity-50"
+                                            )}
+                                        >
+                                            {selected && <span>🧩</span>}
+                                            <span>{p.name}</span>
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                        <div>
+                            <div className="flex items-center gap-2 mb-2 text-sm"><span>✏️</span><span>Composer</span></div>
+                            <div className="flex flex-wrap gap-2">
+                                {displayProviders.map(p => {
+                                    const pid = String(p.id);
+                                    const selected = String(composerVal || '') === pid;
+                                    return (
+                                        <button
+                                            key={`c-${pid}`}
+                                            onClick={() => handleSelectComposer(pid)}
+                                            className={clsx("px-2 py-2 rounded-md text-xs border flex flex-col items-center gap-1 min-w-[96px]",
+                                                selected ? "bg-brand-500/15 border-brand-500 text-text-primary" : "bg-chip border-border-subtle text-text-secondary",
+                                                authStatus && authStatus[pid] === false && "opacity-50"
+                                            )}
+                                        >
+                                            {selected && <span>✏️</span>}
+                                            <span>{p.name}</span>
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                        <div>
+                            <div className="flex items-center gap-2 mb-2 text-sm"><span>🧠</span><span>Analyst</span></div>
+                            <div className="flex flex-wrap gap-2">
+                                {displayProviders.map(p => {
+                                    const pid = String(p.id);
+                                    const selected = String(analystVal || '') === pid;
+                                    return (
+                                        <button
+                                            key={`a-${pid}`}
+                                            onClick={() => handleSelectAnalyst(pid)}
+                                            className={clsx("px-2 py-2 rounded-md text-xs border flex flex-col items-center gap-1 min-w-[96px]",
+                                                selected ? "bg-brand-500/15 border-brand-500 text-text-primary" : "bg-chip border-border-subtle text-text-secondary",
+                                                authStatus && authStatus[pid] === false && "opacity-50"
+                                            )}
+                                        >
+                                            {selected && <span>🧠</span>}
+                                            <span>{p.name}</span>
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                        <div className="col-span-2">
+                            <div className="flex items-center gap-2 mb-2 text-sm"><span>👁️</span><span>Witness</span></div>
+                            <div className="flex flex-wrap gap-2">
+                                {displayProviders.map(p => {
+                                    const pid = String(p.id);
+                                    const checked = !!selectedModels?.[pid];
+                                    return (
+                                        <button
+                                            key={`w-${pid}`}
+                                            onClick={() => setSelectedModels({ ...(selectedModels || {}), [pid]: !checked })}
+                                            className={clsx("px-2 py-1 rounded-md text-xs border",
+                                                checked ? "bg-brand-500/15 border-brand-500 text-text-primary" : "bg-chip border-border-subtle text-text-secondary"
+                                            )}
+                                        >
+                                            {p.name} {checked ? "✓" : ""}
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    </div>
+                    <div className="flex justify-end mt-3">
+                        <button onClick={() => setIsMenuOpen(false)} className="px-2 py-1 text-xs rounded-md bg-surface-highlight border border-border-subtle text-text-secondary">Close</button>
+                    </div>
                 </div>
             )}
         </div>
@@ -192,6 +387,9 @@ interface OrbProps {
     onCrownClick: (e: React.MouseEvent) => void;
     hoveredOrb: string | null;
     variant?: "tray" | "divider" | "historical";
+    onLongPressStart?: () => void;
+    onLongPressCancel?: () => void;
+    disabled?: boolean;
 }
 
 const Orb: React.FC<OrbProps> = ({
@@ -203,7 +401,10 @@ const Orb: React.FC<OrbProps> = ({
     onClick,
     onCrownClick,
     hoveredOrb,
-    variant = "tray"
+    variant = "tray",
+    onLongPressStart,
+    onLongPressCancel,
+    disabled = false
 }) => {
     const pid = String(provider.id);
     const state = useAtomValue(providerEffectiveStateFamily({ turnId, providerId: pid }));
@@ -242,7 +443,8 @@ const Orb: React.FC<OrbProps> = ({
                     isStreaming && "council-orb-streaming",
                     hasError && "council-orb-error",
                     // Crown Mode Selection Target
-                    isCrownMode && !isVoice && "ring-2 ring-brand-500/50 ring-offset-1 ring-offset-surface cursor-crosshair animate-pulse"
+                    isCrownMode && !isVoice && "ring-2 ring-brand-500/50 ring-offset-1 ring-offset-surface cursor-crosshair animate-pulse",
+                    disabled && "opacity-50 cursor-not-allowed"
                 )}
                 style={{
                     '--model-color': modelColor,
@@ -252,6 +454,8 @@ const Orb: React.FC<OrbProps> = ({
                 onMouseEnter={() => onHover(pid)}
                 onMouseLeave={() => onHover(null)}
                 onClick={onClick}
+                onMouseDown={onLongPressStart}
+                onMouseUp={onLongPressCancel}
             />
 
             {/* Tooltip */}

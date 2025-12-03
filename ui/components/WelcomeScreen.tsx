@@ -1,7 +1,12 @@
-import React from "react";
-import { useSetAtom } from "jotai";
+import React, { useMemo, useState } from "react";
+import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { EXAMPLE_PROMPT } from "../constants";
 import logoIcon from "../assets/logos/logo-icon.svg";
+import { LLM_PROVIDERS_CONFIG } from "../constants";
+import { CouncilOrbs } from "./CouncilOrbs";
+import { useProviderStatus } from "../hooks/useProviderStatus";
+import { useSmartVoiceSelection } from "../hooks/useSmartVoiceSelection";
+import { voiceProviderAtom, synthesisProviderAtom, mappingProviderAtom, composerModelAtom, analystModelAtom } from "../state/atoms";
 
 interface WelcomeScreenProps {
   onSendPrompt?: (prompt: string) => void;
@@ -9,8 +14,42 @@ interface WelcomeScreenProps {
 }
 
 const WelcomeScreen = ({ onSendPrompt, isLoading }: WelcomeScreenProps) => {
+  useProviderStatus();
+  useSmartVoiceSelection();
+
+  const providers = useMemo(() => LLM_PROVIDERS_CONFIG.filter(p => p.id !== "system"), []);
+  const [trayExpanded, setTrayExpanded] = useState(false);
+  const voiceProvider = useAtomValue(voiceProviderAtom);
+  const synthesisProvider = useAtomValue(synthesisProviderAtom);
+  const activeVoice = voiceProvider || synthesisProvider || "";
+  const [, setVoice] = useAtom(voiceProviderAtom);
+  const [, setSynth] = useAtom(synthesisProviderAtom);
+  const [, setMapper] = useAtom(mappingProviderAtom);
+  const [, setComposer] = useAtom(composerModelAtom);
+  const [, setAnalyst] = useAtom(analystModelAtom);
+
+  const handleOrbClick = (providerId: string) => {
+    setVoice(providerId);
+    setSynth(providerId);
+    try {
+      localStorage.setItem("htos_voice_locked", "true");
+      chrome?.storage?.local?.set?.({ provider_lock_settings: { voice_locked: true } });
+    } catch {}
+  };
+
+  const handleCrownMove = (providerId: string) => {
+    setVoice(providerId);
+    setSynth(providerId);
+    try {
+      localStorage.setItem("htos_voice_locked", "true");
+      chrome?.storage?.local?.set?.({ provider_lock_settings: { voice_locked: true } });
+    } catch {}
+  };
+
+  const handleTrayExpand = () => setTrayExpanded(v => !v);
+
   return (
-    <div className="flex flex-col items-center justify-center h-full text-center p-10">
+    <div className="flex flex-col items-center justify-center h-full text-center p-10 relative">
       {/* Orb Icon */}
       <img
         src={logoIcon}
@@ -46,6 +85,21 @@ const WelcomeScreen = ({ onSendPrompt, isLoading }: WelcomeScreenProps) => {
           Try: "{EXAMPLE_PROMPT}"
         </button>
       )}
+
+              <div className="fixed inset-x-0 bottom-[96px] pointer-events-auto z-[3002]">
+                <div className="mx-auto w-full max-w-[820px] opacity-20 hover:opacity-100 transition-opacity">
+                  <CouncilOrbs
+                    turnId="welcome"
+                    providers={providers}
+                    voiceProviderId={String(activeVoice)}
+            onOrbClick={handleOrbClick}
+            onCrownMove={handleCrownMove}
+            onTrayExpand={handleTrayExpand}
+            isTrayExpanded={trayExpanded}
+            variant="divider"
+          />
+        </div>
+      </div>
     </div>
   );
 };

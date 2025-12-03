@@ -25,6 +25,7 @@ export class ConnectionHandler {
     this.messageHandler = null;
     this.isInitialized = false;
     this.lifecycleManager = services.lifecycleManager;
+    this._authCache = { ts: 0, data: {} };
   }
 
   /**
@@ -178,7 +179,14 @@ export class ConnectionHandler {
         throw e;
       }
 
-      // Step 2: No mapping needed - compiler accepts primitives + resolvedContext
+      // Step 2: Preflight authorization + smart defaults routing (cached 60s)
+      try {
+        await this._applyPreflightSmartDefaults(executeRequest);
+      } catch (e) {
+        console.warn("[ConnectionHandler] Preflight smart-defaults failed:", e);
+      }
+
+      // Step 3: No mapping needed - compiler accepts primitives + resolvedContext
       console.log("[ConnectionHandler] Passing primitive directly to compiler");
 
       // ========================================================================
@@ -363,6 +371,128 @@ export class ConnectionHandler {
    */
   async _relocateSessionId(executeRequest) {
     // Legacy relocation logic removed; primitives carry explicit session context
+  }
+
+  /**
+   * Preflight authorization check and smart-defaults routing.
+   * - Runs after Context Resolution, before Compilation.
+   * - Caches auth status for 60s to avoid repeated cookie reads.
+   * - Filters unauth providers from batch.
+   * - Selects synthesizer/mapper defaults when missing.
+   * - Applies ephemeral fallback when a locked provider is unavailable.
+   */
+  async _applyPreflightSmartDefaults(executeRequest) {
+    const now = Date.now();
+    let auth = this._authCache.data;
+    if (!this._authCache.ts || now - this._authCache.ts > 60000) {
+      try {
+        auth = await this._refreshAuthStatus();
+        this._authCache = { ts: now, data: auth || {} };
+      } catch (e) {
+        console.warn("[Preflight] Failed to refresh auth, using stale cache:", e);
+      }
+    }
+
+    const isAuth = (pid) => {
+      const key = String(pid).toLowerCase();
+      return auth && auth[key] !== false;
+    };
+
+    // Normalize providers list
+    const allKnown = (self.providerRegistry?.listProviders?.() || []).map(String);
+    const incomingProviders = Array.isArray(executeRequest.providers)
+      ? executeRequest.providers.map(String)
+      : [];
+
+    // If no providers specified on initialize, pick smart defaults set (authorized only)
+    if (executeRequest.type === "initialize" && incomingProviders.length === 0) {
+      const base = ["claude", "gemini-exp", "qwen", "gemini-pro", "chatgpt", "gemini"];
+      const smartBatch = base.filter((pid) => allKnown.includes(pid) && isAuth(pid)).slice(0, 3);
+      executeRequest.providers = smartBatch.length > 0 ? smartBatch : allKnown.slice(0, 3);
+    } else {
+      // Otherwise, filter out unauth providers quietly
+      executeRequest.providers = incomingProviders.filter((pid) => !auth || isAuth(pid));
+    }
+
+    // Read locks from chrome.storage.local (UI writes these)
+    let locks = {};
+    try {
+      const data = await chrome.storage.local.get(["provider_lock_settings"]);
+      locks = data.provider_lock_settings || {};
+    } catch (_) { }
+
+    const synthLocked = !!locks.voice_locked || !!locks.synth_locked;
+    const mapperLocked = !!locks.mapper_locked;
+
+    // Smart default selection for synthesizer
+    const PRIORITY_SYNTH = ["claude", "gemini-exp", "qwen", "gemini-pro", "chatgpt", "gemini"];
+    const PRIORITY_MAP = ["chatgpt", "gemini-pro", "claude", "qwen", "gemini-exp", "gemini"];
+
+    const chooseBest = (order) => {
+      for (const pid of order) {
+        if (allKnown.includes(pid) && isAuth(pid)) return pid;
+      }
+      // Fallback to first available
+      return allKnown.find(isAuth) || allKnown[0] || null;
+    };
+
+    // Effective synthesizer
+    let effectiveSynth = executeRequest.synthesizer || null;
+    if (!effectiveSynth) {
+      effectiveSynth = chooseBest(PRIORITY_SYNTH);
+    }
+    // If locked and unauth → ephemeral fallback, do not change lock state
+    if (effectiveSynth && !isAuth(effectiveSynth)) {
+      if (!synthLocked) {
+        effectiveSynth = chooseBest(PRIORITY_SYNTH);
+      } else {
+        const fallback = chooseBest(PRIORITY_SYNTH);
+        if (fallback && fallback !== effectiveSynth) {
+          console.log(`[Preflight] Synth locked but unauth; ephemeral fallback to ${fallback}`);
+          effectiveSynth = fallback;
+        }
+      }
+    }
+    executeRequest.synthesizer = effectiveSynth;
+
+    // Effective mapper
+    let effectiveMapper = executeRequest.mapper || null;
+    if (!effectiveMapper) {
+      effectiveMapper = chooseBest(PRIORITY_MAP);
+    }
+    if (effectiveMapper && !isAuth(effectiveMapper)) {
+      if (!mapperLocked) {
+        effectiveMapper = chooseBest(PRIORITY_MAP);
+      } else {
+        const fallback = chooseBest(PRIORITY_MAP);
+        if (fallback && fallback !== effectiveMapper) {
+          console.log(`[Preflight] Mapper locked but unauth; ephemeral fallback to ${fallback}`);
+          effectiveMapper = fallback;
+        }
+      }
+    }
+    executeRequest.mapper = effectiveMapper;
+
+    // Dim degraded providers in storage for UI consumption (optional sync)
+    try {
+      const current = (await chrome.storage.local.get(["provider_auth_status"]))?.provider_auth_status || {};
+      const merged = { ...current, ...auth };
+      await chrome.storage.local.set({ provider_auth_status: merged });
+    } catch (_) { }
+  }
+
+  async _refreshAuthStatus() {
+    try {
+      // Directly reuse sw-entry auth checker to avoid round-trip; fallback to stored state
+      if (typeof checkProviderLoginStatus === "function") {
+        return await checkProviderLoginStatus();
+      }
+      const { provider_auth_status = {} } = await chrome.storage.local.get("provider_auth_status");
+      return provider_auth_status;
+    } catch (e) {
+      console.warn("[Preflight] Auth refresh error:", e);
+      return {};
+    }
   }
 
   /**

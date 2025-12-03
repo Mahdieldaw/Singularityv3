@@ -9,24 +9,31 @@ export function useSmartVoiceSelection() {
     const [mappingProvider, setMappingProvider] = useAtom(mappingProviderAtom);
 
     useEffect(() => {
-        // Logic:
-        // 1. If voiceProvider is null, select best.
-        // 2. If voiceProvider is set but not authenticated, select best.
-        // 3. If voiceProvider is set and authenticated, keep it (user preference).
+        const locks = (() => {
+            try {
+                const ls = {
+                    voice_locked: localStorage.getItem('htos_voice_locked') === 'true',
+                    mapper_locked: localStorage.getItem('htos_mapper_locked') === 'true',
+                } as any;
+                return ls;
+            } catch {
+                return {} as any;
+            }
+        })();
 
         const bestVoice = selectSmartDefault(SYNTHESIS_PRIORITY, authStatus);
-
-        if (!voiceProvider || (voiceProvider && !authStatus[voiceProvider])) {
-            if (bestVoice) {
-                setVoiceProvider(bestVoice);
+        const voiceIsAuth = !!voiceProvider && authStatus[voiceProvider] !== false;
+        if (!locks.voice_locked) {
+            if (!voiceProvider || !voiceIsAuth) {
+                if (bestVoice) setVoiceProvider(bestVoice);
             }
         }
 
-        // Same for mapping
         const bestMapping = selectSmartDefault(MAPPING_PRIORITY, authStatus);
-        if (!mappingProvider || (mappingProvider && !authStatus[mappingProvider])) {
-            if (bestMapping) {
-                setMappingProvider(bestMapping);
+        const mapIsAuth = !!mappingProvider && authStatus[mappingProvider] !== false;
+        if (!locks.mapper_locked) {
+            if (!mappingProvider || !mapIsAuth) {
+                if (bestMapping) setMappingProvider(bestMapping);
             }
         }
 

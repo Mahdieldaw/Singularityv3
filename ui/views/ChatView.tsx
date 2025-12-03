@@ -17,7 +17,6 @@ import MessageRow from "../components/MessageRow";
 import ChatInputConnected from "../components/ChatInputConnected";
 import WelcomeScreen from "../components/WelcomeScreen";
 import { useScrollPersistence } from "../hooks/useScrollPersistence";
-import CompactModelTrayConnected from "../components/CompactModelTrayConnected";
 import { useChat } from "../hooks/useChat";
 import { SplitPaneRightPanel } from "../components/SplitPaneRightPanel";
 import { DecisionMapSheet } from "../components/DecisionMapSheet";
@@ -248,14 +247,13 @@ export default function ChatView() {
       {/* Decision Map - Fixed Overlay */}
       <DecisionMapSheet />
 
-      {/* Bottom Dock: Tray + Input */}
       <div
         className={clsx(
-          "sticky bottom-0 left-0 w-full z-[2001] flex flex-col items-center gap-1 pointer-events-none pb-2 bg-transparent transition-opacity duration-300",
+          "sticky left-0 w-full z-[3000] flex flex-col items-center gap-1 pointer-events-none pb-2 bg-transparent transition-opacity duration-300",
+          showWelcome ? "bottom-[16px]" : "bottom-0",
           isDecisionMapOpen && "opacity-0"
         )}
       >
-        <CompactModelTrayConnected />
         <ChatInputConnected />
       </div>
     </div>
