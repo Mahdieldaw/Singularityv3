@@ -164,7 +164,7 @@ export default function AiTurnBlockConnected({
       )}
       mappingTab={mappingTab}
       onSetMappingTab={useCallback(
-        (t: "map" | "options") => setMappingTab(t),
+        (t: "map" | "options" | "graph") => setMappingTab(t),
         [setMappingTab],
       )}
       activeSynthesisClipProviderId={activeSynthesisClipProviderId}
@@ -181,6 +181,8 @@ export default function AiTurnBlockConnected({
         [setPrimaryView],
       )}
       mapStatus={mapStatus}
+      graphTopology={graphTopology}
+      aiTurnId={aiTurn.id}
     >
       <ProviderResponseBlockConnected aiTurnId={aiTurn.id}
         expectedProviders={aiTurn.meta?.expectedProviders} // ✅ Pass metadata
