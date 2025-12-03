@@ -251,19 +251,62 @@
   }
 
   /* Council Orbs Styles (Migrated from module) */
+
+  /* Orb Bar Container */
+  .council-orb-bar {
+    /* Fully transparent with subtle borders */
+    background: transparent;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    position: relative;
+    padding: 12px 0;
+  }
+
+  .council-orb-bar::before {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: 200px;
+    height: 200px;
+    background: radial-gradient(circle, rgba(255, 255, 255, 0.08) 0%, transparent 70%);
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  /* Glass ring around voice orb */
+  .council-glass-ring {
+    position: absolute;
+    width: 80px;
+    height: 80px;
+    border-radius: 50%;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  /* Base Orb Styles */
   .council-orb {
-    width: 28px;
-    height: 28px;
-    /* remove reliance on Tailwind w-2/w-3 */
     border-radius: 50%;
     background: #475569;
-    /* Fallback slate-600 */
     background: radial-gradient(circle at 30% 30%, #ffffff44, #00000066);
     box-shadow: 0 0 12px rgba(255, 255, 255, 0.4);
     transition: all 0.3s cubic-bezier(0.17, 0.67, 0.12, 1.34);
     position: relative;
     overflow: hidden;
     z-index: 1;
+  }
+
+  /* Size variants */
+  .council-orb-regular {
+    width: 28px;
+    height: 28px;
+  }
+
+  .council-orb-voice {
+    width: 32px;
+    height: 32px;
   }
 
   .council-orb::before {
@@ -277,7 +320,7 @@
     animation: spin 8s linear infinite, breathe 4s infinite alternate;
   }
 
-  /* Logo backdrop - fades in on hover */
+  /* Logo backdrop - ALWAYS visible at 35%, scales to 100% on hover */
   .council-orb::after {
     content: '';
     position: absolute;
@@ -286,25 +329,24 @@
     background-size: 60%;
     background-position: center;
     background-repeat: no-repeat;
-    opacity: 0;
+    opacity: 0.35;
     transition: opacity 0.4s ease-in-out;
     z-index: 1;
   }
 
   .council-orb:hover::after {
-    opacity: 0.6;
+    opacity: 1;
   }
 
   .council-orb:hover {
-    transform: scale(1.35) translateY(-4px);
+    transform: scale(1.4) translateY(-4px);
     box-shadow: 0 0 24px var(--model-color);
     z-index: 10;
   }
 
   .council-orb-voice {
-    transform: scale(1.2);
     box-shadow: 0 0 20px var(--model-color), 0 0 0 3px #ffffff44;
-    animation: pulse 2s infinite;
+    animation: goldenPulse 2s infinite;
   }
 
   .council-orb-streaming::after {
@@ -314,6 +356,7 @@
     background: radial-gradient(circle, var(--model-color) 0%, transparent 70%);
     opacity: 0.3;
     animation: fillPulse 1.5s infinite;
+    z-index: 2;
   }
 
   .council-orb-error {
@@ -342,6 +385,16 @@
 
   .council-historical-dimmed {
     opacity: 0.5;
+  }
+
+  .council-tray-dimmed-split {
+    opacity: 0.4;
+    filter: grayscale(50%);
+  }
+
+  /* Ensure smooth transition for dimming */
+  .council-tray-container {
+    transition: opacity 0.5s ease-in-out;
   }
 }
 
@@ -377,6 +430,18 @@
 
     50% {
       opacity: 0.5;
+    }
+  }
+
+  @keyframes goldenPulse {
+
+    0%,
+    100% {
+      box-shadow: 0 0 20px var(--model-color), 0 0 0 3px #ffffff44;
+    }
+
+    50% {
+      box-shadow: 0 0 32px var(--model-color), 0 0 0 3px #ffffff66;
     }
   }
 

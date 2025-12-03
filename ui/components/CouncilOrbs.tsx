@@ -53,40 +53,124 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
     // Determine if this should be dimmed (historical variant when split is open)
     const shouldDim = variant === "historical" && isSplitOpen;
 
+    // Priority ranking for orb placement (closest to voice = highest priority)
+    const PRIORITY_ORDER = ['claude', 'gemini-exp', 'qwen', 'gemini-pro', 'chatgpt', 'gemini'];
+
+    const getPriority = (providerId: string) => {
+        const index = PRIORITY_ORDER.indexOf(providerId);
+        return index === -1 ? 999 : index; // Unknown providers go to the end
+    };
+
+    // Separate voice and non-voice providers
+    const voiceProvider = displayProviders.find(p => String(p.id) === voiceProviderId);
+    const otherProviders = displayProviders
+        .filter(p => String(p.id) !== voiceProviderId)
+        .sort((a, b) => getPriority(String(a.id)) - getPriority(String(b.id)));
+
+    // Distribute alternating left/right with highest priority closest to voice
+    const leftOrbs: LLMProvider[] = [];
+    const rightOrbs: LLMProvider[] = [];
+
+    otherProviders.forEach((provider, index) => {
+        if (index % 2 === 0) {
+            // Even indices go to RIGHT (0, 2, 4... = highest, 3rd, 5th priority)
+            rightOrbs.push(provider);
+        } else {
+            // Odd indices go to LEFT (1, 3, 5... = 2nd, 4th, 6th priority)
+            leftOrbs.push(provider);
+        }
+    });
+
+    // Reverse left array so highest priority is closest to center
+    leftOrbs.reverse();
+
+    // Determine if this tray should be dimmed when split is open
+    const shouldDimInSplitMode = isSplitOpen && variant === "tray";
+
     return (
         <div
             className={clsx(
-                "council-tray relative mx-auto mt-4 transition-all duration-300 ease-out",
-                "bg-surface-raised border border-border-subtle rounded-full",
-                "flex items-center justify-center gap-4 px-6 py-2",
-                "cursor-pointer hover:bg-surface-highlight hover:shadow-md",
-                isTrayExpanded ? "opacity-0 pointer-events-none h-0 py-0 overflow-hidden" : "opacity-100 h-auto",
+                "council-tray-container relative transition-all duration-300 ease-out",
+                isTrayExpanded ? "opacity-0 pointer-events-none h-0 overflow-hidden" : "opacity-100",
                 variant === "tray" && "council-tray",
                 variant === "divider" && "council-divider",
                 variant === "historical" && "council-historical",
-                shouldDim && "council-historical-dimmed"
+                shouldDim && "council-historical-dimmed",
+                shouldDimInSplitMode && "council-tray-dimmed-split"
             )}
-            onClick={onTrayExpand}
         >
-            {displayProviders.map((p) => {
-                const pid = String(p.id);
-                const isVoice = pid === voiceProviderId;
+            {/* Orb bar with centered voice and fanned others */}
+            <div className="council-orb-bar flex items-center justify-center relative" style={{ maxWidth: '480px', margin: '0 auto', height: '60px' }}>
+                {/* Left side orbs - 40px gap from sacred zone, 28px between orbs */}
+                <div className="flex items-center justify-end gap-[28px]" style={{ flex: 1, paddingRight: '40px' }}>
+                    {leftOrbs.map((p) => {
+                        const pid = String(p.id);
+                        return (
+                            <Orb
+                                key={pid}
+                                turnId={turnId}
+                                provider={p}
+                                isVoice={false}
+                                isCrownMode={isCrownMode}
+                                onHover={setHoveredOrb}
+                                onClick={(e) => handleOrbClickInternal(e, pid)}
+                                onCrownClick={handleCrownClick}
+                                hoveredOrb={hoveredOrb}
+                                variant={variant}
+                            />
+                        );
+                    })}
+                </div>
 
-                return (
-                    <Orb
-                        key={pid}
-                        turnId={turnId}
-                        provider={p}
-                        isVoice={isVoice}
-                        isCrownMode={isCrownMode}
-                        onHover={setHoveredOrb}
-                        onClick={(e) => handleOrbClickInternal(e, pid)}
-                        onCrownClick={handleCrownClick}
-                        hoveredOrb={hoveredOrb}
-                        variant={variant}
-                    />
-                );
-            })}
+                {/* CENTER: Voice Orb with Sacred Zone - 80px total */}
+                <div
+                    className="council-voice-zone relative flex items-center justify-center cursor-pointer"
+                    style={{ width: '80px', height: '80px', flexShrink: 0 }}
+                    onClick={onTrayExpand}
+                >
+                    {/* Subtle glass ring indicator */}
+                    <div className="council-glass-ring" />
+
+                    {voiceProvider && (
+                        <Orb
+                            key={String(voiceProvider.id)}
+                            turnId={turnId}
+                            provider={voiceProvider}
+                            isVoice={true}
+                            isCrownMode={isCrownMode}
+                            onHover={setHoveredOrb}
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                handleOrbClickInternal(e, String(voiceProvider.id));
+                            }}
+                            onCrownClick={handleCrownClick}
+                            hoveredOrb={hoveredOrb}
+                            variant={variant}
+                        />
+                    )}
+                </div>
+
+                {/* Right side orbs - 40px gap from sacred zone, 28px between orbs */}
+                <div className="flex items-center justify-start gap-[28px]" style={{ flex: 1, paddingLeft: '40px' }}>
+                    {rightOrbs.map((p) => {
+                        const pid = String(p.id);
+                        return (
+                            <Orb
+                                key={pid}
+                                turnId={turnId}
+                                provider={p}
+                                isVoice={false}
+                                isCrownMode={isCrownMode}
+                                onHover={setHoveredOrb}
+                                onClick={(e) => handleOrbClickInternal(e, pid)}
+                                onCrownClick={handleCrownClick}
+                                hoveredOrb={hoveredOrb}
+                                variant={variant}
+                            />
+                        );
+                    })}
+                </div>
+            </div>
 
             {/* Crown Mode Indicator */}
             {isCrownMode && (
@@ -153,9 +237,8 @@ const Orb: React.FC<OrbProps> = ({
                 type="button"
                 className={clsx(
                     "council-orb",
-                    // Size & Base Style (Tailwind)
-                    isVoice ? "opacity-100" : "opacity-70 hover:opacity-100",
-                    isVoice && "council-orb-voice",
+                    // Size differences: voice is 32px, others are 28px
+                    isVoice ? "council-orb-voice" : "council-orb-regular",
                     isStreaming && "council-orb-streaming",
                     hasError && "council-orb-error",
                     // Crown Mode Selection Target

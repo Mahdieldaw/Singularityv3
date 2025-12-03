@@ -527,11 +527,11 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
           <div className="flex justify-center w-full transition-all duration-300 px-4">
             <div className="w-full">
 
-              {/* LEFT: Synthesis Block + Tray */}
-              <div className="flex-1 flex flex-col relative min-w-0">
+              {/* LEFT: Synthesis Block with Orbs Inside */}
+              <div className="flex-1 flex flex-col relative min-w-0" style={{ maxWidth: '820px', margin: '0 auto' }}>
 
                 {/* Synthesis Bubble */}
-                <div className="synthesis-bubble bg-surface rounded-3xl p-6 border border-border-subtle shadow-sm">
+                <div className="synthesis-bubble bg-surface rounded-3xl border border-border-subtle shadow-sm relative" style={{ padding: '28px 40px 96px' }}>
                   {(() => {
                     if (!wasSynthRequested)
                       return (
@@ -625,21 +625,22 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                       </div>
                     );
                   })()}
+
+                  {/* BOTTOM TRAY: Council Orbs INSIDE bubble - 28px from bottom */}
+                  <div className="absolute bottom-0 left-0 right-0" style={{ paddingBottom: '28px' }}>
+                    <CouncilOrbs
+                      turnId={aiTurn.id}
+                      providers={LLM_PROVIDERS_CONFIG}
+                      voiceProviderId={activeSynthPid || ""}
+                      onOrbClick={(pid) => setActiveSplitPanel({ turnId: aiTurn.id, providerId: pid })}
+                      onCrownMove={handleCrownMove}
+                      onTrayExpand={() => setIsDecisionMapOpen({ turnId: aiTurn.id })}
+                      isTrayExpanded={isDecisionMapOpen?.turnId === aiTurn.id}
+                      variant="tray"
+                    />
+                  </div>
                 </div>
 
-                {/* BOTTOM TRAY: Council Orbs */}
-                <div className="relative mt-4">
-                  <CouncilOrbs
-                    turnId={aiTurn.id}
-                    providers={LLM_PROVIDERS_CONFIG}
-                    voiceProviderId={activeSynthPid || ""}
-                    onOrbClick={(pid) => setActiveSplitPanel({ turnId: aiTurn.id, providerId: pid })}
-                    onCrownMove={handleCrownMove}
-                    onTrayExpand={() => setIsDecisionMapOpen({ turnId: aiTurn.id })}
-                    isTrayExpanded={isDecisionMapOpen?.turnId === aiTurn.id}
-                    variant="tray"
-                  />
-                </div>
               </div>
             </div>
           </div>

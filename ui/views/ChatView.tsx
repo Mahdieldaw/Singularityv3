@@ -223,8 +223,11 @@ export default function ChatView() {
               {/* Divider with Orbs */}
               <PanelResizeHandle className="w-1.5 bg-border-subtle hover:bg-brand-500/50 transition-colors cursor-col-resize relative z-10">
                 {/* Adjacent Orb Column - pointer-events-none wrapper */}
-                <div className="absolute top-1/2 -translate-y-1/2 left-0 -translate-x-full w-10 flex flex-col items-center justify-center gap-2 bg-surface-raised border-y border-l border-border-subtle rounded-l-xl shadow-sm z-20 pointer-events-none">
-                  <div className="pointer-events-auto">
+                <div
+                  className="divider-handle absolute top-1/2 -translate-y-1/2 left-0 -translate-x-full w-10 flex flex-col items-center justify-center gap-2 bg-surface-raised border-y border-l border-border-subtle rounded-l-xl shadow-sm z-20"
+                  style={{ pointerEvents: 'none' }}
+                >
+                  <div className="orb-bar pointer-events-auto cursor-default" style={{ cursor: 'default' }}>
                     <CouncilOrbsVertical />
                   </div>
                 </div>
