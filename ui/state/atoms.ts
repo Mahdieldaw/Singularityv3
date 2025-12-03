@@ -276,6 +276,11 @@ export const synthesisProviderAtom = atomWithStorage<string | null>(
   "htos_synthesis_provider",
   null,
 );
+
+export const voiceProviderAtom = atomWithStorage<string | null>(
+  "htos_voice_provider",
+  null,
+);
 export const synthesisProvidersAtom = atomWithStorage<string[]>(
   "htos_synthesis_providers",
   [],

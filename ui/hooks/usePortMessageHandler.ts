@@ -13,6 +13,7 @@ import {
   mappingEnabledAtom,
   mappingProviderAtom,
   synthesisProviderAtom,
+  voiceProviderAtom,
   lastActivityAtAtom,
 } from "../state/atoms";
 import { activeRecomputeStateAtom, lastStreamingProviderAtom } from "../state/atoms";
@@ -72,6 +73,7 @@ export function usePortMessageHandler() {
   const mappingEnabled = useAtomValue(mappingEnabledAtom);
   const mappingProvider = useAtomValue(mappingProviderAtom);
   const synthesisProvider = useAtomValue(synthesisProviderAtom);
+  const voiceProvider = useAtomValue(voiceProviderAtom);
   const setLastActivityAt = useSetAtom(lastActivityAtAtom);
   // Note: We rely on Jotai's per-atom update serialization; no manual pending cache
 
@@ -500,7 +502,10 @@ export function usePortMessageHandler() {
                     status: "completed" as const,
                     createdAt: Date.now(),
                     updatedAt: Date.now(),
-                    meta: data?.meta || {},
+                    meta: {
+                      ...(data?.meta || {}),
+                      isPrimary: normalizedId === voiceProvider
+                    },
                     artifacts: data?.artifacts || [], // ✅ Preserve artifacts
                   };
 
@@ -727,6 +732,7 @@ export function usePortMessageHandler() {
       mappingEnabled,
       mappingProvider,
       synthesisProvider,
+      voiceProvider,
     ],
   );
 
