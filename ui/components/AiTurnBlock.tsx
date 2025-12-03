@@ -40,38 +40,54 @@ function parseMappingResponse(response?: string | null) {
     normalized = normalized.slice(0, topoMatch.index).trim();
   }
 
+  // Context-aware patterns with position constraints
   const optionsPatterns = [
-    /={3,}\s*ALL[_\s]*AVAILABLE[_\s]*OPTIONS\s*={3,}/i,
-    /\*{0,2}={3,}\s*ALL[_\s]*AVAILABLE[_\s]*OPTIONS\s*={3,}\*{0,2}/i,
-    /#{1,3}\s*All\s+Available\s+Options:?/i,
-    /\*{2}All\s+Available\s+Options:?\*{2}/i,
-    /All\s+Available\s+Options:?/i,
+    // Strict delimiters (can appear anywhere)
+    { re: /\n={3,}\s*ALL[_\s]*AVAILABLE[_\s]*OPTIONS\s*={3,}\n/i, minPosition: 0 },
+    { re: /\n[=\-─━═＝]{3,}\s*ALL[_\s]*AVAILABLE[_\s]*OPTIONS\s*[=\-─━═＝]{3,}\n/i, minPosition: 0 },
+    { re: /\n\*{0,2}={3,}\s*ALL[_\s]*AVAILABLE[_\s]*OPTIONS\s*={3,}\*{0,2}\n/i, minPosition: 0 },
+
+    // Markdown headings (require newline, can appear mid-document)
+    { re: /\n#{1,3}\s*All\s+Available\s+Options:?\n/i, minPosition: 0.25 },
+    { re: /\n\*{2}All\s+Available\s+Options:?\*{2}\n/i, minPosition: 0.25 },
+
+    // Loose patterns - require at least 30% through to avoid narrative mentions
+    { re: /\nAll\s+Available\s+Options:\n/i, minPosition: 0.3 },
   ];
-  const universal = /[=\-─━═＝]{3,}\s*ALL[_\s]*AVAILABLE[_\s]*OPTIONS\s*[=\-─━═＝]{3,}/i;
 
-  let bestIndex = -1;
-  let splitLength = 0;
-
-  const uni = normalized.match(universal);
-  if (uni && typeof uni.index === 'number') {
-    bestIndex = uni.index;
-    splitLength = uni[0].length;
-  }
+  let bestMatch = null;
+  let bestScore = -1;
 
   for (const pattern of optionsPatterns) {
-    const match = normalized.match(pattern);
+    const match = normalized.match(pattern.re);
     if (match && typeof match.index === 'number') {
-      if (bestIndex === -1 || match.index < bestIndex) {
-        bestIndex = match.index;
-        splitLength = match[0].length;
+      const position = match.index / normalized.length;
+
+      // Reject matches too early in text
+      if (position < pattern.minPosition) continue;
+
+      // Score: later position is better
+      const score = position * 100;
+
+      if (score > bestScore) {
+        bestScore = score;
+        bestMatch = { index: match.index, length: match[0].length };
       }
     }
   }
 
-  if (bestIndex !== -1) {
-    const mapping = normalized.substring(0, bestIndex).trim();
-    const options = normalized.substring(bestIndex + splitLength).trim() || null;
-    return { mapping, options };
+  if (bestMatch) {
+    const afterDelimiter = normalized.substring(bestMatch.index + bestMatch.length).trim();
+
+    // Validate: check for list structure
+    const listPreview = afterDelimiter.slice(0, 100);
+    const hasListStructure = /^\s*[-*•]\s+|\n\s*[-*•]\s+|^\s*\d+\.\s+|\n\s*\d+\.\s+/.test(listPreview);
+
+    if (hasListStructure) {
+      const mapping = normalized.substring(0, bestMatch.index).trim();
+      const options = afterDelimiter || null;
+      return { mapping, options };
+    }
   }
 
   return { mapping: normalized, options: null };

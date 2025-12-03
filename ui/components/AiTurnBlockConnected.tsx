@@ -65,7 +65,24 @@ export default function AiTurnBlockConnected({
   // but hasn't clicked a clip yet for the new turn.
   const activeSynthesisClipProviderId =
     turnClips.synthesis || aiTurn.meta?.synthesizer;
-  const activeMappingClipProviderId = turnClips.mapping || aiTurn.meta?.mapper;
+
+  // For mapping, if no explicit selection and meta.mapper is missing,
+  // default to the first provider that has mapping responses
+  const activeMappingClipProviderId = (() => {
+    // User explicitly selected a provider
+    if (turnClips.mapping) return turnClips.mapping;
+
+    // Fallback to meta.mapper from backend
+    if (aiTurn.meta?.mapper) return aiTurn.meta.mapper;
+
+    // Final fallback: first provider with mapping responses
+    const mappingProviders = Object.keys(aiTurn.mappingResponses || {});
+    if (mappingProviders.length > 0) {
+      return mappingProviders[0];
+    }
+
+    return undefined;
+  })();
 
   // Derive mapStatus for Decision Map indicator (per-turn, no new atoms)
   const mapStatus: "idle" | "streaming" | "ready" | "error" = (() => {
@@ -107,7 +124,9 @@ export default function AiTurnBlockConnected({
 
   // Extract graph topology from mapping response metadata (if available)
   const graphTopology = useMemo(() => {
-    if (!activeMappingClipProviderId) return null;
+    if (!activeMappingClipProviderId) {
+      return null;
+    }
 
     const mappingResponsesForProvider = aiTurn.mappingResponses?.[activeMappingClipProviderId];
     if (!mappingResponsesForProvider || mappingResponsesForProvider.length === 0) {
@@ -118,9 +137,88 @@ export default function AiTurnBlockConnected({
       ? mappingResponsesForProvider[mappingResponsesForProvider.length - 1]
       : mappingResponsesForProvider;
 
-    // Check if topology exists in meta
-    return (latestMapping as any)?.meta?.graphTopology || null;
-  }, [activeMappingClipProviderId, aiTurn.mappingResponses]);
+    // Check if topology exists in meta (preferred)
+    const metaTopology = (latestMapping as any)?.meta?.graphTopology;
+    if (metaTopology) {
+      return metaTopology;
+    }
+
+    // FALLBACK: Extract from raw text for historical responses that weren't parsed
+    const rawText = (latestMapping as any)?.text;
+    if (!rawText || typeof rawText !== 'string') {
+      return null;
+    }
+
+    try {
+      // Normalize escapes like backend does
+      let normalized = rawText
+        .replace(/\\=/g, '=')
+        .replace(/\\_/g, '_')
+        .replace(/\\\*/g, '*')
+        .replace(/\\-/g, '-');
+
+      const match = normalized.match(/={3,}\s*GRAPH[_\s]*TOPOLOGY\s*={3,}/i);
+      if (!match || typeof match.index !== 'number') {
+        return null;
+      }
+
+      const start = match.index + match[0].length;
+      let rest = normalized.slice(start).trim();
+
+      // Strip markdown code fence if present (```json ... ```)
+      const codeBlockMatch = rest.match(/^```(?:json)?\s*\n([\s\S]*?)\n```/);
+      if (codeBlockMatch) {
+        rest = codeBlockMatch[1].trim();
+      }
+
+      // Find opening brace
+      let i = 0;
+      while (i < rest.length && rest[i] !== '{') i++;
+      if (i >= rest.length) return null;
+
+      // Extract JSON object
+      let depth = 0;
+      let inStr = false;
+      let esc = false;
+      for (let j = i; j < rest.length; j++) {
+        const ch = rest[j];
+        if (inStr) {
+          if (esc) {
+            esc = false;
+          } else if (ch === '\\') {
+            esc = true;
+          } else if (ch === '"') {
+            inStr = false;
+          }
+          continue;
+        }
+        if (ch === '"') {
+          inStr = true;
+          continue;
+        }
+        if (ch === '{') {
+          depth++;
+        } else if (ch === '}') {
+          depth--;
+          if (depth === 0) {
+            let jsonText = rest.slice(i, j + 1);
+
+            // FIX: Replace unquoted S in supporter arrays (common LLM error)
+            // Pattern: "supporters": [S, 1, 2] -> "supporters": ["S", 1, 2]
+            jsonText = jsonText.replace(/("supporters"\s*:\s*\[)\s*S\s*([,\]])/g, '$1"S"$2');
+
+            const parsed = JSON.parse(jsonText);
+            console.log('[AiTurnBlockConnected] Extracted graph topology from historical response for turn:', aiTurn.id);
+            return parsed;
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[AiTurnBlockConnected] Failed to extract graph topology from turn ' + aiTurn.id + ':', e);
+    }
+
+    return null;
+  }, [activeMappingClipProviderId, aiTurn.mappingResponses, aiTurn.id]);
 
   // Filter activeRecomputeState to only include synthesis/mapping (AiTurnBlock doesn't handle batch)
   const filteredRecomputeState = useMemo(() => {

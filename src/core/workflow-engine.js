@@ -2,10 +2,25 @@
 import { ArtifactProcessor } from '../../shared/artifact-processor.ts';
 function extractGraphTopologyAndStrip(text) {
   if (!text || typeof text !== 'string') return { text, topology: null };
-  const match = text.match(/={3,}\s*GRAPH_TOPOLOGY\s*={3,}/i);
+
+  // Normalize markdown escapes (LLMs often escape special chars)
+  let normalized = text
+    .replace(/\\=/g, '=')      // \= → =
+    .replace(/\\_/g, '_')      // \_ → _
+    .replace(/\\\*/g, '*')     // \* → *
+    .replace(/\\-/g, '-');     // \- → -
+
+  const match = normalized.match(/={3,}\s*GRAPH_TOPOLOGY\s*={3,}/i);
   if (!match || typeof match.index !== 'number') return { text, topology: null };
   const start = match.index + match[0].length;
-  const rest = text.slice(start).trim();
+  let rest = normalized.slice(start).trim();
+
+  // Strip markdown code fence if present (```json ... ```)
+  const codeBlockMatch = rest.match(/^```(?:json)?\s*\n([\s\S]*?)\n```/);
+  if (codeBlockMatch) {
+    rest = codeBlockMatch[1].trim();
+  }
+
   let i = 0;
   while (i < rest.length && rest[i] !== '{') i++;
   if (i >= rest.length) return { text, topology: null };
@@ -41,52 +56,100 @@ function extractGraphTopologyAndStrip(text) {
     }
   }
   if (jsonEnd === -1) return { text, topology: null };
-  const jsonText = rest.slice(jsonStart, jsonEnd + 1);
+  let jsonText = rest.slice(jsonStart, jsonEnd + 1);
+
+  // FIX: Replace unquoted S in supporter arrays (common LLM error)
+  // Pattern: "supporters": [S, 1, 2] -> "supporters": ["S", 1, 2]
+  jsonText = jsonText.replace(/("supporters"\s*:\s*\[)\s*S\s*([,\]])/g, '$1"S"$2');
+
   let topology = null;
   try {
     topology = JSON.parse(jsonText);
-  } catch (_) {
+  } catch (e) {
+    console.warn('[extractGraphTopology] JSON parse failed:', e.message);
     return { text, topology: null };
   }
-  const before = text.slice(0, match.index).trim();
+  const before = normalized.slice(0, match.index).trim();
   const after = rest.slice(jsonEnd + 1).trim();
   const newText = after ? `${before}\n${after}` : before;
   return { text: newText, topology };
 }
 function extractOptionsAndStrip(text) {
   if (!text || typeof text !== 'string') return { text, options: null };
+
+  // Normalize markdown escapes AND unicode variants
   let normalized = text
+    .replace(/\\=/g, '=')      // \= → =
+    .replace(/\\_/g, '_')      // \_ → _
+    .replace(/\\\*/g, '*')     // \* → *
+    .replace(/\\-/g, '-')      // \- → -
     .replace(/[＝═⁼˭꓿﹦]/g, '=')
     .replace(/[‗₌]/g, '=')
     .replace(/\u2550/g, '=')
     .replace(/\uFF1D/g, '=');
+
+  // Patterns ordered by strictness (stricter first)
   const patterns = [
-    /={3,}\s*ALL_AVAILABLE_OPTIONS\s*={3,}/i,
-    /={3,}\s*ALL\s+AVAILABLE\s+OPTIONS\s*={3,}/i,
-    /={3,}\s*ALL\s+OPTIONS\s*={3,}/i,
-    /\*\*\s*={3,}\s*ALL_AVAILABLE_OPTIONS\s*={3,}\s*\*\*/i,
-    /###\s*={3,}\s*ALL_AVAILABLE_OPTIONS\s*={3,}/i,
-    /\*\*All Available Options:?\*\*/i,
-    /## All Available Options:?/i,
-    /All Available Options:/i,
-    /\*\*Options:?\*\*/i,
-    /## Options:?/i,
-    /^Options:/im,
+    // Require newline before and equals signs (strongest delimiter)
+    { re: /\n={3,}\s*ALL_AVAILABLE_OPTIONS\s*={3,}\n/i, minPosition: 0 },
+    { re: /\n={3,}\s*ALL\s+AVAILABLE\s+OPTIONS\s*={3,}\n/i, minPosition: 0 },
+    { re: /\n={3,}\s*ALL\s+OPTIONS\s*={3,}\n/i, minPosition: 0 },
+
+    // Markdown wrapped variants
+    { re: /\n\*\*\s*={3,}\s*ALL_AVAILABLE_OPTIONS\s*={3,}\s*\*\*\n/i, minPosition: 0 },
+    { re: /\n###\s*={3,}\s*ALL_AVAILABLE_OPTIONS\s*={3,}\n/i, minPosition: 0 },
+
+    // Heading styles (require newline before) - can appear mid-document
+    { re: /\n\*\*All Available Options:?\*\*\n/i, minPosition: 0.25 },
+    { re: /\n## All Available Options:?\n/i, minPosition: 0.25 },
+
+    // Looser patterns - require at least 30% through document to avoid narrative mentions
+    { re: /\nAll Available Options:\n/i, minPosition: 0.3 },
+    { re: /\n\*\*Options:?\*\*\n/i, minPosition: 0.3 },
+    { re: /\n## Options:?\n/i, minPosition: 0.3 },
+    { re: /^Options:\n/im, minPosition: 0.3 },
   ];
-  let idx = -1;
-  let len = 0;
-  for (const re of patterns) {
-    const m = normalized.match(re);
+
+  let bestMatch = null;
+  let bestScore = -1;
+
+  for (const pattern of patterns) {
+    const m = normalized.match(pattern.re);
     if (m && typeof m.index === 'number') {
-      if (idx === -1 || m.index < idx) {
-        idx = m.index;
-        len = m[0].length;
+      const position = m.index / normalized.length;
+
+      // Reject matches that are too early in the text
+      if (position < pattern.minPosition) continue;
+
+      // Score based on position (later is better) and pattern strictness
+      const score = position * 100 + (patterns.indexOf(pattern) === 0 ? 50 : 0);
+
+      if (score > bestScore) {
+        bestScore = score;
+        bestMatch = { index: m.index, length: m[0].length };
       }
     }
   }
-  if (idx === -1) return { text: normalized, options: null };
+
+  if (!bestMatch) return { text: normalized, options: null };
+
+  const idx = bestMatch.index;
+  const len = bestMatch.length;
+
+  // Extract what comes after the delimiter
+  const afterDelimiter = normalized.slice(idx + len).trim();
+
+  // Validation: Check if what follows looks like a list (starts with -, *, 1., etc. within first 100 chars)
+  const listPreview = afterDelimiter.slice(0, 100);
+  const hasListStructure = /^\s*[-*•]\s+|\n\s*[-*•]\s+|^\s*\d+\.\s+|\n\s*\d+\.\s+/.test(listPreview);
+
+  if (!hasListStructure) {
+    console.warn('[extractOptionsAndStrip] Matched delimiter but no list structure found, rejecting match at position', idx);
+    return { text: normalized, options: null };
+  }
+
   const before = normalized.slice(0, idx).trim();
-  const after = normalized.slice(idx + len).trim();
+  const after = afterDelimiter;
   return { text: before, options: after };
 }
 
@@ -1867,13 +1930,27 @@ Your job is to address what the user is actually asking, informed by but not foc
             let graphTopology = null;
             let allOptions = null;
             if (finalResult?.text) {
+              console.log('[WorkflowEngine] Mapping response length:', finalResult.text.length);
+              console.log('[WorkflowEngine] Mapping response preview:', finalResult.text.slice(0, 500));
+
               const topo = extractGraphTopologyAndStrip(finalResult.text);
               graphTopology = topo.topology;
               finalResult.text = topo.text;
 
+              console.log('[WorkflowEngine] Graph topology extracted:', {
+                found: !!graphTopology,
+                hasNodes: graphTopology?.nodes?.length || 0,
+                hasEdges: graphTopology?.edges?.length || 0,
+              });
+
               const opt = extractOptionsAndStrip(finalResult.text);
               allOptions = opt.options;
               finalResult.text = opt.text;
+
+              console.log('[WorkflowEngine] Options extracted:', {
+                found: !!allOptions,
+                length: allOptions?.length || 0,
+              });
 
               const processed = artifactProcessor.process(finalResult.text);
               finalResult.text = processed.cleanText;
