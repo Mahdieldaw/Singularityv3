@@ -14,12 +14,15 @@ import { LLM_PROVIDERS_CONFIG } from "../constants";
 import ClipsCarousel from "./ClipsCarousel";
 import { ChevronDownIcon, ChevronUpIcon, ListIcon } from "./Icons";
 import DecisionMapGraph from "./experimental/DecisionMapGraph";
+import { CouncilOrbs } from "./CouncilOrbs";
+import { ModelResponsePanel } from "./ModelResponsePanel";
 import { adaptGraphTopology } from "./experimental/graphAdapter";
 import { GraphTopology } from "../types";
 import {
   normalizeResponseArray,
   getLatestResponse,
 } from "../utils/turn-helpers";
+import clsx from "clsx";
 
 // --- Helper Functions ---
 function parseMappingResponse(response?: string | null) {
@@ -263,16 +266,20 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
   const setMapExpanded = onSetMapExpanded || (() => { });
   const setToast = useSetAtom(toastAtom);
 
+  // --- NEW STATE ---
+  const [activeOrbPanel, setActiveOrbPanel] = useState<{
+    turnId: string;
+    providerId: string;
+  } | null>(null);
+
+  const [isDecisionMapOpen, setIsDecisionMapOpen] = useState(false);
+
   // State for Claude artifact overlay
   const [selectedArtifact, setSelectedArtifact] = useState<{
     title: string;
     identifier: string;
     content: string;
   } | null>(null);
-
-  // --- REFS REMOVED HERE ---
-  // We do NOT define mapRef/synthRef manually here anymore.
-  // They come from useShorterHeight below.
 
   const synthesisResponses = useMemo(() => {
     if (!aiTurn.synthesisResponses) aiTurn.synthesisResponses = {};
@@ -401,20 +408,10 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
     requestedSynth === undefined ? true : !!requestedSynth;
   const wasMapRequested = requestedMap === undefined ? true : !!requestedMap;
 
-  // Create refs for sections
-  const synthRef = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<HTMLDivElement>(null);
-
-  // No cross-panel truncation in single viewport mode
-  const synthTruncated = false;
-  const mapTruncated = false;
-
   // --- 1. DEFINITION: Citation Click Logic (First) ---
   const handleCitationClick = useCallback(
     (modelNumber: number) => {
       try {
-        if (!showSourceOutputs) onToggleSourceOutputs?.();
-
         const take = activeMappingPid
           ? getLatestResponse(mappingResponses[activeMappingPid])
           : undefined;
@@ -431,13 +428,9 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
         }
         if (!providerId) return;
 
-        setTimeout(() => {
-          const evt = new CustomEvent("htos:scrollToProvider", {
-            detail: { aiTurnId: aiTurn.id, providerId },
-            bubbles: true,
-          });
-          document.dispatchEvent(evt);
-        }, 200);
+        // NEW: Open slide-in panel instead of scrolling
+        setActiveOrbPanel({ turnId: aiTurn.id, providerId });
+
       } catch (e) {
         console.warn("[AiTurnBlock] Citation click failed", e);
       }
@@ -445,8 +438,6 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
     [
       activeMappingPid,
       mappingResponses,
-      showSourceOutputs,
-      onToggleSourceOutputs,
       aiTurn.id,
       aiTurn.batchResponses,
     ]
@@ -515,6 +506,13 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
     (aiTurn as any)?.input ??
     null;
 
+  // --- NEW: Crown Move Handler (Recompute) ---
+  const handleCrownMove = useCallback((providerId: string) => {
+    if (onClipClick) {
+      onClipClick("synthesis", providerId);
+    }
+  }, [onClipClick]);
+
   return (
     <div className="turn-block pb-8 border-b border-border-subtle mb-4">
       {userPrompt && (
@@ -530,636 +528,213 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
 
       <div className="ai-turn-block">
         <div className="ai-turn-content flex flex-col gap-3">
-          <div className="primaries mb-4 relative">
-            <div className="controls-row px-1 mt-6 mb-1 flex items-center justify-center gap-2">
-              <button
-                type="button"
-                onClick={() => onSetPrimaryView?.(primaryView === "synthesis" ? "decision-map" : "synthesis")}
-                className="group flex items-center gap-2 px-3 py-1.5 bg-input hover:bg-surface-raised border border-border-subtle rounded-full text-sm font-medium text-text-secondary hover:text-text-primary transition-all shadow-sm hover:shadow-md"
-                title={primaryView === "synthesis" ? "Switch to Decision Map" : "Switch to Synthesis"}
-                aria-label={primaryView === "synthesis" ? "Switch to Decision Map" : "Switch to Synthesis"}
-              >
-                {/* Status LED */}
-                {(mapStatus !== "idle" || hasMapping) && (
-                  <span
-                    className={`inline-block w-2 h-2 rounded-full transition-colors ${mapStatus === "streaming"
-                      ? "bg-intent-warning animate-pulse shadow-[0_0_4px_rgba(255,170,0,0.4)]"
-                      : (mapStatus === "ready" || (mapStatus === "idle" && hasMapping))
-                        ? "bg-intent-success shadow-[0_0_4px_rgba(0,255,170,0.3)]"
-                        : mapStatus === "error"
-                          ? "bg-intent-danger"
-                          : ""
-                      }`}
-                  />
-                )}
-                <span>
-                  {primaryView === "synthesis" ? "Synthesis" : "Decision Map"}
-                </span>
 
-                {/* Swap Icon */}
-                <span className="text-text-muted group-hover:text-text-secondary transition-colors text-xs">
-                  ↔
-                </span>
-              </button>
-            </div>
+          {/* SHARED LAYOUT CONTAINER */}
+          <div className="flex justify-center w-full transition-all duration-300">
+            <div className={`flex gap-6 transition-all duration-300 ${activeOrbPanel ? 'w-[66vw] max-w-none' : 'w-full max-w-3xl'}`}>
 
+              {/* LEFT: Synthesis Block + Tray */}
+              <div className="flex-1 flex flex-col relative min-w-0">
 
-
-            {/* Single Content Viewport */}
-            <div className="content-viewport">
-              {/* Synthesis Section */}
-              <div
-                ref={synthRef}
-                className={`${primaryView === "synthesis" ? "flex" : "hidden"} flex-1 min-w-0 flex-col min-h-[150px] relative
-                           rounded-3xl p-4 gap-3`}
-                style={synthExpanded ? {} : {}}
-              >
-                {isSynthesisExpanded && (
-                  <div className="flex-1 flex flex-col min-h-0" style={{ overflow: synthTruncated && !synthExpanded ? "hidden" : "visible" }}>
-                    <div className="h-6 mb-1" />
-
-                    <div
-                      className="clip-content rounded-2xl p-3 flex-1 min-w-0 break-words"
-                      style={{
-                        overflowY: isLive || isLoading ? "auto" : "visible",
-                        maxHeight: isLive || isLoading ? "40vh" : "none",
-                        minHeight: 0,
-                      }}
-                      // Scroll Props Only - Navigation handled by annotated buttons
-                      onWheelCapture={(e: React.WheelEvent<HTMLDivElement>) => {
-                        const el = e.currentTarget;
-                        const dy = e.deltaY ?? 0;
-                        const canDown =
-                          el.scrollTop + el.clientHeight < el.scrollHeight;
-                        const canUp = el.scrollTop > 0;
-                        if ((dy > 0 && canDown) || (dy < 0 && canUp)) {
-                          e.stopPropagation();
-                        }
-                      }}
-                      onWheel={(e: React.WheelEvent<HTMLDivElement>) => {
-                        const el = e.currentTarget;
-                        const dy = e.deltaY ?? 0;
-                        const canDown =
-                          el.scrollTop + el.clientHeight < el.scrollHeight;
-                        const canUp = el.scrollTop > 0;
-                        if ((dy > 0 && canDown) || (dy < 0 && canUp)) {
-                          e.stopPropagation();
-                        }
-                      }}
-                      onTouchStartCapture={(
-                        e: React.TouchEvent<HTMLDivElement>
-                      ) => {
-                        e.stopPropagation();
-                      }}
-                      onTouchMove={(e: React.TouchEvent<HTMLDivElement>) => {
-                        const el = e.currentTarget;
-                        const canDown =
-                          el.scrollTop + el.clientHeight < el.scrollHeight;
-                        const canUp = el.scrollTop > 0;
-                        if (canDown || canUp) {
-                          e.stopPropagation();
-                        }
-                      }}
-                    >
-                      {(() => {
-                        if (!wasSynthRequested)
-                          return (
-                            <div className="text-text-muted/70 italic text-center">
-                              Synthesis not enabled for this turn.
-                            </div>
-                          );
-                        const latest = activeSynthPid
-                          ? getLatestResponse(
-                            synthesisResponses[activeSynthPid]
-                          )
-                          : undefined;
-                        const isGenerating =
-                          (latest &&
-                            (latest.status === "streaming" ||
-                              latest.status === "pending")) ||
-                          isSynthesisTarget;
-                        if (isGenerating)
-                          return (
-                            <div className="flex items-center justify-center gap-2 text-text-muted">
-                              <span className="italic">
-                                Synthesis generating
-                              </span>
-                              <span className="streaming-dots" />
-                            </div>
-                          );
-                        if (activeSynthPid) {
-                          const take = getLatestResponse(
-                            synthesisResponses[activeSynthPid]
-                          );
-                          if (take && take.status === "error") {
-                            return (
-                              <div className="bg-intent-danger/15 border border-intent-danger text-intent-danger rounded-lg p-3">
-                                <div className="text-xs mb-2">
-                                  {activeSynthPid} · error
-                                </div>
-                                <div className="prose prose-sm max-w-none dark:prose-invert leading-7 text-sm">
-                                  <MarkdownDisplay
-                                    content={String(
-                                      take.text || "Synthesis failed"
-                                    )}
-                                  />
-                                </div>
-                              </div>
-                            );
-                          }
-                          if (!take)
-                            return (
-                              <div className="text-text-muted">
-                                No synthesis yet.
-                              </div>
-                            );
-                          return (
-                            <div>
-                              {(() => {
-                                // ✅ Artifacts already extracted by backend
-                                const cleanText = take.text || '';
-                                const artifacts = take.artifacts || [];
-
-
-                                return (
-                                  <>
-                                    <div className="mx-auto max-w-3xl">
-                                      {/* Header Row: Model Info & Copy Button */}
-                                      <div className="flex items-center justify-between gap-2 mb-2">
-                                        <ClipsCarousel
-                                          providers={LLM_PROVIDERS_CONFIG}
-                                          responsesMap={synthesisResponses}
-                                          activeProviderId={activeSynthPid}
-                                          onClipClick={(pid) => onClipClick?.("synthesis", pid)}
-                                          type="synthesis"
-                                        />
-                                        <button
-                                          type="button"
-                                          onClick={async (e) => {
-                                            e.stopPropagation();
-                                            try {
-                                              await navigator.clipboard.writeText(
-                                                String(take.text || "")
-                                              );
-                                              setToast({ id: Date.now(), message: 'Copied to clipboard', type: 'info' });
-                                            } catch (err) {
-                                              console.error("Failed to copy:", err);
-                                              setToast({ id: Date.now(), message: 'Failed to copy', type: 'error' });
-                                            }
-                                          }}
-                                          className="bg-surface-raised border border-border-subtle rounded-md
-                                                           px-2 py-1 text-text-muted text-xs cursor-pointer
-                                                           hover:bg-surface-highlight transition-all flex items-center gap-1"
-                                        >
-                                          📋 Copy
-                                        </button>
-                                      </div>
-                                      <div className="text-base leading-relaxed text-text-primary">
-                                        <MarkdownDisplay content={String(cleanText || take.text || "")} />
-                                      </div>
-                                    </div>
-
-                                    {/* Artifact badges */}
-                                    {artifacts.length > 0 && (
-                                      <div className="mt-3 flex flex-wrap gap-2 justify-center">
-                                        {artifacts.map((artifact, idx) => (
-                                          <button
-                                            key={idx}
-                                            onClick={() => setSelectedArtifact(artifact)}
-                                            className="bg-gradient-to-br from-brand-500 to-brand-600 border border-brand-400 rounded-lg px-3 py-2 text-text-primary text-sm font-medium cursor-pointer flex items-center gap-1.5 hover:-translate-y-px hover:shadow-glow-brand-soft transition-all"
-                                          >
-                                            📄 {artifact.title}
-                                          </button>
-                                        ))}
-                                      </div>
-                                    )}
-
-                                    {/* Artifact Overlay Modal */}
-                                    {selectedArtifact && (
-                                      <div className="fixed inset-0 bg-overlay-backdrop z-[9999] flex items-center justify-center p-5" onClick={() => setSelectedArtifact(null)}>
-                                        <div className="bg-surface-raised border border-border-strong rounded-2xl max-w-[900px] w-full max-h-[90vh] flex flex-col shadow-elevated" onClick={(e) => e.stopPropagation()}>
-                                          {/* Header */}
-                                          <div className="flex items-center justify-between p-4 border-b border-border-subtle">
-                                            <div>
-                                              <h3 className="m-0 text-lg text-text-primary font-semibold">
-                                                📄 {selectedArtifact.title}
-                                              </h3>
-                                              <div className="text-xs text-text-muted mt-1">
-                                                {selectedArtifact.identifier}
-                                              </div>
-                                            </div>
-                                            <button
-                                              onClick={() => setSelectedArtifact(null)}
-                                              className="bg-transparent border-none text-text-muted text-2xl cursor-pointer px-2 py-1"
-                                            >
-                                              ×
-                                            </button>
-                                          </div>
-
-                                          {/* Content */}
-                                          <div className="flex-1 overflow-y-auto p-5 bg-surface">
-                                            <MarkdownDisplay content={selectedArtifact.content} />
-                                          </div>
-
-                                          {/* Footer Actions */}
-                                          <div className="flex gap-3 p-4 border-t border-border-subtle justify-end">
-                                            <button
-                                              onClick={async () => {
-                                                try {
-                                                  await navigator.clipboard.writeText(selectedArtifact.content);
-                                                  setToast({ id: Date.now(), message: 'Copied artifact', type: 'info' });
-                                                } catch (err) {
-                                                  console.error("Failed to copy artifact:", err);
-                                                  setToast({ id: Date.now(), message: 'Failed to copy', type: 'error' });
-                                                }
-                                              }}
-                                              className="bg-surface-raised border border-border-subtle rounded-md px-4 py-2 text-text-secondary text-sm cursor-pointer flex items-center gap-1.5 hover:bg-surface-highlight transition-all"
-                                            >
-                                              📋 Copy
-                                            </button>
-                                            <button
-                                              onClick={() => {
-                                                const blob = new Blob([selectedArtifact.content], { type: "text/plain;charset=utf-8" });
-                                                const url = URL.createObjectURL(blob);
-                                                const a = document.createElement("a");
-                                                a.href = url;
-                                                a.download = `${selectedArtifact.identifier}.md`;
-                                                document.body.appendChild(a);
-                                                a.click();
-                                                setTimeout(() => {
-                                                  URL.revokeObjectURL(url);
-                                                  try { document.body.removeChild(a); } catch { }
-                                                }, 0);
-                                              }}
-                                              className="bg-brand-500 border border-brand-400 rounded-md px-4 py-2 text-text-primary text-sm cursor-pointer flex items-center gap-1.5 hover:bg-brand-600 transition-all"
-                                            >
-                                              ⬇️ Download
-                                            </button>
-                                          </div>
-                                        </div>
-                                      </div>
-                                    )}
-                                  </>
-                                );
-                              })()}
-                            </div>
-                          );
-                        }
+                {/* Synthesis Bubble */}
+                <div className="synthesis-bubble bg-surface rounded-3xl p-6 border border-border-subtle shadow-sm">
+                  {(() => {
+                    if (!wasSynthRequested)
+                      return (
+                        <div className="text-text-muted/70 italic text-center">
+                          Synthesis not enabled for this turn.
+                        </div>
+                      );
+                    const latest = activeSynthPid
+                      ? getLatestResponse(
+                        synthesisResponses[activeSynthPid]
+                      )
+                      : undefined;
+                    const isGenerating =
+                      (latest &&
+                        (latest.status === "streaming" ||
+                          latest.status === "pending")) ||
+                      isSynthesisTarget;
+                    if (isGenerating)
+                      return (
+                        <div className="flex items-center justify-center gap-2 text-text-muted">
+                          <span className="italic">
+                            Synthesis generating
+                          </span>
+                          <span className="streaming-dots" />
+                        </div>
+                      );
+                    if (activeSynthPid) {
+                      const take = getLatestResponse(
+                        synthesisResponses[activeSynthPid]
+                      );
+                      if (take && take.status === "error") {
                         return (
-                          <div className="flex items-center justify-center h-full text-text-muted italic">
-                            Choose a model.
+                          <div className="bg-intent-danger/15 border border-intent-danger text-intent-danger rounded-lg p-3">
+                            <div className="text-xs mb-2">
+                              {activeSynthPid} · error
+                            </div>
+                            <div className="prose prose-sm max-w-none dark:prose-invert leading-7 text-sm">
+                              <MarkdownDisplay
+                                content={String(
+                                  take.text || "Synthesis failed"
+                                )}
+                              />
+                            </div>
                           </div>
                         );
-                      })()}
-                    </div>
-                    {synthTruncated && !synthExpanded && (
-                      <>
-                        <div
-                          className="absolute bottom-0 left-0 right-0 h-16
-                                     bg-gradient-to-t from-surface to-transparent
-                                     pointer-events-none rounded-b-3xl"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => setSynthExpanded(true)}
-                          className="absolute bottom-3 left-1/2 -translate-x-1/2
-                                     bg-surface-raised border border-border-subtle
-                                     rounded-md px-3 py-1.5 text-text-secondary text-xs
-                                     cursor-pointer hover:bg-surface-highlight
-                                     transition-all flex items-center gap-1.5 z-10"
-                        >
-                          Show full response
-                          <ChevronDownIcon className="w-3.5 h-3.5" />
-                        </button>
-                      </>
-                    )}
-                    {synthExpanded && synthTruncated && (
-                      <button
-                        type="button"
-                        onClick={() => setSynthExpanded(false)}
-                        className="mt-3 px-3 py-1.5 bg-surface-raised border border-border-subtle
-                                   rounded-md text-text-muted text-xs cursor-pointer
-                                   flex items-center gap-1.5 hover:bg-surface-highlight
-                                   transition-all self-center"
-                      >
-                        <ChevronUpIcon className="w-3.5 h-3.5" /> Collapse
-                      </button>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              {/* Mapping Section */}
-              <div
-                ref={mapRef}
-                className={`${primaryView === "decision-map" ? "flex" : "hidden"} flex-1 min-w-0 flex-col min-h-[150px] relative
-                           rounded-3xl p-4 gap-3`}
-                style={mapExpanded ? {} : {}}
-              >
-
-
-                {isMappingExpanded && (
-                  <div
-                    className="flex-1 flex flex-col min-h-0"
-                    style={{ overflow: mapTruncated && !mapExpanded ? "hidden" : "visible" }}
-                  >
-
-
-                    <div
-                      className="clip-content rounded-2xl p-3 flex-1 min-w-0 break-words"
-                      style={{
-                        overflowY: isLive || isLoading ? "auto" : "visible",
-                        maxHeight: isLive || isLoading ? "40vh" : "none",
-                        minHeight: 0,
-                      }}
-                      // Scroll Props Only
-                      onWheelCapture={(e: React.WheelEvent<HTMLDivElement>) => {
-                        const el = e.currentTarget;
-                        const dy = e.deltaY ?? 0;
-                        const canDown =
-                          el.scrollTop + el.clientHeight < el.scrollHeight;
-                        const canUp = el.scrollTop > 0;
-                        if ((dy > 0 && canDown) || (dy < 0 && canUp)) {
-                          e.stopPropagation();
-                        }
-                      }}
-                      onWheel={(e: React.WheelEvent<HTMLDivElement>) => {
-                        const el = e.currentTarget;
-                        const dy = e.deltaY ?? 0;
-                        const canDown =
-                          el.scrollTop + el.clientHeight < el.scrollHeight;
-                        const canUp = el.scrollTop > 0;
-                        if ((dy > 0 && canDown) || (dy < 0 && canUp)) {
-                          e.stopPropagation();
-                        }
-                      }}
-                      onTouchStartCapture={(
-                        e: React.TouchEvent<HTMLDivElement>
-                      ) => {
-                        e.stopPropagation();
-                      }}
-                      onTouchMove={(e: React.TouchEvent<HTMLDivElement>) => {
-                        const el = e.currentTarget;
-                        const canDown =
-                          el.scrollTop + el.clientHeight < el.scrollHeight;
-                        const canUp = el.scrollTop > 0;
-                        if (canDown || canUp) {
-                          e.stopPropagation();
-                        }
-                      }}
-                    >
-                      {(() => {
-                        const options = getOptions();
-                        const optionsInner = (() => {
-                          if (!options)
-                            return (
-                              <div className="text-text-muted">
-                                {!activeMappingPid
-                                  ? "Select a mapping provider."
-                                  : "No options found."}
-                              </div>
-                            );
-                          return (
-                            <div className="mx-auto max-w-3xl">
-                              <div className="flex items-center justify-between gap-2 mb-2">
-                                <div className="text-xs text-text-muted">
-                                  All Available Options • via {activeMappingPid}
-                                </div>
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    navigator.clipboard.writeText(options);
-                                  }}
-                                  className="bg-surface-raised border border-border-subtle rounded-md
-                                               px-2 py-1 text-text-muted text-xs cursor-pointer
-                                               hover:bg-surface-highlight transition-all flex items-center gap-1"
-                                >
-                                  📋 Copy
-                                </button>
-                              </div>
-                              <div
-                                className="text-base leading-relaxed text-text-primary"
-                              >
-                                <MarkdownDisplay
-                                  content={transformCitations(options)}
-                                  components={markdownComponents}
-                                />
-                              </div>
-                            </div>
-                          );
-                        })();
-
-                        const mapInner = (() => {
-                          if (!wasMapRequested)
-                            return (
-                              <div className="text-text-muted italic text-center">
-                                Mapping not enabled.
-                              </div>
-                            );
-                          const latest = displayedMappingTake;
-                          const isGenerating =
-                            (latest &&
-                              (latest.status === "streaming" ||
-                                latest.status === "pending")) ||
-                            isMappingTarget;
-                          if (isGenerating)
-                            return (
-                              <div className="flex items-center justify-center gap-2 text-text-muted">
-                                <span className="italic">
-                                  Conflict map generating
-                                </span>
-                                <span className="streaming-dots" />
-                              </div>
-                            );
-                          if (activeMappingPid) {
-                            const take = displayedMappingTake;
-                            if (take && take.status === "error") {
-                              return (
-                                <div className="bg-intent-danger/15 border border-intent-danger text-intent-danger rounded-lg p-3">
-                                  <div className="text-xs mb-2">
-                                    {activeMappingPid} · error
-                                  </div>
-                                  <div className="text-sm leading-relaxed text-text-primary">
-                                    <MarkdownDisplay
-                                      content={String(
-                                        take.text || "Mapping failed"
-                                      )}
-                                    />
-                                  </div>
-                                </div>
-                              );
-                            }
-                            if (!take)
-                              return (
-                                <div className="text-text-muted">
-                                  No mapping yet.
-                                </div>
-                              );
-                            return (
-                              <div>
-                                {(() => {
-                                  // ✅ Artifacts already extracted by backend
-                                  const cleanText = take.text || '';
-                                  const artifacts = take.artifacts || [];
-
-                                  return (
-                                    <>
-                                      <div className="mx-auto max-w-3xl">
-                                        <div className="flex items-center justify-between gap-2 mb-2">
-                                          <ClipsCarousel
-                                            providers={LLM_PROVIDERS_CONFIG}
-                                            responsesMap={mappingResponses}
-                                            activeProviderId={activeMappingPid}
-                                            onClipClick={(pid) => onClipClick?.("mapping", pid)}
-                                            type="mapping"
-                                          />
-                                          <button
-                                            type="button"
-                                            onClick={async (e) => {
-                                              e.stopPropagation();
-                                              await navigator.clipboard.writeText(
-                                                displayedMappingText
-                                              );
-                                            }}
-                                            className="bg-surface-raised border border-border-subtle rounded-md
-                                                         px-2 py-1 text-text-muted text-xs cursor-pointer
-                                                         hover:bg-surface-highlight transition-all flex items-center gap-1"
-                                          >
-                                            📋 Copy
-                                          </button>
-                                        </div>
-                                        <div
-                                          className="text-base leading-relaxed text-text-primary"
-                                        >
-                                          <MarkdownDisplay
-                                            content={transformCitations(displayedMappingText)}
-                                            components={markdownComponents}
-                                          />
-                                        </div>
-                                      </div>
-
-                                      {/* Artifact badges */}
-                                      {artifacts.length > 0 && (
-                                        <div className="mt-3 flex flex-wrap gap-2">
-                                          {artifacts.map((artifact: any, idx: number) => (
-                                            <button
-                                              key={idx}
-                                              onClick={() => setSelectedArtifact(artifact)}
-                                              className="bg-gradient-to-br from-brand-500 to-brand-600 border border-brand-400 rounded-lg px-3 py-2 text-text-primary text-sm font-medium cursor-pointer flex items-center gap-1.5 hover:-translate-y-px hover:shadow-glow-brand-soft transition-all"
-                                            >
-                                              📄 {artifact.title}
-                                            </button>
-                                          ))}
-                                        </div>
-                                      )}
-                                    </>
-                                  );
-                                })()}
-                              </div>
-                            );
-                          }
-                          return (
-                            <div className="flex items-center justify-center h-full text-text-muted italic">
-                              Choose a model.
-                            </div>
-                          );
-                        })();
-
+                      }
+                      if (!take)
                         return (
-                          <>
-                            {primaryView === "decision-map" && (
-                              <div className="h-6 mb-1 flex items-center justify-center">
-                                <div className="flex items-center gap-1">
-                                  <button
-                                    onClick={() => onSetMappingTab && onSetMappingTab("map")}
-                                    className={`px-2 py-0.5 text-xs font-medium rounded-md transition-all ${mappingTab === "map" ? "bg-chip-active text-text-primary shadow-card-sm" : "text-text-muted hover:text-text-secondary"}`}
-                                  >
-                                    Narrative
-                                  </button>
-                                  <button
-                                    onClick={() => onSetMappingTab && onSetMappingTab("graph")}
-                                    className={`px-2 py-0.5 text-xs font-medium rounded-md transition-all ${mappingTab === "graph" ? "bg-chip-active text-text-primary shadow-card-sm" : "text-text-muted hover:text-text-secondary"}`}
-                                  >
-                                    Graph
-                                  </button>
-                                  <button
-                                    onClick={() => onSetMappingTab && onSetMappingTab("options")}
-                                    className={`px-2 py-0.5 text-xs font-medium rounded-md transition-all ${mappingTab === "options" ? "bg-chip-active text-text-primary shadow-card-sm" : "text-text-muted hover:text-text-secondary"}`}
-                                  >
-                                    All Options
-                                  </button>
-                                </div>
-                              </div>
-                            )}
-                            <div style={{ display: mappingTab === "options" ? "block" : "none" }}>
-                              {optionsInner}
-                            </div>
-                            <div style={{ display: mappingTab === "map" ? "block" : "none" }}>
-                              {mapInner}
-                            </div>
-                            <div style={{ display: mappingTab === "graph" ? "block" : "none" }}>
-                              {/* Experimental Decision Graph - only show if we have topology data */}
-                              {graphTopology && graphTopology.nodes && graphTopology.nodes.length > 0 ? (
-                                <div className="mt-4 flex justify-center">
-                                  <DecisionMapGraph
-                                    {...adaptGraphTopology(graphTopology)}
-                                    width={Math.min(800, typeof window !== 'undefined' ? window.innerWidth - 100 : 800)}
-                                    height={450}
+                          <div className="text-text-muted">
+                            No synthesis yet.
+                          </div>
+                        );
+                      return (
+                        <div>
+                          {(() => {
+                            const cleanText = take.text || '';
+                            const artifacts = take.artifacts || [];
+
+                            return (
+                              <>
+                                <div className="text-base leading-relaxed text-text-primary">
+                                  <MarkdownDisplay
+                                    content={String(cleanText || take.text || "")}
+                                    components={markdownComponents}
                                   />
                                 </div>
-                              ) : (
-                                <div className="flex items-center justify-center h-40 text-text-muted italic">
-                                  No graph topology available.
-                                </div>
-                              )}
-                            </div>
-                          </>
-                        );
-                      })()}
-                    </div>
 
-                    {mapTruncated && !mapExpanded && (
-                      <>
-                        <div
-                          className="absolute bottom-0 left-0 right-0 h-16
-                                     bg-gradient-to-t from-surface to-transparent
-                                     pointer-events-none rounded-b-3xl"
-                        />
+                                {/* Artifact badges */}
+                                {artifacts.length > 0 && (
+                                  <div className="mt-3 flex flex-wrap gap-2 justify-center">
+                                    {artifacts.map((artifact, idx) => (
+                                      <button
+                                        key={idx}
+                                        onClick={() => setSelectedArtifact(artifact)}
+                                        className="bg-gradient-to-br from-brand-500 to-brand-600 border border-brand-400 rounded-lg px-3 py-2 text-text-primary text-sm font-medium cursor-pointer flex items-center gap-1.5 hover:-translate-y-px hover:shadow-glow-brand-soft transition-all"
+                                      >
+                                        📄 {artifact.title}
+                                      </button>
+                                    ))}
+                                  </div>
+                                )}
+                              </>
+                            );
+                          })()}
+                        </div>
+                      );
+                    }
+                    return (
+                      <div className="flex items-center justify-center h-full text-text-muted italic">
+                        Choose a model.
+                      </div>
+                    );
+                  })()}
+                </div>
+
+                {/* BOTTOM TRAY: Council Orbs + Decision Map */}
+                <div className="relative mt-4">
+                  {/* Decision Map Drawer (Slides Up) */}
+                  <div
+                    className={clsx(
+                      "decision-map-drawer overflow-hidden transition-all duration-300 ease-out border-border-subtle bg-surface-raised rounded-2xl mb-2",
+                      isDecisionMapOpen ? "max-h-[800px] border opacity-100 shadow-lg" : "max-h-0 border-0 opacity-0"
+                    )}
+                  >
+                    <div className="p-4">
+                      <div className="flex items-center justify-between mb-4">
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => onSetMappingTab && onSetMappingTab("map")}
+                            className={`px-3 py-1 text-xs font-medium rounded-full transition-all ${mappingTab === "map" ? "bg-chip-active text-text-primary shadow-sm" : "text-text-muted hover:text-text-secondary"}`}
+                          >
+                            Narrative
+                          </button>
+                          <button
+                            onClick={() => onSetMappingTab && onSetMappingTab("graph")}
+                            className={`px-3 py-1 text-xs font-medium rounded-full transition-all ${mappingTab === "graph" ? "bg-chip-active text-text-primary shadow-sm" : "text-text-muted hover:text-text-secondary"}`}
+                          >
+                            Graph
+                          </button>
+                          <button
+                            onClick={() => onSetMappingTab && onSetMappingTab("options")}
+                            className={`px-3 py-1 text-xs font-medium rounded-full transition-all ${mappingTab === "options" ? "bg-chip-active text-text-primary shadow-sm" : "text-text-muted hover:text-text-secondary"}`}
+                          >
+                            All Options
+                          </button>
+                        </div>
                         <button
-                          type="button"
-                          onClick={() => setMapExpanded(true)}
-                          className="absolute bottom-3 left-1/2 -translate-x-1/2
-                                     bg-surface-raised border border-border-subtle
-                                     rounded-md px-3 py-1.5 text-text-secondary text-xs
-                                     cursor-pointer hover:bg-surface-highlight
-                                     transition-all flex items-center gap-1.5 z-10"
+                          onClick={() => setIsDecisionMapOpen(false)}
+                          className="text-text-muted hover:text-text-primary p-1"
                         >
-                          Show full response
-                          <ChevronDownIcon className="w-3.5 h-3.5" />
+                          ✕ Close Map
                         </button>
-                      </>
-                    )}
-                    {mapExpanded && mapTruncated && (
-                      <button
-                        type="button"
-                        onClick={() => setMapExpanded(false)}
-                        className="mt-3 px-3 py-1.5 bg-surface-raised border border-border-subtle
-                                   rounded-md text-text-muted text-xs cursor-pointer
-                                   flex items-center gap-1.5 hover:bg-surface-highlight
-                                   transition-all self-center"
-                      >
-                        <ChevronUpIcon className="w-3.5 h-3.5" /> Collapse
-                      </button>
-                    )}
+                      </div>
+
+                      {/* Map Content */}
+                      <div className="min-h-[300px]">
+                        {mappingTab === "map" && (
+                          <div className="prose prose-sm max-w-none dark:prose-invert">
+                            <MarkdownDisplay
+                              content={transformCitations(displayedMappingText)}
+                              components={markdownComponents}
+                            />
+                          </div>
+                        )}
+                        {mappingTab === "graph" && (
+                          <div className="flex justify-center">
+                            {graphTopology && graphTopology.nodes && graphTopology.nodes.length > 0 ? (
+                              <DecisionMapGraph
+                                {...adaptGraphTopology(graphTopology)}
+                                width={800}
+                                height={450}
+                              />
+                            ) : (
+                              <div className="text-text-muted italic py-10">No graph topology available.</div>
+                            )}
+                          </div>
+                        )}
+                        {mappingTab === "options" && (
+                          <div className="prose prose-sm max-w-none dark:prose-invert">
+                            <MarkdownDisplay
+                              content={transformCitations(getOptions() || "No options found.")}
+                              components={markdownComponents}
+                            />
+                          </div>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                )}
+
+                  {/* Council Orbs (The Handle) */}
+                  <CouncilOrbs
+                    turnId={aiTurn.id}
+                    providers={LLM_PROVIDERS_CONFIG}
+                    voiceProviderId={activeSynthPid || ""}
+                    onOrbClick={(pid) => setActiveOrbPanel({ turnId: aiTurn.id, providerId: pid })}
+                    onCrownMove={handleCrownMove}
+                    onTrayExpand={() => setIsDecisionMapOpen(true)}
+                    isTrayExpanded={isDecisionMapOpen}
+                  />
+                </div>
               </div>
+
+              {/* RIGHT: Slide-in Panel */}
+              {activeOrbPanel && (
+                <div className="flex-1 min-w-[300px] max-w-[400px]">
+                  <ModelResponsePanel
+                    turnId={activeOrbPanel.turnId}
+                    providerId={activeOrbPanel.providerId}
+                    onClose={() => setActiveOrbPanel(null)}
+                  />
+                </div>
+              )}
             </div>
           </div>
 
-          {/* Sources Section - Always Visible */}
-          {hasSources && (
+          {/* Hidden Grid (Dev Only) */}
+          {showSourceOutputs && (
             <div className="batch-filler mt-3">
               <div className="sources-wrapper">
                 <div className="sources-content">
@@ -1170,6 +745,49 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
           )}
         </div>
       </div>
+
+      {/* Artifact Overlay Modal */}
+      {selectedArtifact && (
+        <div className="fixed inset-0 bg-overlay-backdrop z-[9999] flex items-center justify-center p-5" onClick={() => setSelectedArtifact(null)}>
+          <div className="bg-surface-raised border border-border-strong rounded-2xl max-w-[900px] w-full max-h-[90vh] flex flex-col shadow-elevated" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between p-4 border-b border-border-subtle">
+              <div>
+                <h3 className="m-0 text-lg text-text-primary font-semibold">
+                  📄 {selectedArtifact.title}
+                </h3>
+                <div className="text-xs text-text-muted mt-1">
+                  {selectedArtifact.identifier}
+                </div>
+              </div>
+              <button
+                onClick={() => setSelectedArtifact(null)}
+                className="bg-transparent border-none text-text-muted text-2xl cursor-pointer px-2 py-1"
+              >
+                ×
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-5 bg-surface">
+              <MarkdownDisplay content={selectedArtifact.content} />
+            </div>
+            <div className="flex gap-3 p-4 border-t border-border-subtle justify-end">
+              <button
+                onClick={async () => {
+                  try {
+                    await navigator.clipboard.writeText(selectedArtifact.content);
+                    setToast({ id: Date.now(), message: 'Copied artifact', type: 'info' });
+                  } catch (err) {
+                    console.error("Failed to copy artifact:", err);
+                    setToast({ id: Date.now(), message: 'Failed to copy', type: 'error' });
+                  }
+                }}
+                className="bg-surface-raised border border-border-subtle rounded-md px-4 py-2 text-text-secondary text-sm cursor-pointer flex items-center gap-1.5 hover:bg-surface-highlight transition-all"
+              >
+                📋 Copy
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
