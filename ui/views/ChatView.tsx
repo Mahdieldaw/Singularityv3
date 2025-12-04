@@ -21,7 +21,7 @@ import { useChat } from "../hooks/useChat";
 import { SplitPaneRightPanel } from "../components/SplitPaneRightPanel";
 import { DecisionMapSheet } from "../components/DecisionMapSheet";
 import { CouncilOrbsVertical } from "../components/CouncilOrbsVertical";
-import { useSmartVoiceSelection } from "../hooks/useSmartVoiceSelection";
+import { useSmartProviderDefaults } from "../hooks/useSmartProviderDefaults";
 
 export default function ChatView() {
   const [turnIds] = useAtom(turnIdsAtom as any) as [string[], any];
@@ -39,7 +39,7 @@ export default function ChatView() {
   const setDecisionMapOpen = useSetAtom(isDecisionMapOpenAtom);
 
   // Smart Defaults
-  useSmartVoiceSelection();
+  useSmartProviderDefaults();
 
   const scrollerRef = useScrollPersistence();
   const virtuosoRef = useRef<VirtuosoHandle | null>(null);

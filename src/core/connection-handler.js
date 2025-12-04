@@ -1,6 +1,8 @@
 // src/core/connection-handler.js
 
 import { WorkflowEngine } from "./workflow-engine.js";
+import { runPreflight, createAuthErrorMessage } from './preflight-validator.js';
+import { authManager } from './auth-manager.js';
 // Note: ContextResolver is now available via services; we don't import it directly here
 
 /**
@@ -25,7 +27,6 @@ export class ConnectionHandler {
     this.messageHandler = null;
     this.isInitialized = false;
     this.lifecycleManager = services.lifecycleManager;
-    this._authCache = { ts: 0, data: {} };
   }
 
   /**
@@ -382,116 +383,52 @@ export class ConnectionHandler {
    * - Applies ephemeral fallback when a locked provider is unavailable.
    */
   async _applyPreflightSmartDefaults(executeRequest) {
-    const now = Date.now();
-    let auth = this._authCache.data;
-    if (!this._authCache.ts || now - this._authCache.ts > 60000) {
-      try {
-        auth = await this._refreshAuthStatus();
-        this._authCache = { ts: now, data: auth || {} };
-      } catch (e) {
-        console.warn("[Preflight] Failed to refresh auth, using stale cache:", e);
-      }
+    // Use centralized AuthManager
+    const authStatus = await authManager.getAuthStatus();
+    const availableProviders = self.providerRegistry?.listProviders?.() || [];
+
+    // Run preflight (handles filtering + fallbacks)
+    const result = await runPreflight(
+      {
+        providers: executeRequest.providers,
+        synthesizer: executeRequest.synthesizer,
+        mapper: executeRequest.mapper,
+      },
+      authStatus,
+      availableProviders
+    );
+
+    // Apply results
+    executeRequest.providers = result.providers;
+    executeRequest.synthesizer = result.synthesizer;
+    executeRequest.mapper = result.mapper;
+
+    // Emit warnings (not errors!)
+    if (result.warnings.length > 0) {
+      this.port.postMessage({
+        type: 'PREFLIGHT_WARNINGS',
+        sessionId: executeRequest.sessionId,
+        warnings: result.warnings,
+      });
     }
 
-    const isAuth = (pid) => {
-      const key = String(pid).toLowerCase();
-      return auth && auth[key] !== false;
-    };
+    // ONLY fail if zero providers available
+    const hasAnyProvider =
+      result.providers.length > 0 ||
+      result.synthesizer !== null ||
+      result.mapper !== null;
 
-    // Normalize providers list
-    const allKnown = (self.providerRegistry?.listProviders?.() || []).map(String);
-    const incomingProviders = Array.isArray(executeRequest.providers)
-      ? executeRequest.providers.map(String)
-      : [];
+    if (!hasAnyProvider) {
+      const attempted = [
+        ...(executeRequest.providers || []),
+        executeRequest.synthesizer,
+        executeRequest.mapper
+      ].filter(Boolean);
 
-    // If no providers specified on initialize, pick smart defaults set (authorized only)
-    if (executeRequest.type === "initialize" && incomingProviders.length === 0) {
-      const base = ["claude", "gemini-exp", "qwen", "gemini-pro", "chatgpt", "gemini"];
-      const smartBatch = base.filter((pid) => allKnown.includes(pid) && isAuth(pid)).slice(0, 3);
-      executeRequest.providers = smartBatch.length > 0 ? smartBatch : allKnown.slice(0, 3);
-    } else {
-      // Otherwise, filter out unauth providers quietly
-      executeRequest.providers = incomingProviders.filter((pid) => !auth || isAuth(pid));
-    }
-
-    // Read locks from chrome.storage.local (UI writes these)
-    let locks = {};
-    try {
-      const data = await chrome.storage.local.get(["provider_lock_settings"]);
-      locks = data.provider_lock_settings || {};
-    } catch (_) { }
-
-    const synthLocked = !!locks.voice_locked || !!locks.synth_locked;
-    const mapperLocked = !!locks.mapper_locked;
-
-    // Smart default selection for synthesizer
-    const PRIORITY_SYNTH = ["claude", "gemini-exp", "qwen", "gemini-pro", "chatgpt", "gemini"];
-    const PRIORITY_MAP = ["chatgpt", "gemini-pro", "claude", "qwen", "gemini-exp", "gemini"];
-
-    const chooseBest = (order) => {
-      for (const pid of order) {
-        if (allKnown.includes(pid) && isAuth(pid)) return pid;
-      }
-      // Fallback to first available
-      return allKnown.find(isAuth) || allKnown[0] || null;
-    };
-
-    // Effective synthesizer
-    let effectiveSynth = executeRequest.synthesizer || null;
-    if (!effectiveSynth) {
-      effectiveSynth = chooseBest(PRIORITY_SYNTH);
-    }
-    // If locked and unauth → ephemeral fallback, do not change lock state
-    if (effectiveSynth && !isAuth(effectiveSynth)) {
-      if (!synthLocked) {
-        effectiveSynth = chooseBest(PRIORITY_SYNTH);
-      } else {
-        const fallback = chooseBest(PRIORITY_SYNTH);
-        if (fallback && fallback !== effectiveSynth) {
-          console.log(`[Preflight] Synth locked but unauth; ephemeral fallback to ${fallback}`);
-          effectiveSynth = fallback;
-        }
-      }
-    }
-    executeRequest.synthesizer = effectiveSynth;
-
-    // Effective mapper
-    let effectiveMapper = executeRequest.mapper || null;
-    if (!effectiveMapper) {
-      effectiveMapper = chooseBest(PRIORITY_MAP);
-    }
-    if (effectiveMapper && !isAuth(effectiveMapper)) {
-      if (!mapperLocked) {
-        effectiveMapper = chooseBest(PRIORITY_MAP);
-      } else {
-        const fallback = chooseBest(PRIORITY_MAP);
-        if (fallback && fallback !== effectiveMapper) {
-          console.log(`[Preflight] Mapper locked but unauth; ephemeral fallback to ${fallback}`);
-          effectiveMapper = fallback;
-        }
-      }
-    }
-    executeRequest.mapper = effectiveMapper;
-
-    // Dim degraded providers in storage for UI consumption (optional sync)
-    try {
-      const current = (await chrome.storage.local.get(["provider_auth_status"]))?.provider_auth_status || {};
-      const merged = { ...current, ...auth };
-      await chrome.storage.local.set({ provider_auth_status: merged });
-    } catch (_) { }
-  }
-
-  async _refreshAuthStatus() {
-    try {
-      // Directly reuse sw-entry auth checker to avoid round-trip; fallback to stored state
-      if (typeof checkProviderLoginStatus === "function") {
-        return await checkProviderLoginStatus();
-      }
-      const { provider_auth_status = {} } = await chrome.storage.local.get("provider_auth_status");
-      return provider_auth_status;
-    } catch (e) {
-      console.warn("[Preflight] Auth refresh error:", e);
-      return {};
+      throw new Error(
+        `No authorized providers available. Attempted: ${attempted.join(', ')}. ` +
+        'Please log in to at least one AI service.'
+      );
     }
   }
 

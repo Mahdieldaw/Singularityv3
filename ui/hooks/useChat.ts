@@ -12,7 +12,6 @@ import {
   mappingEnabledAtom,
   mappingProviderAtom,
   synthesisProviderAtom,
-  synthesisProvidersAtom,
   powerUserModeAtom,
   thinkOnChatGPTAtom,
   activeAiTurnIdAtom,
@@ -51,7 +50,6 @@ export function useChat() {
   const mappingEnabled = useAtomValue(mappingEnabledAtom);
   const mappingProvider = useAtomValue(mappingProviderAtom);
   const synthesisProvider = useAtomValue(synthesisProviderAtom);
-  const synthesisProviders = useAtomValue(synthesisProvidersAtom);
   const powerUserMode = useAtomValue(powerUserModeAtom);
   const thinkOnChatGPT = useAtomValue(thinkOnChatGPTAtom);
   const currentSessionId = useAtomValue(currentSessionIdAtom);
@@ -217,7 +215,7 @@ export function useChat() {
       mappingEnabled,
       mappingProvider,
       thinkOnChatGPT,
-      synthesisProviders,
+      thinkOnChatGPT,
       powerUserMode,
       turnIds.length,
     ],

@@ -13,12 +13,14 @@ const SettingsPanel = React.lazy(() => import("./components/SettingsPanel"));
 import { Toast } from "./components/Toast";
 import { isHistoryPanelOpenAtom } from "./state/atoms";
 import { useInitialization } from "./hooks/useInitialization"; // Import the new hook
+import { useSmartProviderDefaults } from "./hooks/useSmartProviderDefaults";
 import { useOnClickOutside } from "usehooks-ts";
 import { useKey } from "./hooks/useKey";
 
 export default function App() {
   // This is now the entry point for all startup logic.
   const isInitialized = useInitialization();
+  useSmartProviderDefaults();
 
   // Initialize other global side effects that can run after init
   usePortMessageHandler();

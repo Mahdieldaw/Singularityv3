@@ -254,11 +254,19 @@ export const synthesisProviderAtom = atomWithStorage<string | null>(
   null,
 );
 
+/**
+ * Provider locks - stored in chrome.storage.local for backend access
+ * UI writes, backend reads. Not atomWithStorage because we need chrome.storage.local
+ */
+export const providerLocksAtom = atom<{ synthesis: boolean; mapping: boolean }>({
+  synthesis: false,
+  mapping: false,
+});
 
-export const synthesisProvidersAtom = atomWithStorage<string[]>(
-  "htos_synthesis_providers",
-  [],
-);
+
+
+
+
 export const powerUserModeAtom = atomWithStorage<boolean>(
   "htos_power_user_mode",
   false,

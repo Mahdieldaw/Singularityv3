@@ -5,6 +5,60 @@
 
 import { persistenceMonitor } from "../debug/PersistenceMonitor.js";
 
+// ============================================================
+// NEW: Provider authentication configuration
+// ============================================================
+
+export const PROVIDER_CONFIG = {
+  claude: {
+    displayName: 'Claude',
+    loginUrl: 'https://claude.ai',
+  },
+  chatgpt: {
+    displayName: 'ChatGPT',
+    loginUrl: 'https://chatgpt.com',
+  },
+  gemini: {
+    displayName: 'Gemini',
+    loginUrl: 'https://gemini.google.com',
+  },
+  'gemini-pro': {
+    displayName: 'Gemini Pro',
+    loginUrl: 'https://gemini.google.com',
+  },
+  'gemini-exp': {
+    displayName: 'Gemini 2.0',
+    loginUrl: 'https://gemini.google.com',
+  },
+  qwen: {
+    displayName: 'Qwen',
+    loginUrl: 'https://tongyi.com/qianwen',
+  },
+};
+
+// ============================================================
+// NEW: Auth error detection patterns
+// ============================================================
+
+const AUTH_STATUS_CODES = new Set([401, 403]);
+
+const AUTH_ERROR_PATTERNS = [
+  /NOT_LOGIN/i,
+  /session.?expired/i,
+  /unauthorized/i,
+  /login.?required/i,
+  /authentication.?required/i,
+  /invalid.?session/i,
+  /please.?log.?in/i,
+];
+
+const RATE_LIMIT_PATTERNS = [
+  /rate.?limit/i,
+  /too.?many.?requests/i,
+  /quota.?exceeded/i,
+  /try.?again.?later/i,
+];
+
 export class HTOSError extends Error {
   constructor(message, code, context = {}, recoverable = true) {
     super(message);
@@ -30,6 +84,112 @@ export class HTOSError extends Error {
   }
 }
 
+// ============================================================
+// NEW: Provider-specific error class
+// ============================================================
+
+export class ProviderAuthError extends HTOSError {
+  constructor(providerId, message, context = {}) {
+    const config = PROVIDER_CONFIG[providerId] || {
+      displayName: providerId,
+      loginUrl: 'the provider website'
+    };
+
+    const userMessage = message ||
+      `${config.displayName} session expired. Please log in at ${config.loginUrl}`;
+
+    super(userMessage, 'AUTH_REQUIRED', {
+      ...context,
+      providerId,
+      loginUrl: config.loginUrl,
+      displayName: config.displayName,
+    }, false); // Auth errors are not auto-recoverable
+
+    this.name = 'ProviderAuthError';
+    this.providerId = providerId;
+    this.loginUrl = config.loginUrl;
+  }
+}
+
+// ============================================================
+// NEW: Error classification helpers
+// ============================================================
+
+/**
+ * Check if an error indicates provider authentication failure
+ */
+export function isProviderAuthError(error) {
+  // Already classified
+  if (error instanceof ProviderAuthError) return true;
+  if (error?.code === 'AUTH_REQUIRED') return true;
+
+  // Check HTTP status
+  const status = error?.status || error?.response?.status;
+  if (status && AUTH_STATUS_CODES.has(status)) return true;
+
+  // Check error message patterns
+  const message = error?.message || String(error);
+  return AUTH_ERROR_PATTERNS.some(pattern => pattern.test(message));
+}
+
+/**
+ * Check if an error indicates rate limiting (NOT an auth error)
+ */
+export function isRateLimitError(error) {
+  const status = error?.status || error?.response?.status;
+  if (status === 429) return true;
+
+  const message = error?.message || String(error);
+  return RATE_LIMIT_PATTERNS.some(pattern => pattern.test(message));
+}
+
+/**
+ * Check if an error is a network/connectivity issue
+ */
+export function isNetworkError(error) {
+  const message = error?.message || String(error);
+  return /failed.?to.?fetch|network|timeout|ECONNREFUSED|ENOTFOUND/i.test(message);
+}
+
+/**
+ * Create a ProviderAuthError from a generic error
+ */
+export function createProviderAuthError(providerId, originalError, context = {}) {
+  const config = PROVIDER_CONFIG[providerId] || {};
+
+  return new ProviderAuthError(providerId, null, {
+    ...context,
+    originalError,
+    originalMessage: originalError?.message,
+    originalStatus: originalError?.status,
+  });
+}
+
+/**
+ * Create consolidated error for multiple provider auth failures
+ */
+export function createMultiProviderAuthError(providerIds, context = '') {
+  if (!providerIds?.length) return null;
+
+  if (providerIds.length === 1) {
+    return new ProviderAuthError(providerIds[0]);
+  }
+
+  const lines = providerIds.map(pid => {
+    const config = PROVIDER_CONFIG[pid] || { displayName: pid, loginUrl: '' };
+    return `• ${config.displayName}: ${config.loginUrl}`;
+  });
+
+  const message = context
+    ? `${context}\n\nPlease log in to:\n${lines.join('\n')}`
+    : `Multiple providers need authentication:\n${lines.join('\n')}`;
+
+  return new HTOSError(message, 'MULTI_AUTH_REQUIRED', {
+    providerIds,
+    loginUrls: providerIds.map(pid => PROVIDER_CONFIG[pid]?.loginUrl),
+  }, false);
+}
+
 export class ErrorHandler {
   constructor() {
     this.fallbackStrategies = new Map();
@@ -39,12 +199,65 @@ export class ErrorHandler {
 
     this.setupDefaultStrategies();
     this.setupDefaultRetryPolicies();
+    this.setupProviderStrategies(); // NEW
+  }
+
+  /**
+   * NEW: Setup provider-specific strategies
+   */
+  setupProviderStrategies() {
+    // Provider auth retry policy (conservative - auth issues rarely resolve quickly)
+    this.retryPolicies.set("PROVIDER_AUTH", {
+      maxRetries: 1,        // Only 1 retry after auth verification
+      baseDelay: 500,
+      maxDelay: 2000,
+      backoffMultiplier: 2,
+      jitter: false,
+    });
+
+    // Provider rate limit policy (wait longer)
+    this.retryPolicies.set("PROVIDER_RATE_LIMIT", {
+      maxRetries: 2,
+      baseDelay: 5000,      // Start with 5 seconds
+      maxDelay: 30000,      // Max 30 seconds
+      backoffMultiplier: 2,
+      jitter: true,
+    });
   }
 
   /**
    * Setup default fallback strategies
    */
   setupDefaultStrategies() {
+    // NEW: Provider auth fallback - use alternative provider
+    this.fallbackStrategies.set(
+      "PROVIDER_AUTH_FAILED",
+      async (operation, context) => {
+        const { failedProvider, availableProviders, authManager } = context;
+
+        console.warn(`🔄 Provider ${failedProvider} auth failed, checking alternatives`);
+
+        if (!availableProviders?.length || !authManager) {
+          throw new ProviderAuthError(failedProvider);
+        }
+
+        // Get current auth status
+        const authStatus = await authManager.getAuthStatus();
+
+        // Find first available authorized provider
+        const fallbackProvider = availableProviders.find(
+          pid => pid !== failedProvider && authStatus[pid] === true
+        );
+
+        if (fallbackProvider) {
+          console.log(`🔄 Falling back to ${fallbackProvider}`);
+          return { fallbackProvider, authStatus };
+        }
+
+        throw new ProviderAuthError(failedProvider);
+      }
+    );
+
     // IndexedDB fallback to localStorage
     this.fallbackStrategies.set(
       "INDEXEDDB_UNAVAILABLE",
@@ -196,6 +409,7 @@ export class ErrorHandler {
    * Normalize any error to HTOSError
    */
   normalizeError(error, context = {}) {
+    // Already an HTOS error
     if (error instanceof HTOSError) {
       return error;
     }
@@ -203,8 +417,19 @@ export class ErrorHandler {
     let code = "UNKNOWN_ERROR";
     let recoverable = true;
 
+    // NEW: Check for provider auth errors first
+    if (isProviderAuthError(error)) {
+      code = "AUTH_REQUIRED";
+      recoverable = false;
+    } else if (isRateLimitError(error)) {
+      code = "RATE_LIMITED";
+      recoverable = true;
+    } else if (isNetworkError(error)) {
+      code = "NETWORK_ERROR";
+      recoverable = true;
+    }
     // Categorize common errors
-    if (error.name === "QuotaExceededError") {
+    else if (error.name === "QuotaExceededError") {
       code = "STORAGE_QUOTA_EXCEEDED";
       recoverable = false;
     } else if (error.name === "InvalidStateError") {
@@ -262,6 +487,33 @@ export class ErrorHandler {
    */
   getRecoveryStrategy(errorCode) {
     const strategies = {
+      // NEW: Provider auth recovery
+      AUTH_REQUIRED: {
+        name: "Provider Auth Recovery",
+        execute: async (error, context) => {
+          // Auth errors are not auto-recoverable
+          // Just update auth status and re-throw
+          if (context.authManager && context.providerId) {
+            context.authManager.invalidateCache(context.providerId);
+            await context.authManager.verifyProvider(context.providerId);
+          }
+          throw error;
+        },
+      },
+
+      // NEW: Rate limit recovery
+      RATE_LIMITED: {
+        name: "Rate Limit Recovery",
+        execute: async (error, context) => {
+          console.log(`⏳ Rate limited by ${context.providerId}, waiting...`);
+          return await this.retryWithBackoff(
+            context.operation,
+            context,
+            "PROVIDER_RATE_LIMIT"
+          );
+        },
+      },
+
       INDEXEDDB_ERROR: {
         name: "IndexedDB Recovery",
         execute: async (error, context) => {
@@ -506,6 +758,88 @@ export class ErrorHandler {
       "Direct session management not implemented",
       "DIRECT_SESSION_NOT_IMPLEMENTED",
     );
+  }
+
+  /**
+   * NEW: Handle provider-specific error with auth recovery
+   */
+  async handleProviderError(error, providerId, context = {}) {
+    const htosError = this.normalizeError(error, {
+      ...context,
+      providerId
+    });
+
+    // Record for monitoring
+    persistenceMonitor.recordError(htosError, { providerId, ...context });
+    this.incrementErrorCount(`${providerId}_${htosError.code}`);
+
+    // Check provider-specific circuit breaker
+    const breakerKey = `provider_${providerId}`;
+    if (this.isCircuitBreakerOpen(breakerKey)) {
+      throw new HTOSError(
+        `${PROVIDER_CONFIG[providerId]?.displayName || providerId} is temporarily unavailable`,
+        "CIRCUIT_BREAKER_OPEN",
+        { providerId, originalError: htosError }
+      );
+    }
+
+    // For auth errors, just update status and throw
+    if (htosError.code === 'AUTH_REQUIRED') {
+      this.updateCircuitBreaker(breakerKey, false);
+      throw createProviderAuthError(providerId, error, context);
+    }
+
+    // For rate limits, update breaker but don't fully open
+    if (htosError.code === 'RATE_LIMITED') {
+      // Don't count rate limits toward circuit breaker
+      throw htosError;
+    }
+
+    // For other errors, use normal recovery flow
+    if (htosError.recoverable) {
+      try {
+        const result = await this.attemptRecovery(htosError, {
+          ...context,
+          providerId,
+        });
+        this.updateCircuitBreaker(breakerKey, true);
+        return result;
+      } catch (recoveryError) {
+        this.updateCircuitBreaker(breakerKey, false);
+        throw recoveryError;
+      }
+    }
+
+    this.updateCircuitBreaker(breakerKey, false);
+    throw htosError;
+  }
+
+  /**
+   * NEW: Get provider error statistics
+   */
+  getProviderErrorStats(providerId) {
+    const prefix = `${providerId}_`;
+    const stats = {
+      providerId,
+      errors: {},
+      circuitBreaker: null,
+    };
+
+    for (const [code, count] of this.errorCounts.entries()) {
+      if (code.startsWith(prefix)) {
+        stats.errors[code.substring(prefix.length)] = count;
+      }
+    }
+
+    const breaker = this.circuitBreakers.get(`provider_${providerId}`);
+    if (breaker) {
+      stats.circuitBreaker = {
+        state: breaker.state,
+        failures: breaker.failures,
+      };
+    }
+
+    return stats;
   }
 
   /**

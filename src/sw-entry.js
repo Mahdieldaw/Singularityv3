@@ -31,6 +31,7 @@ import { ChatGPTProviderController } from "./providers/chatgpt.js";
 import { QwenProviderController } from "./providers/qwen.js";
 import { DNRUtils } from "./core/dnr-utils.js";
 import { ConnectionHandler } from "./core/connection-handler.js";
+import { authManager } from './core/auth-manager.js';
 
 // Persistence Layer Imports
 import { SessionManager } from "./persistence/SessionManager.js";
@@ -42,81 +43,16 @@ import { PromptRefinerService } from "./services/PromptRefinerService.ts";
 // ============================================================================
 // AUTH DETECTION SYSTEM
 // ============================================================================
-const AUTH_COOKIES = [
-  { provider: "chatgpt", domain: "chatgpt.com", name: "__Secure-next-auth.session-token", url: "https://chatgpt.com" },
-  { provider: "claude", domain: "claude.ai", name: "sessionKey", url: "https://claude.ai" },
-  { provider: "gemini", domain: "google.com", name: "__Secure-1PSID", url: "https://gemini.google.com" },
-  { provider: "qwen", domain: "qianwen.com", name: "tongyi_sso_ticket", url: "https://qianwen.com" }
-];
-
-async function checkProviderLoginStatus() {
-  const status = {};
-
-  await Promise.all(AUTH_COOKIES.map(async (config) => {
-    try {
-      const cookie = await chrome.cookies.get({ url: config.url, name: config.name });
-      const isAuthenticated = !!cookie;
-      status[config.provider] = isAuthenticated;
-
-      // Gemini has multiple variants (gemini, gemini-pro, gemini-exp) - set auth for all
-      if (config.provider === "gemini") {
-        status["gemini-pro"] = isAuthenticated;
-        status["gemini-exp"] = isAuthenticated;
-      }
-
-      // Log auth status for each provider
-      console.log(`[Auth] ${config.provider}: ${isAuthenticated ? 'authenticated' : 'not authenticated'}`);
-    } catch (e) {
-      console.warn(`[Auth] Failed to check ${config.provider}`, e);
-      status[config.provider] = false;
-
-      // Also set variants to false on error
-      if (config.provider === "gemini") {
-        status["gemini-pro"] = false;
-        status["gemini-exp"] = false;
-      }
-    }
-  }));
-
-  const { provider_auth_status: current = {} } = await chrome.storage.local.get("provider_auth_status");
-  const newState = { ...current, ...status };
-
-  await chrome.storage.local.set({ provider_auth_status: newState });
-  return newState;
-}
-
-// Watchdog: Listen for cookie changes
-chrome.cookies.onChanged.addListener((changeInfo) => {
-  const { cookie, removed } = changeInfo;
-  const match = AUTH_COOKIES.find(c => cookie.domain.includes(c.domain) && cookie.name === c.name);
-
-  if (match) {
-    chrome.storage.local.get(['provider_auth_status'], (result) => {
-      const current = result.provider_auth_status || {};
-      if (current[match.provider] !== !removed) {
-        const newState = { ...current, [match.provider]: !removed };
-        chrome.storage.local.set({ provider_auth_status: newState });
-        console.log(`[Auth] Status changed for ${match.provider}: ${!removed}`);
-      }
-    });
-  }
-});
-
 // Check auth on browser startup
 chrome.runtime.onStartup.addListener(() => {
-  console.log('[Auth] Browser started - checking provider login status');
-  checkProviderLoginStatus();
+  console.log('[Auth] Browser started');
+  authManager.initialize();
 });
 
-// Check auth on extension install/update/reload
 chrome.runtime.onInstalled.addListener((details) => {
-  console.log(`[Auth] Extension ${details.reason} - checking provider login status`);
-  checkProviderLoginStatus();
+  console.log(`[Auth] Extension ${details.reason}`);
+  authManager.initialize();
 });
-
-// Check auth immediately when service worker starts
-console.log('[Auth] Service worker started - checking provider login status');
-checkProviderLoginStatus();
 
 // ... rest of existing sw-entry.js code ...
 // ============================================================================
@@ -613,6 +549,10 @@ async function initializeGlobalServices() {
   if (globalServicesReady) return globalServicesReady;
   globalServicesReady = (async () => {
     console.log("[SW] 🚀 Initializing global services...");
+
+    // Initialize AuthManager FIRST
+    await authManager.initialize();
+
     await initializeGlobalInfrastructure();
     const pl = await initializePersistence();
     persistenceLayer = pl;
@@ -631,6 +571,7 @@ async function initializeGlobalServices() {
       contextResolver,
       persistenceLayer: pl,
       promptRefinerService,
+      authManager, // Add to services object
     };
   })();
   return globalServicesReady;
@@ -652,9 +593,26 @@ async function handleUnifiedMessage(message, sender, sendResponse) {
     switch (message.type) {
       case "REFRESH_AUTH_STATUS": {
         try {
-          const status = await checkProviderLoginStatus();
+          const status = await authManager.getAuthStatus(true); // Force refresh
           sendResponse({ success: true, data: status });
         } catch (e) {
+          console.error('[SW] Auth refresh failed:', e);
+          sendResponse({ success: false, error: e.message });
+        }
+        return true;
+      }
+
+      case "VERIFY_AUTH_TOKEN": {
+        try {
+          const { providerId } = message.payload || {};
+
+          const status = providerId
+            ? { [providerId]: await authManager.verifyProvider(providerId) }
+            : await authManager.verifyAll();
+
+          sendResponse({ success: true, data: status });
+        } catch (e) {
+          console.error('[SW] Auth verification failed:', e);
           sendResponse({ success: false, error: e.message });
         }
         return true;
@@ -1443,6 +1401,13 @@ chrome.runtime.onInstalled.addListener(async (details) => {
 // ============================================================================
 // LIFECYCLE HANDLERS
 // ============================================================================
+
+// Main message listener
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  handleUnifiedMessage(message, sender, sendResponse);
+  return true; // Keep channel open for async response
+});
+
 chrome.runtime.onStartup.addListener(() => {
   console.log("[SW] Browser startup detected");
 });

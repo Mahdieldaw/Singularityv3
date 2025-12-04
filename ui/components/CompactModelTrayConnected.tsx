@@ -6,7 +6,6 @@ import {
   mappingEnabledAtom,
   mappingProviderAtom,
   synthesisProviderAtom,
-  synthesisProvidersAtom,
   powerUserModeAtom,
   thinkOnChatGPTAtom,
   chatInputHeightAtom,
@@ -26,7 +25,6 @@ const CompactModelTrayConnected = () => {
   const [mappingEnabled, setMappingEnabled] = useAtom(mappingEnabledAtom);
   const [mappingProvider, setMappingProvider] = useAtom(mappingProviderAtom);
   const [synthesisProvider, setSynthesisProvider] = useAtom(synthesisProviderAtom);
-  const [synthesisProviders, setSynthesisProviders] = useAtom(synthesisProvidersAtom);
   const [powerUserMode] = useAtom(powerUserModeAtom);
   const [thinkOnChatGPT, setThinkOnChatGPT] = useAtom(thinkOnChatGPTAtom);
   const [chatInputHeight] = useAtom(chatInputHeightAtom);
@@ -71,15 +69,7 @@ const CompactModelTrayConnected = () => {
     } catch { }
   };
 
-  const handleToggleSynthesisProvider = (providerId: string) => {
-    setSynthesisProviders((prev) => {
-      if (prev.includes(providerId)) {
-        return prev.filter((id) => id !== providerId);
-      } else {
-        return [...prev, providerId];
-      }
-    });
-  };
+
 
   const handleToggleThinkChatGPT = () => {
     setThinkOnChatGPT((prev) => !prev);
@@ -113,8 +103,6 @@ const CompactModelTrayConnected = () => {
       mappingProvider={mappingProvider}
       onSetMappingProvider={handleSetMappingProvider}
       powerUserMode={powerUserMode}
-      synthesisProviders={synthesisProviders}
-      onToggleSynthesisProvider={handleToggleSynthesisProvider}
       isFirstLoad={isFirstLoad}
       onAcknowledgeFirstLoad={() => {
         try {

@@ -2,8 +2,14 @@
  * HTOS Gemini Provider Adapter (Unified)
  * - Implements ProviderAdapter interface for Gemini AND Gemini Pro
  * - Handles both Flash and Pro models via dynamic configuration
+ * - Wraps GeminiSessionApi with auth observation (Gemini has internal retries)
  */
-import { classifyProviderError } from "../core/request-lifecycle-manager.js";
+import { authManager } from '../core/auth-manager.js';
+import {
+  errorHandler,
+  isProviderAuthError,
+  createProviderAuthError
+} from '../utils/ErrorHandler.js';
 
 const GEMINI_ADAPTER_DEBUG = false;
 const pad = (...args) => {
@@ -106,20 +112,47 @@ export class GeminiAdapter {
         },
       };
     } catch (error) {
-      const classification = classifyProviderError("gemini-session", error);
-      const errorCode = classification.type || "unknown";
-      return {
-        providerId: this.id,
-        ok: false,
-        text: null,
-        errorCode,
-        latencyMs: Date.now() - startTime,
-        meta: {
-          error: error.toString(),
-          details: error.details,
-          suppressed: classification.suppressed,
-        },
-      };
+      // Check Gemini-specific auth errors
+      if (isProviderAuthError(error) || this._isGeminiAuthError(error)) {
+        authManager.invalidateCache(this.id);
+        await authManager.verifyProvider(this.id);
+
+        // Special message for "no access" vs "session expired"
+        if (error?.code === 'noGeminiAccess') {
+          error.message = 'Your Google account does not have Gemini access.';
+        }
+
+        const authError = createProviderAuthError(this.id, error);
+        return {
+          providerId: this.id,
+          ok: false,
+          text: null,
+          errorCode: 'AUTH_REQUIRED',
+          latencyMs: Date.now() - startTime,
+          meta: {
+            error: authError.toString(),
+            details: authError.details,
+          },
+        };
+      }
+
+      try {
+        await errorHandler.handleProviderError(error, this.id, {
+          operation: 'sendPrompt',
+        });
+      } catch (handledError) {
+        return {
+          providerId: this.id,
+          ok: false,
+          text: null,
+          errorCode: handledError.code || "unknown",
+          latencyMs: Date.now() - startTime,
+          meta: {
+            error: handledError.toString(),
+            details: handledError.details,
+          },
+        };
+      }
     }
   }
 
@@ -135,7 +168,6 @@ export class GeminiAdapter {
       const model = (providerContext?.model ?? meta.model) || defaultModel;
 
       // STRICT CONTINUATION: Do NOT fall back to new chat. 
-      // If we lost the cursor, we must report it so data integrity is preserved.
       if (!cursor) {
         console.warn(`[GeminiAdapter:${this.id}] Context missing (no cursor)`);
         throw new Error("Continuity lost: Missing Gemini cursor for this thread.");
@@ -149,7 +181,7 @@ export class GeminiAdapter {
         model,
       });
 
-      // NORMALIZATION LOGIC (From Pro Adapter)
+      // NORMALIZATION LOGIC
       const normalizedText =
         result?.text ??
         result?.candidates?.[0]?.content ??
@@ -197,36 +229,54 @@ export class GeminiAdapter {
         },
       };
     } catch (error) {
-      const classification = classifyProviderError("gemini-session", error);
-      const errorCode = classification.type || "unknown";
-      return {
-        providerId: this.id,
-        ok: false,
-        text: null,
-        errorCode,
-        latencyMs: Date.now() - startTime,
-        meta: {
-          error: error.toString(),
-          details: error.details,
-          suppressed: classification.suppressed,
-          // Return partial context so UI can debug what was missing
-          cursor: providerContext?.cursor ?? providerContext?.meta?.cursor,
-        },
-      };
+      if (isProviderAuthError(error) || this._isGeminiAuthError(error)) {
+        authManager.invalidateCache(this.id);
+        await authManager.verifyProvider(this.id);
+
+        if (error?.code === 'noGeminiAccess') {
+          error.message = 'Your Google account does not have Gemini access.';
+        }
+
+        const authError = createProviderAuthError(this.id, error);
+        return {
+          providerId: this.id,
+          ok: false,
+          text: null,
+          errorCode: 'AUTH_REQUIRED',
+          latencyMs: Date.now() - startTime,
+          meta: {
+            error: authError.toString(),
+            details: authError.details,
+            cursor: providerContext?.cursor ?? providerContext?.meta?.cursor,
+          },
+        };
+      }
+
+      try {
+        await errorHandler.handleProviderError(error, this.id, {
+          operation: 'sendContinuation',
+        });
+      } catch (handledError) {
+        return {
+          providerId: this.id,
+          ok: false,
+          text: null,
+          errorCode: handledError.code || "unknown",
+          latencyMs: Date.now() - startTime,
+          meta: {
+            error: handledError.toString(),
+            details: handledError.details,
+            cursor: providerContext?.cursor ?? providerContext?.meta?.cursor,
+          },
+        };
+      }
     }
   }
 
   /**
    * Unified ask API
-   * Routes to sendContinuation or sendPrompt based on context presence.
    */
-  async ask(
-    prompt,
-    providerContext = null,
-    sessionId = undefined,
-    onChunk = undefined,
-    signal = undefined,
-  ) {
+  async ask(prompt, providerContext = null, sessionId = undefined, onChunk = undefined, signal = undefined) {
     try {
       const meta = providerContext?.meta || providerContext || {};
       const hasCursor = Boolean(meta.cursor || providerContext?.cursor);
@@ -235,19 +285,9 @@ export class GeminiAdapter {
 
       let res;
       if (hasCursor) {
-        res = await this.sendContinuation(
-          prompt,
-          providerContext,
-          sessionId,
-          onChunk,
-          signal,
-        );
+        res = await this.sendContinuation(prompt, providerContext, sessionId, onChunk, signal);
       } else {
-        res = await this.sendPrompt(
-          { originalPrompt: prompt, sessionId, meta },
-          onChunk,
-          signal,
-        );
+        res = await this.sendPrompt({ originalPrompt: prompt, sessionId, meta }, onChunk, signal);
       }
 
       try {
@@ -260,5 +300,10 @@ export class GeminiAdapter {
       console.warn(`[ProviderAdapter] ASK_FAILED provider=${this.id}:`, e?.message || String(e));
       throw e;
     }
+  }
+
+  _isGeminiAuthError(error) {
+    const code = error?.code;
+    return code === 'login' || code === 'noGeminiAccess' || code === 'badToken';
   }
 }

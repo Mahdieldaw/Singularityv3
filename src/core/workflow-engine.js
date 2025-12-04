@@ -1,5 +1,12 @@
 // src/core/workflow-engine.js - FIXED VERSION
 import { ArtifactProcessor } from '../../shared/artifact-processor.ts';
+import {
+  errorHandler,
+  createMultiProviderAuthError,
+  ProviderAuthError,
+  isProviderAuthError
+} from '../utils/ErrorHandler.js';
+import { authManager } from '../core/auth-manager.js';
 function extractGraphTopologyAndStrip(text) {
   if (!text || typeof text !== 'string') return { text, topology: null };
 
@@ -1328,6 +1335,7 @@ Your job is to address what the user is actually asking, informed by but not foc
 
           // Format results for workflow engine
           const formattedResults = {};
+          const authErrors = [];
 
           results.forEach((result, providerId) => {
             const processed = artifactProcessor.process(result.text || '');
@@ -1348,6 +1356,11 @@ Your job is to address what the user is actually asking, informed by but not foc
               status: "failed",
               meta: { _rawError: error.message },
             };
+
+            // Collect auth errors
+            if (isProviderAuthError(error)) {
+              authErrors.push(error);
+            }
           });
 
           // Validate at least one provider succeeded
@@ -1357,6 +1370,15 @@ Your job is to address what the user is actually asking, informed by but not foc
           );
 
           if (!hasAnyValidResults) {
+            // If all failed and we have auth errors, throw MultiProviderAuthError
+            if (authErrors.length > 0 && authErrors.length === errors.size) {
+              const providerIds = Array.from(errors.keys());
+              reject(createMultiProviderAuthError(providerIds, {
+                originalErrors: authErrors
+              }));
+              return;
+            }
+
             reject(
               new Error("All providers failed or returned empty responses"),
             );
@@ -1721,101 +1743,136 @@ Your job is to address what the user is actually asking, informed by but not foc
       }
     }
 
-    const synthPrompt = buildSynthesisPrompt(
-      payload.originalPrompt,
-      sourceData,
-      payload.synthesisProvider,
-      mappingResult,
-    );
+    // Helper to execute synthesis with a specific provider
+    const runSynthesis = async (providerId) => {
+      const synthPrompt = buildSynthesisPrompt(
+        payload.originalPrompt,
+        sourceData,
+        providerId,
+        mappingResult,
+      );
 
-    // Resolve provider context using three-tier resolution
-    const providerContexts = this._resolveProviderContext(
-      payload.synthesisProvider,
-      context,
-      payload,
-      workflowContexts,
-      previousResults,
-      resolvedContext,
-      "Synthesis",
-    );
+      // Resolve provider context using three-tier resolution
+      const providerContexts = this._resolveProviderContext(
+        providerId,
+        context,
+        payload,
+        workflowContexts,
+        previousResults,
+        resolvedContext,
+        "Synthesis",
+      );
 
-    return new Promise((resolve, reject) => {
-      this.orchestrator.executeParallelFanout(
-        synthPrompt,
-        [payload.synthesisProvider],
-        {
-          sessionId: context.sessionId,
-          useThinking: payload.useThinking,
-          providerContexts: Object.keys(providerContexts).length
-            ? providerContexts
-            : undefined,
-          providerMeta: step?.payload?.providerMeta,
-          onPartial: (providerId, chunk) => {
-            this._dispatchPartialDelta(
-              context.sessionId,
-              step.stepId,
-              providerId,
-              chunk.text,
-              "Synthesis",
-            );
-          },
-          onAllComplete: (results) => {
-            const finalResult = results.get(payload.synthesisProvider);
-
-            // ✅ Extract artifacts from synthesis response
-            if (finalResult?.text) {
-              const { cleanText, artifacts } = artifactProcessor.process(finalResult.text);
-              finalResult.text = cleanText;
-              finalResult.artifacts = artifacts;
-            }
-
-            // ✅ Ensure final emission for synthesis
-            if (finalResult?.text) {
+      return new Promise((resolve, reject) => {
+        this.orchestrator.executeParallelFanout(
+          synthPrompt,
+          [providerId],
+          {
+            sessionId: context.sessionId,
+            useThinking: payload.useThinking,
+            providerContexts: Object.keys(providerContexts).length
+              ? providerContexts
+              : undefined,
+            providerMeta: step?.payload?.providerMeta,
+            onPartial: (pid, chunk) => {
               this._dispatchPartialDelta(
                 context.sessionId,
                 step.stepId,
-                payload.synthesisProvider,
-                finalResult.text,
+                pid,
+                chunk.text,
                 "Synthesis",
-                true,
               );
-            }
+            },
+            onError: (error) => {
+              reject(error);
+            },
+            onAllComplete: (results) => {
+              const finalResult = results.get(providerId);
 
-            if (!finalResult || !finalResult.text) {
-              reject(
-                new Error(
-                  `Synthesis provider ${payload.synthesisProvider} returned empty response`,
-                ),
-              );
-              return;
-            }
+              // ✅ Extract artifacts from synthesis response
+              if (finalResult?.text) {
+                const { cleanText, artifacts } = artifactProcessor.process(finalResult.text);
+                finalResult.text = cleanText;
+                finalResult.artifacts = artifacts;
+              }
 
-            // Defer persistence to avoid blocking synthesis resolution
-            this._persistProviderContextsAsync(context.sessionId, {
-              [payload.synthesisProvider]: finalResult,
-            });
-            // Update workflow-cached context for subsequent steps in the same workflow
-            try {
-              if (finalResult?.meta) {
-                workflowContexts[payload.synthesisProvider] = finalResult.meta;
-                wdbg(
-                  `[WorkflowEngine] Updated workflow context for ${payload.synthesisProvider
-                  }: ${Object.keys(finalResult.meta).join(",")}`,
+              // ✅ Ensure final emission for synthesis
+              if (finalResult?.text) {
+                this._dispatchPartialDelta(
+                  context.sessionId,
+                  step.stepId,
+                  providerId,
+                  finalResult.text,
+                  "Synthesis",
+                  true,
                 );
               }
-            } catch (_) { }
 
-            resolve({
-              providerId: payload.synthesisProvider,
-              text: finalResult.text, // ✅ Return text explicitly
-              status: "completed",
-              meta: finalResult.meta || {},
-              artifacts: finalResult.artifacts || [],
-            });
+              if (!finalResult || !finalResult.text) {
+                reject(
+                  new Error(
+                    `Synthesis provider ${providerId} returned empty response`,
+                  ),
+                );
+                return;
+              }
+
+              // Defer persistence to avoid blocking synthesis resolution
+              this._persistProviderContextsAsync(context.sessionId, {
+                [providerId]: finalResult,
+              });
+              // Update workflow-cached context for subsequent steps in the same workflow
+              try {
+                if (finalResult?.meta) {
+                  workflowContexts[providerId] = finalResult.meta;
+                  wdbg(
+                    `[WorkflowEngine] Updated workflow context for ${providerId
+                    }: ${Object.keys(finalResult.meta).join(",")}`,
+                  );
+                }
+              } catch (_) { }
+
+              resolve({
+                providerId: providerId,
+                text: finalResult.text, // ✅ Return text explicitly
+                status: "completed",
+                meta: finalResult.meta || {},
+                artifacts: finalResult.artifacts || [],
+              });
+            },
           },
-        },
-      );
-    });
+        );
+      });
+    };
+
+    try {
+      return await runSynthesis(payload.synthesisProvider);
+    } catch (error) {
+      // Check if we can recover from auth error
+      if (isProviderAuthError(error)) {
+        console.warn(`[WorkflowEngine] Synthesis failed with auth error for ${payload.synthesisProvider}, attempting fallback...`);
+
+        const fallbackStrategy = errorHandler.fallbackStrategies.get('PROVIDER_AUTH_FAILED');
+        if (fallbackStrategy) {
+          try {
+            const fallbackProvider = await fallbackStrategy(
+              'synthesis',
+              { failedProviderId: payload.synthesisProvider }
+            );
+
+            if (fallbackProvider) {
+              console.log(`[WorkflowEngine] executing synthesis with fallback provider: ${fallbackProvider}`);
+              // Retry with fallback provider
+              return await runSynthesis(fallbackProvider);
+            }
+          } catch (fallbackError) {
+            console.warn(`[WorkflowEngine] Fallback failed:`, fallbackError);
+          }
+        }
+      }
+
+      throw error;
+    }
   }
 
   /**

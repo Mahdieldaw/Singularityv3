@@ -110,6 +110,17 @@ export function usePortMessageHandler() {
       switch (message.type) {
         // SESSION_STARTED is deprecated. UI now initializes session from TURN_CREATED.
 
+        case "PREFLIGHT_WARNINGS": {
+          const { warnings } = message;
+          console.warn('[Preflight] Warnings:', warnings);
+          if (Array.isArray(warnings)) {
+            warnings.forEach((warning: string) => {
+              console.warn('[Preflight]', warning);
+            });
+          }
+          break;
+        }
+
         case "TURN_CREATED": {
           const {
             userTurnId,

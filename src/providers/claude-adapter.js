@@ -1,16 +1,23 @@
 /**
  * HTOS Claude Provider Adapter
  * - Implements ProviderAdapter interface for Claude
- *
+ * - Wraps ClaudeSessionApi with auth recovery
+ * 
  * Build-phase safe: emitted to dist/adapters/*
  */
-import { classifyProviderError } from "../core/request-lifecycle-manager.js";
+import { authManager } from '../core/auth-manager.js';
+import {
+  errorHandler,
+  isProviderAuthError,
+  createProviderAuthError
+} from '../utils/ErrorHandler.js';
 
 // Provider-specific adapter debug flag (off by default)
 const CLAUDE_ADAPTER_DEBUG = false;
 const pad = (...args) => {
   if (CLAUDE_ADAPTER_DEBUG) console.log(...args);
 };
+
 export class ClaudeAdapter {
   constructor(controller) {
     this.id = "claude";
@@ -23,29 +30,62 @@ export class ClaudeAdapter {
     };
     this.controller = controller;
   }
+
   /**
    * Initialize the adapter
    */
   async init() {
-    // Initialization logic if needed
     return;
   }
+
   /**
    * Check if the provider is available and working
    */
   async healthCheck() {
     try {
-      // Perform a simple check to verify Claude API is accessible
       return await this.controller.isAvailable();
     } catch (error) {
       return false;
     }
   }
-  async sendPrompt(req, onChunk, signal) {
+
+  /**
+   * Unified ask API: prefer continuation when chatId/threadUrl exists, else start new.
+   */
+  async ask(prompt, providerContext = null, sessionId = undefined, onChunk = undefined, signal = undefined) {
+    try {
+      const meta = providerContext?.meta || providerContext || {};
+      const hasChat = Boolean(
+        meta.chatId || providerContext?.chatId || providerContext?.threadUrl,
+      );
+
+      pad(`[ProviderAdapter] ASK_STARTED provider=${this.id} hasContext=${hasChat}`);
+
+      let res;
+      if (hasChat) {
+        res = await this.sendContinuation(prompt, providerContext, sessionId, onChunk, signal);
+      } else {
+        res = await this.sendPrompt({ originalPrompt: prompt, sessionId, meta }, onChunk, signal);
+      }
+
+      try {
+        const len = (res?.text || "").length;
+        pad(`[ProviderAdapter] ASK_COMPLETED provider=${this.id} ok=${res?.ok !== false} textLen=${len}`);
+      } catch (_) { }
+
+      return res;
+    } catch (e) {
+      console.warn(`[ProviderAdapter] ASK_FAILED provider=${this.id}:`, e?.message || String(e));
+      throw e;
+    }
+  }
+
+  async sendPrompt(req, onChunk, signal, _isRetry = false) {
     const startTime = Date.now();
     let aggregatedText = "";
+
     try {
-      // Send prompt to Claude with streaming via callback (ClaudeSessionApi.ask supports onChunk)
+      // Send prompt to Claude with streaming via callback
       const result = await this.controller.claudeSession.ask(
         req.originalPrompt,
         { signal, chatId: req.meta?.chatId },
@@ -64,13 +104,14 @@ export class ClaudeAdapter {
           });
         },
       );
+
       // Ensure final text is returned
       aggregatedText = result?.text ?? aggregatedText;
-      // Return final result
+
       return {
         providerId: this.id,
         ok: true,
-        id: result?.chatId || req.meta?.chatId || req.reqId, // Use chatId as message ID when available
+        id: result?.chatId || req.meta?.chatId || req.reqId,
         text: aggregatedText,
         partial: false,
         latencyMs: Date.now() - startTime,
@@ -80,55 +121,62 @@ export class ClaudeAdapter {
         },
       };
     } catch (error) {
-      // Handle errors with proper classification
-      const classification = classifyProviderError("claude-session", error);
-      const errorCode = classification.type || "unknown";
-      return {
-        providerId: this.id,
-        ok: false,
-        text: aggregatedText || null,
-        errorCode,
-        latencyMs: Date.now() - startTime,
-        meta: {
-          error: error.toString(),
-          details: error.details,
-          suppressed: classification.suppressed,
-        },
-      };
+      // Use central error handler for provider errors
+      if (isProviderAuthError(error)) {
+        try {
+          return await this._handleAuthError(error, req, onChunk, signal, _isRetry);
+        } catch (authError) {
+          // If auth recovery fails, return error response
+          return {
+            providerId: this.id,
+            ok: false,
+            text: aggregatedText || null,
+            errorCode: 'AUTH_REQUIRED',
+            latencyMs: Date.now() - startTime,
+            meta: {
+              error: authError.toString(),
+              details: authError.details,
+            },
+          };
+        }
+      }
+
+      // Let error handler deal with other errors
+      try {
+        await errorHandler.handleProviderError(error, this.id, {
+          operation: 'sendPrompt',
+          prompt: req.originalPrompt?.substring(0, 100),
+        });
+      } catch (handledError) {
+        // Convert handled error to response format
+        return {
+          providerId: this.id,
+          ok: false,
+          text: aggregatedText || null,
+          errorCode: handledError.code || "unknown",
+          latencyMs: Date.now() - startTime,
+          meta: {
+            error: handledError.toString(),
+            details: handledError.details,
+          },
+        };
+      }
     }
   }
 
-  /**
-   * Send continuation message using existing chat context
-   * @param {string} prompt - The continuation prompt
-   * @param {Object} providerContext - Context containing chatId and other metadata
-   * @param {string} sessionId - Session identifier
-   * @param {Function} onChunk - Streaming callback
-   * @param {AbortSignal} signal - Abort signal
-   * @returns {Promise<Object>} Response object
-   */
-  async sendContinuation(prompt, providerContext, sessionId, onChunk, signal) {
+  async sendContinuation(prompt, providerContext, sessionId, onChunk, signal, _isRetry = false) {
     const startTime = Date.now();
     let aggregatedText = "";
 
     try {
-      // Extract chatId from provider context (support both top-level and nested .meta)
       const meta = providerContext?.meta || providerContext || {};
-      const chatId =
-        providerContext?.chatId ??
-        meta.chatId ??
-        providerContext?.threadUrl ??
-        meta.threadUrl;
+      const chatId = providerContext?.chatId ?? meta.chatId ?? providerContext?.threadUrl ?? meta.threadUrl;
 
       if (!chatId) {
         console.warn(`[ClaudeAdapter] Context missing (no ChatId)`);
         throw new Error("Continuity lost: Missing Claude ChatId for this thread.");
       }
 
-      // Avoid logging per-continuation start to reduce noisy logs.
-      // The adapter will only emit a single completion log after the final response is received.
-
-      // Send continuation to Claude with existing chatId
       const result = await this.controller.claudeSession.ask(
         prompt,
         { signal, chatId },
@@ -136,7 +184,6 @@ export class ClaudeAdapter {
           if (!this.capabilities.supportsStreaming || !onChunk) return;
           aggregatedText = text || aggregatedText;
 
-          // Forward partials to orchestrator/port
           onChunk({
             providerId: this.id,
             ok: true,
@@ -149,15 +196,10 @@ export class ClaudeAdapter {
         },
       );
 
-      // Ensure final text is returned
       aggregatedText = result?.text ?? aggregatedText;
 
-      // Log only the final completion to reduce log volume (gated)
-      pad(
-        `[ClaudeAdapter] providerComplete: claude status=success, latencyMs=${Date.now() - startTime}, textLen=${(aggregatedText || "").length}`,
-      );
+      pad(`[ClaudeAdapter] providerComplete: claude status=success, latencyMs=${Date.now() - startTime}, textLen=${(aggregatedText || "").length}`);
 
-      // Return final result with preserved/updated context
       return {
         providerId: this.id,
         ok: true,
@@ -168,78 +210,69 @@ export class ClaudeAdapter {
         meta: {
           orgId: result?.orgId,
           chatId: result?.chatId || chatId,
-          threadUrl: result?.chatId || chatId, // Preserve for future continuations
+          threadUrl: result?.chatId || chatId,
         },
       };
     } catch (error) {
-      // Handle errors with proper classification
-      const classification = classifyProviderError("claude-session", error);
-      const errorCode = classification.type || "unknown";
+      if (isProviderAuthError(error)) {
+        try {
+          return await this._handleAuthError(error, { originalPrompt: prompt, meta: providerContext }, onChunk, signal, _isRetry, true);
+        } catch (authError) {
+          return {
+            providerId: this.id,
+            ok: false,
+            text: aggregatedText || null,
+            errorCode: 'AUTH_REQUIRED',
+            latencyMs: Date.now() - startTime,
+            meta: {
+              error: authError.toString(),
+              details: authError.details,
+              chatId: providerContext?.chatId ?? meta.chatId, // Preserve context even on error
+            },
+          };
+        }
+      }
 
-      return {
-        providerId: this.id,
-        ok: false,
-        text: aggregatedText || null,
-        errorCode,
-        latencyMs: Date.now() - startTime,
-        meta: {
-          error: error.toString(),
-          details: error.details,
-          suppressed: classification.suppressed,
-          chatId: providerContext?.chatId ?? meta.chatId, // Preserve context even on error
-        },
-      };
+      try {
+        await errorHandler.handleProviderError(error, this.id, {
+          operation: 'sendContinuation',
+          prompt: prompt?.substring(0, 100),
+        });
+      } catch (handledError) {
+        return {
+          providerId: this.id,
+          ok: false,
+          text: aggregatedText || null,
+          errorCode: handledError.code || "unknown",
+          latencyMs: Date.now() - startTime,
+          meta: {
+            error: handledError.toString(),
+            details: handledError.details,
+            chatId: providerContext?.chatId,
+          },
+        };
+      }
     }
   }
 
-  /**
-   * Unified ask API: prefer continuation when chatId/threadUrl exists, else start new.
-   * ask(prompt, providerContext?, sessionId?, onChunk?, signal?)
-   */
-  async ask(
-    prompt,
-    providerContext = null,
-    sessionId = undefined,
-    onChunk = undefined,
-    signal = undefined,
-  ) {
-    try {
-      const meta = providerContext?.meta || providerContext || {};
-      const hasChat = Boolean(
-        meta.chatId || providerContext?.chatId || providerContext?.threadUrl,
-      );
-      pad(
-        `[ProviderAdapter] ASK_STARTED provider=${this.id} hasContext=${hasChat}`,
-      );
-      let res;
-      if (hasChat) {
-        res = await this.sendContinuation(
-          prompt,
-          providerContext,
-          sessionId,
-          onChunk,
-          signal,
-        );
+  async _handleAuthError(error, req, onChunk, signal, _isRetry, isContinuation = false) {
+    console.warn(`[ClaudeAdapter] Auth error: ${error.status || error.message}`);
+
+    // Update auth status
+    authManager.invalidateCache(this.id);
+    const isStillValid = await authManager.verifyProvider(this.id);
+
+    if (isStillValid && !_isRetry) {
+      // Transient issue - retry once
+      console.log(`[ClaudeAdapter] Auth verified, retrying...`);
+      if (isContinuation) {
+        return await this.sendContinuation(req.originalPrompt, req.meta, undefined, onChunk, signal, true);
       } else {
-        res = await this.sendPrompt(
-          { originalPrompt: prompt, sessionId, meta },
-          onChunk,
-          signal,
-        );
+        return await this.sendPrompt(req, onChunk, signal, true);
       }
-      try {
-        const len = (res?.text || "").length;
-        pad(
-          `[ProviderAdapter] ASK_COMPLETED provider=${this.id} ok=${res?.ok !== false} textLen=${len}`,
-        );
-      } catch (_) { }
-      return res;
-    } catch (e) {
-      console.warn(
-        `[ProviderAdapter] ASK_FAILED provider=${this.id}:`,
-        e?.message || String(e),
-      );
-      throw e;
     }
+
+    // Confirmed auth failure
+    throw createProviderAuthError(this.id, error);
   }
 }

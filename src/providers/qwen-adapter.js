@@ -1,10 +1,15 @@
 /**
  * HTOS Qwen Provider Adapter
  * - Implements ProviderAdapter interface for Qwen
+ * - Wraps QwenSessionApi with auth observation (Qwen has internal retries)
  */
-import { classifyProviderError } from "../core/request-lifecycle-manager.js";
+import { authManager } from '../core/auth-manager.js';
+import {
+  errorHandler,
+  isProviderAuthError,
+  createProviderAuthError
+} from '../utils/ErrorHandler.js';
 
-// Provider-specific adapter debug flag (off by default)
 const QWEN_ADAPTER_DEBUG = false;
 const pad = (...args) => {
   if (QWEN_ADAPTER_DEBUG) console.log(...args);
@@ -28,8 +33,6 @@ export class QwenAdapter {
     let aggregatedText = "";
     let responseContext = {};
 
-    // Default to continuation when prior context exists (sessionId/parentMsgId),
-    // matching behavior of other adapters which reuse meta for continuations.
     const meta = req?.meta || {};
     const hasContinuation = !!(meta.sessionId || meta.parentMsgId);
 
@@ -69,21 +72,44 @@ export class QwenAdapter {
         meta: { sessionId: result.sessionId, parentMsgId: result.parentMsgId },
       };
     } catch (error) {
-      const classification = classifyProviderError("qwen-session", error);
-      const errorCode = classification.type || "unknown";
-      return {
-        providerId: this.id,
-        ok: false,
-        text: aggregatedText || null,
-        errorCode,
-        latencyMs: Date.now() - startTime,
-        meta: {
-          error: error.toString(),
-          details: error.details,
-          suppressed: classification.suppressed,
-          ...meta,
-        },
-      };
+      if (isProviderAuthError(error) || this._isQwenAuthError(error)) {
+        authManager.invalidateCache(this.id);
+        await authManager.verifyProvider(this.id);
+
+        const authError = createProviderAuthError(this.id, error);
+        return {
+          providerId: this.id,
+          ok: false,
+          text: aggregatedText || null,
+          errorCode: 'AUTH_REQUIRED',
+          latencyMs: Date.now() - startTime,
+          meta: {
+            error: authError.toString(),
+            details: authError.details,
+            ...meta,
+          },
+        };
+      }
+
+      try {
+        await errorHandler.handleProviderError(error, this.id, {
+          operation: 'sendPrompt',
+        });
+      } catch (handledError) {
+        return {
+          providerId: this.id,
+          ok: false,
+          text: aggregatedText || null,
+          errorCode: handledError.code || "unknown",
+          latencyMs: Date.now() - startTime,
+          meta: {
+            error: handledError.toString(),
+            details: handledError.details,
+            suppressed: handledError.suppressed,
+            ...meta,
+          },
+        };
+      }
     }
   }
 
@@ -93,20 +119,14 @@ export class QwenAdapter {
     let aggregatedText = "";
     let responseContext = {};
 
-    // If no session context, this is an invalid state for continuation.
     if (!meta.sessionId) {
-      console.warn(
-        `[Qwen Adapter] sendContinuation called without a sessionId. This indicates a logic error in the orchestrator or session manager.`,
-      );
-      // Return an error instead of falling back to sendPrompt to make the contract explicit.
+      console.warn(`[Qwen Adapter] sendContinuation called without a sessionId.`);
       return {
         providerId: this.id,
         ok: false,
         text: null,
         errorCode: "continuation_failed",
-        meta: {
-          error: "Missing sessionId for continuation.",
-        },
+        meta: { error: "Missing sessionId for continuation." },
       };
     }
 
@@ -146,70 +166,73 @@ export class QwenAdapter {
         meta: { sessionId: result.sessionId, parentMsgId: result.parentMsgId },
       };
     } catch (error) {
-      const classification = classifyProviderError("qwen-session", error);
-      const errorCode = classification.type || "unknown";
-      return {
-        providerId: this.id,
-        ok: false,
-        text: aggregatedText || null,
-        errorCode,
-        latencyMs: Date.now() - startTime,
-        meta: {
-          error: error.toString(),
-          details: error.details,
-          suppressed: classification.suppressed,
-          ...meta, // Preserve original context on error
-        },
-      };
+      if (isProviderAuthError(error) || this._isQwenAuthError(error)) {
+        authManager.invalidateCache(this.id);
+        await authManager.verifyProvider(this.id);
+
+        const authError = createProviderAuthError(this.id, error);
+        return {
+          providerId: this.id,
+          ok: false,
+          text: aggregatedText || null,
+          errorCode: 'AUTH_REQUIRED',
+          latencyMs: Date.now() - startTime,
+          meta: {
+            error: authError.toString(),
+            details: authError.details,
+            ...meta,
+          },
+        };
+      }
+
+      try {
+        await errorHandler.handleProviderError(error, this.id, {
+          operation: 'sendContinuation',
+        });
+      } catch (handledError) {
+        return {
+          providerId: this.id,
+          ok: false,
+          text: aggregatedText || null,
+          errorCode: handledError.code || "unknown",
+          latencyMs: Date.now() - startTime,
+          meta: {
+            error: handledError.toString(),
+            details: handledError.details,
+            suppressed: handledError.suppressed,
+            ...meta,
+          },
+        };
+      }
     }
   }
 
-  /**
-   * Unified ask API: prefer continuation when sessionId/parentMsgId exists, else start new.
-   * ask(prompt, providerContext?, sessionId?, onChunk?, signal?)
-   */
-  async ask(
-    prompt,
-    providerContext = null,
-    sessionId = undefined,
-    onChunk = undefined,
-    signal = undefined,
-  ) {
+  async ask(prompt, providerContext = null, sessionId = undefined, onChunk = undefined, signal = undefined) {
     try {
       const meta = providerContext?.meta || providerContext || {};
       const hasContinuation = Boolean(meta.sessionId || meta.parentMsgId);
-      pad(
-        `[ProviderAdapter] ASK_STARTED provider=${this.id} hasContext=${hasContinuation}`,
-      );
+      pad(`[ProviderAdapter] ASK_STARTED provider=${this.id} hasContext=${hasContinuation}`);
+
       let res;
       if (hasContinuation) {
-        res = await this.sendContinuation(
-          prompt,
-          meta,
-          sessionId,
-          onChunk,
-          signal,
-        );
+        res = await this.sendContinuation(prompt, meta, sessionId, onChunk, signal);
       } else {
-        res = await this.sendPrompt(
-          { originalPrompt: prompt, sessionId, meta },
-          onChunk,
-          signal,
-        );
+        res = await this.sendPrompt({ originalPrompt: prompt, sessionId, meta }, onChunk, signal);
       }
+
       try {
         const len = (res?.text || "").length;
-        pad(
-          `[ProviderAdapter] ASK_COMPLETED provider=${this.id} ok=${res?.ok !== false} textLen=${len}`,
-        );
+        pad(`[ProviderAdapter] ASK_COMPLETED provider=${this.id} ok=${res?.ok !== false} textLen=${len}`);
       } catch (_) { }
       return res;
     } catch (e) {
-      console.warn(
-        `[ProviderAdapter] ASK_FAILED provider=${this.id}:`,
-        e?.message || String(e),
-      );
+      console.warn(`[ProviderAdapter] ASK_FAILED provider=${this.id}:`, e?.message || String(e));
       throw e;
     }
+  }
+
+  _isQwenAuthError(error) {
+    const code = error?.code;
+    return code === 'login' || code === 'csrf';
   }
 }

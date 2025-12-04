@@ -1,0 +1,54 @@
+export const PROVIDER_PRIORITIES = {
+    /**
+     * For synthesis: Quality of prose/narrative consolidation
+     * Claude > Gemini 2.0 Exp > Qwen > Gemini 2.5 Pro > ChatGPT > Gemini
+     */
+    synthesis: ['claude', 'gemini-exp', 'qwen', 'gemini-pro', 'chatgpt', 'gemini'],
+
+    /**
+     * For mapping: Structured reasoning / decision tree quality
+     * Gemini > Qwen > ChatGPT > Gemini Exp > Claude > Gemini Pro
+     */
+    mapping: ['gemini', 'qwen', 'chatgpt', 'gemini-exp', 'claude', 'gemini-pro'],
+
+    /**
+     * For batch queries: Balance of speed + quality
+     */
+    batch: ['claude', 'gemini-exp', 'qwen', 'gemini-pro', 'chatgpt', 'gemini'],
+} as const;
+
+export type ProviderRole = keyof typeof PROVIDER_PRIORITIES;
+
+/**
+ * Shared selection logic - used identically in UI and backend
+ */
+export function selectBestProvider(
+    role: ProviderRole,
+    authStatus: Record<string, boolean>,
+    availableProviders?: string[]
+): string | null {
+    const priority = PROVIDER_PRIORITIES[role];
+
+    for (const providerId of priority) {
+        // Must be explicitly authorized (not undefined, not false)
+        const isAuth = authStatus[providerId] === true;
+        // If available list provided, must be in it
+        const isAvailable = !availableProviders || availableProviders.includes(providerId);
+
+        if (isAuth && isAvailable) {
+            return providerId;
+        }
+    }
+
+    return null;
+}
+
+/**
+ * Check if a specific provider is authorized
+ */
+export function isProviderAuthorized(
+    providerId: string,
+    authStatus: Record<string, boolean>
+): boolean {
+    return authStatus[providerId.toLowerCase()] === true;
+}

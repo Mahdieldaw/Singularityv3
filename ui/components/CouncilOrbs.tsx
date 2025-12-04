@@ -4,6 +4,7 @@ import { providerEffectiveStateFamily, isSplitOpenAtom, synthesisProviderAtom, m
 import { LLMProvider } from "../types";
 import { PROVIDER_COLORS } from "../constants";
 import { getProviderById } from "../providers/providerRegistry";
+import { setProviderLock } from "@shared/provider-locks";
 import clsx from "clsx";
 
 interface CouncilOrbsProps {
@@ -113,24 +114,20 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
 
     const handleSelectSynth = (pid: string) => {
         setSynthesisProvider(pid);
-        try {
-            localStorage.setItem('htos_voice_locked', 'true');
-            chrome?.storage?.local?.set?.({ provider_lock_settings: { voice_locked: true } });
-        } catch { }
+        setProviderLock('synthesis', true);
         setIsMenuOpen(false);
     };
 
     const handleSelectMap = (pid: string) => {
         setMapProvider(pid);
-        try {
-            localStorage.setItem('htos_mapper_locked', 'true');
-            chrome?.storage?.local?.set?.({ provider_lock_settings: { mapper_locked: true } });
-        } catch { }
+        setProviderLock('mapping', true);
         setIsMenuOpen(false);
     };
 
     const handleSelectComposer = (pid: string) => {
         setComposer(pid);
+        // Composer lock not yet in shared config, leaving as is or removing if obsolete
+        // Assuming we only care about synthesis/mapping for now as per plan
         try {
             localStorage.setItem('htos_composer_locked', 'true');
             chrome?.storage?.local?.set?.({ provider_lock_settings: { composer_locked: true } });
@@ -140,6 +137,7 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
 
     const handleSelectAnalyst = (pid: string) => {
         setAnalyst(pid);
+        // Analyst lock not yet in shared config
         try {
             localStorage.setItem('htos_analyst_locked', 'true');
             chrome?.storage?.local?.set?.({ provider_lock_settings: { analyst_locked: true } });

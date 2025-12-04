@@ -14,7 +14,7 @@ import {
   currentSessionIdAtom,
   selectedModelsAtom,
   isHistoryPanelOpenAtom,
-  activeClipsAtom,
+
 } from "../state/atoms";
 import api from "../services/extension-api";
 
@@ -30,7 +30,7 @@ export function useInitialization(): boolean {
   const setCurrentSessionId = useSetAtom(currentSessionIdAtom);
   const setSelectedModels = useSetAtom(selectedModelsAtom);
   const setIsHistoryPanelOpen = useSetAtom(isHistoryPanelOpenAtom);
-  const setActiveClips = useSetAtom(activeClipsAtom);
+
 
   useEffect(() => {
     if (hasModuleInitialized) return; // already done
@@ -58,7 +58,7 @@ export function useInitialization(): boolean {
         draft.length = 0;
       });
       setCurrentSessionId(null);
-      setActiveClips({});
+
 
       // --- Stage 3: Restore user preferences (best-effort) ---
       try {
@@ -89,7 +89,7 @@ export function useInitialization(): boolean {
     setCurrentSessionId,
     setSelectedModels,
     setIsHistoryPanelOpen,
-    setActiveClips,
+
   ]);
 
   return isInitialized;

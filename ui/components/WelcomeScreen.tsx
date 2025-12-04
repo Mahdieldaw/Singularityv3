@@ -5,8 +5,9 @@ import logoIcon from "../assets/logos/logo-icon.svg";
 import { LLM_PROVIDERS_CONFIG } from "../constants";
 import { CouncilOrbs } from "./CouncilOrbs";
 import { useProviderStatus } from "../hooks/useProviderStatus";
-import { useSmartVoiceSelection } from "../hooks/useSmartVoiceSelection";
+import { useSmartProviderDefaults } from "../hooks/useSmartProviderDefaults";
 import { synthesisProviderAtom, mappingProviderAtom, composerModelAtom, analystModelAtom } from "../state/atoms";
+import { setProviderLock } from "@shared/provider-locks";
 
 interface WelcomeScreenProps {
   onSendPrompt?: (prompt: string) => void;
@@ -15,7 +16,7 @@ interface WelcomeScreenProps {
 
 const WelcomeScreen = ({ onSendPrompt, isLoading }: WelcomeScreenProps) => {
   useProviderStatus();
-  useSmartVoiceSelection();
+  useSmartProviderDefaults();
 
   const providers = useMemo(() => LLM_PROVIDERS_CONFIG.filter(p => p.id !== "system"), []);
   const [trayExpanded, setTrayExpanded] = useState(false);
@@ -28,17 +29,11 @@ const WelcomeScreen = ({ onSendPrompt, isLoading }: WelcomeScreenProps) => {
 
   const handleOrbClick = (providerId: string) => {
     setSynth(providerId);
-    try {
-      localStorage.setItem("htos_voice_locked", "true");
-      chrome?.storage?.local?.set?.({ provider_lock_settings: { voice_locked: true } });
-    } catch { }
+    setProviderLock('synthesis', true);
   };
 
   const handleCrownMove = (providerId: string) => {
-    try {
-      localStorage.setItem("htos_voice_locked", "true");
-      chrome?.storage?.local?.set?.({ provider_lock_settings: { voice_locked: true } });
-    } catch { }
+    setProviderLock('synthesis', true);
   };
 
   const handleTrayExpand = () => setTrayExpanded(v => !v);
