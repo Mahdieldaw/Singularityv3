@@ -1,3 +1,4 @@
+
 // ui/components/AiTurnBlockConnected.tsx
 import React, { useCallback, useMemo } from "react";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
@@ -7,15 +8,10 @@ import ProviderResponseBlockConnected from "./ProviderResponseBlockConnected";
 import {
   isReducedMotionAtom,
   showSourceOutputsFamily,
-  activeClipsAtom,
   activeRecomputeStateAtom,
-  aiTurnSynthesisExpandedFamily,
-  aiTurnMappingExpandedFamily,
-  aiTurnSynthExpandedFamily,
-  aiTurnMapExpandedFamily,
-  aiTurnMappingTabFamily,
-  aiTurnPrimaryViewFamily,
   turnStreamingStateFamily,
+  synthesisProviderAtom,
+  mappingProviderAtom,
 } from "../state/atoms";
 import { useClipActions } from "../hooks/useClipActions";
 import { useEligibility } from "../hooks/useEligibility";
@@ -36,41 +32,24 @@ export default function AiTurnBlockConnected({
   const [showSourceOutputs, setShowSourceOutputs] = useAtom(
     showSourceOutputsFamily(aiTurn.id),
   );
-  const [activeClips] = useAtom(activeClipsAtom);
+  const synthesisProvider = useAtomValue(synthesisProviderAtom);
+  const mappingProvider = useAtomValue(mappingProviderAtom);
   const { handleClipClick } = useClipActions();
   const { eligibilityMaps } = useEligibility();
   const [activeRecomputeState] = useAtom(activeRecomputeStateAtom);
-  const [isSynthesisExpanded, setIsSynthesisExpanded] = useAtom(
-    aiTurnSynthesisExpandedFamily(aiTurn.id),
-  );
-  const [isMappingExpanded, setIsMappingExpanded] = useAtom(
-    aiTurnMappingExpandedFamily(aiTurn.id),
-  );
-  const [synthExpanded, setSynthExpanded] = useAtom(
-    aiTurnSynthExpandedFamily(aiTurn.id),
-  );
-  const [mapExpanded, setMapExpanded] = useAtom(
-    aiTurnMapExpandedFamily(aiTurn.id),
-  );
-  const [mappingTab, setMappingTab] = useAtom(aiTurnMappingTabFamily(aiTurn.id));
-  const [primaryView, setPrimaryView] = useAtom(aiTurnPrimaryViewFamily(aiTurn.id));
 
   // Determine if this turn is currently streaming (for isLive prop)
   const isLive = isLoading && currentAppStep !== "initial";
 
-  const turnClips = activeClips[aiTurn.id] || {};
-
-  // Use user-selected clip, or fall back to the provider used for generation
-  // This fixes the issue where "stale" providers are shown if the user changes selection
-  // but hasn't clicked a clip yet for the new turn.
+  // Use global synthesis provider, or fall back to the provider used for generation
   const activeSynthesisClipProviderId =
-    turnClips.synthesis || aiTurn.meta?.synthesizer;
+    synthesisProvider || aiTurn.meta?.synthesizer;
 
-  // For mapping, if no explicit selection and meta.mapper is missing,
+  // For mapping, if no explicit global selection and meta.mapper is missing,
   // default to the first provider that has mapping responses
   const activeMappingClipProviderId = (() => {
-    // User explicitly selected a provider
-    if (turnClips.mapping) return turnClips.mapping;
+    // Global selection
+    if (mappingProvider) return mappingProvider;
 
     // Fallback to meta.mapper from backend
     if (aiTurn.meta?.mapper) return aiTurn.meta.mapper;
@@ -240,43 +219,11 @@ export default function AiTurnBlockConnected({
         () => setShowSourceOutputs((prev) => !prev),
         [setShowSourceOutputs],
       )}
-      isSynthesisExpanded={isSynthesisExpanded}
-      onToggleSynthesisExpanded={useCallback(
-        () => setIsSynthesisExpanded((prev) => !prev),
-        [setIsSynthesisExpanded],
-      )}
-      isMappingExpanded={isMappingExpanded}
-      onToggleMappingExpanded={useCallback(
-        () => setIsMappingExpanded((prev) => !prev),
-        [setIsMappingExpanded],
-      )}
-      synthExpanded={synthExpanded}
-      onSetSynthExpanded={useCallback(
-        (v: boolean) => setSynthExpanded(v),
-        [setSynthExpanded],
-      )}
-      mapExpanded={mapExpanded}
-      onSetMapExpanded={useCallback(
-        (v: boolean) => setMapExpanded(v),
-        [setMapExpanded],
-      )}
-      mappingTab={mappingTab}
-      onSetMappingTab={useCallback(
-        (t: "map" | "options" | "graph") => setMappingTab(t),
-        [setMappingTab],
-      )}
-      activeSynthesisClipProviderId={activeSynthesisClipProviderId}
-      activeMappingClipProviderId={activeMappingClipProviderId}
       onClipClick={useCallback(
         (type: "synthesis" | "mapping", pid: string) => {
           void handleClipClick(aiTurn.id, type, pid);
         },
         [handleClipClick, aiTurn.id],
-      )}
-      primaryView={primaryView}
-      onSetPrimaryView={useCallback(
-        (view: "synthesis" | "decision-map") => setPrimaryView(view),
-        [setPrimaryView],
       )}
       mapStatus={mapStatus}
       graphTopology={graphTopology}

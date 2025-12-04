@@ -113,18 +113,7 @@ interface AiTurnBlockProps {
   activeSynthesisClipProviderId?: string;
   activeMappingClipProviderId?: string;
   onClipClick?: (type: "synthesis" | "mapping", providerId: string) => void;
-  isSynthesisExpanded?: boolean;
-  onToggleSynthesisExpanded?: () => void;
-  isMappingExpanded?: boolean;
-  onToggleMappingExpanded?: () => void;
-  synthExpanded?: boolean;
-  onSetSynthExpanded?: (v: boolean) => void;
-  mapExpanded?: boolean;
-  onSetMapExpanded?: (v: boolean) => void;
-  mappingTab?: "map" | "options" | "graph";
-  onSetMappingTab?: (t: "map" | "options" | "graph") => void;
-  primaryView?: "synthesis" | "decision-map";
-  onSetPrimaryView?: (view: "synthesis" | "decision-map") => void;
+
   mapStatus?: "idle" | "streaming" | "ready" | "error";
   graphTopology?: GraphTopology | null;
   aiTurnId?: string;
@@ -243,25 +232,13 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
   activeSynthesisClipProviderId,
   activeMappingClipProviderId,
   onClipClick,
-  isSynthesisExpanded = true,
-  onToggleSynthesisExpanded,
-  isMappingExpanded = true,
-  onToggleMappingExpanded,
-  synthExpanded = false,
-  onSetSynthExpanded,
-  mapExpanded = false,
-  onSetMapExpanded,
-  mappingTab = "map",
-  onSetMappingTab,
-  primaryView = "synthesis",
-  onSetPrimaryView,
+
   mapStatus = "idle",
   graphTopology = null,
   aiTurnId,
   children,
 }) => {
-  const setSynthExpanded = onSetSynthExpanded || (() => { });
-  const setMapExpanded = onSetMapExpanded || (() => { });
+
   const setToast = useSetAtom(toastAtom);
   const setActiveSplitPanel = useSetAtom(activeSplitPanelAtom);
   const setIsDecisionMapOpen = useSetAtom(isDecisionMapOpenAtom);

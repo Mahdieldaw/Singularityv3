@@ -1,14 +1,14 @@
 import { useCallback } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
-import { activeClipsAtom, alertTextAtom, turnsMapAtom } from "../state/atoms";
+import { turnsMapAtom, alertTextAtom, synthesisProviderAtom, mappingProviderAtom } from "../state/atoms";
 import { useRoundActions } from "./useRoundActions";
 import type { AiTurn } from "../types";
 import { PRIMARY_STREAMING_PROVIDER_IDS } from "../constants";
 
 export function useClipActions() {
   const turnsMap = useAtomValue(turnsMapAtom);
-  const activeClips = useAtomValue(activeClipsAtom);
-  const setActiveClips = useSetAtom(activeClipsAtom);
+  const setSynthesisProvider = useSetAtom(synthesisProviderAtom);
+  const setMappingProvider = useSetAtom(mappingProviderAtom);
   const setAlertText = useSetAtom(alertTextAtom);
   const setTurnsMap = useSetAtom(turnsMapAtom);
   const { runSynthesisForAiTurn, runMappingForAiTurn } = useRoundActions();
@@ -52,13 +52,12 @@ export function useClipActions() {
           : undefined;
         const hasValidExisting = lastResponse && lastResponse.status !== "error";
 
-        setActiveClips((prev) => ({
-          ...prev,
-          [aiTurnId]: {
-            ...(prev?.[aiTurnId] || {}),
-            [type]: providerId,
-          },
-        }));
+        // Update global provider preference (Crown Move / Mapper Select)
+        if (type === "synthesis") {
+          setSynthesisProvider(providerId);
+        } else {
+          setMappingProvider(providerId);
+        }
 
         // If the selected provider is not present in the AI turn's batchResponses, add an optimistic
         // batch response so the batch count increases and the model shows up in the batch area.
@@ -103,11 +102,10 @@ export function useClipActions() {
       turnsMap,
       runSynthesisForAiTurn,
       runMappingForAiTurn,
-      setActiveClips,
       setAlertText,
       setTurnsMap,
     ],
   );
 
-  return { handleClipClick, activeClips };
+  return { handleClipClick };
 }

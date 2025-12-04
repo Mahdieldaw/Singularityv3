@@ -231,30 +231,7 @@ export const showSourceOutputsFamily = atomFamily(
   (a, b) => a === b,
 );
 
-export const aiTurnSynthesisExpandedFamily = atomFamily(
-  (_turnId: string) => atom(true),
-  (a, b) => a === b,
-);
-export const aiTurnMappingExpandedFamily = atomFamily(
-  (_turnId: string) => atom(true),
-  (a, b) => a === b,
-);
-export const aiTurnSynthExpandedFamily = atomFamily(
-  (_turnId: string) => atom(false),
-  (a, b) => a === b,
-);
-export const aiTurnMapExpandedFamily = atomFamily(
-  (_turnId: string) => atom(false),
-  (a, b) => a === b,
-);
-export const aiTurnMappingTabFamily = atomFamily(
-  (_turnId: string) => atom<"map" | "options" | "graph">("map"),
-  (a, b) => a === b,
-);
-export const aiTurnPrimaryViewFamily = atomFamily(
-  (_turnId: string) => atom<"synthesis" | "decision-map">("synthesis"),
-  (a, b) => a === b,
-);
+
 export const showScrollToBottomAtom = atom<boolean>(false);
 
 // -----------------------------
@@ -277,10 +254,7 @@ export const synthesisProviderAtom = atomWithStorage<string | null>(
   null,
 );
 
-export const voiceProviderAtom = atomWithStorage<string | null>(
-  "htos_voice_provider",
-  null,
-);
+
 export const synthesisProvidersAtom = atomWithStorage<string[]>(
   "htos_synthesis_providers",
   [],
@@ -341,10 +315,10 @@ export const swapSourceProviderAtom = atom<string | null>(null);
 // -----------------------------
 // Round-level selections
 // -----------------------------
-export const synthSelectionsByRoundAtom = atomWithImmer<
+export const synthRecomputeSelectionsByRoundAtom = atomWithImmer<
   Record<string, Record<string, boolean>>
 >({});
-export const mappingSelectionByRoundAtom = atomWithImmer<
+export const mappingRecomputeSelectionByRoundAtom = atomWithImmer<
   Record<string, string | null>
 >({});
 
@@ -358,9 +332,7 @@ export const thinkSynthByRoundAtom = atomWithImmer<Record<string, boolean>>({});
 export const thinkMappingByRoundAtom = atomWithImmer<Record<string, boolean>>(
   {},
 );
-export const activeClipsAtom = atom<
-  Record<string, { synthesis?: string; mapping?: string }>
->({});
+
 
 // -----------------------------
 // History & sessions

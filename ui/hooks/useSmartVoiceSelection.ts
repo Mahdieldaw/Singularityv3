@@ -1,11 +1,11 @@
 import { useEffect } from 'react';
 import { useAtom, useAtomValue } from 'jotai';
-import { providerAuthStatusAtom, voiceProviderAtom, mappingProviderAtom } from '../state/atoms';
+import { providerAuthStatusAtom, synthesisProviderAtom, mappingProviderAtom } from '../state/atoms';
 import { selectSmartDefault, SYNTHESIS_PRIORITY, MAPPING_PRIORITY } from '../utils/smart-defaults';
 
 export function useSmartVoiceSelection() {
     const authStatus = useAtomValue(providerAuthStatusAtom);
-    const [voiceProvider, setVoiceProvider] = useAtom(voiceProviderAtom);
+    const [synthesisProvider, setSynthesisProvider] = useAtom(synthesisProviderAtom);
     const [mappingProvider, setMappingProvider] = useAtom(mappingProviderAtom);
 
     useEffect(() => {
@@ -22,10 +22,10 @@ export function useSmartVoiceSelection() {
         })();
 
         const bestVoice = selectSmartDefault(SYNTHESIS_PRIORITY, authStatus);
-        const voiceIsAuth = !!voiceProvider && authStatus[voiceProvider] !== false;
+        const voiceIsAuth = !!synthesisProvider && authStatus[synthesisProvider] !== false;
         if (!locks.voice_locked) {
-            if (!voiceProvider || !voiceIsAuth) {
-                if (bestVoice) setVoiceProvider(bestVoice);
+            if (!synthesisProvider || !voiceIsAuth) {
+                if (bestVoice) setSynthesisProvider(bestVoice);
             }
         }
 
@@ -37,5 +37,5 @@ export function useSmartVoiceSelection() {
             }
         }
 
-    }, [authStatus, voiceProvider, setVoiceProvider, mappingProvider, setMappingProvider]);
+    }, [authStatus, synthesisProvider, setSynthesisProvider, mappingProvider, setMappingProvider]);
 }

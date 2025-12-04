@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useMemo, useRef } from "react";
 import { useAtom, useAtomValue } from "jotai";
-import { providerEffectiveStateFamily, isSplitOpenAtom, voiceProviderAtom, synthesisProviderAtom, mappingProviderAtom, composerModelAtom, analystModelAtom, providerAuthStatusAtom, selectedModelsAtom } from "../state/atoms";
+import { providerEffectiveStateFamily, isSplitOpenAtom, synthesisProviderAtom, mappingProviderAtom, composerModelAtom, analystModelAtom, providerAuthStatusAtom, selectedModelsAtom } from "../state/atoms";
 import { LLMProvider } from "../types";
 import { PROVIDER_COLORS } from "../constants";
 import { getProviderById } from "../providers/providerRegistry";
@@ -34,8 +34,7 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
     const longPressRef = useRef<any>(null);
     const isSplitOpen = useAtomValue(isSplitOpenAtom);
     const authStatus = useAtomValue(providerAuthStatusAtom);
-    const [voiceProvider, setVoiceProvider] = useAtom(voiceProviderAtom);
-    const [, setSynthProvider] = useAtom(synthesisProviderAtom);
+    const [synthesisProvider, setSynthesisProvider] = useAtom(synthesisProviderAtom);
     const [mapProviderVal, setMapProvider] = useAtom(mappingProviderAtom);
     const [composerVal, setComposer] = useAtom(composerModelAtom);
     const [analystVal, setAnalyst] = useAtom(analystModelAtom);
@@ -113,12 +112,11 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
     };
 
     const handleSelectSynth = (pid: string) => {
-        setVoiceProvider(pid);
-        setSynthProvider(pid);
+        setSynthesisProvider(pid);
         try {
             localStorage.setItem('htos_voice_locked', 'true');
             chrome?.storage?.local?.set?.({ provider_lock_settings: { voice_locked: true } });
-        } catch {}
+        } catch { }
         setIsMenuOpen(false);
     };
 
@@ -127,7 +125,7 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
         try {
             localStorage.setItem('htos_mapper_locked', 'true');
             chrome?.storage?.local?.set?.({ provider_lock_settings: { mapper_locked: true } });
-        } catch {}
+        } catch { }
         setIsMenuOpen(false);
     };
 
@@ -136,7 +134,7 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
         try {
             localStorage.setItem('htos_composer_locked', 'true');
             chrome?.storage?.local?.set?.({ provider_lock_settings: { composer_locked: true } });
-        } catch {}
+        } catch { }
         setIsMenuOpen(false);
     };
 
@@ -145,7 +143,7 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
         try {
             localStorage.setItem('htos_analyst_locked', 'true');
             chrome?.storage?.local?.set?.({ provider_lock_settings: { analyst_locked: true } });
-        } catch {}
+        } catch { }
         setIsMenuOpen(false);
     };
 
@@ -264,7 +262,7 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
                             <div className="flex flex-wrap gap-2">
                                 {displayProviders.map(p => {
                                     const pid = String(p.id);
-                                    const selected = String(voiceProvider || '') === pid;
+                                    const selected = String(synthesisProvider || '') === pid;
                                     return (
                                         <button
                                             key={`s-${pid}`}

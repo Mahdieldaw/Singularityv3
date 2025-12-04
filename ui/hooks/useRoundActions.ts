@@ -4,8 +4,8 @@ import { useAtom, useAtomValue, useSetAtom } from "jotai";
 
 import {
   turnsMapAtom,
-  synthSelectionsByRoundAtom,
-  mappingSelectionByRoundAtom,
+  synthRecomputeSelectionsByRoundAtom,
+  mappingRecomputeSelectionByRoundAtom,
   currentSessionIdAtom,
   isLoadingAtom,
   uiPhaseAtom,
@@ -29,10 +29,10 @@ export function useRoundActions() {
   const setTurnsMap = useSetAtom(turnsMapAtom);
 
   const [synthSelectionsByRound, setSynthSelectionsByRound] = useAtom(
-    synthSelectionsByRoundAtom,
+    synthRecomputeSelectionsByRoundAtom,
   );
   const [mappingSelectionByRound, setMappingSelectionByRound] = useAtom(
-    mappingSelectionByRoundAtom,
+    mappingRecomputeSelectionByRoundAtom,
   );
   const [currentSessionId] = useAtom(currentSessionIdAtom);
   const setIsLoading = useSetAtom(isLoadingAtom);
