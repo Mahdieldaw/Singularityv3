@@ -1,7 +1,16 @@
 // src/core/preflight-validator.js
 import { selectBestProvider, isProviderAuthorized, PROVIDER_PRIORITIES } from '../../shared/provider-config.js';
 import { getProviderLocks } from '../../shared/provider-locks.js';
-import { PROVIDER_URLS } from '../../shared/auth-config.ts';
+
+// Provider login URLs (duplicated from auth-config.ts for JS compatibility)
+const PROVIDER_URLS = {
+    chatgpt: 'https://chatgpt.com',
+    claude: 'https://claude.ai',
+    gemini: 'https://gemini.google.com',
+    'gemini-pro': 'https://gemini.google.com',
+    'gemini-exp': 'https://gemini.google.com',
+    qwen: 'https://qianwen.com'
+};
 
 /**
  * Get the login URL for a provider

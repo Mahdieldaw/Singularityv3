@@ -425,10 +425,12 @@ export class ConnectionHandler {
         executeRequest.mapper
       ].filter(Boolean);
 
-      throw new Error(
-        `No authorized providers available. Attempted: ${attempted.join(', ')}. ` +
-        'Please log in to at least one AI service.'
-      );
+      const errorMsg = createAuthErrorMessage(
+        attempted,
+        'Pre-workflow validation found no authorized providers'
+      ) || `No authorized providers available. Attempted: ${attempted.join(', ')}. Please log in to at least one AI service.`;
+
+      throw new Error(errorMsg);
     }
   }
 

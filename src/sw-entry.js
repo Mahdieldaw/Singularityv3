@@ -592,29 +592,39 @@ async function handleUnifiedMessage(message, sender, sendResponse) {
 
     switch (message.type) {
       case "REFRESH_AUTH_STATUS": {
-        try {
-          const status = await authManager.getAuthStatus(true); // Force refresh
-          sendResponse({ success: true, data: status });
-        } catch (e) {
-          console.error('[SW] Auth refresh failed:', e);
-          sendResponse({ success: false, error: e.message });
-        }
+        (async () => {
+          try {
+            const status = await authManager.getAuthStatus(true); // Force refresh
+            sendResponse({ success: true, data: status });
+          } catch (e) {
+            console.error('[SW] Auth refresh failed:', e);
+            sendResponse({ success: false, error: e.message });
+          }
+        })();
         return true;
       }
 
       case "VERIFY_AUTH_TOKEN": {
-        try {
-          const { providerId } = message.payload || {};
+        (async () => {
+          try {
+            const { providerId } = message.payload || {};
+            console.log('[SW] VERIFY_AUTH_TOKEN received:', { providerId });
 
-          const status = providerId
-            ? { [providerId]: await authManager.verifyProvider(providerId) }
-            : await authManager.verifyAll();
+            let status;
+            if (providerId) {
+              const isValid = await authManager.verifyProvider(providerId);
+              status = { [providerId]: isValid };
+            } else {
+              status = await authManager.verifyAll();
+            }
 
-          sendResponse({ success: true, data: status });
-        } catch (e) {
-          console.error('[SW] Auth verification failed:', e);
-          sendResponse({ success: false, error: e.message });
-        }
+            console.log('[SW] VERIFY_AUTH_TOKEN result:', status);
+            sendResponse({ success: true, data: status });
+          } catch (e) {
+            console.error('[SW] Auth verification failed:', e);
+            sendResponse({ success: false, error: e.message });
+          }
+        })();
         return true;
       }
 
@@ -1461,6 +1471,7 @@ globalThis.__HTOS_SW = {
   getSessionManager: () => sessionManager,
   getPersistenceLayer: () => persistenceLayer,
   getProviderRegistry: () => providerRegistry,
+
   reinitialize: initializeGlobalServices,
   runTests: async () => {
     try {

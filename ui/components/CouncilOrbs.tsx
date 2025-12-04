@@ -261,17 +261,20 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
                                 {displayProviders.map(p => {
                                     const pid = String(p.id);
                                     const selected = String(synthesisProvider || '') === pid;
+                                    const isUnauthorized = authStatus && authStatus[pid] === false;
                                     return (
                                         <button
                                             key={`s-${pid}`}
-                                            onClick={() => handleSelectSynth(pid)}
+                                            onClick={() => !isUnauthorized && handleSelectSynth(pid)}
+                                            disabled={isUnauthorized}
                                             className={clsx("px-2 py-2 rounded-md text-xs border flex flex-col items-center gap-1 min-w-[96px]",
                                                 selected ? "bg-brand-500/15 border-brand-500 text-text-primary" : "bg-chip border-border-subtle text-text-secondary",
-                                                authStatus && authStatus[pid] === false && "opacity-50"
+                                                isUnauthorized && "opacity-50 cursor-not-allowed"
                                             )}
+                                            title={isUnauthorized ? `Login required for ${p.name}` : undefined}
                                         >
                                             {selected && <span>👑</span>}
-                                            <span>{p.name}</span>
+                                            <span>{p.name}</span> {isUnauthorized ? "🔒" : ""}
                                         </button>
                                     );
                                 })}
@@ -283,17 +286,20 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
                                 {displayProviders.map(p => {
                                     const pid = String(p.id);
                                     const selected = String(mapProviderVal || '') === pid;
+                                    const isUnauthorized = authStatus && authStatus[pid] === false;
                                     return (
                                         <button
                                             key={`m-${pid}`}
-                                            onClick={() => handleSelectMap(pid)}
+                                            onClick={() => !isUnauthorized && handleSelectMap(pid)}
+                                            disabled={isUnauthorized}
                                             className={clsx("px-2 py-2 rounded-md text-xs border flex flex-col items-center gap-1 min-w-[96px]",
                                                 selected ? "bg-brand-500/15 border-brand-500 text-text-primary" : "bg-chip border-border-subtle text-text-secondary",
-                                                authStatus && authStatus[pid] === false && "opacity-50"
+                                                isUnauthorized && "opacity-50 cursor-not-allowed"
                                             )}
+                                            title={isUnauthorized ? `Login required for ${p.name}` : undefined}
                                         >
                                             {selected && <span>🧩</span>}
-                                            <span>{p.name}</span>
+                                            <span>{p.name}</span> {isUnauthorized ? "🔒" : ""}
                                         </button>
                                     );
                                 })}
@@ -305,17 +311,20 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
                                 {displayProviders.map(p => {
                                     const pid = String(p.id);
                                     const selected = String(composerVal || '') === pid;
+                                    const isUnauthorized = authStatus && authStatus[pid] === false;
                                     return (
                                         <button
                                             key={`c-${pid}`}
-                                            onClick={() => handleSelectComposer(pid)}
+                                            onClick={() => !isUnauthorized && handleSelectComposer(pid)}
+                                            disabled={isUnauthorized}
                                             className={clsx("px-2 py-2 rounded-md text-xs border flex flex-col items-center gap-1 min-w-[96px]",
                                                 selected ? "bg-brand-500/15 border-brand-500 text-text-primary" : "bg-chip border-border-subtle text-text-secondary",
-                                                authStatus && authStatus[pid] === false && "opacity-50"
+                                                isUnauthorized && "opacity-50 cursor-not-allowed"
                                             )}
+                                            title={isUnauthorized ? `Login required for ${p.name}` : undefined}
                                         >
                                             {selected && <span>✏️</span>}
-                                            <span>{p.name}</span>
+                                            <span>{p.name}</span> {isUnauthorized ? "🔒" : ""}
                                         </button>
                                     );
                                 })}
@@ -327,17 +336,20 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
                                 {displayProviders.map(p => {
                                     const pid = String(p.id);
                                     const selected = String(analystVal || '') === pid;
+                                    const isUnauthorized = authStatus && authStatus[pid] === false;
                                     return (
                                         <button
                                             key={`a-${pid}`}
-                                            onClick={() => handleSelectAnalyst(pid)}
+                                            onClick={() => !isUnauthorized && handleSelectAnalyst(pid)}
+                                            disabled={isUnauthorized}
                                             className={clsx("px-2 py-2 rounded-md text-xs border flex flex-col items-center gap-1 min-w-[96px]",
                                                 selected ? "bg-brand-500/15 border-brand-500 text-text-primary" : "bg-chip border-border-subtle text-text-secondary",
-                                                authStatus && authStatus[pid] === false && "opacity-50"
+                                                isUnauthorized && "opacity-50 cursor-not-allowed"
                                             )}
+                                            title={isUnauthorized ? `Login required for ${p.name}` : undefined}
                                         >
                                             {selected && <span>🧠</span>}
-                                            <span>{p.name}</span>
+                                            <span>{p.name}</span> {isUnauthorized ? "🔒" : ""}
                                         </button>
                                     );
                                 })}
@@ -349,15 +361,19 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
                                 {displayProviders.map(p => {
                                     const pid = String(p.id);
                                     const checked = !!selectedModels?.[pid];
+                                    const isUnauthorized = authStatus && authStatus[pid] === false;
                                     return (
                                         <button
                                             key={`w-${pid}`}
-                                            onClick={() => setSelectedModels({ ...(selectedModels || {}), [pid]: !checked })}
+                                            onClick={() => !isUnauthorized && setSelectedModels({ ...(selectedModels || {}), [pid]: !checked })}
+                                            disabled={isUnauthorized}
                                             className={clsx("px-2 py-1 rounded-md text-xs border",
-                                                checked ? "bg-brand-500/15 border-brand-500 text-text-primary" : "bg-chip border-border-subtle text-text-secondary"
+                                                checked ? "bg-brand-500/15 border-brand-500 text-text-primary" : "bg-chip border-border-subtle text-text-secondary",
+                                                isUnauthorized && "opacity-50 cursor-not-allowed"
                                             )}
+                                            title={isUnauthorized ? `Login required for ${p.name}` : undefined}
                                         >
-                                            {p.name} {checked ? "✓" : ""}
+                                            {p.name} {checked ? "✓" : ""} {isUnauthorized ? "🔒" : ""}
                                         </button>
                                     );
                                 })}
