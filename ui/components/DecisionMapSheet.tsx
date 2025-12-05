@@ -26,9 +26,10 @@ function parseMappingResponse(response?: string | null) {
     normalized = normalized.slice(0, topoMatch.index).trim();
   }
   const optionsPatterns = [
-    { re: /\n={3,}\s*ALL[_\s]*AVAILABLE[_\s]*OPTIONS\s*={3,}\n/i, minPosition: 0 },
-    { re: /\n[=\-─━═＝]{3,}\s*ALL[_\s]*AVAILABLE[_\s]*OPTIONS\s*[=\-─━═＝]{3,}\n/i, minPosition: 0 },
-    { re: /\n\*{0,2}={3,}\s*ALL[_\s]*AVAILABLE[_\s]*OPTIONS\s*={3,}\*{0,2}\n/i, minPosition: 0 },
+    // Match with optional leading newline - handles both mid-text and start-of-section cases
+    { re: /\n?={3,}\s*ALL[_\s]*AVAILABLE[_\s]*OPTIONS\s*={3,}\n?/i, minPosition: 0 },
+    { re: /\n?[=\-─━═＝]{3,}\s*ALL[_\s]*AVAILABLE[_\s]*OPTIONS\s*[=\-─━═＝]{3,}\n?/i, minPosition: 0 },
+    { re: /\n?\*{0,2}={3,}\s*ALL[_\s]*AVAILABLE[_\s]*OPTIONS\s*={3,}\*{0,2}\n?/i, minPosition: 0 },
     { re: /\n#{1,3}\s*All\s+Available\s+Options:?\n/i, minPosition: 0.25 },
     { re: /\n\*{2}All\s+Available\s+Options:?\*{2}\n/i, minPosition: 0.25 },
     { re: /\nAll\s+Available\s+Options:\n/i, minPosition: 0.3 },
@@ -49,13 +50,22 @@ function parseMappingResponse(response?: string | null) {
   }
   if (bestMatch) {
     const afterDelimiter = normalized.substring(bestMatch.index + bestMatch.length).trim();
-    const listPreview = afterDelimiter.slice(0, 100);
-    const hasListStructure = /^\s*[-*•]\s+|\n\s*[-*•]\s+|^\s*\d+\.\s+|\n\s*\d+\.\s+/.test(listPreview);
+    const listPreview = afterDelimiter.slice(0, 200);
+    // Accept: bullet lists, numbered lists, "Theme:" headers, bold headers (**), or any capitalized heading
+    const hasListStructure = /^\s*[-*•]\s+|\n\s*[-*•]\s+|^\s*\d+\.\s+|\n\s*\d+\.\s+|^\s*\*\*[^*]+\*\*|^\s*Theme\s*:|^\s*[A-Z][^:\n]{2,}:/i.test(listPreview);
+    console.log('[parseMappingResponse] Match found:', { bestMatch, listPreview: listPreview.slice(0, 100), hasListStructure });
     if (hasListStructure) {
       const mapping = normalized.substring(0, bestMatch.index).trim();
       const options = afterDelimiter || null;
+      console.log('[parseMappingResponse] Returning options:', { optionsLength: options?.length });
       return { mapping, options };
     }
+  } else {
+    // Debug: check if any pattern partially matches
+    console.log('[parseMappingResponse] No match found. Checking text for delimiter...',
+      normalized.includes('ALL') ? 'Contains ALL' : 'No ALL',
+      normalized.includes('OPTIONS') ? 'Contains OPTIONS' : 'No OPTIONS'
+    );
   }
   return { mapping: normalized, options: null };
 }
@@ -184,8 +194,16 @@ export const DecisionMapSheet = React.memo(() => {
   }, [latestMapping]);
 
   const optionsText = useMemo(() => {
+    // First check if backend already extracted options into meta (stored as 'allAvailableOptions')
+    const fromMeta = (latestMapping as any)?.meta?.allAvailableOptions || null;
+    if (fromMeta) {
+      console.log('[DecisionMapSheet] Using options from meta.allAvailableOptions:', fromMeta.length);
+      return fromMeta;
+    }
+    // Fallback to frontend parsing (for historical data or if backend didn't extract)
     const t = latestMapping?.text || '';
     const { options } = parseMappingResponse(String(t));
+    console.log('[DecisionMapSheet] Frontend parsed options:', options?.length || 0);
     return options;
   }, [latestMapping]);
 
@@ -202,7 +220,7 @@ export const DecisionMapSheet = React.memo(() => {
       }
       if (!providerId || !aiTurn) return;
       setActiveSplitPanel({ turnId: aiTurn.id, providerId });
-    } catch {}
+    } catch { }
   }, [latestMapping, aiTurn, setActiveSplitPanel]);
 
   const markdownComponents = useMemo(() => ({
@@ -255,7 +273,7 @@ export const DecisionMapSheet = React.memo(() => {
           animate={{ y: 0 }}
           exit={{ y: "100%" }}
           transition={{ type: "spring", damping: 25, stiffness: 300 }}
-          className="fixed inset-x-0 bottom-0 h-[70vh] bg-surface-raised border-t border-border-strong shadow-elevated z-[2000] rounded-t-2xl flex flex-col"
+          className="fixed inset-x-0 bottom-0 h-[70vh] bg-surface-raised border-t border-border-strong shadow-elevated z-[3500] rounded-t-2xl flex flex-col pointer-events-auto"
         >
           <div
             className="h-8 flex items-center justify-center cursor-grab active:cursor-grabbing border-b border-border-subtle hover:bg-surface-highlight transition-colors rounded-t-2xl"
@@ -264,7 +282,7 @@ export const DecisionMapSheet = React.memo(() => {
             <div className="w-12 h-1.5 bg-border-subtle rounded-full" />
           </div>
 
-          <div className="flex items-center gap-2 px-4 py-2 border-b border-border-subtle">
+          <div className="flex items-center justify-around gap-4 px-8 py-3 border-b border-border-subtle max-w-2xl mx-auto">
             {[
               { key: 'graph', label: 'Graph' },
               { key: 'narrative', label: 'Narrative' },
@@ -286,10 +304,16 @@ export const DecisionMapSheet = React.memo(() => {
             ))}
           </div>
 
-          <div className="flex-1 overflow-hidden relative">
+          <div className="flex-1 overflow-hidden relative pointer-events-auto" onClick={(e) => e.stopPropagation()}>
             {activeTab === 'graph' && (
-              <div ref={containerRef} className="w-full h-full">
-                <DecisionMapGraph nodes={adapted.nodes} edges={adapted.edges} width={dims.w} height={dims.h} />
+              <div ref={containerRef} className="w-full h-full flex items-center justify-center p-4 pointer-events-auto" style={{ isolation: 'isolate' }}>
+                {/* Centered graph with padding, capture all pointer events */}
+                <DecisionMapGraph
+                  nodes={adapted.nodes}
+                  edges={adapted.edges}
+                  width={Math.min(dims.w - 48, 1200)}
+                  height={Math.max(dims.h - 32, 200)}
+                />
               </div>
             )}
 
@@ -309,7 +333,7 @@ export const DecisionMapSheet = React.memo(() => {
               <div className="p-4 h-full overflow-y-auto">
                 {optionsText ? (
                   <div className="prose prose-sm max-w-none dark:prose-invert leading-7 text-sm">
-                    <MarkdownDisplay content={optionsText} />
+                    <MarkdownDisplay content={transformCitations(optionsText)} components={markdownComponents} />
                   </div>
                 ) : (
                   <div className="text-text-muted text-sm">No options available.</div>

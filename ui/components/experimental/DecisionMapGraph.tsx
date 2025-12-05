@@ -43,6 +43,7 @@ const DecisionMapGraph: React.FC<Props> = ({
     const [nodes, setNodes] = useState<ClaimNode[]>([]);
     const [edges, setEdges] = useState<ClaimEdge[]>([]);
     const [hoveredNode, setHoveredNode] = useState<string | null>(null);
+    const [hoveredEdge, setHoveredEdge] = useState<{ edge: ClaimEdge; x: number; y: number } | null>(null);
 
     // Initialize and update simulation when input changes
     useEffect(() => {
@@ -73,29 +74,36 @@ const DecisionMapGraph: React.FC<Props> = ({
             simulationRef.current.stop();
         }
 
-        // Create new simulation with SEMANTIC forces
+        // Create new simulation with SEMANTIC forces - WIDE LAYOUT for sheet
+        // Calculate horizontal spread based on aspect ratio (sheet is wide)
+        const aspectRatio = width / height;
+        const isWideLayout = aspectRatio > 1.5;
+
         const simulation = d3.forceSimulation<ClaimNode>(simNodes)
-            .force('charge', d3.forceManyBody().strength(-300))
+            // Increased repulsion for wider spread
+            .force('charge', d3.forceManyBody().strength(isWideLayout ? -500 : -300))
             .force('link', d3.forceLink<ClaimNode, ClaimEdge>(simEdges)
                 .id(d => d.id)
                 // SEMANTIC DISTANCES: encode relationship meaning spatially
+                // Increased for wide layout to fill horizontal space
                 .distance(link => {
-                    if (link.type === 'complements') return 80;   // Close together
-                    if (link.type === 'conflicts') return 200;    // Far apart
-                    if (link.type === 'prerequisite') return 120; // Medium distance
-                    return 100;
+                    const baseDist = link.type === 'complements' ? 100 :  // Close together
+                        link.type === 'conflicts' ? 250 :    // Far apart
+                            link.type === 'prerequisite' ? 150 : 120; // Medium distance
+                    return isWideLayout ? baseDist * 1.3 : baseDist;
                 })
                 // SEMANTIC STRENGTHS: encode relationship importance
                 .strength(link => {
-                    if (link.type === 'complements') return 0.8;   // Strong attraction
-                    if (link.type === 'conflicts') return 0.3;     // Weak (let repulsion dominate)
-                    if (link.type === 'prerequisite') return 0.6;  // Medium
-                    return 0.5;
+                    if (link.type === 'complements') return 0.6;   // Slightly reduced to allow spread
+                    if (link.type === 'conflicts') return 0.2;     // Very weak (let repulsion dominate)
+                    if (link.type === 'prerequisite') return 0.4;  // Medium
+                    return 0.4;
                 }))
-            .force('center', d3.forceCenter(width / 2, height / 2))
-            .force('collision', d3.forceCollide<ClaimNode>().radius(d => 22 + d.consensusStrength * 20))
-            .force('x', d3.forceX(width / 2).strength(0.03))
-            .force('y', d3.forceY(height / 2).strength(0.03))
+            .force('center', d3.forceCenter(width / 2, height / 2).strength(0.05))
+            .force('collision', d3.forceCollide<ClaimNode>().radius(d => 28 + d.consensusStrength * 22))
+            // Strong horizontal spread, very weak vertical centering
+            .force('x', d3.forceX(width / 2).strength(isWideLayout ? 0.015 : 0.03))
+            .force('y', d3.forceY(height / 2).strength(isWideLayout ? 0.08 : 0.03))
             // DIRECTIONAL FLOW: prerequisites flow left-to-right
             .force('prerequisite', () => {
                 simEdges.forEach(link => {
@@ -322,6 +330,8 @@ const DecisionMapGraph: React.FC<Props> = ({
                             edge.type === 'conflicts' ? '#ef4444' :     // Red for tension
                                 '#3b82f6';                                   // Blue for flow
                     const isDashed = edge.type === 'conflicts';
+                    const midX = (coords.x1 + coords.x2) / 2;
+                    const midY = (coords.y1 + coords.y2) / 2;
 
                     return (
                         <g key={`edge-${i}`}>
@@ -351,6 +361,18 @@ const DecisionMapGraph: React.FC<Props> = ({
                                         edge.type === 'conflicts' ? 'url(#edgeGlowRed)' :
                                             'url(#edgeGlowBlue)'
                                 }
+                            />
+                            {/* Invisible wider hit area for hover */}
+                            <line
+                                x1={coords.x1}
+                                y1={coords.y1}
+                                x2={coords.x2}
+                                y2={coords.y2}
+                                stroke="transparent"
+                                strokeWidth={20}
+                                style={{ cursor: 'pointer' }}
+                                onMouseEnter={() => setHoveredEdge({ edge, x: midX, y: midY })}
+                                onMouseLeave={() => setHoveredEdge(null)}
                             />
                         </g>
                     );
@@ -427,30 +449,29 @@ const DecisionMapGraph: React.FC<Props> = ({
                                 opacity={isHovered ? 0.7 : 0.4}
                             />
 
-                            {/* Label with styled background */}
-                            {(isHovered || node.consensusStrength > 0.7) && (
-                                <g>
+                            {/* Label for high-consensus nodes only (they're big, rarely masked) */}
+                            {!isHovered && node.consensusStrength > 0.7 && (
+                                <g style={{ pointerEvents: 'none' }}>
                                     <rect
-                                        x={-55}
-                                        y={radius + 10}
-                                        width={110}
-                                        height={20}
+                                        x={-80}
+                                        y={radius + 8}
+                                        width={160}
+                                        height={22}
                                         fill="rgba(17,24,39,0.95)"
                                         stroke={color}
                                         strokeWidth={1.2}
                                         strokeOpacity={0.6}
-                                        rx={5}
+                                        rx={6}
                                     />
                                     <text
-                                        y={radius + 24}
+                                        y={radius + 23}
                                         textAnchor="middle"
                                         fill="rgba(255,255,255,0.97)"
                                         fontSize={11}
                                         fontWeight={600}
-                                        style={{ pointerEvents: 'none' }}
                                     >
-                                        {node.label.length > 16
-                                            ? node.label.slice(0, 16) + '…'
+                                        {node.label.length > 24
+                                            ? node.label.slice(0, 24) + '…'
                                             : node.label}
                                     </text>
                                 </g>
@@ -472,6 +493,87 @@ const DecisionMapGraph: React.FC<Props> = ({
                         </g>
                     );
                 })}
+            </g>
+
+            {/* HOVERED NODE LABEL - Rendered AFTER all nodes for proper z-index (appears on top) */}
+            {hoveredNode && (() => {
+                const node = nodes.find(n => n.id === hoveredNode);
+                if (!node) return null;
+                const x = node.x || 0;
+                const y = node.y || 0;
+                const baseRadius = 16;
+                const radius = baseRadius + node.consensusStrength * 24;
+                const hue = 180 + node.consensusStrength * 110;
+                const saturation = 75 + node.consensusStrength * 15;
+                const lightness = 55 + node.consensusStrength * 10;
+                const color = `hsl(${hue}, ${saturation}%, ${lightness}%)`;
+
+                return (
+                    <g transform={`translate(${x}, ${y})`} style={{ pointerEvents: 'none' }}>
+                        <rect
+                            x={-80}
+                            y={radius + 8}
+                            width={160}
+                            height={22}
+                            fill="rgba(17,24,39,0.97)"
+                            stroke={color}
+                            strokeWidth={1.5}
+                            strokeOpacity={0.8}
+                            rx={6}
+                        />
+                        <text
+                            y={radius + 23}
+                            textAnchor="middle"
+                            fill="rgba(255,255,255,0.97)"
+                            fontSize={11}
+                            fontWeight={600}
+                        >
+                            {node.label.length > 24
+                                ? node.label.slice(0, 24) + '…'
+                                : node.label}
+                        </text>
+                    </g>
+                );
+            })()}
+
+            {/* Edge reason tooltip - rendered last so it's on top */}
+            {hoveredEdge && hoveredEdge.edge.reason && (
+                <g transform={`translate(${hoveredEdge.x}, ${hoveredEdge.y})`} style={{ pointerEvents: 'none' }}>
+                    <rect
+                        x={-100}
+                        y={-28}
+                        width={200}
+                        height={24}
+                        fill="rgba(17,24,39,0.97)"
+                        stroke={hoveredEdge.edge.type === 'complements' ? '#10b981' : hoveredEdge.edge.type === 'conflicts' ? '#ef4444' : '#3b82f6'}
+                        strokeWidth={1.5}
+                        rx={6}
+                    />
+                    <text
+                        y={-12}
+                        textAnchor="middle"
+                        fill="rgba(255,255,255,0.95)"
+                        fontSize={10}
+                        fontWeight={500}
+                    >
+                        {hoveredEdge.edge.reason.length > 35 ? hoveredEdge.edge.reason.slice(0, 35) + '…' : hoveredEdge.edge.reason}
+                    </text>
+                </g>
+            )}
+
+            {/* Legend */}
+            <g transform={`translate(${width - 140}, 20)`}>
+                <rect x={-10} y={-10} width={135} height={80} fill="rgba(17,24,39,0.85)" rx={8} stroke="rgba(139,92,246,0.3)" strokeWidth={1} />
+                <text x={0} y={8} fill="rgba(255,255,255,0.8)" fontSize={10} fontWeight={600}>Legend</text>
+
+                <line x1={0} y1={24} x2={30} y2={24} stroke="#10b981" strokeWidth={2.5} />
+                <text x={38} y={28} fill="rgba(255,255,255,0.7)" fontSize={9}>Complements</text>
+
+                <line x1={0} y1={42} x2={30} y2={42} stroke="#ef4444" strokeWidth={2.5} strokeDasharray="6,4" />
+                <text x={38} y={46} fill="rgba(255,255,255,0.7)" fontSize={9}>Conflicts</text>
+
+                <line x1={0} y1={60} x2={30} y2={60} stroke="#3b82f6" strokeWidth={2.5} markerEnd="url(#arrowBlue)" />
+                <text x={38} y={64} fill="rgba(255,255,255,0.7)" fontSize={9}>Prerequisite</text>
             </g>
         </svg >
     );

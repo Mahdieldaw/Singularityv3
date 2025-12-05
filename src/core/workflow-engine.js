@@ -96,15 +96,15 @@ function extractOptionsAndStrip(text) {
     .replace(/\uFF1D/g, '=');
 
   // Patterns ordered by strictness (stricter first)
+  // NOTE: Use ={2,} to match 2+ equals signs (models sometimes output ==, not ===)
   const patterns = [
-    // Require newline before and equals signs (strongest delimiter)
-    { re: /\n={3,}\s*ALL_AVAILABLE_OPTIONS\s*={3,}\n/i, minPosition: 0 },
-    { re: /\n={3,}\s*ALL\s+AVAILABLE\s+OPTIONS\s*={3,}\n/i, minPosition: 0 },
-    { re: /\n={3,}\s*ALL\s+OPTIONS\s*={3,}\n/i, minPosition: 0 },
+    // Standard delimiter with 2+ equals signs, optional leading newline
+    { re: /\n?={2,}\s*ALL[_\s]*AVAILABLE[_\s]*OPTIONS\s*={2,}\n?/i, minPosition: 0 },
+    { re: /\n?={2,}\s*ALL[_\s]*OPTIONS\s*={2,}\n?/i, minPosition: 0 },
 
     // Markdown wrapped variants
-    { re: /\n\*\*\s*={3,}\s*ALL_AVAILABLE_OPTIONS\s*={3,}\s*\*\*\n/i, minPosition: 0 },
-    { re: /\n###\s*={3,}\s*ALL_AVAILABLE_OPTIONS\s*={3,}\n/i, minPosition: 0 },
+    { re: /\n\*\*\s*={2,}\s*ALL[_\s]*AVAILABLE[_\s]*OPTIONS\s*={2,}\s*\*\*\n?/i, minPosition: 0 },
+    { re: /\n###\s*={2,}\s*ALL[_\s]*AVAILABLE[_\s]*OPTIONS\s*={2,}\n?/i, minPosition: 0 },
 
     // Heading styles (require newline before) - can appear mid-document
     { re: /\n\*\*All Available Options:?\*\*\n/i, minPosition: 0.25 },
@@ -146,17 +146,19 @@ function extractOptionsAndStrip(text) {
   // Extract what comes after the delimiter
   const afterDelimiter = normalized.slice(idx + len).trim();
 
-  // Validation: Check if what follows looks like a list (starts with -, *, 1., etc. within first 100 chars)
-  const listPreview = afterDelimiter.slice(0, 100);
-  const hasListStructure = /^\s*[-*•]\s+|\n\s*[-*•]\s+|^\s*\d+\.\s+|\n\s*\d+\.\s+/.test(listPreview);
+  // Validation: Check if what follows looks like structured content
+  // Accept: bullet lists, numbered lists, "Theme:" headers, bold headers (**), or any capitalized heading
+  const listPreview = afterDelimiter.slice(0, 200);
+  const hasListStructure = /^\s*[-*•]\s+|\n\s*[-*•]\s+|^\s*\d+\.\s+|\n\s*\d+\.\s+|^\s*\*\*[^*]+\*\*|^\s*Theme\s*:|^\s*###?\s+Theme|^\s*[A-Z][^:\n]{2,}:/i.test(listPreview);
 
   if (!hasListStructure) {
-    console.warn('[extractOptionsAndStrip] Matched delimiter but no list structure found, rejecting match at position', idx);
+    console.warn('[extractOptionsAndStrip] Matched delimiter but no list structure found, rejecting match at position', idx, 'Preview:', listPreview.slice(0, 100));
     return { text: normalized, options: null };
   }
 
   const before = normalized.slice(0, idx).trim();
   const after = afterDelimiter;
+  console.log('[extractOptionsAndStrip] Successfully extracted options, length:', after.length);
   return { text: before, options: after };
 }
 
