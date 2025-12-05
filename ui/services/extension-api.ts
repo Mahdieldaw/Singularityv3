@@ -39,7 +39,7 @@ class ExtensionAPI {
 
     try {
       window.addEventListener("beforeunload", () => this.disconnectAll());
-      window.addEventListener("unload", () => this.disconnectAll());
+      window.addEventListener("pagehide", () => this.disconnectAll());
     } catch (e) {
       console.warn("[ExtensionAPI] Failed to attach unload handlers", e);
     }
