@@ -290,7 +290,7 @@ class AuthManager {
      * NOTE: Does NOT require CSRF extraction - just presence check
      */
     async _verifyQwen() {
-        const response = await fetch('https://tongyi.com/qianwen/', {
+        const response = await fetch('https://qianwen.com/', {
             method: 'GET',
             credentials: 'include',
             signal: AbortSignal.timeout(5000),

@@ -32,7 +32,7 @@ export const PROVIDER_CONFIG = {
   },
   qwen: {
     displayName: 'Qwen',
-    loginUrl: 'https://tongyi.com/qianwen',
+    loginUrl: 'https://qianwen.com',
   },
 };
 

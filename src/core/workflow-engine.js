@@ -265,32 +265,12 @@ function buildMappingPrompt(
 
   return `You are not a synthesizer. You are a provenance tracker and option cataloger, a mirror that reveals what others cannot see.
 
-CRUCIAL: Before writing anything, extract every distinct approach/stance/capability across synthesis + all raw outputs and assign each a permanent canonical label (max 6 words, precise, unique). These labels are sacred — you will reuse them verbatim (no synonyms, no rephrasing) in narrative, options, and graph.
+CRUCIAL: Before writing, extract every distinct approach/stance/capability from synthesis + raw outputs. Assign each a permanent canonical label (max 6 words, precise, unique). These labels link narrative ↔ options ↔ graph—reuse them verbatim throughout.
 
 Task: Present ALL insights from the model outputs below in their most useful form for decision-making on the user's prompt that maps the terrain and catalogs every approach.
 
 <user_prompt>: ${String(userPrompt || "")} </user_prompt>
 
-Task 1
-Write a fluid, insightful narrative that explains:
-- Where models agreed (and why that might be a blind spot)
-- Where they diverged (and what that reveals) **Surface the invisible** — Highlight consensus from 2+ models, unique sightings from one model as natural flow.
-- Trade-offs each model made **Map the landscape** — Group similar ideas, preserving tensions and contradictions.
-- Questions the synthesis didn't answer
-**Frame the choices** — present alternatives as "If you prioritize X, this path fits because Y."
-Embed citations [1], [2, 3] throughout.
-
-**Anticipate the journey** — End with a subtle suggestion: "This naturally leads to questions about..."
-
- or "The next consideration might be..." based on the tensions and gaps identified.
-**Internal format for reasoning - NEVER output directly:**
-- What Everyone Sees, consensus
-- The Tensions, disagreements
-- The Unique Insights
-- The Choice Framework
-- Confidence Check
-
-Finally output your response as a narrative explaining everything implicitly to the user, like a natural response to the user's prompt—fluid, insightful, redacting model names and extraneous details. Build feedback as emergent wisdom—evoke clarity, agency, and subtle awe. Weave your final narrative as representation of a cohesive response of the collective thought to the user's prompt
 A synthesis has been created:
 <synthesis>${synthesisText}</synthesis>
 
@@ -298,28 +278,48 @@ A synthesis has been created:
 ${modelOutputsBlock}
 </model_outputs>
 
+**Task 1: Narrative**
+
+Write a fluid, insightful narrative that explains:
+- Where models agreed (and why that might be a blind spot)
+- Where they diverged (and what that reveals)
+- Trade-offs each model made
+- Questions the synthesis didn't answer
+
+**Surface the invisible** — Highlight consensus (2+ models) and unique insights (single model) naturally.
+**Map the landscape** — Group similar ideas, preserving tensions and contradictions.
+**Frame the choices** — Present alternatives as "If you prioritize X, this path fits because Y."
+**Anticipate the journey** — End with "This naturally leads to questions about..." based on tensions identified.
+
+Embed citations [1], [2, 3] throughout. When discussing an approach, use its canonical label in **bold** as a recognizable anchor.
+
+**Internal reasoning (never output):**
+- What Everyone Sees / The Tensions / The Unique Insights / The Choice Framework / Confidence Check
+
+Output as a natural response to the user's prompt—fluid, insightful, model names redacted. Build feedback as emergent wisdom—evoke clarity, agency, and subtle awe.
+
 **Task 2: All Options Inventory**
+
 After your narrative, add exactly:
 "===ALL_AVAILABLE_OPTIONS==="
 
-Then list EVERY distinct approach found in synthesis + raw outputs, grouped by theme.  
-Each bullet starts with **Canonical Label**: (exact same label you used in narrative/graph)  
-- Brief 1-2 sentence summary
-- Inline citations: [1, 3, 5] referencing MODEL numbers
+List EVERY distinct approach from synthesis + raw outputs (including any the synthesis missed):
+- **[Canonical Label]:** 1-2 sentence summary [1, 3, 5]
 - Group by theme
 - Deduplicate rigorously
 - Order by prevalence
 
 **Task 3: Topology (for visualization)**
+
 After the options list, add exactly:
 "===GRAPH_TOPOLOGY==="
 
-Output a JSON object with this structure:
+Output JSON:
 {
   "nodes": [
     {
       "id": "opt_1",
-      "label": "<exact canonical label from above, max 10 words>",  
+      "label": "<exact canonical label from Task 2>",
       "theme": "<theme name>",
       "supporters": [<model numbers>],
       "support_count": <number>
@@ -335,14 +335,14 @@ Output a JSON object with this structure:
   ]
 }
 
-Rules for edges:
-- "conflicts": These options are mutually exclusive or represent opposing philosophies
-- "complements": These options work well together or one enables the other
-- "prerequisite": This option should be done before the other
-- Only include edges where a clear relationship exists
-- Every node must have at least one edge
+Edge types:
+- **conflicts**: Mutually exclusive or opposing philosophies
+- **complements**: Work well together or one enables the other
+- **prerequisite**: Must be done before the other
 
-Canonical labels are sacred. Never deviate from them across any section.
+Only include edges where clear relationships exist. Every node needs ≥1 edge.
+
+Labels must match exactly across narrative, options, and graph nodes.
 
 Begin.`;
 }

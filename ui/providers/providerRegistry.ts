@@ -71,7 +71,7 @@ export const INITIAL_PROVIDERS: ProviderConfig[] = [
     name: "Qwen",
     color: "#00A9E0",
     logoBgClass: "bg-cyan-500",
-    hostnames: ["tongyi.aliyun.com"],
+    hostnames: ["qianwen.com", "qianwen.aliyun.com"],
     icon: QwenIcon,
     emoji: "🤖",
     logoSrc: QwenLogo,

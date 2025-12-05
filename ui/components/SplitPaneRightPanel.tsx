@@ -10,7 +10,7 @@ export const SplitPaneRightPanel = React.memo(() => {
     if (!panelState) return null;
 
     return (
-        <div className="h-full flex flex-col bg-surface-raised border-l border-border-subtle">
+        <div className="h-full w-full min-w-0 flex flex-col bg-surface-raised border-l border-border-subtle overflow-hidden">
             <ModelResponsePanel
                 turnId={panelState.turnId}
                 providerId={panelState.providerId}

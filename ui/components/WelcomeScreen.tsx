@@ -76,8 +76,8 @@ const WelcomeScreen = ({ onSendPrompt, isLoading }: WelcomeScreenProps) => {
         </button>
       )}
 
-      <div className="fixed inset-x-0 bottom-[96px] pointer-events-auto z-[3002]">
-        <div className="mx-auto w-full max-w-[820px] opacity-20 hover:opacity-100 transition-opacity">
+      <div className="fixed inset-x-0 bottom-[96px] pointer-events-auto z-[3002] flex justify-center">
+        <div className="w-full max-w-[820px] opacity-50 hover:opacity-100 transition-opacity">
           <CouncilOrbs
             turnId="welcome"
             providers={providers}

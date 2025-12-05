@@ -27,7 +27,7 @@ export const ModelResponsePanel: React.FC<ModelResponsePanelProps> = React.memo(
     const hasHistory = historyCount > 1;
 
     return (
-        <div className="h-full flex flex-col bg-surface-raised border border-border-subtle rounded-2xl shadow-lg overflow-hidden animate-in slide-in-from-right duration-300">
+        <div className="h-full w-full min-w-0 flex flex-col bg-surface-raised border border-border-subtle rounded-2xl shadow-lg overflow-hidden animate-in slide-in-from-right duration-300">
             {/* Header */}
             <div className="flex items-center justify-between px-4 py-3 border-b border-border-subtle bg-surface-raised">
                 <div className="flex items-center gap-2">
@@ -49,8 +49,8 @@ export const ModelResponsePanel: React.FC<ModelResponsePanelProps> = React.memo(
             </div>
 
             {/* Content */}
-            <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
-                <div className="prose prose-sm max-w-none dark:prose-invert">
+            <div className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden p-4 custom-scrollbar">
+                <div className="prose prose-sm max-w-none dark:prose-invert break-words" style={{ overflowWrap: 'anywhere' }}>
                     <MarkdownDisplay content={state.latestResponse.text || ""} />
                 </div>
             </div>

@@ -236,7 +236,7 @@ export default function ChatView() {
                 </div>
               </PanelResizeHandle>
 
-              <Panel defaultSize={40} minSize={0}>
+              <Panel defaultSize={40} minSize={0} className="min-w-0 overflow-hidden">
                 <SplitPaneRightPanel />
               </Panel>
             </>

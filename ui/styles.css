@@ -396,6 +396,247 @@
   .council-tray-container {
     transition: opacity 0.5s ease-in-out;
   }
+
+  /* Decision Map Sheet Premium Styling */
+  .decision-sheet-bg {
+    background: #000000;
+    position: relative;
+  }
+
+  /* Noise texture overlay */
+  .decision-sheet-bg::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+    opacity: 0.03;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  /* Pill-shaped tabs */
+  .decision-tab-pill {
+    padding: 0.5rem 1.25rem;
+    border-radius: 9999px;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    letter-spacing: 0.025em;
+    transition: all 0.3s ease;
+    border: 1px solid transparent;
+    background: rgba(255, 255, 255, 0.05);
+    color: rgba(255, 255, 255, 0.6);
+  }
+
+  .decision-tab-pill:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.85);
+  }
+
+  /* Graph tab active - violet */
+  .decision-tab-active-graph {
+    background: rgba(139, 92, 246, 0.2);
+    border-color: rgba(139, 92, 246, 0.5);
+    color: #a78bfa;
+    box-shadow: 0 0 20px rgba(139, 92, 246, 0.25), inset 0 0 12px rgba(139, 92, 246, 0.1);
+  }
+
+  /* Narrative tab active - amber */
+  .decision-tab-active-narrative {
+    background: rgba(245, 158, 11, 0.2);
+    border-color: rgba(245, 158, 11, 0.5);
+    color: #fbbf24;
+    box-shadow: 0 0 20px rgba(245, 158, 11, 0.25), inset 0 0 12px rgba(245, 158, 11, 0.1);
+  }
+
+  /* Options tab active - emerald */
+  .decision-tab-active-options {
+    background: rgba(16, 185, 129, 0.2);
+    border-color: rgba(16, 185, 129, 0.5);
+    color: #34d399;
+    box-shadow: 0 0 20px rgba(16, 185, 129, 0.25), inset 0 0 12px rgba(16, 185, 129, 0.1);
+  }
+
+  /* Model orb badges (40px) for supporters */
+  .decision-orb-badge {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 30% 30%, rgba(255, 255, 255, 0.3), rgba(0, 0, 0, 0.4));
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 700;
+    color: white;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .decision-orb-badge::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: conic-gradient(from 0deg, var(--orb-color), transparent 80%);
+    opacity: 0.7;
+    animation: spin 6s linear infinite;
+  }
+
+  .decision-orb-badge:hover {
+    transform: scale(1.15);
+    box-shadow: 0 0 16px var(--orb-color);
+  }
+
+  .decision-orb-badge span {
+    position: relative;
+    z-index: 1;
+  }
+
+  /* Detail view header */
+  .decision-detail-header {
+    font-size: 1.5rem;
+    font-weight: 700;
+    line-height: 1.3;
+    max-width: 80%;
+    text-align: center;
+  }
+
+  /* Narrative manuscript prose styling */
+  .narrative-prose {
+    max-width: 48rem;
+    margin: 0 auto;
+    line-height: 1.75;
+    font-size: 1rem;
+    color: rgba(255, 255, 255, 0.9);
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  }
+
+  .narrative-prose p {
+    margin-bottom: 1.25rem;
+  }
+
+  /* Superscript citations in narrative */
+  .narrative-prose .citation-link {
+    font-size: 0.7em;
+    vertical-align: super;
+    color: #8b5cf6;
+    cursor: pointer;
+    padding: 0 2px;
+    transition: color 0.2s ease;
+  }
+
+  .narrative-prose .citation-link:hover {
+    color: #a78bfa;
+    text-decoration: underline;
+  }
+
+  /* Highlighted sentence in detail view */
+  .narrative-highlight {
+    background: rgba(139, 92, 246, 0.2);
+    border-left: 3px solid #8b5cf6;
+    padding: 0.5rem 1rem;
+    margin: 0.5rem 0;
+    border-radius: 0 8px 8px 0;
+  }
+
+  /* Theme section in Options tab */
+  .options-theme-section {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    margin-bottom: 1rem;
+    overflow: hidden;
+  }
+
+  .options-theme-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 1rem 1.25rem;
+    cursor: pointer;
+    transition: background 0.2s ease;
+  }
+
+  .options-theme-header:hover {
+    background: rgba(255, 255, 255, 0.05);
+  }
+
+  .options-theme-title {
+    font-weight: 600;
+    font-size: 1rem;
+    color: rgba(255, 255, 255, 0.9);
+  }
+
+  .options-theme-chevron {
+    transition: transform 0.2s ease;
+    color: rgba(255, 255, 255, 0.5);
+  }
+
+  .options-theme-chevron.expanded {
+    transform: rotate(180deg);
+  }
+
+  .options-theme-content {
+    padding: 0 1.25rem 1rem;
+  }
+
+  /* Option card */
+  .option-card {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 10px;
+    padding: 1rem;
+    margin-bottom: 0.75rem;
+    transition: all 0.2s ease;
+  }
+
+  .option-card:hover {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(255, 255, 255, 0.15);
+  }
+
+  .option-card-title {
+    font-weight: 600;
+    font-size: 0.9375rem;
+    color: rgba(255, 255, 255, 0.95);
+    margin-bottom: 0.5rem;
+  }
+
+  .option-card-description {
+    font-size: 0.875rem;
+    color: rgba(255, 255, 255, 0.7);
+    line-height: 1.5;
+    margin-bottom: 0.75rem;
+  }
+
+  .option-card-supporters {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+  }
+
+  /* Back button in detail view */
+  .decision-back-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 1rem;
+    background: rgba(139, 92, 246, 0.15);
+    border: 1px solid rgba(139, 92, 246, 0.4);
+    border-radius: 8px;
+    color: #a78bfa;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+
+  .decision-back-btn:hover {
+    background: rgba(139, 92, 246, 0.25);
+    box-shadow: 0 0 12px rgba(139, 92, 246, 0.3);
+  }
 }
 
 @layer utilities {
@@ -458,6 +699,19 @@
   @keyframes spin {
     to {
       transform: rotate(360deg);
+    }
+  }
+
+  /* Conflict edge slow pulse for red dashed lines */
+  @keyframes conflictPulse {
+
+    0%,
+    100% {
+      stroke-opacity: 0.4;
+    }
+
+    50% {
+      stroke-opacity: 0.8;
     }
   }
 
