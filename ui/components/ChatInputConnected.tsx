@@ -1,5 +1,5 @@
 import React, { useCallback } from "react";
-import { useAtom, useSetAtom } from "jotai";
+import { useAtom, useSetAtom, useAtomValue } from "jotai";
 import { useChat } from "../hooks/useChat";
 import {
   isLoadingAtom,
@@ -18,10 +18,16 @@ import {
   activeRecomputeStateAtom,
   currentSessionIdAtom,
   toastAtom,
+  analystDrawerOpenAtom,
+  originalPromptAtom,
+  composerDraftAtom,
+  currentRefinementStateAtom,
+  messageRefinementMetaAtom,
 } from "../state/atoms";
 import api from "../services/extension-api";
 import ChatInput from "./ChatInput";
 import RefinerBlock from "./RefinerBlock";
+import AnalystDrawer from "./AnalystDrawer";
 
 const ChatInputConnected = () => {
   const [isLoading] = useAtom(isLoadingAtom as any) as [boolean, any];
@@ -56,6 +62,13 @@ const ChatInputConnected = () => {
   const [activeTarget, setActiveTarget] = useAtom(activeProviderTargetAtom);
   const [currentSessionId] = useAtom(currentSessionIdAtom);
   const setActiveRecomputeState = useSetAtom(activeRecomputeStateAtom);
+
+  // New refinement state
+  const [analystDrawerOpen, setAnalystDrawerOpen] = useAtom(analystDrawerOpenAtom);
+  const [originalPrompt, setOriginalPrompt] = useAtom(originalPromptAtom);
+  const [composerDraft, setComposerDraft] = useAtom(composerDraftAtom);
+  const [currentRefinementState, setCurrentRefinementState] = useAtom(currentRefinementStateAtom);
+  const setMessageRefinementMeta = useSetAtom(messageRefinementMetaAtom);
 
   const handleSend = useCallback(
     (prompt: string) => {
@@ -151,16 +164,79 @@ const ChatInputConnected = () => {
 
   const handleExplain = useCallback(
     (prompt: string) => {
-      void refinePrompt(prompt, "explain");
+      // Open Analyst drawer instead of inline refiner
+      void refinePrompt(prompt, "explain").then(() => {
+        setAnalystDrawerOpen(true);
+        // Save original if not already saved
+        if (!originalPrompt) {
+          setOriginalPrompt(prompt);
+        }
+      });
     },
-    [refinePrompt],
+    [refinePrompt, setAnalystDrawerOpen, originalPrompt, setOriginalPrompt],
   );
 
   const handleCompose = useCallback(
     (prompt: string) => {
-      void refinePrompt(prompt, "compose");
+      // Save original before composing
+      if (!originalPrompt) {
+        setOriginalPrompt(prompt);
+      }
+      void refinePrompt(prompt, "compose").then(() => {
+        setCurrentRefinementState((prev) => prev === "analyst" ? "both" : "composer");
+      });
     },
-    [refinePrompt],
+    [refinePrompt, originalPrompt, setOriginalPrompt, setCurrentRefinementState],
+  );
+
+  // Handle "Use this" from Analyst drawer
+  const handleUseVariant = useCallback(
+    (variant: string) => {
+      setChatInputValue(variant);
+      setAnalystDrawerOpen(false);
+      setCurrentRefinementState((prev) => prev === "composer" ? "both" : "analyst");
+    },
+    [setChatInputValue, setAnalystDrawerOpen, setCurrentRefinementState],
+  );
+
+  // Handle "Perfect this" from Analyst drawer
+  const handlePerfectThis = useCallback(
+    () => {
+      const prompt = refinerData?.refinedPrompt || chatInputValue || "";
+      setAnalystDrawerOpen(false);
+      handleCompose(prompt);
+    },
+    [refinerData, setAnalystDrawerOpen, handleCompose],
+  );
+
+  // Handle Revert action
+  const handleRevert = useCallback(
+    () => {
+      if (originalPrompt) {
+        // Save current composed version as draft
+        const currentValue = refinerData?.refinedPrompt || "";
+        if (currentValue && currentValue !== originalPrompt) {
+          setComposerDraft(currentValue);
+        }
+        setChatInputValue(originalPrompt);
+        setCurrentRefinementState(null);
+        setIsRefinerOpen(false);
+        setRefinerData(null);
+      }
+    },
+    [originalPrompt, refinerData, setComposerDraft, setChatInputValue, setCurrentRefinementState, setIsRefinerOpen, setRefinerData],
+  );
+
+  // Handle re-apply from Composer draft chip
+  const handleApplyDraft = useCallback(
+    () => {
+      if (composerDraft) {
+        setChatInputValue(composerDraft);
+        setComposerDraft(null);
+        setCurrentRefinementState("composer");
+      }
+    },
+    [composerDraft, setChatInputValue, setComposerDraft, setCurrentRefinementState],
   );
 
   // Clear active target when clicking outside (unless clicked inside a provider card which stops propagation)
@@ -175,42 +251,59 @@ const ChatInputConnected = () => {
     return () => document.removeEventListener("click", handleClickOutside);
   }, [activeTarget, setActiveTarget]);
 
+  // Need to access chatInputValue for handlePerfectThis
+  const chatInputValue = useAtomValue(chatInputValueAtom);
+
   return (
-    <ChatInput
-      onSendPrompt={handleSend}
-      onContinuation={handleCont}
-      onAbort={handleAbort}
-      isLoading={isLoading}
-      isRefining={isRefining}
-      isReducedMotion={isReducedMotion}
-      activeProviderCount={activeProviderCount}
-      isVisibleMode={isVisibleMode}
-      isContinuationMode={isContinuationMode}
-      onHeightChange={setChatInputHeight}
-      isHistoryPanelOpen={!!isHistoryOpen}
-      hasRejectedRefinement={hasRejectedRefinement}
-      // Refiner Props
-      isRefinerOpen={isRefinerOpen}
-      onUndoRefinement={handleUndoRefinement}
-      onToggleAudit={() => setShowAudit(!showAudit)}
-      onToggleVariants={() => setShowVariants(!showVariants)}
-      onToggleExplanation={() => setShowExplanation(!showExplanation)}
-      showAudit={showAudit}
-      showVariants={showVariants}
-      showExplanation={showExplanation}
-      refinerContent={
-        <RefinerBlock
-          showAudit={showAudit}
-          showVariants={showVariants}
-          showExplanation={showExplanation}
-        />
-      }
-      onExplain={handleExplain}
-      onCompose={handleCompose}
-      // Targeted Mode
-      activeTarget={activeTarget}
-      onCancelTarget={() => setActiveTarget(null)}
-    />
+    <>
+      <ChatInput
+        onSendPrompt={handleSend}
+        onContinuation={handleCont}
+        onAbort={handleAbort}
+        isLoading={isLoading}
+        isRefining={isRefining}
+        isReducedMotion={isReducedMotion}
+        activeProviderCount={activeProviderCount}
+        isVisibleMode={isVisibleMode}
+        isContinuationMode={isContinuationMode}
+        onHeightChange={setChatInputHeight}
+        isHistoryPanelOpen={!!isHistoryOpen}
+        hasRejectedRefinement={hasRejectedRefinement}
+        // Refiner Props
+        isRefinerOpen={isRefinerOpen}
+        onUndoRefinement={handleUndoRefinement}
+        onToggleAudit={() => setShowAudit(!showAudit)}
+        onToggleVariants={() => setShowVariants(!showVariants)}
+        onToggleExplanation={() => setShowExplanation(!showExplanation)}
+        showAudit={showAudit}
+        showVariants={showVariants}
+        showExplanation={showExplanation}
+        refinerContent={
+          <RefinerBlock
+            showAudit={showAudit}
+            showVariants={showVariants}
+            showExplanation={showExplanation}
+          />
+        }
+        onExplain={handleExplain}
+        onCompose={handleCompose}
+        // Targeted Mode
+        activeTarget={activeTarget}
+        onCancelTarget={() => setActiveTarget(null)}
+        // New Composer/Analyst Props
+        originalPrompt={originalPrompt}
+        composerDraft={composerDraft}
+        currentRefinementState={currentRefinementState}
+        onRevert={handleRevert}
+        onApplyDraft={handleApplyDraft}
+      />
+
+      {/* Analyst Drawer */}
+      <AnalystDrawer
+        onPerfectThis={handlePerfectThis}
+        onUseVariant={handleUseVariant}
+      />
+    </>
   );
 };
 

@@ -42,7 +42,7 @@ const NudgeChipBar: React.FC<NudgeChipBarProps> = ({
 
     return (
         <div
-            className={`absolute bottom-full left-1/2 transform -translate-x-1/2 mb-4 h-[44px] bg-surface-base/90 backdrop-blur-xl border border-border-subtle rounded-full shadow-2xl flex items-center gap-1 px-1.5 z-50 transition-all duration-300 ease-out ${visible ? "opacity-100 translate-y-0 scale-100" : "opacity-0 translate-y-2 scale-95"
+            className={`absolute bottom-full left-1/2 transform -translate-x-1/2 mb-8 h-[44px] bg-surface-base/90 backdrop-blur-xl border border-border-subtle rounded-full shadow-2xl flex items-center gap-1 px-1.5 z-50 transition-all duration-300 ease-out ${visible ? "opacity-100 translate-y-0 scale-100" : "opacity-0 translate-y-2 scale-95"
                 }`}
         >
             {/* Progress Ring (Only for Sending trigger) */}

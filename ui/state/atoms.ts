@@ -407,6 +407,20 @@ export const chatInputValueAtom = atomWithStorage<string>(
 export const hasRejectedRefinementAtom = atom<boolean>(false);
 
 // -----------------------------
+// Composer/Analyst Refinement State
+// -----------------------------
+// Original prompt saved when Composer replaces input (for Revert)
+export const originalPromptAtom = atom<string | null>(null);
+// Composer draft saved when user reverts (can be re-applied)
+export const composerDraftAtom = atom<string | null>(null);
+// Analyst drawer visibility
+export const analystDrawerOpenAtom = atom<boolean>(false);
+// Track refinement state for current draft: "composer" | "analyst" | "both" | null
+export const currentRefinementStateAtom = atom<"composer" | "analyst" | "both" | null>(null);
+// Message refinement metadata (keyed by message ID)
+export const messageRefinementMetaAtom = atomWithImmer<Record<string, { composed?: boolean; audited?: boolean }>>({});
+
+// -----------------------------
 // Global Toast Notification
 // -----------------------------
 export type Toast = {

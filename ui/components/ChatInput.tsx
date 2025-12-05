@@ -41,6 +41,12 @@ interface ChatInputProps {
   // Targeted Continuation
   activeTarget?: { aiTurnId: string; providerId: string } | null;
   onCancelTarget?: () => void;
+  // Composer/Analyst Refinement State
+  originalPrompt?: string | null;
+  composerDraft?: string | null;
+  currentRefinementState?: "composer" | "analyst" | "both" | null;
+  onRevert?: () => void;
+  onApplyDraft?: () => void;
 }
 
 const ChatInput = ({
@@ -73,6 +79,12 @@ const ChatInput = ({
   onCompose,
   activeTarget,
   onCancelTarget,
+  // Composer/Analyst Refinement State
+  originalPrompt,
+  composerDraft,
+  currentRefinementState,
+  onRevert,
+  onApplyDraft,
 }: ChatInputProps) => {
   const CHAT_INPUT_STORAGE_KEY = "htos_chat_input_value";
   const [prompt, setPrompt] = useAtom(chatInputValueAtom);
@@ -102,6 +114,7 @@ const ChatInput = ({
   const nudgeTimerRef = useRef<NodeJS.Timeout | null>(null);
   const idleTimerRef = useRef<NodeJS.Timeout | null>(null);
   const [isNudgeFrozen, setIsNudgeFrozen] = useState(false);
+  const [isFocused, setIsFocused] = useState(false); // Track textarea focus
 
   // Calculate limits based on selected providers
   useEffect(() => {
@@ -174,9 +187,10 @@ const ChatInput = ({
     };
   }, [showMenu]);
 
-  // Idle Nudge Logic (Trigger B)
+  // Idle Nudge Logic (Trigger B) - Only when focused and idle
   useEffect(() => {
-    if (isNudgeFrozen || isLoading || !prompt.trim() || isRefinerOpen) {
+    // Only show idle nudge when: focused, has text, not loading/frozen/refining
+    if (isNudgeFrozen || isLoading || !prompt.trim() || isRefinerOpen || !isFocused) {
       if (nudgeType === "idle") setNudgeVisible(false);
       return;
     }
@@ -193,7 +207,7 @@ const ChatInput = ({
     return () => {
       if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
     };
-  }, [prompt, isNudgeFrozen, isLoading, isRefinerOpen]);
+  }, [prompt, isNudgeFrozen, isLoading, isRefinerOpen, isFocused]);
 
   // Reset idle nudge on typing
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -372,8 +386,16 @@ const ChatInput = ({
             }}
             disabled={isLoading || isNudgeFrozen}
             onFocus={() => {
+              setIsFocused(true);
               if (activeTarget) {
                 onCancelTarget?.();
+              }
+            }}
+            onBlur={() => {
+              setIsFocused(false);
+              // Immediately hide idle nudge on blur
+              if (nudgeType === "idle") {
+                setNudgeVisible(false);
               }
             }}
           />
@@ -528,6 +550,32 @@ const ChatInput = ({
         {isRefinerOpen && refinerContent && (
           <div className="w-full mt-3">
             {refinerContent}
+          </div>
+        )}
+
+        {/* Revert Link and Composer Draft Chip */}
+        {(originalPrompt || composerDraft) && (
+          <div className="w-full flex items-center gap-3 mt-2 text-xs">
+            {/* Revert link - shown when we have an original prompt saved */}
+            {originalPrompt && currentRefinementState && (
+              <button
+                onClick={onRevert}
+                className="text-text-muted hover:text-text-secondary transition-colors opacity-60 hover:opacity-100"
+              >
+                ↩ Revert to original
+              </button>
+            )}
+
+            {/* Composer draft chip - shown after reverting */}
+            {composerDraft && !currentRefinementState && (
+              <button
+                onClick={onApplyDraft}
+                className="flex items-center gap-1 px-2 py-1 bg-brand-500/10 border border-brand-500/30 rounded-md text-brand-400 hover:bg-brand-500/20 transition-all"
+              >
+                <span className="text-[10px]">✦</span>
+                <span>Composer draft</span>
+              </button>
+            )}
           </div>
         )}
       </div>

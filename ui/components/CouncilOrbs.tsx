@@ -44,13 +44,18 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
     const [selectedModels, setSelectedModels] = useAtom(selectedModelsAtom);
 
     // Filter out system provider if present
+    const allProviders = useMemo(() => {
+        return providers.filter(p => p.id !== 'system');
+    }, [providers]);
+
+    // displayProviders is used for orbs - can be filtered by visibleProviderIds
     const displayProviders = useMemo(() => {
-        let filtered = providers.filter(p => p.id !== 'system');
+        let filtered = allProviders;
         if (visibleProviderIds) {
             filtered = filtered.filter(p => visibleProviderIds.includes(String(p.id)));
         }
         return filtered;
-    }, [providers, visibleProviderIds]);
+    }, [allProviders, visibleProviderIds]);
 
     const handleOrbClickInternal = (e: React.MouseEvent, providerId: string) => {
         e.stopPropagation();
@@ -123,13 +128,13 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
     const handleSelectSynth = (pid: string) => {
         setSynthesisProvider(pid);
         setProviderLock('synthesis', true);
-        setIsMenuOpen(false);
+        // Keep menu open - only close on outside click
     };
 
     const handleSelectMap = (pid: string) => {
         setMapProvider(pid);
         setProviderLock('mapping', true);
-        setIsMenuOpen(false);
+        // Keep menu open - only close on outside click
     };
 
     const handleSelectComposer = (pid: string) => {
@@ -140,7 +145,7 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
             localStorage.setItem('htos_composer_locked', 'true');
             chrome?.storage?.local?.set?.({ provider_lock_settings: { composer_locked: true } });
         } catch { }
-        setIsMenuOpen(false);
+        // Keep menu open - only close on outside click
     };
 
     const handleSelectAnalyst = (pid: string) => {
@@ -150,7 +155,7 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
             localStorage.setItem('htos_analyst_locked', 'true');
             chrome?.storage?.local?.set?.({ provider_lock_settings: { analyst_locked: true } });
         } catch { }
-        setIsMenuOpen(false);
+        // Keep menu open - only close on outside click
     };
 
     return (
@@ -196,9 +201,12 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
 
                 {/* CENTER: Voice Orb with Sacred Zone - 80px total */}
                 <div
-                    className="council-voice-zone relative flex items-center justify-center cursor-pointer"
+                    className={clsx(
+                        "council-voice-zone relative flex items-center justify-center",
+                        variant !== "divider" && "cursor-pointer"
+                    )}
                     style={{ width: '80px', height: '80px', flexShrink: 0 }}
-                    onClick={onTrayExpand}
+                    onClick={variant !== "divider" ? onTrayExpand : undefined}
                     onMouseDown={() => handleLongPressStart(String(voiceProviderId))}
                     onMouseUp={handleLongPressCancel}
                 >
@@ -266,7 +274,7 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
                         <div>
                             <div className="flex items-center gap-2 mb-2 text-sm"><span>👑</span><span>Synthesizer</span></div>
                             <div className="flex flex-wrap gap-2">
-                                {displayProviders.map(p => {
+                                {allProviders.map(p => {
                                     const pid = String(p.id);
                                     const selected = String(synthesisProvider || '') === pid;
                                     const isUnauthorized = authStatus && authStatus[pid] === false;
@@ -291,7 +299,7 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
                         <div>
                             <div className="flex items-center gap-2 mb-2 text-sm"><span>🧩</span><span>Mapper</span></div>
                             <div className="flex flex-wrap gap-2">
-                                {displayProviders.map(p => {
+                                {allProviders.map(p => {
                                     const pid = String(p.id);
                                     const selected = String(mapProviderVal || '') === pid;
                                     const isUnauthorized = authStatus && authStatus[pid] === false;
@@ -316,7 +324,7 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
                         <div>
                             <div className="flex items-center gap-2 mb-2 text-sm"><span>✏️</span><span>Composer</span></div>
                             <div className="flex flex-wrap gap-2">
-                                {displayProviders.map(p => {
+                                {allProviders.map(p => {
                                     const pid = String(p.id);
                                     const selected = String(composerVal || '') === pid;
                                     const isUnauthorized = authStatus && authStatus[pid] === false;
@@ -341,7 +349,7 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
                         <div>
                             <div className="flex items-center gap-2 mb-2 text-sm"><span>🧠</span><span>Analyst</span></div>
                             <div className="flex flex-wrap gap-2">
-                                {displayProviders.map(p => {
+                                {allProviders.map(p => {
                                     const pid = String(p.id);
                                     const selected = String(analystVal || '') === pid;
                                     const isUnauthorized = authStatus && authStatus[pid] === false;
@@ -366,7 +374,7 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
                         <div className="col-span-2">
                             <div className="flex items-center gap-2 mb-2 text-sm"><span>👁️</span><span>Witness</span></div>
                             <div className="flex flex-wrap gap-2">
-                                {displayProviders.map(p => {
+                                {allProviders.map(p => {
                                     const pid = String(p.id);
                                     const checked = !!selectedModels?.[pid];
                                     const isUnauthorized = authStatus && authStatus[pid] === false;
