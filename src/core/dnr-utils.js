@@ -647,17 +647,17 @@ export class ProviderDNRGate {
                 {
                   header: "origin",
                   operation: chrome.declarativeNetRequest.HeaderOperation.SET,
-                  value: "https://www.tongyi.com",
+                  value: "https://www.qianwen.com",
                 },
                 {
                   header: "referer",
                   operation: chrome.declarativeNetRequest.HeaderOperation.SET,
-                  value: "https://www.tongyi.com/",
+                  value: "https://www.qianwen.com/",
                 },
               ],
             },
             condition: {
-              requestDomains: ["qianwen.aliyun.com", "api.tongyi.com"],
+              requestDomains: ["qianwen.aliyun.com", "api.qianwen.com"],
               resourceTypes: [
                 chrome.declarativeNetRequest.ResourceType.XMLHTTPREQUEST,
               ],

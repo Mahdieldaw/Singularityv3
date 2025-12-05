@@ -1,8 +1,15 @@
 /**
  * HTOS Qwen Provider Implementation
  *
- * Handles Qwen (Tongyi) session-based authentication and API interaction.
+ * Handles Qwen session-based authentication and API interaction.
+ * Updated for api.qianwen.com endpoints (2024+)
  */
+
+// =============================================================================
+// CONSTANTS
+// =============================================================================
+const QWEN_API_BASE = "https://api.qianwen.com";
+const QWEN_WEB_BASE = "https://www.qianwen.com";
 
 // =============================================================================
 // QWEN ERROR TYPES
@@ -35,24 +42,41 @@ export class QwenSessionApi {
     this._logs = true;
     this.fetch = fetchImpl;
     this._csrfToken = null;
+    this._deviceId = null;
     this.ask = this._wrapMethod(this.ask);
   }
 
-  // simple id generator for msg/request ids
+  // Generate or retrieve device ID (persisted for session)
+  _getDeviceId() {
+    if (this._deviceId) return this._deviceId;
+
+    // Generate UUID v4 format like: 2cefa386-9462-b1b1-2400-c0cfabb8b64f
+    this._deviceId = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+      const r = Math.random() * 16 | 0;
+      const v = c === 'x' ? r : (r & 0x3 | 0x8);
+      return v.toString(16);
+    });
+
+    return this._deviceId;
+  }
+
+  // Simple id generator for msg/request ids (32 hex chars)
   _generateId() {
-    return `m${Date.now()}${Math.random().toString(36).slice(2, 10)}`;
+    return 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'.replace(/x/g, () => {
+      return Math.floor(Math.random() * 16).toString(16);
+    });
   }
 
   async _createConversation(firstQuery, csrfToken, signal) {
-    // ensure DNR rules are applied so Origin/Referer headers are set
+    // Ensure DNR rules are applied so Origin/Referer headers are set
     try {
       await ProviderDNRGate.ensureProviderDnrPrereqs("qwen");
     } catch (e) {
-      // non-fatal: continue but log
+      // Non-fatal: continue but log
       console.warn("[QwenProvider] Failed to ensure DNR prereqs", e);
     }
 
-    const resp = await this.fetch("https://qianwen.aliyun.com/addSession", {
+    const resp = await this.fetch(`${QWEN_API_BASE}/addSession`, {
       method: "POST",
       signal,
       credentials: "include",
@@ -60,6 +84,7 @@ export class QwenSessionApi {
         "Content-Type": "application/json",
         "X-Platform": "pc_tongyi",
         "X-Xsrf-Token": csrfToken,
+        "X-DeviceId": this._getDeviceId(),
       },
       body: JSON.stringify({ firstQuery, sessionType: "text_chat" }),
     });
@@ -82,7 +107,7 @@ export class QwenSessionApi {
   async _fetchCsrfToken() {
     if (this._csrfToken) return this._csrfToken;
     try {
-      const response = await this.fetch("https://www.tongyi.com/qianwen/", {
+      const response = await this.fetch(`${QWEN_WEB_BASE}/`, {
         credentials: "include",
       });
       const html = await response.text();
@@ -99,10 +124,10 @@ export class QwenSessionApi {
   }
 
   async ask(prompt, options = {}, onChunk = () => { }) {
-    const { sessionId, parentMsgId, signal } = options;
+    const { sessionId, parentMsgId, model = "tongyi-qwen3-max-model", signal } = options;
     const csrfToken = await this._fetchCsrfToken();
 
-    // ensure DNR rules headers (origin/referer) are in place for qwen endpoints
+    // Ensure DNR rules headers (origin/referer) are in place for qwen endpoints
     try {
       await ProviderDNRGate.ensureProviderDnrPrereqs("qwen");
     } catch (e) {
@@ -112,41 +137,57 @@ export class QwenSessionApi {
     // Helper to perform conversation POST and return response
     const doConversationPost = async (bodyObj) => {
       const headers = {
-        Accept: "*/*",
+        "Accept": "text/event-stream",
         "Accept-Language": "en-US,en;q=0.9",
         "Content-Type": "application/json",
-        priority: "u=1, i",
+        "priority": "u=1, i",
         "X-Platform": "pc_tongyi",
         "X-Xsrf-Token": csrfToken,
+        "X-DeviceId": this._getDeviceId(),
       };
 
-      return this.fetch("https://api.tongyi.com/dialog/conversation", {
+      return this.fetch(`${QWEN_API_BASE}/dialog/conversation`, {
         method: "POST",
         signal,
         credentials: "include",
-        referrer: "https://www.tongyi.com/",
+        referrer: `${QWEN_WEB_BASE}/`,
         headers,
         body: JSON.stringify(bodyObj),
       });
     };
 
-    // First attempt: mimic the working extension's minimal request (no addSession)
-    const minimalBody = {
-      action: "next",
-      contents: [{ contentType: "text", content: prompt, role: "user" }],
-      mode: "chat",
-      model: "",
-      parentMsgId: parentMsgId || "",
+    // Build request body matching new API format
+    const requestBody = {
       sessionId: sessionId || "",
       sessionType: "text_chat",
-      userAction: "chat",
+      parentMsgId: parentMsgId || "",
+      model: "",
+      mode: "chat",
+      userAction: "",
+      actionSource: "",
+      contents: [
+        {
+          content: prompt,
+          contentType: "text",
+          role: "user",
+        },
+      ],
+      action: "next",
+      requestId: this._generateId(),
+      params: {
+        specifiedModel: model,
+        lastUseModelList: [model],
+        recordModelName: model,
+        bizSceneInfo: {},
+      },
+      topicId: this._generateId(),
     };
 
     let response;
     try {
-      response = await doConversationPost(minimalBody);
+      response = await doConversationPost(requestBody);
     } catch (e) {
-      // network error - surface as network Qwen error
+      // Network error - surface as network Qwen error
       this._throw("network", `Conversation POST failed: ${e.message}`);
     }
 
@@ -159,37 +200,57 @@ export class QwenSessionApi {
         response.status === 401 ||
         response.status === 403 ||
         response.status === 500;
+
       if (needAddSession) {
-        // create session via addSession endpoint
+        console.log("[QwenProvider] Session required, creating...");
+
+        // Clear cached CSRF token and refetch
+        this._csrfToken = null;
+        const freshCsrfToken = await this._fetchCsrfToken();
+
+        // Create session via addSession endpoint
         let createdSessionId;
         try {
           createdSessionId = await this._createConversation(
             prompt,
-            csrfToken,
+            freshCsrfToken,
             signal,
           );
         } catch (e) {
-          // bubble existing error
+          // Bubble existing error
           throw e;
         }
 
-        // Build a fuller body and retry
-        const fullBody = {
-          action: "next",
-          contents: [{ contentType: "text", content: prompt, role: "user" }],
-          mode: "chat",
-          model: "",
-          parentMsgId: parentMsgId || "",
+        // Build retry body with new session
+        const retryBody = {
           sessionId: createdSessionId,
           sessionType: "text_chat",
+          parentMsgId: "",
+          model: "",
+          mode: "chat",
           userAction: "chat",
+          actionSource: "",
+          contents: [
+            {
+              content: prompt,
+              contentType: "text",
+              role: "user",
+            },
+          ],
+          action: "next",
           requestId: this._generateId(),
           msgId: this._generateId(),
-          params: { specifiedModel: "tongyi-qwen3-max-model" },
+          params: {
+            specifiedModel: model,
+            lastUseModelList: [model],
+            recordModelName: model,
+            bizSceneInfo: {},
+          },
+          topicId: this._generateId(),
         };
 
         try {
-          response = await doConversationPost(fullBody);
+          response = await doConversationPost(retryBody);
         } catch (e) {
           this._throw("network", `Conversation retry failed: ${e.message}`);
         }
@@ -245,11 +306,11 @@ export class QwenSessionApi {
               if (json.errorCode === "NOT_LOGIN") {
                 this._throw(
                   "login",
-                  "User is not logged in to Tongyi Qianwen.",
+                  "User is not logged in to Qwen.",
                 );
               }
 
-              // normalize possible content arrays
+              // Normalize possible content arrays
               const possibleArr = json.contents || json.content || [];
               let found;
               if (Array.isArray(possibleArr)) {
@@ -277,7 +338,7 @@ export class QwenSessionApi {
                 });
             } catch (e) {
               console.warn(
-                "[Qwen Provider] Failed to parse SSE payload:",
+                "[QwenProvider] Failed to parse SSE payload:",
                 payload,
                 e,
               );
@@ -302,7 +363,7 @@ export class QwenSessionApi {
                 });
               }
             } catch (e) {
-              // ignore non-json lines
+              // Ignore non-json lines
             }
           }
         }
