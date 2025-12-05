@@ -265,6 +265,8 @@ function buildMappingPrompt(
 
   return `You are not a synthesizer. You are a provenance tracker and option cataloger, a mirror that reveals what others cannot see.
 
+CRUCIAL: Before writing anything, extract every distinct approach/stance/capability across synthesis + all raw outputs and assign each a permanent canonical label (max 6 words, precise, unique). These labels are sacred — you will reuse them verbatim (no synonyms, no rephrasing) in narrative, options, and graph.
+
 Task: Present ALL insights from the model outputs below in their most useful form for decision-making on the user's prompt that maps the terrain and catalogs every approach.
 
 <user_prompt>: ${String(userPrompt || "")} </user_prompt>
@@ -300,15 +302,12 @@ ${modelOutputsBlock}
 After your narrative, add exactly:
 "===ALL_AVAILABLE_OPTIONS==="
 
-Then list EVERY distinct approach found in:
-1. The synthesis text
-2. The raw model outputs (including any the synthesis missed)
-
-For each option:
+Then list EVERY distinct approach found in synthesis + raw outputs, grouped by theme.  
+Each bullet starts with **Canonical Label**: (exact same label you used in narrative/graph)  
 - Brief 1-2 sentence summary
 - Inline citations: [1, 3, 5] referencing MODEL numbers
 - Group by theme
-- Deduplicate
+- Deduplicate rigorously
 - Order by prevalence
 
 **Task 3: Topology (for visualization)**
@@ -320,7 +319,7 @@ Output a JSON object with this structure:
   "nodes": [
     {
       "id": "opt_1",
-      "label": "<option summary, max 10 words>",
+      "label": "<exact canonical label from above, max 10 words>",  
       "theme": "<theme name>",
       "supporters": [<model numbers>],
       "support_count": <number>
@@ -341,7 +340,9 @@ Rules for edges:
 - "complements": These options work well together or one enables the other
 - "prerequisite": This option should be done before the other
 - Only include edges where a clear relationship exists
-- Every node should have at least one edge
+- Every node must have at least one edge
+
+Canonical labels are sacred. Never deviate from them across any section.
 
 Begin.`;
 }
