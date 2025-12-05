@@ -15,7 +15,8 @@ interface CouncilOrbsProps {
     onCrownMove: (providerId: string) => void;
     onTrayExpand: () => void;
     isTrayExpanded: boolean;
-    variant?: "tray" | "divider" | "historical"; // NEW: variant support
+    visibleProviderIds?: string[]; // NEW: Optional filter for visible orbs
+    variant?: "tray" | "divider" | "welcome" | "historical"; // Added variant prop
 }
 
 export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
@@ -26,7 +27,8 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
     onCrownMove,
     onTrayExpand,
     isTrayExpanded,
-    variant = "tray" // Default to tray variant
+    variant = "tray", // Default to tray variant
+    visibleProviderIds
 }) => {
     const [hoveredOrb, setHoveredOrb] = useState<string | null>(null);
     const [isCrownMode, setIsCrownMode] = useState(false);
@@ -42,7 +44,13 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
     const [selectedModels, setSelectedModels] = useAtom(selectedModelsAtom);
 
     // Filter out system provider if present
-    const displayProviders = providers.filter(p => p.id !== 'system');
+    const displayProviders = useMemo(() => {
+        let filtered = providers.filter(p => p.id !== 'system');
+        if (visibleProviderIds) {
+            filtered = filtered.filter(p => visibleProviderIds.includes(String(p.id)));
+        }
+        return filtered;
+    }, [providers, visibleProviderIds]);
 
     const handleOrbClickInternal = (e: React.MouseEvent, providerId: string) => {
         e.stopPropagation();
@@ -177,7 +185,7 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
                                 onClick={(e) => handleOrbClickInternal(e, pid)}
                                 onCrownClick={handleCrownClick}
                                 hoveredOrb={hoveredOrb}
-                                variant={variant}
+                                variant={variant as any}
                                 disabled={authStatus && authStatus[pid] === false}
                                 onLongPressStart={() => handleLongPressStart(pid)}
                                 onLongPressCancel={handleLongPressCancel}
@@ -211,7 +219,7 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
                             }}
                             onCrownClick={handleCrownClick}
                             hoveredOrb={hoveredOrb}
-                            variant={variant}
+                            variant={variant as any}
                             onLongPressStart={() => handleLongPressStart(String(voiceProviderId))}
                             onLongPressCancel={handleLongPressCancel}
                             disabled={authStatus && authStatus[String(voiceProviderObj.id)] === false}
@@ -234,7 +242,7 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
                                 onClick={(e) => handleOrbClickInternal(e, pid)}
                                 onCrownClick={handleCrownClick}
                                 hoveredOrb={hoveredOrb}
-                                variant={variant}
+                                variant={variant as any}
                                 disabled={authStatus && authStatus[pid] === false}
                                 onLongPressStart={() => handleLongPressStart(pid)}
                                 onLongPressCancel={handleLongPressCancel}
@@ -398,7 +406,7 @@ interface OrbProps {
     onClick: (e: React.MouseEvent) => void;
     onCrownClick: (e: React.MouseEvent) => void;
     hoveredOrb: string | null;
-    variant?: "tray" | "divider" | "historical";
+    variant?: "tray" | "divider" | "historical" | "welcome";
     onLongPressStart?: () => void;
     onLongPressCancel?: () => void;
     disabled?: boolean;

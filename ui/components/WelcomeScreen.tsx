@@ -6,7 +6,7 @@ import { LLM_PROVIDERS_CONFIG } from "../constants";
 import { CouncilOrbs } from "./CouncilOrbs";
 import { useProviderStatus } from "../hooks/useProviderStatus";
 import { useSmartProviderDefaults } from "../hooks/useSmartProviderDefaults";
-import { synthesisProviderAtom, mappingProviderAtom, composerModelAtom, analystModelAtom } from "../state/atoms";
+import { synthesisProviderAtom, mappingProviderAtom, composerModelAtom, analystModelAtom, chatInputHeightAtom, selectedModelsAtom } from "../state/atoms";
 import { setProviderLock } from "@shared/provider-locks";
 
 interface WelcomeScreenProps {
@@ -26,6 +26,8 @@ const WelcomeScreen = ({ onSendPrompt, isLoading }: WelcomeScreenProps) => {
   const [, setMapper] = useAtom(mappingProviderAtom);
   const [, setComposer] = useAtom(composerModelAtom);
   const [, setAnalyst] = useAtom(analystModelAtom);
+  const chatInputHeight = useAtomValue(chatInputHeightAtom);
+  const selectedModels = useAtomValue(selectedModelsAtom);
 
   const handleOrbClick = (providerId: string) => {
     setSynth(providerId);
@@ -76,7 +78,10 @@ const WelcomeScreen = ({ onSendPrompt, isLoading }: WelcomeScreenProps) => {
         </button>
       )}
 
-      <div className="fixed inset-x-0 bottom-[96px] pointer-events-auto z-[3002] flex justify-center">
+      <div
+        className="fixed inset-x-0 pointer-events-auto z-[3002] flex justify-center transition-all duration-300 ease-out"
+        style={{ bottom: `${chatInputHeight + 16}px` }}
+      >
         <div className="w-full max-w-[820px] opacity-50 hover:opacity-100 transition-opacity">
           <CouncilOrbs
             turnId="welcome"
@@ -87,6 +92,7 @@ const WelcomeScreen = ({ onSendPrompt, isLoading }: WelcomeScreenProps) => {
             onTrayExpand={handleTrayExpand}
             isTrayExpanded={trayExpanded}
             variant="divider"
+            visibleProviderIds={Object.keys(selectedModels).filter(k => selectedModels[k])}
           />
         </div>
       </div>

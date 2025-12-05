@@ -7,6 +7,7 @@ import {
   isProviderAuthError
 } from '../utils/ErrorHandler.js';
 import { authManager } from '../core/auth-manager.js';
+import { PROVIDER_LIMITS } from '../../shared/provider-limits.ts';
 function extractGraphTopologyAndStrip(text) {
   if (!text || typeof text !== 'string') return { text, topology: null };
 
@@ -1755,6 +1756,17 @@ Your job is to address what the user is actually asking, informed by but not foc
         mappingResult,
       );
 
+      // ✅ RESTORED: Log prompt length for debugging
+      const promptLength = synthPrompt.length;
+      console.log(`[WorkflowEngine] Synthesis prompt length for ${providerId}: ${promptLength} chars`);
+
+      // ✅ NEW: Input Length Validation
+      const limits = PROVIDER_LIMITS[providerId];
+      if (limits && promptLength > limits.maxInputChars) {
+        console.warn(`[WorkflowEngine] Prompt length ${promptLength} exceeds limit ${limits.maxInputChars} for ${providerId}`);
+        throw new Error(`INPUT_TOO_LONG: Prompt length ${promptLength} exceeds limit ${limits.maxInputChars} for ${providerId}`);
+      }
+
       // Resolve provider context using three-tier resolution
       const providerContexts = this._resolveProviderContext(
         providerId,
@@ -1896,9 +1908,9 @@ Your job is to address what the user is actually asking, informed by but not foc
       previousResults,
     );
 
-    if (sourceData.length === 0) {
+    if (sourceData.length < 2) {
       throw new Error(
-        "No valid sources for mapping. All providers returned empty or failed responses.",
+        `Mapping requires at least 2 valid sources, but found ${sourceData.length}.`,
       );
     }
 
@@ -1963,6 +1975,17 @@ Your job is to address what the user is actually asking, informed by but not foc
       resolvedContext,
       "Mapping",
     );
+
+    // ✅ RESTORED: Log prompt length for debugging
+    const promptLength = mappingPrompt.length;
+    console.log(`[WorkflowEngine] Mapping prompt length for ${payload.mappingProvider}: ${promptLength} chars`);
+
+    // ✅ NEW: Input Length Validation
+    const limits = PROVIDER_LIMITS[payload.mappingProvider];
+    if (limits && promptLength > limits.maxInputChars) {
+      console.warn(`[WorkflowEngine] Mapping prompt length ${promptLength} exceeds limit ${limits.maxInputChars} for ${payload.mappingProvider}`);
+      throw new Error(`INPUT_TOO_LONG: Prompt length ${promptLength} exceeds limit ${limits.maxInputChars} for ${payload.mappingProvider}`);
+    }
 
     return new Promise((resolve, reject) => {
       this.orchestrator.executeParallelFanout(

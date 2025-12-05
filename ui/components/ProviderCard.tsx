@@ -12,8 +12,6 @@ import { LLM_PROVIDERS_CONFIG } from "../constants";
 import MarkdownDisplay from "./MarkdownDisplay";
 import clsx from "clsx";
 
-// Extract Claude artifacts from text
-// Extract Claude artifacts removed - handled by backend
 
 interface ProviderCardProps {
     turnId: string;

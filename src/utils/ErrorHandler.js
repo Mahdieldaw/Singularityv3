@@ -13,26 +13,32 @@ export const PROVIDER_CONFIG = {
   claude: {
     displayName: 'Claude',
     loginUrl: 'https://claude.ai',
+    maxInputChars: 100000,
   },
   chatgpt: {
     displayName: 'ChatGPT',
     loginUrl: 'https://chatgpt.com',
+    maxInputChars: 32000,
   },
   gemini: {
     displayName: 'Gemini',
     loginUrl: 'https://gemini.google.com',
+    maxInputChars: 30000,
   },
   'gemini-pro': {
     displayName: 'Gemini Pro',
     loginUrl: 'https://gemini.google.com',
+    maxInputChars: 120000,
   },
   'gemini-exp': {
     displayName: 'Gemini 2.0',
     loginUrl: 'https://gemini.google.com',
+    maxInputChars: 30000,
   },
   qwen: {
     displayName: 'Qwen',
     loginUrl: 'https://qianwen.com',
+    maxInputChars: 30000,
   },
 };
 
@@ -444,6 +450,9 @@ export class ErrorHandler {
       code = "INDEXEDDB_ERROR";
     } else if (error.message?.includes("Service Worker")) {
       code = "SERVICE_WORKER_ERROR";
+    } else if (error.message?.includes("INPUT_TOO_LONG") || error.code === "INPUT_TOO_LONG") {
+      code = "INPUT_TOO_LONG";
+      recoverable = false;
     }
 
     return new HTOSError(

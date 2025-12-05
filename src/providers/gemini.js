@@ -9,7 +9,7 @@
  * Build-phase safe: emitted to dist/adapters/*
  */
 import { BusController } from "../core/vendor-exports.js";
-import { ArtifactProcessor } from "../../shared/artifact-processor.js";
+import { ArtifactProcessor } from "../../shared/artifact-processor.ts";
 
 // =============================================================================
 // GEMINI MODELS CONFIGURATION

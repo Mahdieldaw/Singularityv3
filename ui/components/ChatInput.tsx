@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { useAtom } from "jotai";
-import { chatInputValueAtom } from "../state/atoms";
+import { chatInputValueAtom, selectedModelsAtom } from "../state/atoms";
 import { LLM_PROVIDERS_CONFIG } from "../constants";
+import { PROVIDER_LIMITS } from "../../shared/provider-limits";
+import NudgeChipBar from "./NudgeChipBar";
 
 interface ChatInputProps {
   onSendPrompt: (prompt: string) => void;
@@ -83,6 +85,63 @@ const ChatInput = ({
   const hasTriggeredMenuRef = useRef(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
+  // Input Length Validation State
+  const [selectedModels] = useAtom(selectedModelsAtom);
+  const [maxLength, setMaxLength] = useState<number>(Infinity);
+  const [warnThreshold, setWarnThreshold] = useState<number>(Infinity);
+  const [limitingProvider, setLimitingProvider] = useState<string>("");
+
+  const inputLength = prompt.length;
+  const isOverLimit = inputLength > maxLength;
+  const isWarning = inputLength > warnThreshold && !isOverLimit;
+
+  // Nudge State
+  const [nudgeVisible, setNudgeVisible] = useState(false);
+  const [nudgeType, setNudgeType] = useState<"sending" | "idle">("idle");
+  const [nudgeProgress, setNudgeProgress] = useState(0);
+  const nudgeTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const idleTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const [isNudgeFrozen, setIsNudgeFrozen] = useState(false);
+
+  // Calculate limits based on selected providers
+  useEffect(() => {
+    let minMax = Infinity;
+    let minWarn = Infinity;
+    let provider = "";
+
+    const activeProviders = Object.entries(selectedModels)
+      .filter(([_, isSelected]) => isSelected)
+      .map(([id]) => id);
+
+    // If no providers selected (or only default), consider all or default behavior
+    // For now, if activeProviders is empty, we might assume default providers or no limit?
+    // Let's assume at least one is active or we check against all available if none explicitly selected (though that shouldn't happen in this app state)
+
+    const providersToCheck = activeProviders.length > 0 ? activeProviders : ['chatgpt', 'claude', 'gemini']; // Default fallback
+
+    providersToCheck.forEach(pid => {
+      // Handle model variants (e.g. gemini-pro vs gemini) if needed, 
+      // but PROVIDER_LIMITS uses keys like 'gemini-pro'. 
+      // The selectedModels atom usually stores keys like 'gemini', 'claude', 'chatgpt'.
+      // If we have specific model selections, we might need to map them.
+      // For now, assuming direct mapping or simple fallback.
+
+      // Check for specific model overrides if your app supports them in selectedModels keys
+      // Otherwise use base provider limits
+      const limitConfig = PROVIDER_LIMITS[pid as keyof typeof PROVIDER_LIMITS] || PROVIDER_LIMITS['chatgpt']; // Fallback to safe limit
+
+      if (limitConfig.maxInputChars < minMax) {
+        minMax = limitConfig.maxInputChars;
+        minWarn = limitConfig.warnThreshold;
+        provider = LLM_PROVIDERS_CONFIG.find(p => p.id === pid)?.name || pid;
+      }
+    });
+
+    setMaxLength(minMax);
+    setWarnThreshold(minWarn);
+    setLimitingProvider(provider);
+  }, [selectedModels]);
+
   useEffect(() => {
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto"; // Reset height
@@ -115,6 +174,51 @@ const ChatInput = ({
     };
   }, [showMenu]);
 
+  // Idle Nudge Logic (Trigger B)
+  useEffect(() => {
+    if (isNudgeFrozen || isLoading || !prompt.trim() || isRefinerOpen) {
+      if (nudgeType === "idle") setNudgeVisible(false);
+      return;
+    }
+
+    // Clear existing idle timer
+    if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+
+    // Start new idle timer
+    idleTimerRef.current = setTimeout(() => {
+      setNudgeType("idle");
+      setNudgeVisible(true);
+    }, 3200); // 3.2s idle
+
+    return () => {
+      if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+    };
+  }, [prompt, isNudgeFrozen, isLoading, isRefinerOpen]);
+
+  // Reset idle nudge on typing
+  const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setPrompt(e.target.value);
+    if (nudgeType === "idle" && nudgeVisible) {
+      setNudgeVisible(false);
+    }
+  };
+
+  const executeSend = (text: string) => {
+    const trimmed = text.trim();
+    if (isContinuationMode) {
+      onContinuation(trimmed);
+    } else {
+      onSendPrompt(trimmed);
+    }
+
+    if (!isRefinerOpen && !hasRejectedRefinement) {
+      setPrompt("");
+    }
+    setNudgeVisible(false);
+    setIsNudgeFrozen(false);
+    setNudgeProgress(0);
+  };
+
   const handleSubmit = (e?: React.FormEvent | React.KeyboardEvent) => {
     if (e) e.preventDefault();
     if (isLoading || !prompt.trim()) return;
@@ -125,16 +229,50 @@ const ChatInput = ({
       return;
     }
 
-    const trimmed = prompt.trim();
-    if (isContinuationMode) {
-      onContinuation(trimmed);
-    } else {
-      onSendPrompt(trimmed);
+    // Trigger A: On Send (Nudge)
+    // Only if not already refining or in a special mode that bypasses this
+    if (!isRefinerOpen && !hasRejectedRefinement && !activeTarget) {
+      setIsNudgeFrozen(true);
+      setNudgeType("sending");
+      setNudgeVisible(true);
+      setNudgeProgress(0);
+
+      const DURATION = 2400; // 2.4s
+      const INTERVAL = 50;
+      const steps = DURATION / INTERVAL;
+      let currentStep = 0;
+
+      if (nudgeTimerRef.current) clearInterval(nudgeTimerRef.current);
+
+      nudgeTimerRef.current = setInterval(() => {
+        currentStep++;
+        const progress = (currentStep / steps) * 100;
+        setNudgeProgress(progress);
+
+        if (currentStep >= steps) {
+          if (nudgeTimerRef.current) clearInterval(nudgeTimerRef.current);
+          executeSend(prompt);
+        }
+      }, INTERVAL);
+
+      return;
     }
 
-    if (!isRefinerOpen && !hasRejectedRefinement) {
-      setPrompt("");
-    }
+    executeSend(prompt);
+  };
+
+  const handleNudgeCompose = () => {
+    if (nudgeTimerRef.current) clearInterval(nudgeTimerRef.current);
+    setIsNudgeFrozen(false);
+    setNudgeVisible(false);
+    onCompose?.(prompt);
+  };
+
+  const handleNudgeAnalyst = () => {
+    if (nudgeTimerRef.current) clearInterval(nudgeTimerRef.current);
+    setIsNudgeFrozen(false);
+    setNudgeVisible(false);
+    onExplain?.(prompt); // Use onExplain for Analyst action
   };
 
   const handleMouseDown = () => {
@@ -177,7 +315,7 @@ const ChatInput = ({
   };
 
   const buttonText = (isRefinerOpen || hasRejectedRefinement) ? "Launch" : (isContinuationMode ? "Continue" : "Send");
-  const isDisabled = isLoading || mappingActive || !prompt.trim();
+  const isDisabled = isLoading || mappingActive || !prompt.trim() || isOverLimit || isNudgeFrozen;
   const showMappingBtn = canShowMapping && !!prompt.trim() && !isRefinerOpen && !hasRejectedRefinement;
   const showAbortBtn = !!onAbort && isLoading;
 
@@ -186,6 +324,15 @@ const ChatInput = ({
   return (
     <div className="w-full flex justify-center flex-col items-center pointer-events-auto">
       <div className="flex gap-2.5 items-center relative w-full max-w-[min(800px,calc(100%-32px))] p-3 bg-input backdrop-blur-xl border border-border-subtle rounded-3xl flex-wrap">
+
+        {/* Nudge Chip Bar */}
+        <NudgeChipBar
+          type={nudgeType}
+          visible={nudgeVisible}
+          progress={nudgeProgress}
+          onCompose={handleNudgeCompose}
+          onAnalyst={handleNudgeAnalyst}
+        />
 
         {/* Targeted Mode Banner */}
         {activeTarget && (
@@ -207,9 +354,7 @@ const ChatInput = ({
           <textarea
             ref={textareaRef}
             value={prompt}
-            onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
-              setPrompt(e.target.value)
-            }
+            onChange={handleInputChange}
             placeholder={
               activeTarget
                 ? `Continue conversation with ${providerName}...`
@@ -218,20 +363,38 @@ const ChatInput = ({
                   : "Ask anything... Singularity will orchestrate multiple AI models for you."
             }
             rows={1}
-            className={`w-full min-h-[38px] px-3 py-2 bg-transparent border-none text-text-primary text-base font-inherit resize-none outline-none overflow-y-auto ${isReducedMotion ? '' : 'transition-all duration-200 ease-out'} placeholder:text-text-muted`}
+            className={`w-full min-h-[38px] px-3 py-2 bg-transparent border-none text-text-primary text-base font-inherit resize-none outline-none overflow-y-auto ${isReducedMotion ? '' : 'transition-all duration-200 ease-out'} placeholder:text-text-muted ${isNudgeFrozen ? 'opacity-50 cursor-not-allowed' : ''}`}
             onKeyDown={(e: React.KeyboardEvent<HTMLTextAreaElement>) => {
               if (e.key === "Enter" && !e.shiftKey && prompt.trim()) {
                 e.preventDefault();
                 handleSubmit(e);
               }
             }}
-            disabled={isLoading}
+            disabled={isLoading || isNudgeFrozen}
             onFocus={() => {
               if (activeTarget) {
                 onCancelTarget?.();
               }
             }}
           />
+
+          {/* Length Validation Feedback */}
+          {(isWarning || isOverLimit) && (
+            <div className={`absolute bottom-full left-0 mb-2 px-3 py-1.5 rounded-lg text-xs font-medium backdrop-blur-md border animate-in fade-in slide-in-from-bottom-1 ${isOverLimit
+              ? "bg-intent-danger/10 border-intent-danger/30 text-intent-danger"
+              : "bg-intent-warning/10 border-intent-warning/30 text-intent-warning"
+              }`}>
+              {isOverLimit ? (
+                <span>
+                  ⚠️ Input too long for {limitingProvider} ({inputLength.toLocaleString()} / {maxLength.toLocaleString()})
+                </span>
+              ) : (
+                <span>
+                  Approaching limit for {limitingProvider} ({inputLength.toLocaleString()} / {maxLength.toLocaleString()})
+                </span>
+              )}
+            </div>
+          )}
         </div>
 
         <div

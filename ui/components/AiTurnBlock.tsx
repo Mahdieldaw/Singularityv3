@@ -94,7 +94,6 @@ function parseMappingResponse(response?: string | null) {
   return { mapping: normalized, options: null };
 }
 
-// extractClaudeArtifacts removed - handled by backend
 
 
 interface AiTurnBlockProps {
@@ -614,6 +613,7 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                       onTrayExpand={() => setIsDecisionMapOpen({ turnId: aiTurn.id })}
                       isTrayExpanded={isDecisionMapOpen?.turnId === aiTurn.id}
                       variant="tray"
+                      visibleProviderIds={Object.keys(allSources)}
                     />
                   </div>
                 </div>

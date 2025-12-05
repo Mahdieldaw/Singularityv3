@@ -1,6 +1,6 @@
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
-import { activeSplitPanelAtom, providerEffectiveStateFamily } from "../state/atoms";
+import { activeSplitPanelAtom, providerEffectiveStateFamily, turnsMapAtom } from "../state/atoms";
 import { LLM_PROVIDERS_CONFIG } from "../constants";
 import clsx from "clsx";
 
@@ -12,15 +12,29 @@ interface CouncilOrbsVerticalProps {
 
 export const CouncilOrbsVertical: React.FC<CouncilOrbsVerticalProps> = React.memo(() => {
     const activePanel = useAtomValue(activeSplitPanelAtom);
-    const setActivePanel = useSetAtom(activeSplitPanelAtom);
+    const setActiveSplitPanel = useSetAtom(activeSplitPanelAtom);
     const [hoveredOrb, setHoveredOrb] = useState<string | null>(null);
+    const turnsMap = useAtomValue(turnsMapAtom);
 
     if (!activePanel) return null;
 
     const { turnId, providerId: activeProviderId } = activePanel;
+    const turn = turnsMap.get(turnId);
 
     // Filter out system provider
-    const displayProviders = LLM_PROVIDERS_CONFIG.filter(p => p.id !== 'system');
+    const allProviders = LLM_PROVIDERS_CONFIG.filter(p => p.id !== 'system');
+
+    // Determine contributing providers
+    const contributingIds = useMemo(() => {
+        if (!turn || turn.type !== 'ai') return [];
+        const aiTurn = turn as any; // Cast to access response fields
+        const batchKeys = Object.keys(aiTurn.batchResponses || {});
+        const hiddenKeys = Object.keys(aiTurn.hiddenBatchOutputs || {});
+        return Array.from(new Set([...batchKeys, ...hiddenKeys]));
+    }, [turn]);
+
+    // Filter display providers to only those that contributed
+    const displayProviders = allProviders.filter(p => contributingIds.includes(String(p.id)));
 
     return (
         <div className="flex flex-col items-center gap-3 py-4 w-full">
@@ -34,7 +48,7 @@ export const CouncilOrbsVertical: React.FC<CouncilOrbsVerticalProps> = React.mem
                         turnId={turnId}
                         provider={p}
                         isActive={isActive}
-                        onClick={() => setActivePanel({ turnId, providerId: pid })}
+                        onClick={() => setActiveSplitPanel({ turnId, providerId: pid })}
                         onHover={setHoveredOrb}
                         hoveredOrb={hoveredOrb}
                     />
