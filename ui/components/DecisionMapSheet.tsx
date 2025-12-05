@@ -283,6 +283,12 @@ interface SupporterOrbsProps {
 const SupporterOrbs: React.FC<SupporterOrbsProps> = ({ supporters, citationSourceOrder, onOrbClick, size = 'large' }) => {
   // Map supporter numbers/ids to provider configs using citationSourceOrder when available
   const getProviderFromSupporter = (s: string | number) => {
+    // Handle 'S' as synthesizer identifier
+    if (s === 'S' || s === 's') {
+      // For synthesizer, return the synthesis provider from metadata or use gemini as fallback
+      const synthProviderId = (citationSourceOrder as any)?.['S'] || 'gemini';
+      return getProviderById(synthProviderId) || null;
+    }
     // If it's a number and we have citationSourceOrder, use it
     if ((typeof s === 'number' || !isNaN(Number(s))) && citationSourceOrder) {
       const num = Number(s);
@@ -706,13 +712,15 @@ export const DecisionMapSheet = React.memo(() => {
   const transformCitations = useCallback((text: string) => {
     if (!text) return "";
     let t = text;
-    t = t.replace(/\[\[CITE:(\d+)\]\]/g, "[↗$1](#cite-$1)");
-    t = t.replace(/\[(\d+(?:\s*,\s*\d+)*)\](?!\()/g, (_m, grp) => {
-      const nums = String(grp)
+    // Handle [[CITE:X]] format (including S for synthesizer)
+    t = t.replace(/\[\[CITE:([\dS])\]\]/gi, "[↗$1](#cite-$1)");
+    // Handle [1], [2, 3], [1, S] format citations
+    t = t.replace(/\[([\dS](?:\s*,\s*[\dS])*)\](?!\()/gi, (_m, grp) => {
+      const items = String(grp)
         .split(/\s*,\s*/)
         .map((n) => n.trim())
         .filter(Boolean);
-      return " " + nums.map((n) => `[↗${n}](#cite-${n})`).join(" ") + " ";
+      return " " + items.map((n) => `[↗${n}](#cite-${n})`).join(" ") + " ";
     });
     return t;
   }, []);

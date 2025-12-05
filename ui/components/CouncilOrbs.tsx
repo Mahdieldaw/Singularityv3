@@ -15,8 +15,9 @@ interface CouncilOrbsProps {
     onCrownMove: (providerId: string) => void;
     onTrayExpand: () => void;
     isTrayExpanded: boolean;
-    visibleProviderIds?: string[]; // NEW: Optional filter for visible orbs
-    variant?: "tray" | "divider" | "welcome" | "historical"; // Added variant prop
+    visibleProviderIds?: string[]; // Optional filter for visible orbs
+    variant?: "tray" | "divider" | "welcome" | "historical";
+    isEditMode?: boolean; // When true, auto-open the model selection menu
 }
 
 export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
@@ -27,8 +28,9 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
     onCrownMove,
     onTrayExpand,
     isTrayExpanded,
-    variant = "tray", // Default to tray variant
-    visibleProviderIds
+    variant = "tray",
+    visibleProviderIds,
+    isEditMode = false
 }) => {
     const [hoveredOrb, setHoveredOrb] = useState<string | null>(null);
     const [isCrownMode, setIsCrownMode] = useState(false);
@@ -42,6 +44,18 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
     const [composerVal, setComposer] = useAtom(composerModelAtom);
     const [analystVal, setAnalyst] = useAtom(analystModelAtom);
     const [selectedModels, setSelectedModels] = useAtom(selectedModelsAtom);
+
+    // Auto-open menu when isEditMode becomes true (triggered by next-turn arrow button)
+    React.useEffect(() => {
+        if (isEditMode) {
+            setIsMenuOpen(true);
+            setMenuTarget(voiceProviderId); // Open menu for the voice provider
+        } else {
+            // Close menu when edit mode ends
+            setIsMenuOpen(false);
+            setMenuTarget(null);
+        }
+    }, [isEditMode, voiceProviderId]);
 
     // Filter out system provider if present
     const allProviders = useMemo(() => {

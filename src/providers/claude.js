@@ -224,9 +224,16 @@ export class ClaudeSessionApi {
     const carry = { carryOver: "" };
 
     try {
+      let chunkCount = 0;
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
+
+        chunkCount++;
+        // Debug: Log chunk frequency for synthesis streaming investigation
+        if (CLAUDE_DEBUG) {
+          console.log(`[Claude SSE] chunk=${chunkCount} bytes=${value?.length || 0}`);
+        }
 
         // ✅ _parseChunk now returns {text, error}
         const result = this._parseChunk(value, carry, fullText.length > 0);
@@ -242,6 +249,9 @@ export class ClaudeSessionApi {
           onChunk({ text: fullText, chatId, orgId }, isFirstChunk);
           isFirstChunk = false;
         }
+      }
+      if (CLAUDE_DEBUG) {
+        console.log(`[Claude SSE] Stream ended. Total chunks: ${chunkCount}`);
       }
 
       // ✅ Grace period for late error frames

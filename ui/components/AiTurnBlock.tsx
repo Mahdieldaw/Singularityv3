@@ -250,6 +250,34 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
     content: string;
   } | null>(null);
 
+  // State for next-turn council editor mode
+  const [isEditingNextTurn, setIsEditingNextTurn] = useState(false);
+  const editTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Clear timeout on unmount or when editing ends
+  useEffect(() => {
+    return () => {
+      if (editTimeoutRef.current) {
+        clearTimeout(editTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  const handleNextTurnArrowClick = useCallback(() => {
+    // Toggle edit mode
+    if (isEditingNextTurn) {
+      setIsEditingNextTurn(false);
+      if (editTimeoutRef.current) clearTimeout(editTimeoutRef.current);
+      return;
+    }
+
+    setIsEditingNextTurn(true);
+    // Auto-close after 8 seconds
+    editTimeoutRef.current = setTimeout(() => {
+      setIsEditingNextTurn(false);
+    }, 8000);
+  }, [isEditingNextTurn]);
+
   const synthesisResponses = useMemo(() => {
     if (!aiTurn.synthesisResponses) aiTurn.synthesisResponses = {};
     const out: Record<string, ProviderResponse[]> = {};
@@ -507,7 +535,13 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
               <div className="flex-1 flex flex-col relative min-w-0" style={{ maxWidth: '820px', margin: '0 auto' }}>
 
                 {/* Synthesis Bubble */}
-                <div className="synthesis-bubble bg-surface rounded-3xl border border-border-subtle shadow-sm relative" style={{ padding: '28px 40px 96px' }}>
+                <div
+                  className={clsx(
+                    "synthesis-bubble bg-surface rounded-3xl border border-border-subtle shadow-sm relative transition-all duration-300",
+                    isEditingNextTurn && "opacity-60 ring-2 ring-brand-400/50"
+                  )}
+                  style={{ padding: '28px 40px 96px' }}
+                >
                   {(() => {
                     if (!wasSynthRequested)
                       return (
@@ -614,8 +648,26 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                       isTrayExpanded={isDecisionMapOpen?.turnId === aiTurn.id}
                       variant="tray"
                       visibleProviderIds={Object.keys(allSources)}
+                      isEditMode={isEditingNextTurn}
                     />
                   </div>
+
+                  {/* Next Turn Arrow Button - bottom right of synthesis bubble */}
+                  <button
+                    type="button"
+                    onClick={handleNextTurnArrowClick}
+                    className={clsx(
+                      "absolute bottom-3 right-3 w-8 h-8 rounded-full flex items-center justify-center transition-all",
+                      "border border-border-subtle hover:border-brand-400",
+                      "bg-surface-highlight hover:bg-brand-500/20",
+                      isEditingNextTurn && "ring-2 ring-brand-400 bg-brand-500/30"
+                    )}
+                    title="Configure models for next turn"
+                  >
+                    <svg className="w-4 h-4 text-text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                    </svg>
+                  </button>
                 </div>
 
               </div>

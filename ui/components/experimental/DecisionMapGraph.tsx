@@ -35,6 +35,10 @@ interface Props {
 
 // Map supporter to provider ID using citationSourceOrder when available
 function getProviderIdFromSupporter(s: string | number, citationSourceOrder?: Record<number, string>): string {
+    // Handle 'S' as synthesizer identifier
+    if (s === 'S' || s === 's') {
+        return (citationSourceOrder as any)?.['S'] || 'synthesizer';
+    }
     if ((typeof s === 'number' || !isNaN(Number(s))) && citationSourceOrder) {
         const num = Number(s);
         const providerId = citationSourceOrder[num];

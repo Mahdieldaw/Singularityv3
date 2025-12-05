@@ -6,7 +6,7 @@ import { LLM_PROVIDERS_CONFIG } from "../constants";
 import { CouncilOrbs } from "./CouncilOrbs";
 import { useProviderStatus } from "../hooks/useProviderStatus";
 import { useSmartProviderDefaults } from "../hooks/useSmartProviderDefaults";
-import { synthesisProviderAtom, mappingProviderAtom, composerModelAtom, analystModelAtom } from "../state/atoms";
+import { synthesisProviderAtom, mappingProviderAtom, composerModelAtom, analystModelAtom, selectedModelsAtom } from "../state/atoms";
 import { setProviderLock } from "@shared/provider-locks";
 
 interface WelcomeScreenProps {
@@ -26,6 +26,16 @@ const WelcomeScreen = ({ onSendPrompt, isLoading }: WelcomeScreenProps) => {
   const [, setMapper] = useAtom(mappingProviderAtom);
   const [, setComposer] = useAtom(composerModelAtom);
   const [, setAnalyst] = useAtom(analystModelAtom);
+  const selectedModels = useAtomValue(selectedModelsAtom);
+
+  // Filter visible orbs to only show selected models
+  const visibleProviderIds = useMemo(() => {
+    const selected = Object.entries(selectedModels || {})
+      .filter(([_, v]) => v)
+      .map(([k]) => k);
+    // If no models selected, show all providers
+    return selected.length > 0 ? selected : providers.map(p => String(p.id));
+  }, [selectedModels, providers]);
 
   const handleOrbClick = (providerId: string) => {
     setSynth(providerId);
@@ -76,13 +86,15 @@ const WelcomeScreen = ({ onSendPrompt, isLoading }: WelcomeScreenProps) => {
         </button>
       )}
 
-      {/* Council Orbs - positioned below the example button, centered */}
+      {/* Council Orbs - positioned below the example button, centered + 16px right shift */}
       <div
         className="mt-12 w-full max-w-[820px] opacity-60 hover:opacity-100 transition-opacity pointer-events-auto"
+        style={{ marginLeft: '16px' }}
       >
         <CouncilOrbs
           turnId="welcome"
           providers={providers}
+          visibleProviderIds={visibleProviderIds}
           voiceProviderId={String(activeVoice)}
           onOrbClick={handleOrbClick}
           onCrownMove={handleCrownMove}
