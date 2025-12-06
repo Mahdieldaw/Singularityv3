@@ -99,18 +99,21 @@ function extractOptionsAndStrip(text) {
   // First, check for GRAPH_TOPOLOGY delimiter and strip it to avoid contaminating options
   // The options section ends before GRAPH_TOPOLOGY if present
   let graphTopoStart = -1;
-  // Match emoji + GRAPH_TOPOLOGY or === GRAPH_TOPOLOGY ===
-  const graphTopoMatch = normalized.match(/\n?[\u{1F300}-\u{1FAD6}\u{2600}-\u{26FF}\u{2700}-\u{27BF}][\uFE0E\uFE0F]?\s*GRAPH[_\s]*TOPOLOGY|\n?={2,}\s*GRAPH[_\s]*TOPOLOGY\s*={2,}/iu);
+  // Match various GRAPH_TOPOLOGY formats including markdown headers: ## 📊 GRAPH_TOPOLOGY
+  const graphTopoMatch = normalized.match(/\n#{1,3}\s*[^\w\n].*?GRAPH[_\s]*TOPOLOGY|\n?[🔬📊🗺️]*\s*={0,}GRAPH[_\s]*TOPOLOGY={0,}|\n?[🔬📊🗺️]\s*GRAPH[_\s]*TOPOLOGY/i);
   if (graphTopoMatch && typeof graphTopoMatch.index === 'number') {
     graphTopoStart = graphTopoMatch.index;
   }
 
   // Patterns ordered by strictness (stricter first)
-  // NOTE: Emoji patterns need to match the emoji + optional variation selector (\uFE0E or \uFE0F)
+  // NOTE: Use ={2,} to match 2+ equals signs (models sometimes output ==, not ===)
   const patterns = [
-    // Emoji-prefixed format (🛠️ ALL_AVAILABLE_OPTIONS) - HIGHEST PRIORITY
-    // Match any emoji followed by optional variation selector, then ALL_AVAILABLE_OPTIONS
-    { re: /\n?[\u{1F300}-\u{1FAD6}\u{2600}-\u{26FF}\u{2700}-\u{27BF}][\uFE0E\uFE0F]?\s*ALL[_\s]*AVAILABLE[_\s]*OPTIONS\s*\n?/iu, minPosition: 0.15 },
+    // Markdown H2/H3 header with any emoji prefix: ## 🛠️ ALL_AVAILABLE_OPTIONS
+    // Uses [^\w\n] to match emoji or any non-word char without specifying exact emoji
+    { re: /\n#{1,3}\s*[^\w\n].*?ALL[_\s]*AVAILABLE[_\s]*OPTIONS.*?\n/i, minPosition: 0.15 },
+
+    // Emoji-prefixed format (🛠️ ALL_AVAILABLE_OPTIONS) - standalone without markdown header
+    { re: /\n?[🛠️🔧⚙️🛠]\s*ALL[_\s]*AVAILABLE[_\s]*OPTIONS\s*\n/i, minPosition: 0.15 },
 
     // Standard delimiter with 2+ equals signs, optional leading newline
     { re: /\n?={2,}\s*ALL[_\s]*AVAILABLE[_\s]*OPTIONS\s*={2,}\n?/i, minPosition: 0 },
@@ -171,17 +174,6 @@ function extractOptionsAndStrip(text) {
     }
   }
 
-  // Strip any secondary ALL_AVAILABLE_OPTIONS delimiter at the start
-  // (handles case where emoji header is followed by === delimiter)
-  afterDelimiter = afterDelimiter
-    .replace(/^={2,}\s*ALL[_\s]*AVAILABLE[_\s]*OPTIONS\s*={2,}\s*\n?/i, '')
-    .trim();
-
-  // Also strip any emoji GRAPH_TOPOLOGY at the end that might have slipped through
-  afterDelimiter = afterDelimiter
-    .replace(/\n?[\u{1F300}-\u{1FAD6}\u{2600}-\u{26FF}\u{2700}-\u{27BF}][\uFE0E\uFE0F]?\s*GRAPH[_\s]*TOPOLOGY.*$/isu, '')
-    .trim();
-
   // Validation: Check if what follows looks like structured content
   // Accept: bullet lists, numbered lists, "Theme:" headers, bold headers (**), any capitalized heading,
   // emoji-prefixed sections, or any substantive paragraphs (more than 50 chars)
@@ -196,12 +188,18 @@ function extractOptionsAndStrip(text) {
     return { text: normalized, options: null };
   }
 
-  const before = normalized.slice(0, idx).trim();
+  let before = normalized.slice(0, idx).trim();
+  // Clean up trailing horizontal rules, leftover ALL_AVAILABLE_OPTIONS header text and emojis
+  before = before
+    .replace(/\n---+\s*$/, '')
+    .replace(/\n#{1,3}\s*[🛠️🔧⚙️🛠]\s*ALL[_\s]*AVAILABLE[_\s]*OPTIONS.*$/i, '')
+    .replace(/\n#{1,3}\s*[🛠️🔧⚙️🛠]\s*$/i, '')
+    .replace(/[🛠️🔧⚙️🛠]\s*$/i, '')
+    .trim();
   const after = afterDelimiter;
   console.log('[extractOptionsAndStrip] Successfully extracted options, length:', after.length);
   return { text: before, options: after };
 }
-
 
 // =============================================================================
 // HELPER FUNCTIONS FOR PROMPT BUILDING

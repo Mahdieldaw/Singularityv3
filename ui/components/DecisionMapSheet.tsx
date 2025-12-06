@@ -29,17 +29,22 @@ function parseMappingResponse(response?: string | null) {
     .replace(/\uFF1D/g, '=');
 
   // First, find GRAPH_TOPOLOGY position to know where options section ends
-  // Match emoji + GRAPH_TOPOLOGY or === GRAPH_TOPOLOGY ===
-  const topoMatch = normalized.match(/\n?[\u{1F300}-\u{1FAD6}\u{2600}-\u{26FF}\u{2700}-\u{27BF}][\uFE0E\uFE0F]?\s*GRAPH[_\s]*TOPOLOGY|\n?={2,}\s*GRAPH[_\s]*TOPOLOGY\s*={2,}/iu);
+  let graphTopoStart = -1;
+  // Match various GRAPH_TOPOLOGY formats including markdown headers: ## 📊 GRAPH_TOPOLOGY
+  const topoMatch = normalized.match(/\n#{1,3}\s*[^\w\n].*?GRAPH[_\s]*TOPOLOGY|\n?[🔬📊🗺️]*\s*={0,}GRAPH[_\s]*TOPOLOGY={0,}|\n?[🔬📊🗺️]\s*GRAPH[_\s]*TOPOLOGY|={3,}\s*GRAPH[_\s]*TOPOLOGY\s*={3,}/i);
   if (topoMatch && typeof topoMatch.index === 'number') {
+    graphTopoStart = topoMatch.index;
     // Strip GRAPH_TOPOLOGY section from normalized text for mapping
     normalized = normalized.slice(0, topoMatch.index).trim();
   }
 
   const optionsPatterns = [
-    // Emoji-prefixed format (🛠️ ALL_AVAILABLE_OPTIONS) - HIGHEST PRIORITY
-    // Match any emoji followed by optional variation selector (\uFE0E or \uFE0F)
-    { re: /\n?[\u{1F300}-\u{1FAD6}\u{2600}-\u{26FF}\u{2700}-\u{27BF}][\uFE0E\uFE0F]?\s*ALL[_\s]*AVAILABLE[_\s]*OPTIONS\s*\n?/iu, minPosition: 0.15 },
+    // Markdown H2/H3 header with any emoji prefix: ## 🛠️ ALL_AVAILABLE_OPTIONS
+    // Uses [^\w\n] to match emoji or any non-word char without specifying exact emoji
+    { re: /\n#{1,3}\s*[^\w\n].*?ALL[_\s]*AVAILABLE[_\s]*OPTIONS.*?\n/i, minPosition: 0.15 },
+
+    // Emoji-prefixed format (🛠️ ALL_AVAILABLE_OPTIONS) - standalone without markdown header
+    { re: /\n?[🛠️🔧⚙️🛠]\s*ALL[_\s]*AVAILABLE[_\s]*OPTIONS\s*\n?/iu, minPosition: 0.15 },
 
     // Standard delimiter with === wrapper
     { re: /\n?={3,}\s*ALL[_\s]*AVAILABLE[_\s]*OPTIONS\s*={3,}\n?/i, minPosition: 0 },
@@ -66,19 +71,7 @@ function parseMappingResponse(response?: string | null) {
     }
   }
   if (bestMatch) {
-    let afterDelimiter = normalized.substring(bestMatch.index + bestMatch.length).trim();
-
-    // Strip any secondary ALL_AVAILABLE_OPTIONS delimiter at the start
-    // (handles case where emoji header is followed by === delimiter)
-    afterDelimiter = afterDelimiter
-      .replace(/^={2,}\s*ALL[_\s]*AVAILABLE[_\s]*OPTIONS\s*={2,}\s*\n?/i, '')
-      .trim();
-
-    // Also strip any emoji GRAPH_TOPOLOGY at the end that might have slipped through
-    afterDelimiter = afterDelimiter
-      .replace(/\n?[\u{1F300}-\u{1FAD6}\u{2600}-\u{26FF}\u{2700}-\u{27BF}][\uFE0E\uFE0F]?\s*GRAPH[_\s]*TOPOLOGY.*$/isu, '')
-      .trim();
-
+    const afterDelimiter = normalized.substring(bestMatch.index + bestMatch.length).trim();
     const listPreview = afterDelimiter.slice(0, 400);
 
     // Accept: bullet lists, numbered lists, "Theme:" headers, bold headers (**), any capitalized heading,
@@ -89,7 +82,14 @@ function parseMappingResponse(response?: string | null) {
     const hasSubstantiveContent = afterDelimiter.length > 50 && (afterDelimiter.includes('\n') || afterDelimiter.includes(':'));
 
     if (hasListStructure || hasSubstantiveContent) {
-      const mapping = normalized.substring(0, bestMatch.index).trim();
+      let mapping = normalized.substring(0, bestMatch.index).trim();
+      // Clean up trailing horizontal rules, leftover ALL_AVAILABLE_OPTIONS header text and emojis
+      mapping = mapping
+        .replace(/\n---+\s*$/, '')
+        .replace(/\n#{1,3}\s*[🛠️🔧⚙️🛠]\s*ALL[_\s]*AVAILABLE[_\s]*OPTIONS.*$/i, '')
+        .replace(/\n#{1,3}\s*[🛠️🔧⚙️🛠]\s*$/i, '')
+        .replace(/[🛠️🔧⚙️🛠]\s*$/i, '')
+        .trim();
       const options = afterDelimiter || null;
       return { mapping, options };
     }
@@ -785,8 +785,15 @@ export const DecisionMapSheet = React.memo(() => {
   }, [latestMapping]);
 
   const optionsText = useMemo(() => {
-    const fromMeta = (latestMapping as any)?.meta?.allAvailableOptions || null;
-    if (fromMeta) return fromMeta;
+    let fromMeta = (latestMapping as any)?.meta?.allAvailableOptions || null;
+    if (fromMeta) {
+      // Safety net: strip any trailing GRAPH_TOPOLOGY header that may have been incorrectly included
+      const graphTopoMatch = fromMeta.match(/\n#{1,3}\s*[^\w\n].*?GRAPH[_\s]*TOPOLOGY|\n?[🔬📊🗺️]*\s*={0,}GRAPH[_\s]*TOPOLOGY/i);
+      if (graphTopoMatch && typeof graphTopoMatch.index === 'number') {
+        fromMeta = fromMeta.slice(0, graphTopoMatch.index).trim();
+      }
+      return fromMeta;
+    }
     const t = latestMapping?.text || '';
     const { options } = parseMappingResponse(String(t));
     return options;
