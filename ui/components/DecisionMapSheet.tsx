@@ -13,146 +13,29 @@ import type { AiTurn, ProviderResponse } from "../types";
 import clsx from "clsx";
 
 // ============================================================================
-// PARSING UTILITIES
+// PARSING UTILITIES - Import from shared module (single source of truth)
 // ============================================================================
 
+import {
+  parseMappingResponse as sharedParseMappingResponse,
+  extractGraphTopologyAndStrip,
+  cleanOptionsText,
+} from "../../shared/parsing-utils";
+
+// Wrapper to maintain existing API (returns { mapping, options })
 function parseMappingResponse(response?: string | null) {
   if (!response) return { mapping: "", options: null };
-  let normalized = response
-    .replace(/\\=/g, '=')
-    .replace(/\\_/g, '_')
-    .replace(/\\\*/g, '*')
-    .replace(/\\-/g, '-')
-    .replace(/[＝═⁼˭꓿﹦]/g, '=')
-    .replace(/[‗₌]/g, '=')
-    .replace(/\u2550/g, '=')
-    .replace(/\uFF1D/g, '=');
-
-  // First, find GRAPH_TOPOLOGY position to know where options section ends
-  let graphTopoStart = -1;
-  // Match various GRAPH_TOPOLOGY formats including markdown headers: ## 📊 GRAPH_TOPOLOGY
-  const topoMatch = normalized.match(/\n#{1,3}\s*[^\w\n].*?GRAPH[_\s]*TOPOLOGY|\n?[🔬📊🗺️]*\s*={0,}GRAPH[_\s]*TOPOLOGY={0,}|\n?[🔬📊🗺️]\s*GRAPH[_\s]*TOPOLOGY|={3,}\s*GRAPH[_\s]*TOPOLOGY\s*={3,}/i);
-  if (topoMatch && typeof topoMatch.index === 'number') {
-    graphTopoStart = topoMatch.index;
-    // Strip GRAPH_TOPOLOGY section from normalized text for mapping
-    normalized = normalized.slice(0, topoMatch.index).trim();
-  }
-
-  const optionsPatterns = [
-    // Markdown H2/H3 header with any emoji prefix: ## 🛠️ ALL_AVAILABLE_OPTIONS
-    // Uses [^\w\n] to match emoji or any non-word char without specifying exact emoji
-    { re: /\n#{1,3}\s*[^\w\n].*?ALL[_\s]*AVAILABLE[_\s]*OPTIONS.*?\n/i, minPosition: 0.15 },
-
-    // Emoji-prefixed format (🛠️ ALL_AVAILABLE_OPTIONS) - standalone without markdown header
-    { re: /\n?[🛠️🔧⚙️🛠]\s*ALL[_\s]*AVAILABLE[_\s]*OPTIONS\s*\n?/iu, minPosition: 0.15 },
-
-    // Standard delimiter with === wrapper
-    { re: /\n?={3,}\s*ALL[_\s]*AVAILABLE[_\s]*OPTIONS\s*={3,}\n?/i, minPosition: 0 },
-    { re: /\n?[=\-─━═＝]{3,}\s*ALL[_\s]*AVAILABLE[_\s]*OPTIONS\s*[=\-─━═＝]{3,}\n?/i, minPosition: 0 },
-    { re: /\n?\*{0,2}={3,}\s*ALL[_\s]*AVAILABLE[_\s]*OPTIONS\s*={3,}\*{0,2}\n?/i, minPosition: 0 },
-
-    // Heading styles
-    { re: /\n#{1,3}\s*All\s+Available\s+Options:?\n/i, minPosition: 0.25 },
-    { re: /\n\*{2}All\s+Available\s+Options:?\*{2}\n/i, minPosition: 0.25 },
-    { re: /\nAll\s+Available\s+Options:\n/i, minPosition: 0.3 },
-  ];
-  let bestMatch: { index: number; length: number } | null = null;
-  let bestScore = -1;
-  for (const pattern of optionsPatterns) {
-    const match = normalized.match(pattern.re);
-    if (match && typeof match.index === 'number') {
-      const position = match.index / normalized.length;
-      if (position < pattern.minPosition) continue;
-      const score = position * 100;
-      if (score > bestScore) {
-        bestScore = score;
-        bestMatch = { index: match.index, length: match[0].length };
-      }
-    }
-  }
-  if (bestMatch) {
-    const afterDelimiter = normalized.substring(bestMatch.index + bestMatch.length).trim();
-    const listPreview = afterDelimiter.slice(0, 400);
-
-    // Accept: bullet lists, numbered lists, "Theme:" headers, bold headers (**), any capitalized heading,
-    // emoji-prefixed sections, or any substantive paragraphs
-    const hasListStructure = /^\s*[-*•]\s+|\n\s*[-*•]\s+|^\s*\d+\.\s+|\n\s*\d+\.\s+|^\s*\*\*[^*]+\*\*|^\s*Theme\s*:|^\s*###?\s+|^\s*[A-Z][^:\n]{2,}:|^[\u{1F300}-\u{1FAD6}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/iu.test(listPreview);
-
-    // Also accept if there's substantive content (at least 50 chars with newlines suggesting structure)
-    const hasSubstantiveContent = afterDelimiter.length > 50 && (afterDelimiter.includes('\n') || afterDelimiter.includes(':'));
-
-    if (hasListStructure || hasSubstantiveContent) {
-      let mapping = normalized.substring(0, bestMatch.index).trim();
-      // Clean up trailing horizontal rules, leftover ALL_AVAILABLE_OPTIONS header text and emojis
-      mapping = mapping
-        .replace(/\n---+\s*$/, '')
-        .replace(/\n#{1,3}\s*[🛠️🔧⚙️🛠]\s*ALL[_\s]*AVAILABLE[_\s]*OPTIONS.*$/i, '')
-        .replace(/\n#{1,3}\s*[🛠️🔧⚙️🛠]\s*$/i, '')
-        .replace(/[🛠️🔧⚙️🛠]\s*$/i, '')
-        .trim();
-      const options = afterDelimiter || null;
-      return { mapping, options };
-    }
-  }
-  return { mapping: normalized, options: null };
+  const result = sharedParseMappingResponse(response);
+  return { mapping: result.narrative, options: result.options };
 }
 
-
+// Wrapper to extract just the topology from raw text
 function extractGraphTopologyFromText(rawText?: string | null) {
-  if (!rawText || typeof rawText !== 'string') return null;
-  try {
-    let normalized = rawText
-      .replace(/\\=/g, '=')
-      .replace(/\\_/g, '_')
-      .replace(/\\\*/g, '*')
-      .replace(/\\-/g, '-');
-    const match = normalized.match(/={3,}\s*GRAPH[_\s]*TOPOLOGY\s*={3,}/i);
-    if (!match || typeof match.index !== 'number') return null;
-    const start = match.index + match[0].length;
-    let rest = normalized.slice(start).trim();
-    const codeBlockMatch = rest.match(/^```(?:json)?\s*\n([\s\S]*?)\n```/);
-    if (codeBlockMatch) {
-      rest = codeBlockMatch[1].trim();
-    }
-    let i = 0;
-    while (i < rest.length && rest[i] !== '{') i++;
-    if (i >= rest.length) return null;
-    let depth = 0;
-    let inStr = false;
-    let esc = false;
-    for (let j = i; j < rest.length; j++) {
-      const ch = rest[j];
-      if (inStr) {
-        if (esc) {
-          esc = false;
-        } else if (ch === '\\') {
-          esc = true;
-        } else if (ch === '"') {
-          inStr = false;
-        }
-        continue;
-      }
-      if (ch === '"') {
-        inStr = true;
-        continue;
-      }
-      if (ch === '{') {
-        depth++;
-      } else if (ch === '}') {
-        depth--;
-        if (depth === 0) {
-          let jsonText = rest.slice(i, j + 1);
-          jsonText = jsonText.replace(/("supporters"\s*:\s*\[)\s*S\s*([,\]])/g, '$1"S"$2');
-          const parsed = JSON.parse(jsonText);
-          return parsed;
-        }
-      }
-    }
-  } catch {
-    return null;
-  }
-  return null;
+  if (!rawText) return null;
+  const { topology } = extractGraphTopologyAndStrip(rawText);
+  return topology;
 }
+
 
 
 // ============================================================================
@@ -787,12 +670,8 @@ export const DecisionMapSheet = React.memo(() => {
   const optionsText = useMemo(() => {
     let fromMeta = (latestMapping as any)?.meta?.allAvailableOptions || null;
     if (fromMeta) {
-      // Safety net: strip any trailing GRAPH_TOPOLOGY header that may have been incorrectly included
-      const graphTopoMatch = fromMeta.match(/\n#{1,3}\s*[^\w\n].*?GRAPH[_\s]*TOPOLOGY|\n?[🔬📊🗺️]*\s*={0,}GRAPH[_\s]*TOPOLOGY/i);
-      if (graphTopoMatch && typeof graphTopoMatch.index === 'number') {
-        fromMeta = fromMeta.slice(0, graphTopoMatch.index).trim();
-      }
-      return fromMeta;
+      // Use shared cleanup function to strip any trailing GRAPH_TOPOLOGY
+      return cleanOptionsText(fromMeta);
     }
     const t = latestMapping?.text || '';
     const { options } = parseMappingResponse(String(t));

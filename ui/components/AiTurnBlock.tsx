@@ -7,7 +7,7 @@ import React, {
   useEffect,
 } from "react";
 import { useSetAtom, useAtomValue } from "jotai";
-import { toastAtom, activeSplitPanelAtom, isDecisionMapOpenAtom } from "../state/atoms";
+import { toastAtom, activeSplitPanelAtom, isDecisionMapOpenAtom, synthesisProviderAtom } from "../state/atoms";
 import { AiTurn, ProviderResponse, AppStep } from "../types";
 import MarkdownDisplay from "./MarkdownDisplay";
 import { LLM_PROVIDERS_CONFIG } from "../constants";
@@ -445,10 +445,37 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
     [providerIds]
   );
 
-  const activeSynthPid = computeActiveProvider(
-    activeSynthesisClipProviderId,
-    synthesisResponses
-  );
+  const globalSynthesisProvider = useAtomValue(synthesisProviderAtom);
+
+  const activeSynthPid = useMemo(() => {
+    // 1. Clip Override (Highest Priority interaction)
+    if (activeSynthesisClipProviderId) return activeSynthesisClipProviderId;
+
+    // 2. Global State
+    if (globalSynthesisProvider) return globalSynthesisProvider;
+
+    // 3. Persisted Metadata
+    const metaSynth = (aiTurn.meta as any)?.synthesizer;
+    if (metaSynth) return metaSynth;
+
+    // 4. Fallback: Check for any completed synthesis response
+    for (const p of LLM_PROVIDERS_CONFIG) {
+      const pid = String(p.id);
+      const responses = synthesisResponses[pid];
+      if (responses?.some(r => r.status === 'completed' || (r.text && r.status !== 'error'))) {
+        return pid;
+      }
+    }
+
+    return undefined;
+  }, [activeSynthesisClipProviderId, globalSynthesisProvider, aiTurn.meta, synthesisResponses]);
+
+  const visibleProviderIds = useMemo(() => {
+    const ids = new Set(Object.keys(allSources));
+    if (activeSynthPid) ids.add(activeSynthPid);
+    if ((aiTurn.meta as any)?.mapper) ids.add((aiTurn.meta as any).mapper);
+    return Array.from(ids);
+  }, [allSources, activeSynthPid, aiTurn.meta]);
   const activeMappingPid = computeActiveProvider(
     activeMappingClipProviderId,
     mappingResponses
@@ -795,16 +822,13 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                       turnId={aiTurn.id}
                       providers={LLM_PROVIDERS_CONFIG}
                       voiceProviderId={activeSynthPid || ""}
+                      visibleProviderIds={visibleProviderIds}
                       onOrbClick={(pid) => setActiveSplitPanel({ turnId: aiTurn.id, providerId: pid })}
                       onCrownMove={handleCrownMove}
                       onTrayExpand={() => setIsDecisionMapOpen({ turnId: aiTurn.id })}
                       isTrayExpanded={isDecisionMapOpen?.turnId === aiTurn.id}
                       variant="tray"
-                      visibleProviderIds={[
-                        ...Object.keys(allSources),
-                        ...(aiTurn.meta?.synthesizer ? [aiTurn.meta.synthesizer] : []),
-                        ...(aiTurn.meta?.mapper ? [aiTurn.meta.mapper] : []),
-                      ].filter((v, i, arr) => arr.indexOf(v) === i)}
+
                       isEditMode={isEditingNextTurn}
                     />
                   </div>

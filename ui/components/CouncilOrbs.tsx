@@ -44,6 +44,21 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
     const [composerVal, setComposer] = useAtom(composerModelAtom);
     const [analystVal, setAnalyst] = useAtom(analystModelAtom);
     const [selectedModels, setSelectedModels] = useAtom(selectedModelsAtom);
+    const containerRef = useRef<HTMLDivElement>(null);
+
+    // Click Outside Listener
+    React.useEffect(() => {
+        const handleClickOutside = (event: MouseEvent) => {
+            if (isMenuOpen && containerRef.current && !containerRef.current.contains(event.target as Node)) {
+                setIsMenuOpen(false);
+            }
+        };
+
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => {
+            document.removeEventListener('mousedown', handleClickOutside);
+        };
+    }, [isMenuOpen]);
 
     // Auto-open menu when isEditMode becomes true (triggered by next-turn arrow button)
     React.useEffect(() => {
@@ -186,6 +201,7 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
             onMouseDown={() => handleLongPressStart(null)}
             onMouseUp={handleLongPressCancel}
             onMouseLeave={handleLongPressCancel}
+            ref={containerRef}
         >
             {/* Orb bar with centered voice and fanned others */}
             <div className="council-orb-bar flex items-center justify-center relative" style={{ maxWidth: '480px', margin: '0 auto', height: '60px' }}>
