@@ -5,6 +5,7 @@ import { LLM_PROVIDERS_CONFIG } from "../constants";
 
 interface NudgeChipBarProps {
     type: "sending" | "idle";
+    variant?: "default" | "chain_composer" | "chain_analyst"; // New variant prop
     onCompose: () => void;
     onAnalyst: () => void;
     progress?: number; // 0-100
@@ -13,6 +14,7 @@ interface NudgeChipBarProps {
 
 const NudgeChipBar: React.FC<NudgeChipBarProps> = ({
     type,
+    variant = "default",
     onCompose,
     onAnalyst,
     progress = 0,
@@ -37,8 +39,18 @@ const NudgeChipBar: React.FC<NudgeChipBarProps> = ({
     if (!show) return null;
 
     const isSending = type === "sending";
-    const composerText = isSending ? "Perfect this prompt" : "Let Composer perfect it";
-    const analystText = isSending ? "Pressure-test it" : "Let Analyst sharpen it";
+
+    // Dynamic text based on variant
+    let composerText = isSending ? "Perfect this prompt" : "Let Composer perfect it";
+    let analystText = isSending ? "Pressure-test it" : "Let Analyst sharpen it";
+
+    if (variant === "chain_analyst") {
+        // We just ran Composer, nudge Analyst
+        analystText = "Now pressure-test with Analyst?";
+    } else if (variant === "chain_composer") {
+        // We just ran Analyst, nudge Composer
+        composerText = "Now perfect this audited version?";
+    }
 
     return (
         <div

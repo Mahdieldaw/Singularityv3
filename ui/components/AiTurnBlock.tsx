@@ -263,6 +263,7 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
     };
   }, []);
 
+  /* AUTOMATED SCROLL: Only manual edit mode closes it
   const handleNextTurnArrowClick = useCallback(() => {
     // Toggle edit mode
     if (isEditingNextTurn) {
@@ -277,6 +278,105 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
       setIsEditingNextTurn(false);
     }, 8000);
   }, [isEditingNextTurn]);
+  */
+  // Replacing specific block with new logic + keeping required parts
+  const handleNextTurnArrowClick = useCallback(() => {
+    // Toggle edit mode
+    if (isEditingNextTurn) {
+      setIsEditingNextTurn(false);
+      if (editTimeoutRef.current) clearTimeout(editTimeoutRef.current);
+      return;
+    }
+
+    setIsEditingNextTurn(true);
+    // Auto-close after 8 seconds
+    editTimeoutRef.current = setTimeout(() => {
+      setIsEditingNextTurn(false);
+    }, 8000);
+  }, [isEditingNextTurn]);
+
+  // --- SYNTHESIS TABS LOGIC ---
+  const synthesisTabs = useMemo(() => {
+    if (!aiTurn.synthesisResponses) return [];
+
+    interface SynthTab {
+      id: string; // unique: providerId + index
+      providerId: string;
+      index: number;
+      label: string;
+      response: ProviderResponse;
+      isLatest: boolean;
+    }
+
+    const tabs: SynthTab[] = [];
+    const providersWithResponses = Object.entries(aiTurn.synthesisResponses)
+      .filter(([_, resps]) => Array.isArray(resps) && resps.length > 0);
+
+    // Sort providers by predetermined order or alphabetical
+    // This ensures tabs are stable
+    const sortedProviders = providersWithResponses.sort((a, b) => {
+      const idxA = LLM_PROVIDERS_CONFIG.findIndex(p => String(p.id) === a[0]);
+      const idxB = LLM_PROVIDERS_CONFIG.findIndex(p => String(p.id) === b[0]);
+      return idxA - idxB;
+    });
+
+    sortedProviders.forEach(([pid, resps]) => {
+      const providerConfig = LLM_PROVIDERS_CONFIG.find(p => String(p.id) === pid);
+      const name = providerConfig?.name || pid;
+
+      const respsArray = Array.isArray(resps) ? resps : [resps];
+      // Filter out empty responses unless they are streaming/error
+      const validResps = respsArray.filter(r => r.text || r.status === 'streaming' || r.status === 'error');
+
+      validResps.forEach((resp, idx) => {
+        // If there's more than one response for this provider, append number
+        const count = validResps.length;
+        const label = count > 1 ? `${name} ${idx + 1}` : name;
+
+        tabs.push({
+          id: `${pid}-${idx}`,
+          providerId: pid,
+          index: idx,
+          label,
+          response: resp,
+          isLatest: idx === validResps.length - 1
+        });
+      });
+    });
+
+    return tabs;
+  }, [aiTurn.synthesisResponses, aiTurn.synthesisVersion]);
+
+  // Track active tab ID. Default to the very last (latest) tab.
+  // We use a ref to detect new arrivals and auto-switch if needed.
+  const [activeSynthTabId, setActiveSynthTabId] = useState<string | null>(null);
+  const prevTabsLengthRef = useRef(0);
+
+  // Auto-select latest tab on mount or when new tabs arrive
+  useEffect(() => {
+    if (synthesisTabs.length > 0) {
+      // If first load (active is null) OR new tabs added (recompute finished)
+      if (activeSynthTabId === null || synthesisTabs.length > prevTabsLengthRef.current) {
+        // Find the "recompute target" if exists, else just the last one
+        const lastTab = synthesisTabs[synthesisTabs.length - 1];
+
+        // If we have a specific active recompute target, prioritize that
+        if (activeRecomputeState?.stepType === "synthesis" && activeRecomputeState.aiTurnId === aiTurn.id) {
+          const targetTab = synthesisTabs.slice().reverse().find(t => t.providerId === activeRecomputeState.providerId);
+          if (targetTab) {
+            setActiveSynthTabId(targetTab.id);
+          } else {
+            setActiveSynthTabId(lastTab.id);
+          }
+        } else {
+          setActiveSynthTabId(lastTab.id);
+        }
+      }
+    }
+    prevTabsLengthRef.current = synthesisTabs.length;
+  }, [synthesisTabs, activeRecomputeState, aiTurn.id]); // activeSynthTabId excluded to allow manual switch
+
+
 
   const synthesisResponses = useMemo(() => {
     if (!aiTurn.synthesisResponses) aiTurn.synthesisResponses = {};
@@ -542,6 +642,43 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                   )}
                   style={{ padding: '28px 40px 96px' }}
                 >
+                  {/* SYNTHESIS TABS UI */}
+                  {synthesisTabs.length > 0 && (
+                    <div className="flex gap-2 overflow-x-auto pb-4 px-2 mb-2 no-scrollbar border-b border-border-subtle/50">
+                      {synthesisTabs.map((tab) => {
+                        const isActive = tab.id === activeSynthTabId;
+                        const isStreaming = tab.response.status === 'streaming';
+                        const isError = tab.response.status === 'error';
+
+                        return (
+                          <button
+                            key={tab.id}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setActiveSynthTabId(tab.id);
+                              // Also move split panel if needed (optional)
+                            }}
+                            className={clsx(
+                              "relative px-4 py-2 rounded-full text-sm font-medium transition-all whitespace-nowrap border",
+                              isActive
+                                ? "bg-surface-raised border-brand-400 text-text-primary shadow-sm"
+                                : "bg-transparent border-transparent text-text-muted hover:bg-surface-highlight hover:text-text-secondary"
+                            )}
+                          >
+                            <span className="flex items-center gap-2">
+                              {tab.label}
+                              {isStreaming && <span className="w-1.5 h-1.5 rounded-full bg-intent-warning animate-pulse" />}
+                              {isError && <span className="w-1.5 h-1.5 rounded-full bg-intent-danger" />}
+                            </span>
+                            {isActive && (
+                              <span className="absolute bottom-0 left-1/2 -translate-x-1/2 w-4 h-[2px] bg-brand-500 rounded-t-full" />
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+
                   {(() => {
                     if (!wasSynthRequested)
                       return (
@@ -549,16 +686,30 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                           Synthesis not enabled for this turn.
                         </div>
                       );
-                    const latest = activeSynthPid
-                      ? getLatestResponse(
-                        synthesisResponses[activeSynthPid]
-                      )
-                      : undefined;
-                    const isGenerating =
-                      (latest &&
-                        (latest.status === "streaming" ||
-                          latest.status === "pending")) ||
-                      isSynthesisTarget;
+
+                    // --- USE ACTIVE TAB INSTEAD OF GLOBAL ACTIVE PID ---
+                    const activeTab = synthesisTabs.find(t => t.id === activeSynthTabId) || synthesisTabs[synthesisTabs.length - 1]; // Fallback to last
+
+                    // Fallback to old behavior if no tabs (shouldn't happen if responses exist)
+                    const latest = activeTab
+                      ? activeTab.response
+                      : (activeSynthPid ? getLatestResponse(synthesisResponses[activeSynthPid]) : undefined);
+
+                    // Derive isGenerating from the SPECIFIC response status
+                    const isGenerating = latest && (latest.status === "streaming" || latest.status === "pending");
+
+                    // If specifically targeting synthesis recompute for a provider NOT yet in tabs (rare race condition), show loader
+                    if (!activeTab && isSynthesisTarget) {
+                      return (
+                        <div className="flex items-center justify-center gap-2 text-text-muted">
+                          <span className="italic">
+                            Starting synthesis...
+                          </span>
+                          <span className="streaming-dots" />
+                        </div>
+                      );
+                    }
+
                     if (isGenerating)
                       return (
                         <div className="flex items-center justify-center gap-2 text-text-muted">
@@ -568,15 +719,15 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                           <span className="streaming-dots" />
                         </div>
                       );
-                    if (activeSynthPid) {
-                      const take = getLatestResponse(
-                        synthesisResponses[activeSynthPid]
-                      );
+
+                    if (activeTab) {
+                      const take = activeTab.response;
+
                       if (take && take.status === "error") {
                         return (
                           <div className="bg-intent-danger/15 border border-intent-danger text-intent-danger rounded-lg p-3">
                             <div className="text-xs mb-2">
-                              {activeSynthPid} · error
+                              {activeTab.label} · error
                             </div>
                             <div className="prose prose-sm max-w-none dark:prose-invert leading-7 text-sm">
                               <MarkdownDisplay
@@ -588,14 +739,16 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                           </div>
                         );
                       }
+
                       if (!take)
                         return (
                           <div className="text-text-muted">
-                            No synthesis yet.
+                            No synthesis content.
                           </div>
                         );
+
                       return (
-                        <div>
+                        <div className="animate-in fade-in duration-300">
                           {(() => {
                             const cleanText = take.text || '';
                             const artifacts = take.artifacts || [];

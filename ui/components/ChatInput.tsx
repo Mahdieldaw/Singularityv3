@@ -35,7 +35,6 @@ interface ChatInputProps {
   showExplanation?: boolean;
   refinerContent?: React.ReactNode;
   // New Refiner Actions
-  // New Refiner Actions
   onExplain?: (prompt: string) => void;
   onCompose?: (prompt: string) => void;
   // Targeted Continuation
@@ -88,7 +87,6 @@ const ChatInput = ({
 }: ChatInputProps) => {
   const CHAT_INPUT_STORAGE_KEY = "htos_chat_input_value";
   const [prompt, setPrompt] = useAtom(chatInputValueAtom);
-  // Removed showRefineDropdown and refineModel state
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   // Long-press state
@@ -126,21 +124,9 @@ const ChatInput = ({
       .filter(([_, isSelected]) => isSelected)
       .map(([id]) => id);
 
-    // If no providers selected (or only default), consider all or default behavior
-    // For now, if activeProviders is empty, we might assume default providers or no limit?
-    // Let's assume at least one is active or we check against all available if none explicitly selected (though that shouldn't happen in this app state)
-
     const providersToCheck = activeProviders.length > 0 ? activeProviders : ['chatgpt', 'claude', 'gemini']; // Default fallback
 
     providersToCheck.forEach(pid => {
-      // Handle model variants (e.g. gemini-pro vs gemini) if needed, 
-      // but PROVIDER_LIMITS uses keys like 'gemini-pro'. 
-      // The selectedModels atom usually stores keys like 'gemini', 'claude', 'chatgpt'.
-      // If we have specific model selections, we might need to map them.
-      // For now, assuming direct mapping or simple fallback.
-
-      // Check for specific model overrides if your app supports them in selectedModels keys
-      // Otherwise use base provider limits
       const limitConfig = PROVIDER_LIMITS[pid as keyof typeof PROVIDER_LIMITS] || PROVIDER_LIMITS['chatgpt']; // Fallback to safe limit
 
       if (limitConfig.maxInputChars < minMax) {
@@ -162,14 +148,14 @@ const ChatInput = ({
       const newHeight = Math.min(scrollHeight, 120); // Max height 120px
       textareaRef.current.style.height = `${newHeight}px`;
 
-      // Calculate total input area height (textarea + padding + borders + refiner content)
-      // Note: refinerContent height is dynamic, so this might not be perfect, 
-      // but onHeightChange is mostly for padding the chat history.
-      const totalHeight = newHeight + 24 + 2 + (isRefinerOpen ? 40 : 0) + (activeTarget ? 30 : 0);
+      // Calculate total input area height
+      const bottomBarHeight = (originalPrompt || composerDraft) ? 30 : 0;
+      const refinerHeight = isRefinerOpen ? 40 : 0;
+      const targetHeight = activeTarget ? 30 : 0;
+      const totalHeight = newHeight + 24 + 2 + refinerHeight + targetHeight + bottomBarHeight;
       onHeightChange?.(totalHeight);
-
     }
-  }, [prompt, onHeightChange, isRefinerOpen, activeTarget]);
+  }, [prompt, onHeightChange, isRefinerOpen, activeTarget, originalPrompt, composerDraft]);
 
   // Close menu on click outside
   useEffect(() => {
@@ -190,6 +176,7 @@ const ChatInput = ({
   // Idle Nudge Logic (Trigger B) - Only when focused and idle
   useEffect(() => {
     // Only show idle nudge when: focused, has text, not loading/frozen/refining
+    // Exception: If we have a refinement state (chaining), we allow nudging even if we are technically "refining" in the high-level sense
     if (isNudgeFrozen || isLoading || !prompt.trim() || isRefinerOpen || !isFocused) {
       if (nudgeType === "idle") setNudgeVisible(false);
       return;
@@ -198,16 +185,20 @@ const ChatInput = ({
     // Clear existing idle timer
     if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
 
-    // Start new idle timer
+    // Set new timer for idle detection (reduced to 2s for snappier chaining feel if refined)
+    const idleTime = currentRefinementState ? 2000 : 3200;
+
     idleTimerRef.current = setTimeout(() => {
       setNudgeType("idle");
+      // Calculate progress based on length (visual flair)
+      setNudgeProgress(Math.min(100, (prompt.length / 50) * 100)); // Arbitrary scale
       setNudgeVisible(true);
-    }, 3200); // 3.2s idle
+    }, idleTime);
 
     return () => {
       if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
     };
-  }, [prompt, isNudgeFrozen, isLoading, isRefinerOpen, isFocused]);
+  }, [prompt, isNudgeFrozen, isLoading, isRefinerOpen, isFocused, currentRefinementState, nudgeType]);
 
   // Reset idle nudge on typing
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -286,7 +277,8 @@ const ChatInput = ({
     if (nudgeTimerRef.current) clearInterval(nudgeTimerRef.current);
     setIsNudgeFrozen(false);
     setNudgeVisible(false);
-    onExplain?.(prompt); // Use onExplain for Analyst action
+    // Analyst uses onExplain usually, but we want to map it correctly
+    onExplain?.(prompt);
   };
 
   const handleMouseDown = () => {
@@ -328,6 +320,13 @@ const ChatInput = ({
     }
   };
 
+  // Determine Nudge Variant for Chaining
+  const getNudgeVariant = () => {
+    if (currentRefinementState === "composer") return "chain_analyst";
+    if (currentRefinementState === "analyst") return "chain_composer";
+    return "default";
+  };
+
   const buttonText = (isRefinerOpen || hasRejectedRefinement) ? "Launch" : (isContinuationMode ? "Continue" : "Send");
   const isDisabled = isLoading || mappingActive || !prompt.trim() || isOverLimit || isNudgeFrozen;
   const showMappingBtn = canShowMapping && !!prompt.trim() && !isRefinerOpen && !hasRejectedRefinement;
@@ -342,10 +341,19 @@ const ChatInput = ({
         {/* Nudge Chip Bar */}
         <NudgeChipBar
           type={nudgeType}
-          visible={nudgeVisible}
+          variant={getNudgeVariant()}
+          onCompose={() => {
+            // If already composed and clicking compose again -> standard compose
+            // If chained (analyst -> composer) -> standard compose (which will take the current input)
+            onCompose?.(prompt);
+            setNudgeVisible(false);
+          }}
+          onAnalyst={() => {
+            onExplain?.(prompt); // Analyst = Explain
+            setNudgeVisible(false);
+          }}
           progress={nudgeProgress}
-          onCompose={handleNudgeCompose}
-          onAnalyst={handleNudgeAnalyst}
+          visible={nudgeVisible}
         />
 
         {/* Targeted Mode Banner */}
