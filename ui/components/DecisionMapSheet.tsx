@@ -1,6 +1,7 @@
 import React, { useMemo, useCallback, useEffect, useRef, useState } from "react";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
-import { isDecisionMapOpenAtom, turnByIdAtom, mappingProviderAtom, activeSplitPanelAtom } from "../state/atoms";
+import { isDecisionMapOpenAtom, turnByIdAtom, mappingProviderAtom, activeSplitPanelAtom, providerAuthStatusAtom } from "../state/atoms";
+import { useClipActions } from "../hooks/useClipActions";
 import { motion, AnimatePresence } from "framer-motion";
 import DecisionMapGraph from "./experimental/DecisionMapGraph";
 import { adaptGraphTopology } from "./experimental/graphAdapter";
@@ -26,14 +27,26 @@ function parseMappingResponse(response?: string | null) {
     .replace(/[‗₌]/g, '=')
     .replace(/\u2550/g, '=')
     .replace(/\uFF1D/g, '=');
-  const topoMatch = normalized.match(/={3,}\s*GRAPH[_\s]*TOPOLOGY\s*={3,}/i);
+
+  // First, find GRAPH_TOPOLOGY position to know where options section ends
+  // Match emoji + GRAPH_TOPOLOGY or === GRAPH_TOPOLOGY ===
+  const topoMatch = normalized.match(/\n?[\u{1F300}-\u{1FAD6}\u{2600}-\u{26FF}\u{2700}-\u{27BF}][\uFE0E\uFE0F]?\s*GRAPH[_\s]*TOPOLOGY|\n?={2,}\s*GRAPH[_\s]*TOPOLOGY\s*={2,}/iu);
   if (topoMatch && typeof topoMatch.index === 'number') {
+    // Strip GRAPH_TOPOLOGY section from normalized text for mapping
     normalized = normalized.slice(0, topoMatch.index).trim();
   }
+
   const optionsPatterns = [
+    // Emoji-prefixed format (🛠️ ALL_AVAILABLE_OPTIONS) - HIGHEST PRIORITY
+    // Match any emoji followed by optional variation selector (\uFE0E or \uFE0F)
+    { re: /\n?[\u{1F300}-\u{1FAD6}\u{2600}-\u{26FF}\u{2700}-\u{27BF}][\uFE0E\uFE0F]?\s*ALL[_\s]*AVAILABLE[_\s]*OPTIONS\s*\n?/iu, minPosition: 0.15 },
+
+    // Standard delimiter with === wrapper
     { re: /\n?={3,}\s*ALL[_\s]*AVAILABLE[_\s]*OPTIONS\s*={3,}\n?/i, minPosition: 0 },
     { re: /\n?[=\-─━═＝]{3,}\s*ALL[_\s]*AVAILABLE[_\s]*OPTIONS\s*[=\-─━═＝]{3,}\n?/i, minPosition: 0 },
     { re: /\n?\*{0,2}={3,}\s*ALL[_\s]*AVAILABLE[_\s]*OPTIONS\s*={3,}\*{0,2}\n?/i, minPosition: 0 },
+
+    // Heading styles
     { re: /\n#{1,3}\s*All\s+Available\s+Options:?\n/i, minPosition: 0.25 },
     { re: /\n\*{2}All\s+Available\s+Options:?\*{2}\n/i, minPosition: 0.25 },
     { re: /\nAll\s+Available\s+Options:\n/i, minPosition: 0.3 },
@@ -53,10 +66,29 @@ function parseMappingResponse(response?: string | null) {
     }
   }
   if (bestMatch) {
-    const afterDelimiter = normalized.substring(bestMatch.index + bestMatch.length).trim();
-    const listPreview = afterDelimiter.slice(0, 200);
-    const hasListStructure = /^\s*[-*•]\s+|\n\s*[-*•]\s+|^\s*\d+\.\s+|\n\s*\d+\.\s+|^\s*\*\*[^*]+\*\*|^\s*Theme\s*:|^\s*[A-Z][^:\n]{2,}:/i.test(listPreview);
-    if (hasListStructure) {
+    let afterDelimiter = normalized.substring(bestMatch.index + bestMatch.length).trim();
+
+    // Strip any secondary ALL_AVAILABLE_OPTIONS delimiter at the start
+    // (handles case where emoji header is followed by === delimiter)
+    afterDelimiter = afterDelimiter
+      .replace(/^={2,}\s*ALL[_\s]*AVAILABLE[_\s]*OPTIONS\s*={2,}\s*\n?/i, '')
+      .trim();
+
+    // Also strip any emoji GRAPH_TOPOLOGY at the end that might have slipped through
+    afterDelimiter = afterDelimiter
+      .replace(/\n?[\u{1F300}-\u{1FAD6}\u{2600}-\u{26FF}\u{2700}-\u{27BF}][\uFE0E\uFE0F]?\s*GRAPH[_\s]*TOPOLOGY.*$/isu, '')
+      .trim();
+
+    const listPreview = afterDelimiter.slice(0, 400);
+
+    // Accept: bullet lists, numbered lists, "Theme:" headers, bold headers (**), any capitalized heading,
+    // emoji-prefixed sections, or any substantive paragraphs
+    const hasListStructure = /^\s*[-*•]\s+|\n\s*[-*•]\s+|^\s*\d+\.\s+|\n\s*\d+\.\s+|^\s*\*\*[^*]+\*\*|^\s*Theme\s*:|^\s*###?\s+|^\s*[A-Z][^:\n]{2,}:|^[\u{1F300}-\u{1FAD6}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/iu.test(listPreview);
+
+    // Also accept if there's substantive content (at least 50 chars with newlines suggesting structure)
+    const hasSubstantiveContent = afterDelimiter.length > 50 && (afterDelimiter.includes('\n') || afterDelimiter.includes(':'));
+
+    if (hasListStructure || hasSubstantiveContent) {
       const mapping = normalized.substring(0, bestMatch.index).trim();
       const options = afterDelimiter || null;
       return { mapping, options };
@@ -64,6 +96,7 @@ function parseMappingResponse(response?: string | null) {
   }
   return { mapping: normalized, options: null };
 }
+
 
 function extractGraphTopologyFromText(rawText?: string | null) {
   if (!rawText || typeof rawText !== 'string') return null;
@@ -120,6 +153,7 @@ function extractGraphTopologyFromText(rawText?: string | null) {
   }
   return null;
 }
+
 
 // ============================================================================
 // OPTIONS PARSING - Handle both emoji-prefixed themes and "Theme:" headers
@@ -526,6 +560,138 @@ const DetailView: React.FC<DetailViewProps> = ({ node, narrativeExcerpt, citatio
 };
 
 // ============================================================================
+// MAPPER SELECTOR COMPONENT
+// ============================================================================
+
+interface MapperSelectorProps {
+  aiTurn: AiTurn;
+  activeProviderId?: string;
+}
+
+const MapperSelector: React.FC<MapperSelectorProps> = ({ aiTurn, activeProviderId }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const { handleClipClick } = useClipActions();
+  const authStatus = useAtomValue(providerAuthStatusAtom);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  // Close on outside click
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    };
+    if (isOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isOpen]);
+
+  const activeProvider = activeProviderId ? getProviderById(activeProviderId) : null;
+
+  // Filter out system provider
+  const providers = useMemo(() => LLM_PROVIDERS_CONFIG.filter(p => p.id !== 'system'), []);
+
+  const handleSelect = (providerId: string) => {
+    handleClipClick(aiTurn.id, "mapping", providerId);
+    setIsOpen(false);
+  };
+
+  return (
+    <div className="relative" ref={menuRef}>
+      <button
+        type="button"
+        onClick={() => setIsOpen(!isOpen)}
+        className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 transition-all text-sm font-medium text-text-primary"
+      >
+        <span className="text-base">🧩</span>
+        <span className="opacity-70 text-xs uppercase tracking-wide">Mapper</span>
+        <span className="w-px h-3 bg-white/20 mx-1" />
+        <span className={clsx(!activeProvider && "text-text-muted italic")}>
+          {activeProvider?.name || "Select Model"}
+        </span>
+        <svg
+          className={clsx("w-3 h-3 text-text-muted transition-transform", isOpen && "rotate-180")}
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+
+      {isOpen && (
+        <div className="absolute top-full left-0 mt-2 w-64 bg-surface-raised border border-border-subtle rounded-xl shadow-elevated overflow-hidden z-[3600] animate-in fade-in slide-in-from-top-2 duration-200">
+          <div className="p-2 grid gap-1">
+            {providers.map(p => {
+              const pid = String(p.id);
+              const isActive = pid === activeProviderId;
+              const isUnauthorized = authStatus && authStatus[pid] === false;
+
+              // Check for previous error (e.g. input length)
+              const latestResp = getLatestResponse(aiTurn.mappingResponses?.[pid]);
+              const hasError = latestResp?.status === 'error';
+              const errorMessage = hasError ? ((latestResp?.meta as any)?._rawError || "Failed") : null;
+
+              // Determine if we should disable interaction
+              // We disable if unauthorized, but maybe we allow retry on error? 
+              // User asked to "shortcircuit" if failed for input length.
+              // We'll show it as disabled-ish but maybe clickable if they really want to try? 
+              // User said "failed for input length... grey them out with a tooltip".
+
+              const isDisabled = isUnauthorized; // Strict disable for auth
+              const isDimmed = hasError; // Visual dim for error
+
+              return (
+                <button
+                  key={pid}
+                  onClick={() => !isDisabled && handleSelect(pid)}
+                  className={clsx(
+                    "w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left transition-colors relative group",
+                    isActive ? "bg-brand-500/10 text-brand-500" : "hover:bg-surface-highlight text-text-secondary",
+                    (isDisabled || isDimmed) && "opacity-60 grayscale",
+                    isDisabled && "cursor-not-allowed",
+                  )}
+                  disabled={isDisabled}
+                  title={errorMessage && typeof errorMessage === 'string' ? errorMessage : undefined}
+                >
+                  {/* Color Orb */}
+                  <div
+                    className="w-2 h-2 rounded-full shadow-sm"
+                    style={{ backgroundColor: PROVIDER_COLORS[pid] || PROVIDER_COLORS.default }}
+                  />
+
+                  <div className="flex-1 flex flex-col">
+                    <span className="text-xs font-medium">{p.name}</span>
+                    {hasError && (
+                      <span className="text-[10px] text-intent-danger truncate max-w-[140px]">
+                        {typeof errorMessage === 'string' ? errorMessage : "Generation failed"}
+                      </span>
+                    )}
+                  </div>
+
+                  {isActive && <span>✓</span>}
+                  {isUnauthorized && <span>🔒</span>}
+
+                  {/* Tooltip for error on hover */}
+                  {hasError && (
+                    <div className="absolute left-full ml-2 top-1/2 -translate-y-1/2 hidden group-hover:block z-50 w-48 bg-black/90 text-white text-[10px] p-2 rounded shadow-lg pointer-events-none">
+                      {typeof errorMessage === 'string' ? errorMessage : "Previous generation failed"}
+                    </div>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ============================================================================
 // MAIN COMPONENT
 // ============================================================================
 
@@ -749,24 +915,50 @@ export const DecisionMapSheet = React.memo(() => {
             <div className="w-12 h-1.5 bg-white/20 rounded-full" />
           </div>
 
-          {/* Tabs */}
-          <div className="flex items-center justify-center gap-4 px-8 py-4 border-b border-white/10 relative z-10">
-            {tabConfig.map(({ key, label, activeClass }) => (
+          {/* Header Row: Mapper Selector (Left) + Tabs (Center) */}
+          <div className="flex items-center justify-between px-6 py-4 border-b border-white/10 relative z-20">
+
+            {/* Left: Mapper Selector */}
+            <div className="w-1/3 flex justify-start">
+              {aiTurn && (
+                <MapperSelector
+                  aiTurn={aiTurn}
+                  activeProviderId={activeMappingPid}
+                />
+              )}
+            </div>
+
+            {/* Center: Tabs */}
+            <div className="flex items-center justify-center gap-4">
+              {tabConfig.map(({ key, label, activeClass }) => (
+                <button
+                  key={key}
+                  type="button"
+                  className={clsx(
+                    "decision-tab-pill",
+                    activeTab === key && activeClass
+                  )}
+                  onClick={() => {
+                    setActiveTab(key);
+                    if (key !== 'graph') setSelectedNode(null);
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            {/* Right: Spacer/Close (keeps tabs centered) */}
+            <div className="w-1/3 flex justify-end">
               <button
-                key={key}
-                type="button"
-                className={clsx(
-                  "decision-tab-pill",
-                  activeTab === key && activeClass
-                )}
-                onClick={() => {
-                  setActiveTab(key);
-                  if (key !== 'graph') setSelectedNode(null);
-                }}
+                onClick={() => setOpenState(null)}
+                className="p-2 text-text-muted hover:text-text-primary hover:bg-white/5 rounded-full transition-colors"
               >
-                {label}
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
               </button>
-            ))}
+            </div>
           </div>
 
           {/* Content */}

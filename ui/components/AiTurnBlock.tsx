@@ -800,7 +800,11 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                       onTrayExpand={() => setIsDecisionMapOpen({ turnId: aiTurn.id })}
                       isTrayExpanded={isDecisionMapOpen?.turnId === aiTurn.id}
                       variant="tray"
-                      visibleProviderIds={Object.keys(allSources)}
+                      visibleProviderIds={[
+                        ...Object.keys(allSources),
+                        ...(aiTurn.meta?.synthesizer ? [aiTurn.meta.synthesizer] : []),
+                        ...(aiTurn.meta?.mapper ? [aiTurn.meta.mapper] : []),
+                      ].filter((v, i, arr) => arr.indexOf(v) === i)}
                       isEditMode={isEditingNextTurn}
                     />
                   </div>

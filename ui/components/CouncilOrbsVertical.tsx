@@ -30,7 +30,14 @@ export const CouncilOrbsVertical: React.FC<CouncilOrbsVerticalProps> = React.mem
         const aiTurn = turn as any; // Cast to access response fields
         const batchKeys = Object.keys(aiTurn.batchResponses || {});
         const hiddenKeys = Object.keys(aiTurn.hiddenBatchOutputs || {});
-        return Array.from(new Set([...batchKeys, ...hiddenKeys]));
+        const synthesizerKey = aiTurn.meta?.synthesizer;
+        const mapperKey = aiTurn.meta?.mapper;
+        return Array.from(new Set([
+            ...batchKeys,
+            ...hiddenKeys,
+            ...(synthesizerKey ? [synthesizerKey] : []),
+            ...(mapperKey ? [mapperKey] : []),
+        ]));
     }, [turn]);
 
     // Filter display providers to only those that contributed

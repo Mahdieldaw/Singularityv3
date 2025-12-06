@@ -26,6 +26,7 @@ import {
   chatInputValueAtom,
   hasRejectedRefinementAtom,
   activeProviderTargetAtom,
+  launchpadDraftsAtom, // Import launchpad atom
 } from "../state/atoms";
 // Optimistic AI turn creation is now handled upon TURN_CREATED from backend
 import type {
@@ -74,6 +75,8 @@ export function useChat() {
   const setIsRefining = useSetAtom(isRefiningAtom); // Set new atom
   const setHasRejectedRefinement = useSetAtom(hasRejectedRefinementAtom);
   const setActiveTarget = useSetAtom(activeProviderTargetAtom);
+
+  const setLaunchpadDrafts = useSetAtom(launchpadDraftsAtom);
 
   const sendMessage = useCallback(
     async (prompt: string, mode: "new" | "continuation") => {
@@ -510,6 +513,16 @@ export function useChat() {
             });
             setChatInputValue(result.refinedPrompt);
             setIsRefinerOpen(true);
+
+            // Capture Composer output to Launchpad
+            const newDraft = {
+              id: `draft-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+              title: "Composed prompt",
+              text: result.refinedPrompt,
+              source: "composer" as const,
+              createdAt: Date.now(),
+            };
+            setLaunchpadDrafts(prev => [newDraft, ...prev]);
           }
         } else {
           // Explain Mode: Run Analyst
@@ -535,6 +548,43 @@ export function useChat() {
               variants: result.variants
             }));
             setIsRefinerOpen(true);
+
+            // Capture Analyst outputs to Launchpad
+            const newDrafts: any[] = [];
+            const ts = Date.now();
+
+            // 1. Audit
+            if (result.audit) {
+              newDrafts.push({
+                id: `draft-${ts}-${Math.random().toString(36).slice(2, 8)}`,
+                title: "Audited reconstruction",
+                text: result.audit,
+                source: "analyst-audit",
+                createdAt: ts,
+              });
+            }
+
+            // 2. Variants
+            if (result.variants && result.variants.length > 0) {
+              result.variants.forEach((variant, idx) => {
+                // Try to extract a short title from the variant (e.g. "Sharper framing: ...")
+                // If it starts with a label like "Label:", use it. Otherwise "Variant N"
+                const match = variant.match(/^([^:]+):/);
+                const variantTitle = match ? `Variant: ${match[1]}` : `Variant ${idx + 1}`;
+
+                newDrafts.push({
+                  id: `draft-${ts}-${Math.random().toString(36).slice(2, 8)}-${idx}`,
+                  title: variantTitle,
+                  text: variant,
+                  source: "analyst-variant",
+                  createdAt: ts,
+                });
+              });
+            }
+
+            if (newDrafts.length > 0) {
+              setLaunchpadDrafts(prev => [...newDrafts, ...prev]);
+            }
           }
         }
 

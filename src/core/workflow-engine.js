@@ -96,9 +96,22 @@ function extractOptionsAndStrip(text) {
     .replace(/\u2550/g, '=')
     .replace(/\uFF1D/g, '=');
 
+  // First, check for GRAPH_TOPOLOGY delimiter and strip it to avoid contaminating options
+  // The options section ends before GRAPH_TOPOLOGY if present
+  let graphTopoStart = -1;
+  // Match emoji + GRAPH_TOPOLOGY or === GRAPH_TOPOLOGY ===
+  const graphTopoMatch = normalized.match(/\n?[\u{1F300}-\u{1FAD6}\u{2600}-\u{26FF}\u{2700}-\u{27BF}][\uFE0E\uFE0F]?\s*GRAPH[_\s]*TOPOLOGY|\n?={2,}\s*GRAPH[_\s]*TOPOLOGY\s*={2,}/iu);
+  if (graphTopoMatch && typeof graphTopoMatch.index === 'number') {
+    graphTopoStart = graphTopoMatch.index;
+  }
+
   // Patterns ordered by strictness (stricter first)
-  // NOTE: Use ={2,} to match 2+ equals signs (models sometimes output ==, not ===)
+  // NOTE: Emoji patterns need to match the emoji + optional variation selector (\uFE0E or \uFE0F)
   const patterns = [
+    // Emoji-prefixed format (🛠️ ALL_AVAILABLE_OPTIONS) - HIGHEST PRIORITY
+    // Match any emoji followed by optional variation selector, then ALL_AVAILABLE_OPTIONS
+    { re: /\n?[\u{1F300}-\u{1FAD6}\u{2600}-\u{26FF}\u{2700}-\u{27BF}][\uFE0E\uFE0F]?\s*ALL[_\s]*AVAILABLE[_\s]*OPTIONS\s*\n?/iu, minPosition: 0.15 },
+
     // Standard delimiter with 2+ equals signs, optional leading newline
     { re: /\n?={2,}\s*ALL[_\s]*AVAILABLE[_\s]*OPTIONS\s*={2,}\n?/i, minPosition: 0 },
     { re: /\n?={2,}\s*ALL[_\s]*OPTIONS\s*={2,}\n?/i, minPosition: 0 },
@@ -110,6 +123,7 @@ function extractOptionsAndStrip(text) {
     // Heading styles (require newline before) - can appear mid-document
     { re: /\n\*\*All Available Options:?\*\*\n/i, minPosition: 0.25 },
     { re: /\n## All Available Options:?\n/i, minPosition: 0.25 },
+    { re: /\n### All Available Options:?\n/i, minPosition: 0.25 },
 
     // Looser patterns - require at least 30% through document to avoid narrative mentions
     { re: /\nAll Available Options:\n/i, minPosition: 0.3 },
@@ -144,15 +158,40 @@ function extractOptionsAndStrip(text) {
   const idx = bestMatch.index;
   const len = bestMatch.length;
 
-  // Extract what comes after the delimiter
-  const afterDelimiter = normalized.slice(idx + len).trim();
+  // Extract what comes after the delimiter, but stop before GRAPH_TOPOLOGY if present
+  let afterDelimiter = normalized.slice(idx + len).trim();
+
+  // If there's a GRAPH_TOPOLOGY section after our options, we need to cut before it
+  if (graphTopoStart > idx) {
+    // Find the relative position of GRAPH_TOPOLOGY in the afterDelimiter string
+    const relativeGraphStart = graphTopoStart - (idx + len);
+    if (relativeGraphStart > 0 && relativeGraphStart < afterDelimiter.length) {
+      afterDelimiter = afterDelimiter.slice(0, relativeGraphStart).trim();
+      console.log('[extractOptionsAndStrip] Cut options before GRAPH_TOPOLOGY, new length:', afterDelimiter.length);
+    }
+  }
+
+  // Strip any secondary ALL_AVAILABLE_OPTIONS delimiter at the start
+  // (handles case where emoji header is followed by === delimiter)
+  afterDelimiter = afterDelimiter
+    .replace(/^={2,}\s*ALL[_\s]*AVAILABLE[_\s]*OPTIONS\s*={2,}\s*\n?/i, '')
+    .trim();
+
+  // Also strip any emoji GRAPH_TOPOLOGY at the end that might have slipped through
+  afterDelimiter = afterDelimiter
+    .replace(/\n?[\u{1F300}-\u{1FAD6}\u{2600}-\u{26FF}\u{2700}-\u{27BF}][\uFE0E\uFE0F]?\s*GRAPH[_\s]*TOPOLOGY.*$/isu, '')
+    .trim();
 
   // Validation: Check if what follows looks like structured content
-  // Accept: bullet lists, numbered lists, "Theme:" headers, bold headers (**), or any capitalized heading
-  const listPreview = afterDelimiter.slice(0, 200);
-  const hasListStructure = /^\s*[-*•]\s+|\n\s*[-*•]\s+|^\s*\d+\.\s+|\n\s*\d+\.\s+|^\s*\*\*[^*]+\*\*|^\s*Theme\s*:|^\s*###?\s+Theme|^\s*[A-Z][^:\n]{2,}:/i.test(listPreview);
+  // Accept: bullet lists, numbered lists, "Theme:" headers, bold headers (**), any capitalized heading,
+  // emoji-prefixed sections, or any substantive paragraphs (more than 50 chars)
+  const listPreview = afterDelimiter.slice(0, 400); // Increased preview length
+  const hasListStructure = /^\s*[-*•]\s+|\n\s*[-*•]\s+|^\s*\d+\.\s+|\n\s*\d+\.\s+|^\s*\*\*[^*]+\*\*|^\s*Theme\s*:|^\s*###?\s+|^\s*[A-Z][^:\n]{2,}:|^[\u{1F300}-\u{1FAD6}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/iu.test(listPreview);
 
-  if (!hasListStructure) {
+  // Also accept if there's substantive content (at least 50 chars with newlines suggesting structure)
+  const hasSubstantiveContent = afterDelimiter.length > 50 && (afterDelimiter.includes('\n') || afterDelimiter.includes(':'));
+
+  if (!hasListStructure && !hasSubstantiveContent) {
     console.warn('[extractOptionsAndStrip] Matched delimiter but no list structure found, rejecting match at position', idx, 'Preview:', listPreview.slice(0, 100));
     return { text: normalized, options: null };
   }
@@ -162,6 +201,7 @@ function extractOptionsAndStrip(text) {
   console.log('[extractOptionsAndStrip] Successfully extracted options, length:', after.length);
   return { text: before, options: after };
 }
+
 
 // =============================================================================
 // HELPER FUNCTIONS FOR PROMPT BUILDING

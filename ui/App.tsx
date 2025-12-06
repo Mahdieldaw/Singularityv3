@@ -12,7 +12,10 @@ import CompactModelTrayConnected from "./components/CompactModelTrayConnected";
 const SettingsPanel = React.lazy(() => import("./components/SettingsPanel"));
 import { Toast } from "./components/Toast";
 import { isHistoryPanelOpenAtom } from "./state/atoms";
+
 import { useInitialization } from "./hooks/useInitialization"; // Import the new hook
+import LaunchpadTab from "./components/LaunchpadTab"; // Import LaunchpadTab
+const LaunchpadDrawer = React.lazy(() => import("./components/LaunchpadDrawer")); // Lazy load LaunchpadDrawer
 import { useSmartProviderDefaults } from "./hooks/useSmartProviderDefaults";
 import { useOnClickOutside } from "usehooks-ts";
 import { useKey } from "./hooks/useKey";
@@ -57,9 +60,15 @@ export default function App() {
 
       {/* Main content area */}
       <div className="flex flex-1 relative min-h-0">
+        <LaunchpadTab /> {/* Add Launchpad Tab */}
+
         <main className="chat-main flex-1 flex flex-col relative min-h-0">
           <ChatView />
         </main>
+
+        <Suspense fallback={null}>
+          <LaunchpadDrawer /> {/* Add Launchpad Drawer */}
+        </Suspense>
 
         {/* History Panel Overlay */}
         {isHistoryOpen && (

@@ -175,3 +175,17 @@ export interface GraphTopology {
   nodes: GraphNode[];
   edges: GraphEdge[];
 }
+
+// =============================================================================
+// LAUNCHPAD TYPES
+// =============================================================================
+
+/** Represents a saved draft in the Launchpad drawer. */
+export interface LaunchpadDraft {
+  id: string;
+  title: string;
+  text: string;
+  source: "composer" | "analyst-audit" | "analyst-variant";
+  createdAt: number;
+}
+

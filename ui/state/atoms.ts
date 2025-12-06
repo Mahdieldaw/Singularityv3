@@ -440,5 +440,21 @@ export const activeSplitPanelAtom = atom<{ turnId: string; providerId: string } 
 // Derived atom for performance: ChatView subscribes to this boolean, not the full object
 export const isSplitOpenAtom = atom((get) => get(activeSplitPanelAtom) !== null);
 
+
 export const isDecisionMapOpenAtom = atom<{ turnId: string } | null>(null);
 export const isDecisionMapVisibleAtom = atom((get) => get(isDecisionMapOpenAtom) !== null);
+
+// -----------------------------
+// Launchpad State
+// -----------------------------
+import type { LaunchpadDraft } from "../types";
+
+export const launchpadDraftsAtom = atomWithStorage<LaunchpadDraft[]>(
+  "htos_launchpad_drafts",
+  [],
+);
+
+export const launchpadOpenAtom = atom<boolean>(false);
+
+export const showLaunchpadTabAtom = atom((get) => get(launchpadDraftsAtom).length > 0);
+
