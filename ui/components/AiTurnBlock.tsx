@@ -744,7 +744,8 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                       );
                     }
 
-                    if (isGenerating)
+                    // ONLY show placeholder if we have NO text yet
+                    if (isGenerating && !latest?.text)
                       return (
                         <div className="flex items-center justify-center gap-2 text-text-muted">
                           <span className="italic">
@@ -824,7 +825,7 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                   })()}
 
                   {/* BOTTOM TRAY: Council Orbs INSIDE bubble - 28px from bottom */}
-                  <div className="absolute bottom-0 left-0 right-0 flex flex-col items-center gap-2" style={{ paddingBottom: '20px' }}>
+                  <div className="absolute bottom-0 left-0 right-0 flex flex-col items-center gap-2 z-30" style={{ paddingBottom: '20px' }}>
                     <CouncilOrbs
                       turnId={aiTurn.id}
                       providers={LLM_PROVIDERS_CONFIG}
@@ -850,7 +851,7 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                       {/* Hover/Focus Dropdown */}
                       <div className="absolute top-full left-1/2 -translate-x-1/2 mt-1 min-w-[160px] bg-surface-raised border border-border-subtle rounded-xl shadow-elevated p-1.5 hidden group-hover:block transition-all animate-in fade-in zoom-in-95 duration-150">
                         <div className="text-[10px] text-text-muted px-2 py-1 font-medium uppercase tracking-wider">Select Provider</div>
-                        {LLM_PROVIDERS_CONFIG.filter(p => !visibleProviderIds.includes(String(p.id)) || String(p.id) === activeSynthPid).map(p => (
+                        {LLM_PROVIDERS_CONFIG.map(p => (
                           <button
                             key={p.id}
                             onClick={(e) => {

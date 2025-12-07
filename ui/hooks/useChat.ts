@@ -112,7 +112,7 @@ export function useChat() {
       // No pending cache: rely on Jotai atom serialization across updaters
 
       try {
-        const shouldUseSynthesis = true;
+        const shouldUseSynthesis = !!synthesisProvider;
 
         const fallbackMapping = (() => {
           try {

@@ -178,13 +178,23 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
     };
 
     const handleSelectSynth = (pid: string) => {
-        setSynthesisProvider(pid);
-        setProviderLock('synthesis', true);
+        if (synthesisProvider === pid) {
+            setSynthesisProvider(null);
+            setProviderLock('synthesis', false);
+        } else {
+            setSynthesisProvider(pid);
+            setProviderLock('synthesis', true);
+        }
     };
 
     const handleSelectMap = (pid: string) => {
-        setMapProvider(pid);
-        setProviderLock('mapping', true);
+        if (mapProviderVal === pid) {
+            setMapProvider(null);
+            setProviderLock('mapping', false);
+        } else {
+            setMapProvider(pid);
+            setProviderLock('mapping', true);
+        }
     };
 
     const handleSelectComposer = (pid: string) => {
@@ -211,7 +221,7 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
                 variant === "tray" && "council-tray",
                 variant === "divider" && "council-divider",
                 variant === "historical" && "council-historical",
-                variant === "active" && "council-active w-full flex justify-center py-2",
+                variant === "active" && "council-active w-full flex justify-center py-2 px-4",
                 shouldDim && "council-historical-dimmed",
                 shouldDimInSplitMode && "council-tray-dimmed-split"
             )}
@@ -222,7 +232,11 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
             style={variant === "active" ? { pointerEvents: "auto" } : undefined}
         >
             {/* Orb bar with centered voice and fanned others */}
-            <div className={clsx("council-orb-bar flex items-center justify-center relative transition-all", variant === "active" ? "gap-4 scale-90" : "")} style={{ maxWidth: '480px', margin: '0 auto', height: variant === "active" ? 'auto' : '60px' }}>
+            {/* Active variant gets a glass-morphic container for visual separation */}
+            <div className={clsx(
+                "council-orb-bar flex items-center justify-center relative transition-all",
+                variant === "active" ? "gap-4 scale-90 bg-surface-raised/80 backdrop-blur-xl border border-white/10 rounded-2xl shadow-xl px-6 py-3" : ""
+            )} style={{ maxWidth: '480px', margin: '0 auto', height: variant === "active" ? 'auto' : '60px' }}>
                 {/* Left side orbs */}
                 <div className={clsx("flex items-center justify-end", variant === "active" ? "gap-3" : "gap-[28px]")} style={{ flex: 1, paddingRight: variant === "active" ? '16px' : '40px' }}>
                     {leftOrbs.map((p) => {
@@ -530,14 +544,19 @@ const Orb: React.FC<OrbProps> = ({
             {isVoice && (
                 <div
                     className={clsx(
-                        "absolute z-10 text-[10px] transition-all cursor-pointer hover:scale-125",
+                        "absolute z-10 text-[10px] transition-all",
                         isActiveVariant ? "-top-4" : "-top-3",
-                        isCrownMode ? "text-brand-500 scale-125 animate-pulse" : "text-amber-400"
+                        // Active Crown: Vibrant, interactive, pulsing
+                        isActiveVariant && !isCrownMode && "text-amber-400 cursor-pointer hover:scale-125 animate-pulse",
+                        // Historical Crown: Muted "relic" state (slate/gray), static, still clickable for context
+                        variant === "historical" && "text-slate-500/50 cursor-default",
+                        // Crown Mode: Highlight selection state
+                        isCrownMode && "text-brand-500 scale-125 animate-pulse cursor-pointer"
                     )}
                     onClick={(e) => {
                         if (variant !== "historical") onCrownClick(e);
                     }}
-                    title={variant === "historical" ? "Voice" : "Current Voice (Click to change)"}
+                    title={variant === "historical" ? "Synthesizer for this turn" : "Current Voice (Click to change)"}
                 >
                     👑
                 </div>
@@ -549,6 +568,9 @@ const Orb: React.FC<OrbProps> = ({
                     "council-orb transition-all duration-300 ease-out",
                     // Shape and Size
                     isVoice ? (isActiveVariant ? "w-10 h-10" : "council-orb-voice") : (isActiveVariant ? "w-8 h-8" : "council-orb-regular"),
+
+                    // Historical Mode: Static orbs (no heavy animation), but still interactive
+                    variant === "historical" && "council-orb-historical",
 
                     // Status Effects
                     isStreaming && "council-orb-streaming",

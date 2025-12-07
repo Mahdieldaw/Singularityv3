@@ -392,6 +392,51 @@
     filter: grayscale(50%);
   }
 
+  /* Historical orbs: Dormant state (Grayscale, reduced opacity, smaller) */
+  .council-orb-historical {
+    animation: none !important;
+    filter: grayscale(100%) opacity(0.5);
+    /* The visual cue for "Past" */
+    transform: scale(0.85);
+    /* Physically recede */
+    box-shadow: none !important;
+    /* Remove active glow */
+  }
+
+  /* Remove internal animations for dormant state */
+  .council-orb-historical::before {
+    animation: none !important;
+    opacity: 0.3;
+  }
+
+  /* Reset separate voice styling for historical to match unison "dormant" look */
+  .council-orb-historical.council-orb-voice {
+    animation: none !important;
+    box-shadow: none !important;
+    width: 28px;
+    /* Normalize size to match others until hover */
+    height: 28px;
+  }
+
+  /* WAKE UP on hover: Restore color, scale, and glow */
+  .council-orb-historical:hover {
+    filter: grayscale(0%) opacity(1);
+    transform: scale(1.15) translateY(-2px);
+    box-shadow: 0 0 20px var(--model-color) !important;
+    z-index: 50;
+    cursor: pointer;
+  }
+
+  /* Restore internal vitality on hover */
+  .council-orb-historical:hover::before {
+    opacity: 0.8;
+    animation: spin 4s linear infinite !important;
+  }
+
+  .council-orb-historical:hover::after {
+    opacity: 1;
+  }
+
   /* Ensure smooth transition for dimming */
   .council-tray-container {
     transition: opacity 0.5s ease-in-out;
