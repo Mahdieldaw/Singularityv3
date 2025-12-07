@@ -376,6 +376,12 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
     prevTabsLengthRef.current = synthesisTabs.length;
   }, [synthesisTabs, activeRecomputeState, aiTurn.id]); // activeSynthTabId excluded to allow manual switch
 
+  // Derive the effectively active tab (for orbs and display)
+  const effectiveActiveSynthTab = useMemo(() => {
+    if (synthesisTabs.length === 0) return null;
+    return synthesisTabs.find(t => t.id === activeSynthTabId) || synthesisTabs[synthesisTabs.length - 1];
+  }, [synthesisTabs, activeSynthTabId]);
+
 
 
   const synthesisResponses = useMemo(() => {
@@ -470,12 +476,16 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
     return undefined;
   }, [activeSynthesisClipProviderId, globalSynthesisProvider, aiTurn.meta, synthesisResponses]);
 
+  // The provider ID to show as "Voice" (Crown) on the historical orbs
+  const displayedVoicePid = effectiveActiveSynthTab?.providerId || activeSynthPid || "";
+
   const visibleProviderIds = useMemo(() => {
     const ids = new Set(Object.keys(allSources));
     if (activeSynthPid) ids.add(activeSynthPid);
+    if (effectiveActiveSynthTab?.providerId) ids.add(effectiveActiveSynthTab.providerId);
     if ((aiTurn.meta as any)?.mapper) ids.add((aiTurn.meta as any).mapper);
     return Array.from(ids);
-  }, [allSources, activeSynthPid, aiTurn.meta]);
+  }, [allSources, activeSynthPid, effectiveActiveSynthTab, aiTurn.meta]);
   const activeMappingPid = computeActiveProvider(
     activeMappingClipProviderId,
     mappingResponses
@@ -631,12 +641,9 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
     (aiTurn as any)?.input ??
     null;
 
-  // --- NEW: Crown Move Handler (Recompute) ---
-  const handleCrownMove = useCallback((providerId: string) => {
-    if (onClipClick) {
-      onClipClick("synthesis", providerId);
-    }
-  }, [onClipClick]);
+  // --- NEW: Crown Move Handler (Recompute) - REMOVED for historical turns ---
+  // The crown is now static for historical turns. Recompute is handled via the button below.
+
 
   return (
     <div className="turn-block pb-8 border-b border-border-subtle mb-4">
@@ -817,38 +824,51 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                   })()}
 
                   {/* BOTTOM TRAY: Council Orbs INSIDE bubble - 28px from bottom */}
-                  <div className="absolute bottom-0 left-0 right-0" style={{ paddingBottom: '28px' }}>
+                  <div className="absolute bottom-0 left-0 right-0 flex flex-col items-center gap-2" style={{ paddingBottom: '20px' }}>
                     <CouncilOrbs
                       turnId={aiTurn.id}
                       providers={LLM_PROVIDERS_CONFIG}
-                      voiceProviderId={activeSynthPid || ""}
+                      voiceProviderId={displayedVoicePid}
                       visibleProviderIds={visibleProviderIds}
                       onOrbClick={(pid) => setActiveSplitPanel({ turnId: aiTurn.id, providerId: pid })}
-                      onCrownMove={handleCrownMove}
+                      // onCrownMove disabled for historical
                       onTrayExpand={() => setIsDecisionMapOpen({ turnId: aiTurn.id })}
                       isTrayExpanded={isDecisionMapOpen?.turnId === aiTurn.id}
-                      variant="tray"
-
-                      isEditMode={isEditingNextTurn}
+                      variant="historical"
                     />
+
+                    {/* Recompute Button & Dropdown */}
+                    <div className="relative group z-30">
+                      <button
+                        className="flex items-center gap-1.5 px-3 py-1 bg-surface-raised border border-border-subtle rounded-full text-xs font-medium text-text-secondary hover:bg-surface-highlight hover:text-text-primary transition-all shadow-sm"
+                      >
+                        <span className="opacity-70">⚡</span>
+                        <span>Recompute</span>
+                        <ChevronDownIcon className="w-3 h-3 opacity-50" />
+                      </button>
+
+                      {/* Hover/Focus Dropdown */}
+                      <div className="absolute top-full left-1/2 -translate-x-1/2 mt-1 min-w-[160px] bg-surface-raised border border-border-subtle rounded-xl shadow-elevated p-1.5 hidden group-hover:block transition-all animate-in fade-in zoom-in-95 duration-150">
+                        <div className="text-[10px] text-text-muted px-2 py-1 font-medium uppercase tracking-wider">Select Provider</div>
+                        {LLM_PROVIDERS_CONFIG.filter(p => !visibleProviderIds.includes(String(p.id)) || String(p.id) === activeSynthPid).map(p => (
+                          <button
+                            key={p.id}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (onClipClick) onClipClick("synthesis", String(p.id));
+                            }}
+                            className="w-full text-left px-2 py-1.5 rounded-lg text-xs hover:bg-surface-highlight text-text-secondary hover:text-text-primary flex items-center gap-2"
+                          >
+                            <span className={`w-2 h-2 rounded-full`} style={{ backgroundColor: p.color || '#ccc' }} />
+                            {p.name}
+                          </button>
+                        ))}
+                        {/* Show currently active activeSynthPid as disabled or highlighted? */}
+                      </div>
+                    </div>
                   </div>
 
-                  {/* Next Turn Arrow Button - bottom right of synthesis bubble */}
-                  <button
-                    type="button"
-                    onClick={handleNextTurnArrowClick}
-                    className={clsx(
-                      "absolute bottom-3 right-3 w-8 h-8 rounded-full flex items-center justify-center transition-all",
-                      "border border-border-subtle hover:border-brand-400",
-                      "bg-surface-highlight hover:bg-brand-500/20",
-                      isEditingNextTurn && "ring-2 ring-brand-400 bg-brand-500/30"
-                    )}
-                    title="Configure models for next turn"
-                  >
-                    <svg className="w-4 h-4 text-text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                    </svg>
-                  </button>
+                  {/* Right Arrow Removed */}
                 </div>
 
               </div>

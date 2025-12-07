@@ -8,15 +8,15 @@ import { setProviderLock } from "@shared/provider-locks";
 import clsx from "clsx";
 
 interface CouncilOrbsProps {
-    turnId: string;
+    turnId?: string; // Optional for active mode
     providers: LLMProvider[];
     voiceProviderId: string; // The active synthesizer (Crown)
-    onOrbClick: (providerId: string) => void;
-    onCrownMove: (providerId: string) => void;
-    onTrayExpand: () => void;
-    isTrayExpanded: boolean;
+    onOrbClick?: (providerId: string) => void;
+    onCrownMove?: (providerId: string) => void;
+    onTrayExpand?: () => void;
+    isTrayExpanded?: boolean;
     visibleProviderIds?: string[]; // Optional filter for visible orbs
-    variant?: "tray" | "divider" | "welcome" | "historical";
+    variant?: "tray" | "divider" | "welcome" | "historical" | "active";
     isEditMode?: boolean; // When true, auto-open the model selection menu
 }
 
@@ -30,7 +30,7 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
     isTrayExpanded,
     variant = "tray",
     visibleProviderIds,
-    isEditMode = false
+    isEditMode = false,
 }) => {
     const [hoveredOrb, setHoveredOrb] = useState<string | null>(null);
     const [isCrownMode, setIsCrownMode] = useState(false);
@@ -60,17 +60,18 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
         };
     }, [isMenuOpen]);
 
-    // Auto-open menu when isEditMode becomes true (triggered by next-turn arrow button)
+    // Auto-open menu when isEditMode becomes true
     React.useEffect(() => {
+        if (variant === 'active') return;
+
         if (isEditMode) {
             setIsMenuOpen(true);
-            setMenuTarget(voiceProviderId); // Open menu for the voice provider
+            setMenuTarget(voiceProviderId);
         } else {
-            // Close menu when edit mode ends
             setIsMenuOpen(false);
             setMenuTarget(null);
         }
-    }, [isEditMode, voiceProviderId]);
+    }, [isEditMode, voiceProviderId, variant]);
 
     // Filter out system provider if present
     const allProviders = useMemo(() => {
@@ -89,16 +90,36 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
     const handleOrbClickInternal = (e: React.MouseEvent, providerId: string) => {
         e.stopPropagation();
 
-        if (isCrownMode) {
-            onCrownMove(providerId);
-            setIsCrownMode(false);
+        if (variant === "active") {
+            // Toggle witness
+            const isUnauthorized = authStatus && authStatus[providerId] === false;
+            if (isUnauthorized) return;
+
+            if (isCrownMode) {
+                // Changing Crown
+                if (onCrownMove) {
+                    onCrownMove(providerId);
+                    setIsCrownMode(false);
+                }
+            } else {
+                // Toggling Witness
+                const isSelected = selectedModels[providerId];
+                setSelectedModels({ ...selectedModels, [providerId]: !isSelected });
+            }
         } else {
-            onOrbClick(providerId);
+            // Historical / Standard behavior
+            if (isCrownMode && onCrownMove) {
+                onCrownMove(providerId);
+                setIsCrownMode(false);
+            } else if (onOrbClick) {
+                onOrbClick(providerId);
+            }
         }
     };
 
     const handleCrownClick = (e: React.MouseEvent) => {
         e.stopPropagation();
+        if (variant === "historical") return; // No crown interaction for historical
         setIsCrownMode(!isCrownMode);
     };
 
@@ -115,6 +136,10 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
 
     // Separate voice and non-voice providers
     const voiceProviderObj = displayProviders.find(p => String(p.id) === voiceProviderId);
+
+    // For 'active' mode, if the voice provider is not in the display list (shouldn't happen if all are shown), find it in allProviders
+    const activeVoiceObj = voiceProviderObj || (variant === "active" ? allProviders.find(p => String(p.id) === voiceProviderId) : undefined);
+
     const otherProviders = displayProviders
         .filter(p => String(p.id) !== voiceProviderId)
         .sort((a, b) => getPriority(String(a.id)) - getPriority(String(b.id)));
@@ -125,24 +150,22 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
 
     otherProviders.forEach((provider, index) => {
         if (index % 2 === 0) {
-            // Even indices go to RIGHT (0, 2, 4... = highest, 3rd, 5th priority)
             rightOrbs.push(provider);
         } else {
-            // Odd indices go to LEFT (1, 3, 5... = 2nd, 4th, 6th priority)
             leftOrbs.push(provider);
         }
     });
 
-    // Reverse left array so highest priority is closest to center
     leftOrbs.reverse();
 
-    // Determine if this tray should be dimmed when split is open
     const shouldDimInSplitMode = isSplitOpen && variant === "tray";
 
     const handleLongPressStart = (pid: string | null) => {
+        if (variant === "historical") return; // Disable menu for historical
+
         if (longPressRef.current) clearTimeout(longPressRef.current);
         longPressRef.current = setTimeout(() => {
-            setMenuTarget(pid);
+            setMenuTarget(pid || voiceProviderId);
             setIsMenuOpen(true);
         }, 500);
     };
@@ -157,34 +180,27 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
     const handleSelectSynth = (pid: string) => {
         setSynthesisProvider(pid);
         setProviderLock('synthesis', true);
-        // Keep menu open - only close on outside click
     };
 
     const handleSelectMap = (pid: string) => {
         setMapProvider(pid);
         setProviderLock('mapping', true);
-        // Keep menu open - only close on outside click
     };
 
     const handleSelectComposer = (pid: string) => {
         setComposer(pid);
-        // Composer lock not yet in shared config, leaving as is or removing if obsolete
-        // Assuming we only care about synthesis/mapping for now as per plan
         try {
             localStorage.setItem('htos_composer_locked', 'true');
             chrome?.storage?.local?.set?.({ provider_lock_settings: { composer_locked: true } });
         } catch { }
-        // Keep menu open - only close on outside click
     };
 
     const handleSelectAnalyst = (pid: string) => {
         setAnalyst(pid);
-        // Analyst lock not yet in shared config
         try {
             localStorage.setItem('htos_analyst_locked', 'true');
             chrome?.storage?.local?.set?.({ provider_lock_settings: { analyst_locked: true } });
         } catch { }
-        // Keep menu open - only close on outside click
     };
 
     return (
@@ -195,6 +211,7 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
                 variant === "tray" && "council-tray",
                 variant === "divider" && "council-divider",
                 variant === "historical" && "council-historical",
+                variant === "active" && "council-active w-full flex justify-center py-2",
                 shouldDim && "council-historical-dimmed",
                 shouldDimInSplitMode && "council-tray-dimmed-split"
             )}
@@ -202,17 +219,18 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
             onMouseUp={handleLongPressCancel}
             onMouseLeave={handleLongPressCancel}
             ref={containerRef}
+            style={variant === "active" ? { pointerEvents: "auto" } : undefined}
         >
             {/* Orb bar with centered voice and fanned others */}
-            <div className="council-orb-bar flex items-center justify-center relative" style={{ maxWidth: '480px', margin: '0 auto', height: '60px' }}>
-                {/* Left side orbs - 40px gap from sacred zone, 28px between orbs */}
-                <div className="flex items-center justify-end gap-[28px]" style={{ flex: 1, paddingRight: '40px' }}>
+            <div className={clsx("council-orb-bar flex items-center justify-center relative transition-all", variant === "active" ? "gap-4 scale-90" : "")} style={{ maxWidth: '480px', margin: '0 auto', height: variant === "active" ? 'auto' : '60px' }}>
+                {/* Left side orbs */}
+                <div className={clsx("flex items-center justify-end", variant === "active" ? "gap-3" : "gap-[28px]")} style={{ flex: 1, paddingRight: variant === "active" ? '16px' : '40px' }}>
                     {leftOrbs.map((p) => {
                         const pid = String(p.id);
                         return (
                             <Orb
                                 key={pid}
-                                turnId={turnId}
+                                turnId={turnId || ""}
                                 provider={p}
                                 isVoice={false}
                                 isCrownMode={isCrownMode}
@@ -222,6 +240,7 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
                                 hoveredOrb={hoveredOrb}
                                 variant={variant as any}
                                 disabled={authStatus && authStatus[pid] === false}
+                                isSelected={variant === "active" ? !!selectedModels[pid] : undefined}
                                 onLongPressStart={() => handleLongPressStart(pid)}
                                 onLongPressCancel={handleLongPressCancel}
                             />
@@ -229,50 +248,50 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
                     })}
                 </div>
 
-                {/* CENTER: Voice Orb with Sacred Zone - 80px total */}
+                {/* CENTER: Voice Orb */}
                 <div
                     className={clsx(
                         "council-voice-zone relative flex items-center justify-center",
                         variant !== "divider" && "cursor-pointer"
                     )}
-                    style={{ width: '80px', height: '80px', flexShrink: 0 }}
-                    onClick={variant !== "divider" ? onTrayExpand : undefined}
+                    style={{ width: variant === "active" ? '48px' : '80px', height: variant === "active" ? '48px' : '80px', flexShrink: 0 }}
+                    onClick={variant !== "divider" && variant !== "active" ? onTrayExpand : undefined}
                     onMouseDown={() => handleLongPressStart(String(voiceProviderId))}
                     onMouseUp={handleLongPressCancel}
                 >
-                    {/* Subtle glass ring indicator */}
-                    <div className="council-glass-ring" />
+                    {variant !== "active" && <div className="council-glass-ring" />}
 
-                    {voiceProviderObj && (
+                    {activeVoiceObj && (
                         <Orb
-                            key={String(voiceProviderObj.id)}
-                            turnId={turnId}
-                            provider={voiceProviderObj}
+                            key={String(activeVoiceObj.id)}
+                            turnId={turnId || ""}
+                            provider={activeVoiceObj}
                             isVoice={true}
                             isCrownMode={isCrownMode}
                             onHover={setHoveredOrb}
                             onClick={(e) => {
                                 e.stopPropagation();
-                                handleOrbClickInternal(e, String(voiceProviderObj.id));
+                                handleOrbClickInternal(e, String(activeVoiceObj.id));
                             }}
                             onCrownClick={handleCrownClick}
                             hoveredOrb={hoveredOrb}
                             variant={variant as any}
                             onLongPressStart={() => handleLongPressStart(String(voiceProviderId))}
                             onLongPressCancel={handleLongPressCancel}
-                            disabled={authStatus && authStatus[String(voiceProviderObj.id)] === false}
+                            disabled={authStatus && authStatus[String(activeVoiceObj.id)] === false}
+                            isSelected={true} // Voice is always selected/active
                         />
                     )}
                 </div>
 
-                {/* Right side orbs - 40px gap from sacred zone, 28px between orbs */}
-                <div className="flex items-center justify-start gap-[28px]" style={{ flex: 1, paddingLeft: '40px' }}>
+                {/* Right side orbs */}
+                <div className={clsx("flex items-center justify-start", variant === "active" ? "gap-3" : "gap-[28px]")} style={{ flex: 1, paddingLeft: variant === "active" ? '16px' : '40px' }}>
                     {rightOrbs.map((p) => {
                         const pid = String(p.id);
                         return (
                             <Orb
                                 key={pid}
-                                turnId={turnId}
+                                turnId={turnId || ""}
                                 provider={p}
                                 isVoice={false}
                                 isCrownMode={isCrownMode}
@@ -282,23 +301,43 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
                                 hoveredOrb={hoveredOrb}
                                 variant={variant as any}
                                 disabled={authStatus && authStatus[pid] === false}
+                                isSelected={variant === "active" ? !!selectedModels[pid] : undefined}
                                 onLongPressStart={() => handleLongPressStart(pid)}
                                 onLongPressCancel={handleLongPressCancel}
                             />
                         );
                     })}
                 </div>
+
+                {/* Settings Button for Active Mode */}
+                {variant === "active" && (
+                    <div className="absolute -right-8 top-1/2 -translate-y-1/2">
+                        <button
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                setIsMenuOpen(!isMenuOpen);
+                            }}
+                            className="bg-surface-raised hover:bg-surface-highlight border border-border-subtle rounded-full p-2 text-text-muted hover:text-text-primary transition-all shadow-sm"
+                            title="Configure Council"
+                        >
+                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                            </svg>
+                        </button>
+                    </div>
+                )}
             </div>
 
             {/* Crown Mode Indicator */}
             {isCrownMode && (
-                <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-surface-raised border border-brand-500 text-brand-500 text-xs px-2 py-1 rounded-md shadow-sm animate-bounce">
+                <div className="absolute -top-10 left-1/2 -translate-x-1/2 bg-surface-raised border border-brand-500 text-brand-500 text-xs px-2 py-1 rounded-md shadow-sm animate-bounce whitespace-nowrap z-50">
                     Select new voice
                 </div>
             )}
 
             {isMenuOpen && (
-                <div className="absolute left-1/2 -translate-x-1/2 bottom-[72px] bg-surface-raised border border-border-subtle rounded-xl shadow-elevated p-3 z-[100] min-w-[640px]">
+                <div className="absolute left-1/2 -translate-x-1/2 bottom-[110%] bg-surface-raised border border-border-subtle rounded-xl shadow-elevated p-3 z-[100] min-w-[640px]">
                     <div className="text-xs text-text-muted mb-2">Council Menu</div>
                     <div className="grid grid-cols-2 gap-4">
                         <div>
@@ -444,10 +483,11 @@ interface OrbProps {
     onClick: (e: React.MouseEvent) => void;
     onCrownClick: (e: React.MouseEvent) => void;
     hoveredOrb: string | null;
-    variant?: "tray" | "divider" | "historical" | "welcome";
+    variant?: "tray" | "divider" | "historical" | "welcome" | "active";
     onLongPressStart?: () => void;
     onLongPressCancel?: () => void;
     disabled?: boolean;
+    isSelected?: boolean;
 }
 
 const Orb: React.FC<OrbProps> = ({
@@ -462,13 +502,15 @@ const Orb: React.FC<OrbProps> = ({
     variant = "tray",
     onLongPressStart,
     onLongPressCancel,
-    disabled = false
+    disabled = false,
+    isSelected
 }) => {
     const pid = String(provider.id);
     const state = useAtomValue(providerEffectiveStateFamily({ turnId, providerId: pid }));
 
-    const isStreaming = state.latestResponse?.status === 'streaming';
-    const hasError = state.latestResponse?.status === 'error';
+    // For active variant, we don't use turn state status, we use selection state
+    const isStreaming = variant !== "active" && state.latestResponse?.status === 'streaming';
+    const hasError = variant !== "active" && state.latestResponse?.status === 'error';
     const isHovered = hoveredOrb === pid;
 
     // Get model color and logo
@@ -476,17 +518,26 @@ const Orb: React.FC<OrbProps> = ({
     const providerConfig = getProviderById(pid);
     const logoSrc = providerConfig?.logoSrc || '';
 
+    // Active variant styling logic
+    const isActiveVariant = variant === "active";
+    const showAsActive = isActiveVariant ? isSelected : true; // In active mode, dim if not selected
+
+    // In historical mode, it's always "active" because we filter list upstream vs "active" mode where we show all
+
     return (
         <div className="relative flex items-center justify-center">
             {/* Crown Icon for Voice Provider */}
             {isVoice && (
                 <div
                     className={clsx(
-                        "absolute -top-3 z-10 text-[10px] transition-all cursor-pointer hover:scale-125",
+                        "absolute z-10 text-[10px] transition-all cursor-pointer hover:scale-125",
+                        isActiveVariant ? "-top-4" : "-top-3",
                         isCrownMode ? "text-brand-500 scale-125 animate-pulse" : "text-amber-400"
                     )}
-                    onClick={onCrownClick}
-                    title="Current Voice (Click to change)"
+                    onClick={(e) => {
+                        if (variant !== "historical") onCrownClick(e);
+                    }}
+                    title={variant === "historical" ? "Voice" : "Current Voice (Click to change)"}
                 >
                     👑
                 </div>
@@ -495,11 +546,23 @@ const Orb: React.FC<OrbProps> = ({
             <button
                 type="button"
                 className={clsx(
-                    "council-orb",
-                    // Size differences: voice is 32px, others are 28px
-                    isVoice ? "council-orb-voice" : "council-orb-regular",
+                    "council-orb transition-all duration-300 ease-out",
+                    // Shape and Size
+                    isVoice ? (isActiveVariant ? "w-10 h-10" : "council-orb-voice") : (isActiveVariant ? "w-8 h-8" : "council-orb-regular"),
+
+                    // Status Effects
                     isStreaming && "council-orb-streaming",
                     hasError && "council-orb-error",
+
+                    // Active Mode Selection Dimming
+                    // Unselected: Distinctly "Off" but visible logos. Low opacity (40%) + Grayscale.
+                    // Hover brings it to life (Full Opacity + Color + Bloom).
+                    isActiveVariant && !showAsActive && !isVoice && "opacity-40 grayscale scale-90 hover:opacity-100 hover:grayscale-0 hover:scale-105 hover:shadow-[0_0_15px_-3px_var(--model-color)] transition-all duration-300",
+
+                    // Selected: "On" State. Full Opacity, Color, Glow.
+                    // Added brightness boost to combat "dullness".
+                    isActiveVariant && showAsActive && "opacity-100 grayscale-0 shadow-[0_0_20px_-4px_var(--model-color)] ring-1 ring-[var(--model-color)]/50 scale-110 z-10 brightness-110",
+
                     // Crown Mode Selection Target
                     isCrownMode && !isVoice && "ring-2 ring-brand-500/50 ring-offset-1 ring-offset-surface cursor-crosshair animate-pulse",
                     disabled && "opacity-50 cursor-not-allowed"
@@ -521,8 +584,9 @@ const Orb: React.FC<OrbProps> = ({
                 <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 whitespace-nowrap z-20">
                     <div className="bg-surface-raised border border-border-subtle text-text-primary text-xs px-2 py-1 rounded shadow-lg">
                         {provider.name}
-                        {state.latestResponse?.status === 'streaming' && " (Generating...)"}
-                        {state.latestResponse?.status === 'error' && " (Error)"}
+                        {variant !== "active" && state.latestResponse?.status === 'streaming' && " (Generating...)"}
+                        {variant !== "active" && state.latestResponse?.status === 'error' && " (Error)"}
+                        {isActiveVariant && !showAsActive && !isVoice && " (Click to Enable)"}
                     </div>
                 </div>
             )}

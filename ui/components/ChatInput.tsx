@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { useAtom } from "jotai";
-import { chatInputValueAtom, selectedModelsAtom } from "../state/atoms";
+import { chatInputValueAtom, selectedModelsAtom, composerModelAtom, analystModelAtom } from "../state/atoms";
 import { LLM_PROVIDERS_CONFIG } from "../constants";
 import { PROVIDER_LIMITS } from "../../shared/provider-limits";
-import NudgeChipBar from "./NudgeChipBar";
+import { setProviderLock } from "../../shared/provider-locks";
+import { CouncilOrbs } from "./CouncilOrbs";
+import { synthesisProviderAtom } from "../state/atoms";
 
 interface ChatInputProps {
   onSendPrompt: (prompt: string) => void;
@@ -97,6 +99,7 @@ const ChatInput = ({
 
   // Input Length Validation State
   const [selectedModels] = useAtom(selectedModelsAtom);
+  const [synthesisProvider, setSynthesisProvider] = useAtom(synthesisProviderAtom);
   const [maxLength, setMaxLength] = useState<number>(Infinity);
   const [warnThreshold, setWarnThreshold] = useState<number>(Infinity);
   const [limitingProvider, setLimitingProvider] = useState<string>("");
@@ -113,6 +116,12 @@ const ChatInput = ({
   const idleTimerRef = useRef<NodeJS.Timeout | null>(null);
   const [isNudgeFrozen, setIsNudgeFrozen] = useState(false);
   const [isFocused, setIsFocused] = useState(false); // Track textarea focus
+
+  // Model selection for labels
+  const composerModelId = useAtom(composerModelAtom)[0];
+  const analystModelId = useAtom(analystModelAtom)[0];
+  const composerModelName = LLM_PROVIDERS_CONFIG.find(p => p.id === composerModelId)?.name || composerModelId || "Gemini";
+  const analystModelName = LLM_PROVIDERS_CONFIG.find(p => p.id === analystModelId)?.name || analystModelId || "Gemini";
 
   // Calculate limits based on selected providers
   useEffect(() => {
@@ -152,10 +161,13 @@ const ChatInput = ({
       const bottomBarHeight = (originalPrompt || composerDraft) ? 30 : 0;
       const refinerHeight = isRefinerOpen ? 40 : 0;
       const targetHeight = activeTarget ? 30 : 0;
-      const totalHeight = newHeight + 24 + 2 + refinerHeight + targetHeight + bottomBarHeight;
+      // Add height for nudge chips if visible (approx 28px + margin)
+      const nudgeHeight = nudgeVisible ? 32 : 0;
+
+      const totalHeight = newHeight + 24 + 2 + refinerHeight + targetHeight + bottomBarHeight + nudgeHeight;
       onHeightChange?.(totalHeight);
     }
-  }, [prompt, onHeightChange, isRefinerOpen, activeTarget, originalPrompt, composerDraft]);
+  }, [prompt, onHeightChange, isRefinerOpen, activeTarget, originalPrompt, composerDraft, nudgeVisible]);
 
   // Close menu on click outside
   useEffect(() => {
@@ -320,12 +332,24 @@ const ChatInput = ({
     }
   };
 
-  // Determine Nudge Variant for Chaining
-  const getNudgeVariant = () => {
+  // Determine Nudge Variant for Chaining and Text
+  const nudgeVariant = (() => {
     if (currentRefinementState === "composer") return "chain_analyst";
     if (currentRefinementState === "analyst") return "chain_composer";
     return "default";
-  };
+  })();
+
+  const isSending = nudgeType === "sending";
+
+  // Dynamic text logic based on NudgeChipBar adaptation
+  let composerText = isSending ? "Perfect this prompt" : "Let Composer perfect it";
+  let analystText = isSending ? "Pressure-test it" : "Let Analyst sharpen it";
+
+  if (nudgeVariant === "chain_analyst") {
+    analystText = "Now pressure-test with Analyst?";
+  } else if (nudgeVariant === "chain_composer") {
+    composerText = "Now perfect this audited version?";
+  }
 
   const buttonText = (isRefinerOpen || hasRejectedRefinement) ? "Launch" : (isContinuationMode ? "Continue" : "Send");
   const isDisabled = isLoading || mappingActive || !prompt.trim() || isOverLimit || isNudgeFrozen;
@@ -335,26 +359,22 @@ const ChatInput = ({
   const providerName = activeTarget ? LLM_PROVIDERS_CONFIG.find(p => p.id === activeTarget.providerId)?.name || activeTarget.providerId : "";
 
   return (
-    <div className="w-full flex justify-center flex-col items-center pointer-events-auto">
-      <div className="flex gap-2.5 items-center relative w-full max-w-[min(800px,calc(100%-32px))] p-3 bg-input backdrop-blur-xl border border-border-subtle rounded-3xl flex-wrap">
+    <div className="w-full flex justify-center flex-col items-center pointer-events-auto gap-2">
 
-        {/* Nudge Chip Bar */}
-        <NudgeChipBar
-          type={nudgeType}
-          variant={getNudgeVariant()}
-          onCompose={() => {
-            // If already composed and clicking compose again -> standard compose
-            // If chained (analyst -> composer) -> standard compose (which will take the current input)
-            onCompose?.(prompt);
-            setNudgeVisible(false);
+      {/* Active Council Orbs (Top Border) */}
+      <div className="w-full max-w-[min(800px,calc(100%-32px))] px-3 z-20">
+        <CouncilOrbs
+          providers={LLM_PROVIDERS_CONFIG}
+          voiceProviderId={synthesisProvider || 'claude'}
+          variant="active"
+          onCrownMove={(pid) => {
+            setSynthesisProvider(pid);
+            setProviderLock('synthesis', true); // Lock handled in chat input now? Or imported helper.
           }}
-          onAnalyst={() => {
-            onExplain?.(prompt); // Analyst = Explain
-            setNudgeVisible(false);
-          }}
-          progress={nudgeProgress}
-          visible={nudgeVisible}
         />
+      </div>
+
+      <div className="flex gap-2.5 items-center relative w-full max-w-[min(800px,calc(100%-32px))] p-3 bg-input backdrop-blur-xl border border-border-subtle rounded-3xl flex-wrap">
 
         {/* Targeted Mode Banner */}
         {activeTarget && (
@@ -372,7 +392,7 @@ const ChatInput = ({
           </div>
         )}
 
-        <div className="flex-1 relative min-w-[200px]">
+        <div className="flex-1 relative min-w-[200px] flex flex-col gap-2">
           <textarea
             ref={textareaRef}
             value={prompt}
@@ -407,6 +427,39 @@ const ChatInput = ({
               }
             }}
           />
+
+          {/* Inline Nudge Chips */}
+          <div className={`flex items-center gap-2 overflow-hidden transition-all duration-300 ease-in-out ${nudgeVisible ? 'max-h-10 opacity-100 mt-1 mb-1' : 'max-h-0 opacity-0 mt-0 mb-0'}`}>
+            {isSending && (
+              <div className="absolute left-0 bottom-0 top-0 w-[4px] bg-brand-500 animate-pulse rounded-r-full h-full opacity-60"
+                style={{ height: `${nudgeProgress}%`, maxHeight: '100%', transition: 'height 50ms linear' }}
+              />
+            )}
+
+            <button
+              onClick={(e) => {
+                e.preventDefault();
+                handleNudgeCompose();
+              }}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-surface-highlight/40 hover:bg-brand-500/10 hover:border-brand-500/30 border border-transparent rounded-full text-xs transition-all group animate-in slide-in-from-left-2 duration-300"
+            >
+              <span className="text-brand-400">✨</span>
+              <span className="text-text-secondary group-hover:text-brand-300">{composerText}</span>
+            </button>
+
+            <div className="w-px h-3 bg-border-subtle" />
+
+            <button
+              onClick={(e) => {
+                e.preventDefault();
+                handleNudgeAnalyst();
+              }}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-surface-highlight/40 hover:bg-brand-500/10 hover:border-brand-500/30 border border-transparent rounded-full text-xs transition-all group animate-in slide-in-from-left-4 duration-300 delay-75"
+            >
+              <span className="text-brand-400">🧠</span>
+              <span className="text-text-secondary group-hover:text-brand-300">{analystText}</span>
+            </button>
+          </div>
 
           {/* Length Validation Feedback */}
           {(isWarning || isOverLimit) && (
