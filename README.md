@@ -14,7 +14,7 @@ Singularity is a Chrome extension (Manifest V3) that orchestrates multi‑model 
 
 - **[Architecture Blueprint](Architecture%20Overview.md)**: High-level system map and philosophy.
 - **[Critical Flows](docs/flows.md)**: Detailed sequence diagrams (Initialize, Recompute, Error).
-- **[Debugging Guide](docs/debugging.md)**: Message tracing, state inspection, and common issues.
+- **[Debugging Guide](docs/debugging.md)**: Message tracing, state inspection, and common issues.readme
 - **[Contributing](docs/contributing.md)**: Guide for adding new providers and primitives.
 - **[Style Guide](docs/style-guide.md)**: Logo assets, sizing, and branding guidelines.
 - **[Core DNR Utilities](docs/dnr-utils.md)**: Guide for managing network rules and Arkose injection.
