@@ -257,35 +257,7 @@ interface ProviderContextRecord {
 
 **File:** `src/core/connection-handler.js`
 
-```javascript
-async _handleExecuteWorkflow(message) {
-  const request = message.payload;
-
-  // PHASE 1: Validate primitive type
-  if (!['initialize', 'extend', 'recompute'].includes(request.type)) {
-    throw new Error('Invalid request type');
-  }
-
-  // PHASE 2: Resolve context
-  const resolvedContext = await this.services.contextResolver.resolve(request);
-
-  // PHASE 3: Compile workflow
-  const workflowRequest = this.services.compiler.compile(request, resolvedContext);
-
-  // PHASE 4: Emit TURN_CREATED (for non-recompute)
-  if (request.type !== 'recompute') {
-    this.port.postMessage({
-      type: 'TURN_CREATED',
-      sessionId: workflowRequest.context.sessionId,
-      userTurnId: workflowRequest.context.canonicalUserTurnId,
-      aiTurnId: workflowRequest.context.canonicalAiTurnId
-    });
-  }
-
-  // PHASE 5: Execute
-  await this.workflowEngine.execute(workflowRequest, resolvedContext);
-}
-```
+See: [src/core/connection-handler.js](file:///c:/Users/Mahdi/OneDrive/Desktop/Singularityv3/src/core/connection-handler.js)
 
 ### 3.2 Context Resolver: Data Fetcher
 
@@ -293,73 +265,7 @@ async _handleExecuteWorkflow(message) {
 
 **Purpose:** Fetch minimum required data for each primitive. This is the performance bottleneck—must be fast.
 
-```javascript
-async resolve(request) {
-  switch (request.type) {
-    case 'initialize':
-      return { type: 'initialize', providers: request.providers };
-
-    case 'extend':
-      // Fast path: indexed lookup on provider_contexts for the given session
-      const contexts = await this.sessionManager.adapter.getContextsBySessionId(request.sessionId);
-
-      return {
-        type: 'extend',
-        sessionId: request.sessionId,
-        providerContexts: contexts.reduce((acc, ctx) => {
-          acc[ctx.providerId] = {
-            meta: ctx, // compound PK [sessionId, providerId] in store
-            continueThread: true
-          };
-          return acc;
-        }, {})
-      };
-
-    case 'recompute':
-      // Heavy path: fetch historical turn + all responses
-      const aiTurn = await this.sessionManager.adapter.get('turns', request.sourceTurnId);
-      const userTurn = await this.sessionManager.adapter.get('turns', aiTurn.userTurnId);
-      const responses = await this.sessionManager.adapter.getByIndex(
-        'provider_responses',
-        'byAiTurnId',
-        request.sourceTurnId
-      );
-
-      // Build frozen outputs
-      const frozenBatchOutputs = {};
-      let latestMappingOutput = null;
-
-      responses.forEach(r => {
-        if (r.responseType === 'batch') {
-          frozenBatchOutputs[r.providerId] = {
-            providerId: r.providerId,
-            text: r.text,
-            status: 'completed',
-            meta: r.meta
-          };
-        } else if (r.responseType === 'mapping') {
-          latestMappingOutput = {
-            providerId: r.providerId,
-            text: r.text,
-            meta: r.meta
-          };
-        }
-      });
-
-      return {
-        type: 'recompute',
-        sessionId: request.sessionId,
-        sourceTurnId: request.sourceTurnId,
-        frozenBatchOutputs,
-        latestMappingOutput,
-        providerContextsAtSourceTurn: aiTurn.providerContexts || {},
-        stepType: request.stepType,
-        targetProvider: request.targetProvider,
-        sourceUserMessage: userTurn.text
-      };
-  }
-}
-```
+See: [src/core/context-resolver.js](file:///c:/Users/Mahdi/OneDrive/Desktop/Singularityv3/src/core/context-resolver.js)
 
 ### 3.3 Workflow Compiler: Instruction Generator
 
@@ -367,90 +273,7 @@ async resolve(request) {
 
 **Purpose:** Pure function that converts request + context into imperative steps.
 
-```javascript
-compile(request, resolvedContext) {
-  const steps = [];
-
-  if (request.type === 'recompute') {
-    // Single step: synthesis or mapping
-    if (request.stepType === 'synthesis') {
-      steps.push({
-        stepId: `synthesis-${request.targetProvider}-${Date.now()}`,
-        type: 'synthesis',
-        payload: {
-          synthesisProvider: request.targetProvider,
-          strategy: 'continuation',
-          sourceHistorical: {
-            turnId: request.sourceTurnId,
-            responseType: 'batch'
-          },
-          originalPrompt: resolvedContext.sourceUserMessage,
-          useThinking: request.useThinking
-        }
-      });
-    }
-    // ... similar for mapping
-  } else {
-    // Normal flow: batch → mapping → synthesis
-
-    // Step 1: Prompt step
-    steps.push({
-      stepId: `batch-${Date.now()}`,
-      type: 'prompt',
-      payload: {
-        prompt: request.userMessage,
-        providers: request.providers,
-        providerContexts: resolvedContext.providerContexts, // From extend
-        useThinking: request.useThinking
-      }
-    });
-
-    // Step 2: Mapping (if requested)
-    if (request.includeMapping && request.mapper) {
-      steps.push({
-        stepId: `mapping-${request.mapper}-${Date.now()}`,
-        type: 'mapping',
-        payload: {
-          mappingProvider: request.mapper,
-          sourceStepIds: [steps[0].stepId],
-          originalPrompt: request.userMessage,
-          useThinking: request.useThinking
-        }
-      });
-    }
-
-    // Step 3: Synthesis (if requested)
-    if (request.includeSynthesis && request.synthesizer) {
-      const mappingStepIds = steps
-        .filter(s => s.type === 'mapping')
-        .map(s => s.stepId);
-
-      steps.push({
-        stepId: `synthesis-${request.synthesizer}-${Date.now()}`,
-        type: 'synthesis',
-        payload: {
-          synthesisProvider: request.synthesizer,
-          sourceStepIds: [steps[0].stepId],
-          mappingStepIds,
-          originalPrompt: request.userMessage,
-          useThinking: request.useThinking
-        }
-      });
-    }
-  }
-
-  return {
-    workflowId: `wf-${Date.now()}`,
-    context: {
-      sessionId: request.sessionId,
-      threadId: 'default-thread',
-      canonicalUserTurnId: request.clientUserTurnId || `user-${Date.now()}`,
-      canonicalAiTurnId: `ai-${Date.now()}`
-    },
-    steps
-  };
-}
-```
+See: [src/core/workflow-compiler.js](file:///c:/Users/Mahdi/OneDrive/Desktop/Singularityv3/src/core/workflow-compiler.js)
 
 ### 3.4 Workflow Engine: Step Executor
 
@@ -458,100 +281,90 @@ compile(request, resolvedContext) {
 
 **Purpose:** Execute steps in sequence, stream results to UI, persist on completion.
 
-```javascript
-async execute(workflowRequest, resolvedContext) {
-  const { context, steps } = workflowRequest;
-  const stepResults = new Map();
+See: [src/core/workflow-engine.js](file:///c:/Users/Mahdi/OneDrive/Desktop/Singularityv3/src/core/workflow-engine.js)
 
-  // Execute batch steps first
-  for (const step of steps.filter(s => s.type === 'prompt')) {
-    // NEW: Signal step start to UI (planned)
-    // this.port.postMessage({ type: 'WORKFLOW_STEP_STARTED', stepType: 'batch', stepId: step.stepId, sessionId: context.sessionId });
-    const result = await this.executePromptStep(step, context);
-    stepResults.set(step.stepId, { status: 'completed', result });
+### 3.5 System Prompts: Synthesizer and Mapper
 
-    this.port.postMessage({
-      type: 'WORKFLOW_STEP_UPDATE',
-      sessionId: context.sessionId,
-      stepId: step.stepId,
-      status: 'completed',
-      result
-    });
-  }
+**File:** `src/core/workflow-engine.js`
 
-  // Execute mapping steps
-  for (const step of steps.filter(s => s.type === 'mapping')) {
-    const result = await this.executeMappingStep(step, context, stepResults);
-    stepResults.set(step.stepId, { status: 'completed', result });
+**Purpose:** These prompts define how the synthesis and mapping steps transform batch outputs.
 
-    this.port.postMessage({
-      type: 'WORKFLOW_STEP_UPDATE',
-      sessionId: context.sessionId,
-      stepId: step.stepId,
-      status: 'completed',
-      result
-    });
-  }
+#### Synthesizer Prompt (buildSynthesisPrompt)
 
-  // Execute synthesis steps
-  for (const step of steps.filter(s => s.type === 'synthesis')) {
-    const result = await this.executeSynthesisStep(step, context, stepResults);
-    stepResults.set(step.stepId, { status: 'completed', result });
+The synthesizer creates a unified response that "could only exist" from seeing all models:
 
-    this.port.postMessage({
-      type: 'WORKFLOW_STEP_UPDATE',
-      sessionId: context.sessionId,
-      stepId: step.stepId,
-      status: 'completed',
-      result
-    });
-  }
+See: [src/core/workflow-engine.js](file:///c:/Users/Mahdi/OneDrive/Desktop/Singularityv3/src/core/workflow-engine.js)
 
-  // Persist to database
-  await this.sessionManager.persist({
-    type: resolvedContext.type,
-    sessionId: context.sessionId,
-    userMessage: context.userMessage,
-    canonicalUserTurnId: context.canonicalUserTurnId,
-    canonicalAiTurnId: context.canonicalAiTurnId
-  }, resolvedContext, stepResults);
+**Output Contract:**
+- **The Short Answer:** 1-2 paragraph overview
+- **The Long Answer:** Full synthesis
 
-  // Emit finalized turn
-  this.port.postMessage({
-    type: 'TURN_FINALIZED',
-    sessionId: context.sessionId,
-    userTurnId: context.canonicalUserTurnId,
-    aiTurnId: context.canonicalAiTurnId,
-    turn: {
-      user: { id: context.canonicalUserTurnId, text: context.userMessage },
-      ai: { id: context.canonicalAiTurnId, batchResponses: {}, ... }
-    }
-  });
-}
+---
 
-async executePromptStep(step, context) {
-  const { prompt, providers, providerContexts } = step.payload;
+#### Mapper Prompt (buildMappingPrompt)
 
-  return new Promise((resolve) => {
-    this.orchestrator.executeParallelFanout(prompt, providers, {
-      sessionId: context.sessionId,
-      providerContexts,
-      onPartial: (providerId, chunk) => {
-        // Stream to UI immediately
-        this._dispatchPartialDelta(
-          context.sessionId,
-          step.stepId,
-          providerId,
-          chunk.text
-        );
-      },
-      onAllComplete: (results) => {
-        resolve({ results: Object.fromEntries(results) });
-      }
-    });
-  });
-}
+The mapper is a "provenance tracker and option cataloger" that reveals consensus patterns and divergence:
+
+See: [src/core/workflow-engine.js](file:///c:/Users/Mahdi/OneDrive/Desktop/Singularityv3/src/core/workflow-engine.js)
+
+**Output Contract:**
+1. **Narrative:** Prose with embedded citations `[1,2,3]` and **bold canonical labels**
+2. **Delimiter:** `===ALL_AVAILABLE_OPTIONS===`
+3. **Options List:** Grouped by theme, with citations
+4. **Delimiter:** `===GRAPH_TOPOLOGY===`
+5. **JSON Graph:** Nodes (with supporters) + Edges (with relationship types)
+
+---
+
+### 3.6 Pre-Flight Refinement: PromptRefinerService
+
+**File:** `src/services/PromptRefinerService.ts`
+
+**Purpose:** Two-stage pipeline (Composer → Analyst) that refines user prompts before batch fan-out.
+
+#### Composer Role
+
+The Composer is the "user's voice, clarified"—a hinge between user and the batch pipeline.
+
+See: [src/services/PromptRefinerService.ts](file:///c:/Users/Mahdi/OneDrive/Desktop/Singularityv3/src/services/PromptRefinerService.ts)
+
+**Output Contract:**
+- `REFINED_PROMPT:` — The polished prompt to send
+- `NOTES:` — 2-4 sentences explaining intent/changes
+
+---
+
+#### Analyst Role
+
+The Analyst is the "mirror held up to the composed prompt before it launches."
+
+See: [src/services/PromptRefinerService.ts](file:///c:/Users/Mahdi/OneDrive/Desktop/Singularityv3/src/services/PromptRefinerService.ts)
+
+**Output Contract:**
+- `AUDIT:` — Negative-space analysis (what's being left behind)
+- `VARIANTS:` — 1-3 alternative framings (numbered list)
+- `GUIDANCE:` — 2-4 sentences mapping variants to user priorities
+
+---
+
+#### Pipeline Flow
+
 ```
+User Fragment 
+  ↓
+Composer (refines prompt, preserves voice)
+  ↓
+Analyst (reveals negative space, offers variants)
+  ↓
+User Reviews (chooses refined prompt or variant)
+  ↓
+Batch Fan-Out
+```
+
+**Key Methods:**
+- `refineWithAuthorAnalyst()` — Run full Composer → Analyst pipeline
+- `runComposer()` — Run Composer only
+- `runAnalyst()` — Run Analyst only
 
 ---
 
@@ -561,52 +374,7 @@ async executePromptStep(step, context) {
 
 **Core Principle:** Map-based storage for O(1) lookups, array of IDs for ordering.
 
-```typescript
-// ATOMIC STATE PRIMITIVES
-export const turnsMapAtom = atomWithImmer<Map<string, TurnMessage>>(new Map());
-export const turnIdsAtom = atomWithImmer<string[]>([]);
-
-// DERIVED STATE (computed from primitives)
-export const messagesAtom = atom<TurnMessage[]>((get) => {
-  const ids = get(turnIdsAtom);
-  const map = get(turnsMapAtom);
-  return ids.map((id) => map.get(id)).filter((t): t is TurnMessage => !!t);
-});
-
-// WORKFLOW STATE
-export const currentSessionIdAtom = atomWithStorage<string | null>(
-  "htos_last_session_id",
-  null,
-);
-export const isLoadingAtom = atom<boolean>(false);
-export const uiPhaseAtom = atom<UiPhase>("idle");
-export const activeAiTurnIdAtom = atom<string | null>(null);
-
-// RECOMPUTE TARGETING
-export const activeRecomputeStateAtom = atom<{
-  aiTurnId: string;
-  stepType: "synthesis" | "mapping";
-  providerId: string;
-} | null>(null);
-
-// MODEL CONFIGURATION (persisted)
-export const selectedModelsAtom = atomWithStorage<Record<string, boolean>>(
-  "htos_selected_models",
-  {},
-);
-export const mappingEnabledAtom = atomWithStorage<boolean>(
-  "htos_mapping_enabled",
-  true,
-);
-export const mappingProviderAtom = atomWithStorage<string | null>(
-  "htos_mapping_provider",
-  null,
-);
-export const synthesisProviderAtom = atomWithStorage<string | null>(
-  "htos_synthesis_provider",
-  null,
-);
-```
+See: [ui/state/atoms.ts](file:///c:/Users/Mahdi/OneDrive/Desktop/Singularityv3/ui/state/atoms.ts)
 
 ### 4.2 Message Handler: Backend → State Bridge
 
@@ -614,283 +382,13 @@ export const synthesisProviderAtom = atomWithStorage<string | null>(
 
 **Purpose:** Translate backend messages into state updates. This is the most critical UI hook.
 
-```typescript
-export function usePortMessageHandler() {
-  const setTurnsMap = useSetAtom(turnsMapAtom);
-  const setTurnIds = useSetAtom(turnIdsAtom);
-  const setCurrentSessionId = useSetAtom(currentSessionIdAtom);
-  const setIsLoading = useSetAtom(isLoadingAtom);
-  const setActiveAiTurnId = useSetAtom(activeAiTurnIdAtom);
-
-  const handler = useCallback(
-    (message: any) => {
-      switch (message.type) {
-        case "TURN_CREATED": {
-          const { userTurnId, aiTurnId, sessionId } = message;
-
-          // Initialize session for new conversations
-          if (!currentSessionId) {
-            setCurrentSessionId(sessionId);
-          }
-
-          // Get optimistic user turn (already created by useChat)
-          // NOTE: No ID swap occurs here. Backend provides canonical aiTurnId; UI creates
-          // an optimistic AI turn with that canonical ID and later merges data on TURN_FINALIZED.
-          const userTurn = turnsMap.get(userTurnId);
-
-          // Create optimistic AI turn
-          const aiTurn = createOptimisticAiTurn(
-            aiTurnId,
-            userTurn,
-            activeProviders,
-            !!synthesisProvider,
-            !!mappingEnabled && !!mappingProvider,
-            synthesisProvider,
-            mappingProvider,
-            Date.now(),
-            userTurnId,
-            {
-              // ← NEW: Store request intent
-              synthesis: !!synthesisProvider,
-              mapping: !!mappingEnabled && !!mappingProvider,
-            },
-          );
-
-          setTurnsMap((draft) => {
-            draft.set(aiTurnId, aiTurn);
-          });
-          setTurnIds((draft) => {
-            draft.push(aiTurnId);
-          });
-          setActiveAiTurnId(aiTurnId);
-          break;
-        }
-
-        case "PARTIAL_RESULT": {
-          const { stepId, providerId, chunk } = message;
-
-          // Determine step type from stepId pattern
-          const stepType = getStepType(stepId); // 'batch' | 'synthesis' | 'mapping'
-
-          // Buffer streaming updates for 16ms batching
-          streamingBuffer.addDelta(
-            providerId,
-            chunk.text,
-            "streaming",
-            stepType,
-          );
-          break;
-        }
-
-        case "WORKFLOW_STEP_UPDATE": {
-          const { stepId, status, result, error } = message;
-
-          if (status === "completed") {
-            streamingBuffer.flushImmediate();
-
-            const stepType = getStepType(stepId);
-            const resultsMap = result.results || {
-              [result.providerId]: result,
-            };
-
-            Object.entries(resultsMap).forEach(([providerId, data]) => {
-              setTurnsMap((draft) => {
-                const turn = draft.get(activeAiTurnId) as AiTurn;
-
-                const completedEntry = {
-                  providerId,
-                  text: data.text || "",
-                  status: "completed" as const,
-                  createdAt: Date.now(),
-                  updatedAt: Date.now(),
-                  meta: data.meta || {},
-                };
-
-                if (stepType === "synthesis") {
-                  const arr = turn.synthesisResponses?.[providerId] || [];
-                  arr.push(completedEntry);
-                  turn.synthesisResponses = {
-                    ...turn.synthesisResponses,
-                    [providerId]: arr,
-                  };
-                } else if (stepType === "mapping") {
-                  const arr = turn.mappingResponses?.[providerId] || [];
-                  arr.push(completedEntry);
-                  turn.mappingResponses = {
-                    ...turn.mappingResponses,
-                    [providerId]: arr,
-                  };
-                } else if (stepType === "batch") {
-                  turn.batchResponses = {
-                    ...turn.batchResponses,
-                    [providerId]: completedEntry,
-                  };
-                }
-              });
-            });
-          } else if (status === "failed") {
-            // ✅ NEW: Handle errors
-            const stepType = getStepType(stepId);
-            const providerId = extractProviderFromStepId(stepId, stepType);
-
-            setTurnsMap((draft) => {
-              const turn = draft.get(activeAiTurnId) as AiTurn;
-
-              const errorResponse = {
-                providerId,
-                text: "",
-                status: "error" as const,
-                createdAt: Date.now(),
-                updatedAt: Date.now(),
-                meta: { error: error || "Unknown error" },
-              };
-
-              if (stepType === "synthesis") {
-                turn.synthesisResponses = {
-                  ...turn.synthesisResponses,
-                  [providerId]: [errorResponse],
-                };
-              } else if (stepType === "mapping") {
-                turn.mappingResponses = {
-                  ...turn.mappingResponses,
-                  [providerId]: [errorResponse],
-                };
-              }
-            });
-
-            setIsLoading(false);
-          }
-          break;
-        }
-
-        case "TURN_FINALIZED": {
-          const { aiTurnId, turn } = message;
-
-          streamingBuffer.flushImmediate();
-
-          // Merge canonical data into optimistic turn
-          setTurnsMap((draft) => {
-            const existingAi = draft.get(aiTurnId) as AiTurn;
-            const canonicalAi = turn.ai as AiTurn;
-
-            draft.set(aiTurnId, {
-              ...existingAi,
-              ...canonicalAi,
-              batchResponses: {
-                ...existingAi.batchResponses,
-                ...canonicalAi.batchResponses,
-              },
-              synthesisResponses: {
-                ...existingAi.synthesisResponses,
-                ...canonicalAi.synthesisResponses,
-              },
-              mappingResponses: {
-                ...existingAi.mappingResponses,
-                ...canonicalAi.mappingResponses,
-              },
-              meta: {
-                ...existingAi.meta,
-                isOptimistic: false,
-              },
-            });
-          });
-
-          setIsLoading(false);
-          setActiveAiTurnId(null);
-          break;
-        }
-      }
-    },
-    [
-      /* deps */
-    ],
-  );
-
-  // Register handler with API
-  useEffect(() => {
-    api.setPortMessageHandler(handler);
-  }, [handler]);
-}
-```
+See: [ui/hooks/usePortMessageHandler.ts](file:///c:/Users/Mahdi/OneDrive/Desktop/Singularityv3/ui/hooks/usePortMessageHandler.ts)
 
 ### 4.3 Action Hook: User Intent → Backend Messages
 
 **File:** `ui/hooks/useChat.ts`
 
-```typescript
-export function useChat() {
-  const selectedModels = useAtomValue(selectedModelsAtom);
-  const currentSessionId = useAtomValue(currentSessionIdAtom);
-  const turnIds = useAtomValue(turnIdsAtom);
-  const setTurnsMap = useSetAtom(turnsMapAtom);
-  const setTurnIds = useSetAtom(turnIdsAtom);
-  const setIsLoading = useSetAtom(isLoadingAtom);
-
-  const sendMessage = useCallback(
-    async (prompt: string, mode: "new" | "continuation") => {
-      const ts = Date.now();
-      const userTurnId = `user-${ts}-${Math.random().toString(36).slice(2, 8)}`;
-
-      const userTurn: UserTurn = {
-        type: "user",
-        id: userTurnId,
-        text: prompt,
-        createdAt: ts,
-        sessionId: currentSessionId,
-      };
-
-      // Write optimistic user turn
-      setTurnsMap((draft) => {
-        draft.set(userTurn.id, userTurn);
-      });
-      setTurnIds((draft) => {
-        draft.push(userTurn.id);
-      });
-
-      setIsLoading(true);
-
-      // Determine active providers
-      const activeProviders = LLM_PROVIDERS_CONFIG.filter(
-        (p) => selectedModels[p.id],
-      ).map((p) => p.id as ProviderKey);
-
-      // Build primitive request
-      const isInitialize = mode === "new" && !currentSessionId;
-
-      const primitive: PrimitiveWorkflowRequest = isInitialize
-        ? {
-            type: "initialize",
-            sessionId: null,
-            userMessage: prompt,
-            providers: activeProviders,
-            includeMapping: mappingEnabled && !!mappingProvider,
-            includeSynthesis: !!synthesisProvider,
-            synthesizer: synthesisProvider,
-            mapper: mappingProvider,
-            clientUserTurnId: userTurnId,
-          }
-        : {
-            type: "extend",
-            sessionId: currentSessionId!,
-            userMessage: prompt,
-            providers: activeProviders,
-            includeMapping: mappingEnabled && !!mappingProvider,
-            includeSynthesis: !!synthesisProvider,
-            synthesizer: synthesisProvider,
-            mapper: mappingProvider,
-            clientUserTurnId: userTurnId,
-          };
-
-      await api.executeWorkflow(primitive);
-    },
-    [
-      /* deps */
-    ],
-  );
-
-  return { sendMessage };
-}
-```
+See: [ui/hooks/useChat.ts](file:///c:/Users/Mahdi/OneDrive/Desktop/Singularityv3/ui/hooks/useChat.ts)
 
 ---
 
@@ -898,382 +396,167 @@ export function useChat() {
 
 ### 5.1 Top-Level Layout (`ui/App.tsx`)
 
-```typescript
-export default function App() {
-  const isInitialized = useInitialization();
-  const [viewMode] = useAtom(viewModeAtom);
-  const [isHistoryOpen] = useAtom(isHistoryPanelOpenAtom);
-
-  // Global side effects
-  usePortMessageHandler();
-  useConnectionMonitoring();
-  useHistoryLoader(isInitialized);
-
-  if (!isInitialized) {
-    return <div className="loading-spinner" />;
-  }
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
-      <Header />
-      <BannerConnected />
-
-      <div style={{ display: 'flex', flex: 1 }}>
-        <main style={{ flex: 1 }}>
-          <ChatView />
-        </main>
-
-        {isHistoryOpen && <HistoryPanelConnected />}
-      </div>
-
-      <SettingsPanel />
-    </div>
-  );
-}
-```
+See: [ui/App.tsx](file:///c:/Users/Mahdi/OneDrive/Desktop/Singularityv3/ui/App.tsx)
 
 ### 5.2 Chat View: Virtualized Turn List (`ui/views/ChatView.tsx`)
 
-```typescript
-export default function ChatView() {
-  const [turnIds] = useAtom(turnIdsAtom);
-  const [showWelcome] = useAtom(showWelcomeAtom);
+See: [ui/views/ChatView.tsx](file:///c:/Users/Mahdi/OneDrive/Desktop/Singularityv3/ui/views/ChatView.tsx)
 
-  const itemContent = useMemo(() => (index: number, turnId: string) => {
-    return <MessageRow turnId={turnId} />;
-  }, []);
+### 5.3 AI Turn Block: Synthesis-Focused Renderer (`ui/components/AiTurnBlock.tsx`)
 
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      {showWelcome ? (
-        <WelcomeScreen />
-      ) : (
-        <Virtuoso
-          style={{ flex: 1 }}
-          data={turnIds}
-          followOutput={(isAtBottom) => (isAtBottom ? 'smooth' : false)}
-          itemContent={itemContent}
-        />
-      )}
+**Purpose:** Renders synthesis response front-and-center as a conversation bubble, with tabs to switch between multiple synthesis takes.
 
-      <ChatInputConnected />
-      <CompactModelTrayConnected />
-    </div>
-  );
-}
+**Current Layout (v2):**
+- Synthesis bubble is the main content (not side-by-side with mapping)
+- Mapping has moved to Decision Map Sheet (bottom sheet)
+- Provider batch responses shown in right split pane via `ModelResponsePanel`
+- Council Orbs strip below each synthesis bubble for model navigation
+
+**Key Props:**
+See: [ui/components/AiTurnBlock.tsx](file:///c:/Users/Mahdi/OneDrive/Desktop/Singularityv3/ui/components/AiTurnBlock.tsx)
+
+**Synthesis Tab System:**
+
+
+**Interaction Flow:**
+1. **Click any orb** → Opens right split pane with that provider's batch response
+2. **Click center orb (crown)** → No-op (crown shows synthesizer)
+3. **Click orb strip background** → Opens Decision Map Sheet
+4. **Click synthesis tab** → Switches to that provider's synthesis
+
+**Visual Structure:**
+```
+┌─────────────────────────────────────┐
+│  User Prompt Card                   │
+└─────────────────────────────────────┘
+┌─────────────────────────────────────┐
+│  Synthesis Bubble                   │
+│  ┌─────────────────────────────────┐│
+│  │ [Tab: Claude] [Tab: Gemini (2)]││
+│  ├─────────────────────────────────┤│
+│  │ The Short Answer...             ││
+│  │ The Long Answer...              ││
+│  │ (Markdown rendered)             ││
+│  └─────────────────────────────────┘│
+│  ┌─────────────────────────────────┐│
+│  │  ○ ○ ● ○ ○  Council Orbs        ││
+│  └─────────────────────────────────┘│
+└─────────────────────────────────────┘
 ```
 
-### 5.3 AI Turn Block: Complex Stateful Renderer (`ui/components/AiTurnBlock.tsx`)
+**Right Split Pane (ModelResponsePanel):**
+- Opens when user clicks an orb
+- Shows full batch response for that provider
+- Independent scroll from main thread
+- Draggable divider (default 60/40 split)
 
-**Purpose:** Renders synthesis, mapping, and source outputs with truncation, errors, and clip selection.
+**Decision Map Sheet (DecisionMapSheet):**
+- Opens when user clicks orb strip background
+- Bottom sheet with Graph/Narrative/Options tabs
+- See Section 5.4 for details
 
-```typescript
-const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
-  aiTurn,
-  isLive,
-  activeRecomputeState,
-  activeSynthesisClipProviderId,
-  activeMappingClipProviderId,
-  onClipClick,
-  showSourceOutputs,
-  onToggleSourceOutputs
-}) => {
-  const [isSynthesisExpanded, setIsSynthesisExpanded] = useState(true);
-  const [isMappingExpanded, setIsMappingExpanded] = useState(true);
+### 5.4 Interactive Components: Council Orbs, Decision Map, Nudge Bar, Launchpad
 
-  // Normalize responses to arrays
-  const synthesisResponses = useMemo(() => {
-    const out: Record<string, ProviderResponse[]> = {};
-    Object.entries(aiTurn.synthesisResponses || {}).forEach(([pid, resp]) => {
-      out[pid] = normalizeResponseArray(resp);
-    });
-    return out;
-  }, [aiTurn.synthesisResponses]);
+#### Council Orbs (`ui/components/CouncilOrbs.tsx`)
 
-  const mappingResponses = useMemo(() => {
-    const out: Record<string, ProviderResponse[]> = {};
-    Object.entries(aiTurn.mappingResponses || {}).forEach(([pid, resp]) => {
-      out[pid] = normalizeResponseArray(resp);
-    });
-    return out;
-  }, [aiTurn.mappingResponses]);
+**Purpose:** Visual representation of active models for each turn, with role assignment via long-press menu.
 
-  // Determine active provider (from props or first available)
-  const activeSynthPid = activeSynthesisClipProviderId ||
-    Object.keys(synthesisResponses).find(pid => synthesisResponses[pid].length > 0);
+**Key Features:**
+- **Voice Provider (Center):** The "crown" model that synthesizes
+- **Priority Ordering:** Models arranged by priority (closest to center = highest)
+- **Long-Press Menu:** Assign roles (Synthesizer, Mapper, Composer, Analyst)
+- **Variants:**
+  - `tray` — Config orbs above chat input (for next turn)
+  - `historical` — Orbs attached to past synthesis bubbles
+  - `welcome` — Orbs on welcome screen
+  - `divider` — Orbs on split-pane divider
+  - `active` — Currently executing turn
 
-  const activeMappingPid = activeMappingClipProviderId ||
-    Object.keys(mappingResponses).find(pid => mappingResponses[pid].length > 0);
+**Props:**
+See: [ui/components/CouncilOrbs.tsx](file:///c:/Users/Mahdi/OneDrive/Desktop/Singularityv3/ui/components/CouncilOrbs.tsx)
 
-  // Check if this turn is target of recompute
-  const isSynthesisTarget = !!(
-    activeRecomputeState &&
-    activeRecomputeState.aiTurnId === aiTurn.id &&
-    activeRecomputeState.stepType === 'synthesis' &&
-    activeRecomputeState.providerId === activeSynthPid
-  );
+**Visual States:**
+- **Active:** Full color, 100% opacity, slight glow
+- **Inactive:** Grayscale, 40% opacity
+- **Hover:** Scale 1.1x, stronger glow
+- **Selected (in menu):** Border highlight
 
-  const isMappingTarget = !!(
-    activeRecomputeState &&
-    activeRecomputeState.aiTurnId === aiTurn.id &&
-    activeRecomputeState.stepType === 'mapping' &&
-    activeRecomputeState.providerId === activeMappingPid
-  );
+---
 
-  // Get latest response for active provider
-  const displayedSynthesisTake = activeSynthPid
-    ? getLatestResponse(synthesisResponses[activeSynthPid])
-    : undefined;
+#### Decision Map Sheet (`ui/components/DecisionMapSheet.tsx`)
 
-  const displayedMappingTake = activeMappingPid
-    ? getLatestResponse(mappingResponses[activeMappingPid])
-    : undefined;
+**Purpose:** Bottom sheet for visualizing decision map with three tabs.
 
-  // ✅ NEW: Check if features were actually requested
-  const wasRequested = {
-    synthesis: aiTurn.meta?.requestedFeatures?.synthesis ?? true,
-    mapping: aiTurn.meta?.requestedFeatures?.mapping ?? true
-  };
+**Tabs:**
 
-  return (
-    <div className="ai-turn-block">
-      <div style={{ display: 'flex', gap: 12 }}>
-        {/* SYNTHESIS SECTION */}
-        <div style={{ flex: 1, border: '1px solid #475569', borderRadius: 8, padding: 12 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-            <h4>Synthesis</h4>
-            <button onClick={() => setIsSynthesisExpanded(p => !p)}>
-              {isSynthesisExpanded ? '▲' : '▼'}
-            </button>
-          </div>
+1. **Graph Tab** (default)
+   - Force-directed visualization using D3 (via `DecisionMapGraph.tsx`)
+   - Node size = supporter count
+   - Edge types: conflicts (red), complements (green), prerequisite (blue)
+   - Click node → Detail view with provenance
 
-          {isSynthesisExpanded && (
-            <>
-              <ClipsCarousel
-                providers={LLM_PROVIDERS_CONFIG}
-                responsesMap={synthesisResponses}
-                activeProviderId={activeSynthPid}
-                onClipClick={(pid) => onClipClick?.('synthesis', pid)}
-                type="synthesis"
-              />
+2. **Narrative Tab**
+   - Prose explanation of consensus/divergence
+   - Embedded citations `[1,2,3]` clickable
+   - **Bold canonical labels** link to options
 
-              <div style={{ marginTop: 12, background: '#0f172a', padding: 12, borderRadius: 8 }}>
-                {(() => {
-                  // ✅ CRITICAL FIX: Check request intent first
-                  if (!wasRequested.synthesis) {
-                    return (
-                      <div style={{ color: '#64748b', fontStyle: 'italic', textAlign: 'center' }}>
-                        Synthesis not enabled for this turn
-                      </div>
-                    );
-                  }
+3. **Options Tab**
+   - Collapsible theme sections
+   - Each option shows: **[Label]** + description + citations
+   - Click citation → Jump to that model's response
 
-                  // Check if generating
-                  const isGenerating =
-                    (displayedSynthesisTake?.status === 'streaming' ||
-                     displayedSynthesisTake?.status === 'pending') ||
-                    isSynthesisTarget;
+**Data Flow:**
+See: [ui/components/DecisionMapSheet.tsx](file:///c:/Users/Mahdi/OneDrive/Desktop/Singularityv3/ui/components/DecisionMapSheet.tsx)
 
-                  if (isGenerating) {
-                    return (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#94a3b8' }}>
-                        <span style={{ fontStyle: 'italic' }}>Synthesis generating</span>
-                        <span className="streaming-dots" />
-                      </div>
-                    );
-                  }
+**Key Components:**
+- `SupporterOrbs` — Mini orbs showing which models support a claim
+- `MapperSelector` — Dropdown to recompute with different mapper
+- `DetailView` — Full provenance for a selected node
 
-                  // ✅ NEW: Check for error state
-                  if (displayedSynthesisTake?.status === 'error') {
-                    return (
-                      <div style={{
-                        background: '#7f1d1d',
-                        border: '1px solid #991b1b',
-                        borderRadius: 8,
-                        padding: 12,
-                        color: '#fca5a5'
-                      }}>
-                        <div style={{ fontWeight: 600, marginBottom: 4 }}>
-                          Synthesis failed
-                        </div>
-                        <div style={{ fontSize: 14 }}>
-                          {displayedSynthesisTake.meta?.error || 'Unknown error'}
-                        </div>
-                      </div>
-                    );
-                  }
+---
 
-                  // Render completed content
-                  if (activeSynthPid && displayedSynthesisTake) {
-                    const { synthesis } = parseSynthesisResponse(displayedSynthesisTake.text);
-                    return (
-                      <div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-                          <div style={{ fontSize: 12, color: '#94a3b8' }}>
-                            {activeSynthPid} · {displayedSynthesisTake.status}
-                          </div>
-                          <button onClick={async (e) => {
-                            e.stopPropagation();
-                            await navigator.clipboard.writeText(synthesis);
-                          }} style={{
-                            background: '#334155',
-                            border: '1px solid #475569',
-                            borderRadius: 6,
-                            padding: '4px 8px',
-                            color: '#94a3b8',
-                            fontSize: 12,
-                            cursor: 'pointer'
-                          }}>
-                            📋 Copy
-                          </button>
-                        </div>
-                        <div className="prose prose-sm dark:prose-invert">
-                          <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                            {synthesis}
-                          </ReactMarkdown>
-                        </div>
-                      </div>
-                    );
-                  }
+#### Nudge Chip Bar (`ui/components/NudgeChipBar.tsx`)
 
-                  // No provider selected
-                  return (
-                    <div style={{ color: '#64748b', fontStyle: 'italic', textAlign: 'center' }}>
-                      Choose a model to synthesize
-                    </div>
-                  );
-                })()}
-              </div>
-            </>
-          )}
-        </div>
+**Purpose:** Pre-flight suggestions that appear above chat input after user pauses typing.
 
-        {/* MAPPING SECTION */}
-        <div style={{ flex: 1, border: '1px solid #475569', borderRadius: 8, padding: 12 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-            <h4>Mapping</h4>
-            <button onClick={() => setIsMappingExpanded(p => !p)}>
-              {isMappingExpanded ? '▲' : '▼'}
-            </button>
-          </div>
+**Variants:**
+- `default` — "Let Composer perfect it" / "Let Analyst sharpen it"
+- `chain_analyst` — After Composer ran: "Now pressure-test with Analyst?"
+- `chain_composer` — After Analyst ran: "Now perfect this audited version?"
 
-          {isMappingExpanded && (
-            <>
-              <ClipsCarousel
-                providers={LLM_PROVIDERS_CONFIG}
-                responsesMap={mappingResponses}
-                activeProviderId={activeMappingPid}
-                onClipClick={(pid) => onClipClick?.('mapping', pid)}
-                type="mapping"
-              />
+**Props:**
+See: [ui/components/NudgeChipBar.tsx](file:///c:/Users/Mahdi/OneDrive/Desktop/Singularityv3/ui/components/NudgeChipBar.tsx)
 
-              <div style={{ marginTop: 12, background: '#0f172a', padding: 12, borderRadius: 8 }}>
-                {(() => {
-                  // ✅ CRITICAL FIX: Check request intent first
-                  if (!wasRequested.mapping) {
-                    return (
-                      <div style={{ color: '#64748b', fontStyle: 'italic', textAlign: 'center' }}>
-                        Mapping not enabled for this turn
-                      </div>
-                    );
-                  }
+**Visual Design:**
+- Floating pill above input with backdrop blur
+- Two chips separated by divider
+- Shows model name in small mono font `[gemini-flash]`
+- Progress ring animates around perimeter when `type="sending"`
 
-                  const isGenerating =
-                    (displayedMappingTake?.status === 'streaming' ||
-                     displayedMappingTake?.status === 'pending') ||
-                    isMappingTarget;
+---
 
-                  if (isGenerating) {
-                    return (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#94a3b8' }}>
-                        <span style={{ fontStyle: 'italic' }}>Conflict map generating</span>
-                        <span className="streaming-dots" />
-                      </div>
-                    );
-                  }
+#### Launchpad Drawer (`ui/components/LaunchpadDrawer.tsx`)
 
-                  // ✅ NEW: Check for error state
-                  if (displayedMappingTake?.status === 'error') {
-                    return (
-                      <div style={{
-                        background: '#7f1d1d',
-                        border: '1px solid #991b1b',
-                        borderRadius: 8,
-                        padding: 12,
-                        color: '#fca5a5'
-                      }}>
-                        <div style={{ fontWeight: 600, marginBottom: 4 }}>
-                          Mapping failed
-                        </div>
-                        <div style={{ fontSize: 14 }}>
-                          {displayedMappingTake.meta?.error || 'Unknown error'}
-                        </div>
-                      </div>
-                    );
-                  }
+**Purpose:** Left-edge drawer for managing draft prompts from Composer and Analyst.
 
-                  if (activeMappingPid && displayedMappingTake) {
-                    return (
-                      <div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-                          <div style={{ fontSize: 12, color: '#94a3b8' }}>
-                            {activeMappingPid} · {displayedMappingTake.status}
-                          </div>
-                          <button onClick={async (e) => {
-                            e.stopPropagation();
-                            await navigator.clipboard.writeText(displayedMappingTake.text);
-                          }} style={{
-                            background: '#334155',
-                            border: '1px solid #475569',
-                            borderRadius: 6,
-                            padding: '4px 8px',
-                            color: '#94a3b8',
-                            fontSize: 12,
-                            cursor: 'pointer'
-                          }}>
-                            📋 Copy
-                          </button>
-                        </div>
-                        <div className="prose prose-sm dark:prose-invert">
-                          <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                            {displayedMappingTake.text}
-                          </ReactMarkdown>
-                        </div>
-                      </div>
-                    );
-                  }
+**Features:**
+- **Auto-capture:** Composer outputs and Analyst variants saved as draft cards
+- **Actions per card:**
+  - Send (directly to batch)
+  - Send to Composer (refine further)
+  - Send to Analyst (get audit)
+  - Delete
+- **Reordering:** Drag to reorder priority
+- **Persistence:** Stored in `launchpadDraftsAtom` (IndexedDB via atomWithStorage)
 
-                  return (
-                    <div style={{ color: '#64748b', fontStyle: 'italic', textAlign: 'center' }}>
-                      Choose a model to map
-                    </div>
-                  );
-                })()}
-              </div>
-            </>
-          )}
-        </div>
-      </div>
+**Draft Card Structure:**
+See: [ui/components/LaunchpadDrawer.tsx](file:///c:/Users/Mahdi/OneDrive/Desktop/Singularityv3/ui/components/LaunchpadDrawer.tsx)
 
-      {/* SOURCE OUTPUTS TOGGLE */}
-      {Object.keys(aiTurn.batchResponses || {}).length > 0 && (
-        <div style={{ marginTop: 12, textAlign: 'center' }}>
-          <button onClick={onToggleSourceOutputs} style={{
-            padding: '6px 12px',
-            borderRadius: 8,
-            border: '1px solid #334155',
-            background: '#0b1220',
-            color: '#e2e8f0',
-            cursor: 'pointer'
-          }}>
-            {showSourceOutputs ? 'Hide Sources' : 'Show Sources'}
-          </button>
-        </div>
-      )}
-    </div>
-  );
-};
-```
+**Visual Design:**
+- 420px wide, full height
+- Backdrop blur overlay
+- Empty state: "Ready for lift-off" with rocket emoji
+- Cards show source badge (Composer/Analyst) and timestamp
 
 ---
 
@@ -1283,415 +566,29 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
 
 **Actors:** User, UI, ConnectionHandler, ContextResolver, Compiler, WorkflowEngine, Orchestrator, SessionManager
 
-```mermaid
-sequenceDiagram
-    participant User
-    participant UI
-    participant CH as ConnectionHandler
-    participant CR as ContextResolver
-    participant Compiler
-    participant Engine as WorkflowEngine
-    participant Orch as Orchestrator
-    participant SM as SessionManager
-
-    User->>UI: Types "Hello" + clicks Send
-    UI->>UI: Create optimistic UserTurn
-    UI->>UI: Add to turnsMap + turnIds
-    UI->>CH: ExtendRequest{type:'initialize', userMessage:'Hello'}
-
-    CH->>CR: resolve(request)
-    CR->>CR: type='initialize' → return empty context
-    CR-->>CH: ResolvedContext{type:'initialize'}
-
-    CH->>Compiler: compile(request, context)
-    Compiler->>Compiler: Generate [promptStep]
-    Compiler-->>CH: WorkflowRequest{steps:[...]}
-
-    CH->>UI: TURN_CREATED{userTurnId, aiTurnId, sessionId}
-    UI->>UI: Create optimistic AiTurn with meta.requestedFeatures
-    UI->>UI: Add aiTurn to turnsMap + turnIds
-
-    CH->>Engine: execute(workflowRequest)
-
-    Engine->>Orch: executeParallelFanout('Hello', [claude,gemini])
-
-    loop For each provider
-        Orch->>Provider: POST /chat {message:'Hello'}
-        Provider-->>Orch: Stream chunk
-        Orch->>Engine: onPartial(providerId, chunk)
-        Engine->>UI: PARTIAL_RESULT{providerId, chunk.text}
-        UI->>UI: streamingBuffer.addDelta()
-        UI->>UI: Batch update turnsMap (16ms)
-    end
-
-    Orch-->>Engine: onAllComplete(results)
-    Engine->>UI: WORKFLOW_STEP_UPDATE{stepId:'batch-123', status:'completed'}
-    UI->>UI: Mark batchResponses as completed
-
-    Engine->>SM: persist(request, context, results)
-    SM->>DB: Write SessionRecord
-    SM->>DB: Write UserTurnRecord
-    SM->>DB: Write AiTurnRecord
-    SM->>DB: Write ProviderResponseRecords
-    SM->>DB: Write ProviderContextRecords (live index)
-    SM-->>Engine: Persist complete
-
-    Engine->>UI: TURN_FINALIZED{turn:{user, ai}}
-    UI->>UI: Merge canonical data into turnsMap
-    UI->>UI: Set meta.isOptimistic = false
-    UI->>UI: setIsLoading(false)
-```
+See: [Introduction Flow in docs/flows.md](file:///c:/Users/Mahdi/OneDrive/Desktop/Singularityv3/docs/flows.md#1-user-sends-first-message-initialize)
 
 ### 6.2 Flow: User Re-runs Synthesis with Different Model (Recompute)
 
 **Actors:** User, UI, ConnectionHandler, ContextResolver, Compiler, WorkflowEngine, Orchestrator, SessionManager
 
-```mermaid
-sequenceDiagram
-    participant User
-    participant UI
-    participant CH as ConnectionHandler
-    participant CR as ContextResolver
-    participant Compiler
-    participant Engine as WorkflowEngine
-    participant Orch as Orchestrator
-    participant SM as SessionManager
-
-    User->>UI: Clicks "gemini" clip on historical turn
-    UI->>UI: setActiveRecomputeState({aiTurnId, stepType:'synthesis', providerId:'gemini'})
-    UI->>CH: RecomputeRequest{sourceTurnId, stepType:'synthesis', targetProvider:'gemini'}
-
-    CH->>CR: resolve(request)
-    CR->>DB: get('turns', sourceTurnId) → AiTurnRecord
-    CR->>DB: get('turns', aiTurn.userTurnId) → UserTurnRecord
-    CR->>DB: getByIndex('provider_responses', 'byAiTurnId', sourceTurnId)
-    CR->>CR: Build frozenBatchOutputs from responses
-    CR->>CR: Find latestMappingOutput from responses
-    CR->>CR: Extract providerContextsAtSourceTurn from AiTurnRecord
-    CR-->>CH: ResolvedContext{type:'recompute', frozenBatchOutputs, ...}
-
-    CH->>Compiler: compile(request, context)
-    Compiler->>Compiler: Generate single synthesisStep with sourceHistorical
-    Compiler-->>CH: WorkflowRequest{steps:[synthesisStep]}
-
-    CH->>Engine: execute(workflowRequest)
-
-    Engine->>Engine: resolveSourceData() → use frozenBatchOutputs
-    Engine->>Orch: executeParallelFanout(synthPrompt, ['gemini'])
-
-    Orch->>Provider: POST /chat {message:synthPrompt}
-    Provider-->>Orch: Stream chunk
-    Orch->>Engine: onPartial('gemini', chunk)
-    Engine->>UI: PARTIAL_RESULT{providerId:'gemini', chunk.text}
-    UI->>UI: streamingBuffer.addDelta() on active turn
-
-    Orch-->>Engine: onAllComplete(results)
-    Engine->>UI: WORKFLOW_STEP_UPDATE{stepId:'synthesis-gemini-456', status:'completed'}
-    UI->>UI: Add new synthesis response to synthesisResponses['gemini']
-
-    Engine->>SM: persist(request, context, results)
-    SM->>DB: Write NEW AiTurnRecord (linked to original userTurnId)
-    SM->>DB: Write NEW ProviderResponseRecord
-    SM->>DB: DO NOT update sessions.lastTurnId (historical branch)
-    SM-->>Engine: Persist complete
-
-    Engine->>UI: TURN_FINALIZED (no-op for recompute)
-    UI->>UI: setActiveRecomputeState(null)
-    UI->>UI: setIsLoading(false)
-```
+See: [Recompute Flow in docs/flows.md](file:///c:/Users/Mahdi/OneDrive/Desktop/Singularityv3/docs/flows.md#2-user-re-runs-synthesis-with-different-model-recompute)
 
 ### 6.3 Flow: Provider Fails (Error Handling)
 
-```mermaid
-sequenceDiagram
-    participant Engine as WorkflowEngine
-    participant Orch as Orchestrator
-    participant Provider
-    participant UI
-
-    Engine->>Orch: executeParallelFanout('prompt', [claude,gemini])
-
-    Orch->>Provider: POST /chat (claude)
-    Provider-->>Orch: Stream chunks ✓
-
-    Orch->>Provider: POST /chat (gemini)
-    Provider-->>Orch: 503 Overloaded ✗
-
-    Orch->>Orch: Catch error for gemini
-    Orch->>Orch: Create error result {providerId:'gemini', status:'error'}
-
-    Orch-->>Engine: onAllComplete(results={claude:✓, gemini:✗})
-
-    alt At least one success
-        Engine->>UI: WORKFLOW_STEP_UPDATE{status:'completed', stepId:'batch-... ', result:{results:{claude:✓, gemini:✗}}}
-        UI->>UI: Render claude success, render gemini error card
-        Engine->>Engine: Continue to synthesis/mapping with claude only
-    else All failed
-        Engine->>UI: WORKFLOW_STEP_UPDATE{status:'failed', stepId:'batch-... ', error:'All providers failed'}
-        Engine->>UI: WORKFLOW_COMPLETE{error:'A critical error occurred.'}
-        UI->>UI: setIsLoading(false)
-    end
-```
+See: [Error Handling Flow in docs/flows.md](file:///c:/Users/Mahdi/OneDrive/Desktop/Singularityv3/docs/flows.md#3-provider-fails-error-handling)
 
 ---
 
 ## 7. Debugging Guide
 
-### 7.1 Message Flow Tracing
-
-**Enable debug logs:**
-
-```typescript
-// In usePortMessageHandler.ts
-const STREAMING_DEBUG_UI = true; // See every PARTIAL_RESULT
-
-// In workflow-engine.js
-const STREAMING_DEBUG = true; // See backend streaming deltas
-```
-
-**Expected message sequence for a normal prompt:**
-
-1. `TURN_CREATED` (once)
-2. `PARTIAL_RESULT` (hundreds of times)
-3. `WORKFLOW_STEP_UPDATE` {status:'completed', stepId:'batch-...'} (once per provider)
-4. `WORKFLOW_STEP_UPDATE` {status:'completed', stepId:'mapping-...'} (if requested)
-5. `WORKFLOW_STEP_UPDATE` {status:'completed', stepId:'synthesis-...'} (if requested)
-6. `WORKFLOW_COMPLETE` (once)
-7. `TURN_FINALIZED` (once)
-
-**If you see:**
-
-- **No TURN_CREATED**: Connection handler rejected the request (check primitive validation)
-- **PARTIAL_RESULT but no completion**: Orchestrator is stuck (check provider adapter errors)
-- **WORKFLOW_COMPLETE but no TURN_FINALIZED**: Persistence failed (check IndexedDB errors)
-- **"Generating..." never stops**: UI missed a completion message (check stepId parsing)
-
-### 7.2 State Inspection
-
-**In browser DevTools console:**
-
-```javascript
-// Inspect current UI state
-window.__JOTAI_STORE__ = jotaiStore;
-const turnsMap = jotaiStore.get(turnsMapAtom);
-const turnIds = jotaiStore.get(turnIdsAtom);
-console.log("Turns:", Array.from(turnsMap.entries()));
-
-// Inspect backend state
-chrome.runtime.sendMessage({ type: "GET_HEALTH_STATUS" }, (response) => {
-  console.log("Backend health:", response);
-});
-
-// Check persistence layer
-const db = await window.indexedDB.open("HTOSPersistenceDB", 1);
-const tx = db.transaction(["turns"], "readonly");
-const turns = await tx.objectStore("turns").getAll();
-console.log("Persisted turns:", turns);
-```
-
-### 7.3 Common Issues
-
-**Issue: "Synthesis generating..." never completes**
-
-**Root cause:** UI is checking `status === 'pending'` but backend sent `status === 'streaming'`.
-
-**Fix:** Normalize status checks:
-
-```typescript
-const isGenerating = ["pending", "streaming"].includes(latest?.status);
-```
-
----
-
-**Issue: Recompute shows "No synthesis yet"**
-
-**Root cause:** `activeRecomputeState.providerId` doesn't match `activeSynthesisClipProviderId`.
-
-**Fix:** Ensure recompute target check uses `||` logic:
-
-```typescript
-const isSynthesisTarget = !!(
-  activeRecomputeState &&
-  activeRecomputeState.aiTurnId === aiTurn.id &&
-  activeRecomputeState.stepType === "synthesis" &&
-  (!activeSynthPid || activeRecomputeState.providerId === activeSynthPid)
-);
-```
-
----
-
-**Issue: "All providers failed" but one succeeded**
-
-**Root cause:** Backend `executePromptStep` checks `hasAnyValidResults` incorrectly.
-
-**Fix:** Ensure validation checks `text.trim().length > 0`:
-
-```javascript
-const hasAnyValidResults = Object.values(formattedResults).some(
-  (r) => r.status === "completed" && r.text && r.text.trim().length > 0,
-);
-```
-
----
-
-**Issue: Continuation request fails with "Missing context"**
-
-**Root cause:** `provider_contexts` store is stale or empty.
-
-**Debug:**
-
-```javascript
-// Check live contexts
-const contexts = await db
-  .transaction(["provider_contexts"])
-  .objectStore("provider_contexts")
-  .getAll();
-console.log("Live contexts:", contexts);
-
-// Force refresh
-await sessionManager.updateProviderContextsBatch(sessionId, results, true);
-```
+See: [docs/debugging.md](file:///c:/Users/Mahdi/OneDrive/Desktop/Singularityv3/docs/debugging.md)
 
 ---
 
 ## 8. Extension Points
 
-### 8.1 Adding a New Provider
-
-1. **Create adapter** (`src/providers/newprovider-adapter.js`):
-
-```javascript
-export class NewProviderAdapter {
-  async sendPrompt(request, onPartial, signal) {
-    const response = await fetch("https://api.newprovider.com/chat", {
-      method: "POST",
-      signal,
-      body: JSON.stringify({ message: request.originalPrompt }),
-    });
-
-    const reader = response.body.getReader();
-    let fullText = "";
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      const chunk = new TextDecoder().decode(value);
-      fullText += chunk;
-      onPartial({ text: chunk });
-    }
-
-    return {
-      text: fullText,
-      meta: { conversationId: response.headers.get("X-Conversation-Id") },
-    };
-  }
-}
-```
-
-2. **Register in service worker** (`sw-entry.js`):
-
-```javascript
-import { NewProviderAdapter } from "./providers/newprovider-adapter.js";
-
-providerRegistry.register(
-  "newprovider",
-  new NewProviderController(),
-  new NewProviderAdapter(),
-);
-```
-
-3. **Add UI config** (`ui/constants.ts`):
-
-```typescript
-export const LLM_PROVIDERS_CONFIG: LLMProvider[] = [
-  // ... existing providers
-  {
-    id: "newprovider",
-    name: "New Provider",
-    color: "#ff6b6b",
-    emoji: "🆕",
-  },
-];
-```
-
-### 8.2 Adding a New Workflow Primitive
-
-Example: Add `regenerate` primitive to re-run the last turn with different settings.
-
-1. **Define contract** (`shared/contract.ts`):
-
-```typescript
-interface RegenerateRequest {
-  type: "regenerate";
-  sessionId: string;
-  providers: ProviderKey[];
-  includeMapping: boolean;
-  includeSynthesis: boolean;
-}
-
-export type PrimitiveWorkflowRequest =
-  | InitializeRequest
-  | ExtendRequest
-  | RecomputeRequest
-  | RegenerateRequest; // ← Add here
-```
-
-2. **Add resolver logic** (`context-resolver.js`):
-
-```javascript
-async resolve(request) {
-  if (request.type === 'regenerate') {
-    const session = await this.sessionManager.adapter.get('sessions', request.sessionId);
-    const lastAiTurn = await this.sessionManager.adapter.get('turns', session.lastTurnId);
-    const userTurn = await this.sessionManager.adapter.get('turns', lastAiTurn.userTurnId);
-
-    return {
-      type: 'regenerate',
-      sessionId: request.sessionId,
-      lastUserMessage: userTurn.text,
-      providerContexts: {} // Fresh contexts
-    };
-  }
-}
-```
-
-3. **Add compiler logic** (`workflow-compiler.js`):
-
-```javascript
-compile(request, resolvedContext) {
-  if (request.type === 'regenerate') {
-    return {
-      workflowId: `wf-${Date.now()}`,
-      context: { sessionId: request.sessionId },
-      steps: [{
-        stepId: `batch-${Date.now()}`,
-        type: 'prompt',
-        payload: {
-          prompt: resolvedContext.lastUserMessage,
-          providers: request.providers
-        }
-      }]
-    };
-  }
-}
-```
-
-4. **Add UI action** (`ui/hooks/useChat.ts`):
-
-```typescript
-const regenerate = useCallback(async () => {
-  const request: RegenerateRequest = {
-    type: "regenerate",
-    sessionId: currentSessionId!,
-    providers: activeProviders,
-    includeMapping: mappingEnabled,
-    includeSynthesis: !!synthesisProvider,
-  };
-
-  await api.executeWorkflow(request);
-}, [currentSessionId, activeProviders]);
-```
+See: [docs/contributing.md](file:///c:/Users/Mahdi/OneDrive/Desktop/Singularityv3/docs/contributing.md)
 
 ---
 
@@ -1702,8 +599,12 @@ const regenerate = useCallback(async () => {
 - `src/core/connection-handler.js` - Entry point, orchestrates Resolve → Compile → Execute
 - `src/core/context-resolver.js` - Fetches data for primitives
 - `src/core/workflow-compiler.js` - Converts primitives to steps
-- `src/core/workflow-engine.js` - Executes steps, manages streaming
+- `src/core/workflow-engine.js` - Executes steps, manages streaming, contains Synthesizer + Mapper prompts
 - `src/core/workflow-orchestrator.js` (FaultTolerantOrchestrator) - Provider fan-out
+
+**Pre-Flight Refinement:**
+
+- `src/services/PromptRefinerService.ts` - Composer + Analyst pipeline for prompt refinement
 
 **Persistence:**
 
@@ -1714,21 +615,31 @@ const regenerate = useCallback(async () => {
 **Contracts:**
 
 - `shared/contract.ts` - Request/response types
+- `shared/parsing-utils.ts` - Shared parsing functions (extractOptionsAndStrip, extractGraphTopologyAndStrip)
 - `ui/types.ts` - UI-specific types
 
 **UI State:**
 
-- `ui/state/atoms.ts` - Jotai state definitions
+- `ui/state/atoms.ts` - Jotai state definitions (includes Composer, Analyst, Launchpad, Decision Map atoms)
 - `ui/hooks/usePortMessageHandler.ts` - Backend → State bridge
 - `ui/hooks/useChat.ts` - User actions → Backend messages
+- `ui/hooks/useLaunchpadDrafts.ts` - Launchpad draft management
 
 **UI Components:**
 
 - `ui/App.tsx` - Top-level layout
 - `ui/views/ChatView.tsx` - Virtualized turn list
-- `ui/components/AiTurnBlock.tsx` - Complex AI response renderer
+- `ui/components/AiTurnBlock.tsx` - Synthesis-focused renderer with tabs
+- `ui/components/ModelResponsePanel.tsx` - Right split pane for batch responses
 - `ui/components/ChatInput.tsx` - Prompt input
 - `ui/components/ChatInputConnected.tsx` - Connected input wrapper
+- `ui/components/CouncilOrbs.tsx` - Horizontal orb strip with long-press menu
+- `ui/components/CouncilOrbsVertical.tsx` - Vertical orb strip variant
+- `ui/components/DecisionMapSheet.tsx` - Bottom sheet with Graph/Narrative/Options tabs
+- `ui/components/experimental/DecisionMapGraph.tsx` - D3 force-directed graph visualization
+- `ui/components/NudgeChipBar.tsx` - Pre-flight Composer/Analyst suggestions
+- `ui/components/LaunchpadDrawer.tsx` - Left-edge draft management drawer
+- `ui/components/DraftCard.tsx` - Individual draft card in Launchpad
 
 ---
 

@@ -1,6 +1,8 @@
-# Singularity Logo Assets
+# Singularity Style Guide & Assets
 
 Official Singularity branding assets with sizing guidelines for the UI.
+
+All assets are located in: `ui/assets/logos/`
 
 ---
 
@@ -147,50 +149,3 @@ If the wordmark uses a specific font/weight:
 | Nav collapsed | `logo-icon.svg` | `h-8 w-8` | 32px |
 | Loading spinner | `logo-icon.svg` | `h-6 w-6` | 24px |
 | Extension icon | `icon*.png` | - | 16/32/48/128 |
-
----
-
-## 🗂️ File Structure
-
-```
-ui/assets/logos/
-├── logo-full.svg          # Full lockup (orb + text), 512px
-├── logo-full.png          # Full lockup, PNG fallback
-├── logo-full-large.svg    # Full lockup, 1024px (high-res)
-├── logo-full-large.png    # Full lockup, large PNG
-├── logo-name.svg          # Wordmark only, 512px
-├── logo-name.png          # Wordmark, PNG fallback
-├── logo-name-large.svg    # Wordmark, 1024px
-├── logo-name-large.png    # Wordmark, large PNG
-├── logo-icon.svg          # Icon only (orb), 512px
-├── logo-icon.png          # Icon, PNG fallback
-├── logo-icon-large.svg    # Icon, 1024px
-├── logo-icon-large.png    # Icon, large PNG
-└── README.md              # This file
-```
-
----
-
-## 🎨 Usage Examples
-
-```tsx
-// Import what you need
-import logoFull from '../assets/logos/logo-full.svg';
-import logoName from '../assets/logos/logo-name.svg';
-import logoIcon from '../assets/logos/logo-icon.svg';
-
-// Welcome screen
-<img src={logoFull} alt="Singularity AI" className="h-32 w-auto mb-6" />
-
-// Header with icon + wordmark
-<div className="flex items-center gap-2">
-  <img src={logoIcon} alt="" className="h-5 w-5" />
-  <img src={logoName} alt="Singularity AI" className="h-6 w-auto" />
-</div>
-
-// Compact icon only
-<img src={logoIcon} alt="Singularity" className="h-8 w-8" />
-```
-
-**Remember:** SVG scales perfectly, so use it for UI. PNG is for extension icons only.
-

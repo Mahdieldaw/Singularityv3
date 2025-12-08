@@ -34,7 +34,7 @@ import type {
   PrimitiveWorkflowRequest,
 } from "../../shared/contract";
 import { LLM_PROVIDERS_CONFIG } from "../constants";
-import { computeThinkFlag } from "../../src/think/lib/think/computeThinkFlag.js";
+import { computeThinkFlag } from "../../src/think/computeThinkFlag.js";
 
 import type {
   HistorySessionSummary,
@@ -43,7 +43,7 @@ import type {
   UserTurn,
   AiTurn,
   ProviderResponse,
-} from "../types";
+} from "..";
 
 export function useChat() {
   // Reads

@@ -23,7 +23,7 @@ import {
 } from "../utils/turn-helpers";
 import { normalizeProviderId } from "../utils/provider-id-mapper";
 import api from "../services/extension-api";
-import type { TurnMessage, UserTurn, AiTurn, ProviderKey } from "../types";
+import type { TurnMessage, UserTurn, AiTurn, ProviderKey } from "..";
 import { LLM_PROVIDERS_CONFIG } from "../constants";
 
 /**

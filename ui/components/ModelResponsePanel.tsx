@@ -4,6 +4,8 @@ import { providerEffectiveStateFamily } from "../state/atoms";
 import { LLM_PROVIDERS_CONFIG } from "../constants";
 import MarkdownDisplay from "./MarkdownDisplay";
 import { ChevronDownIcon, ChevronUpIcon } from "./Icons";
+import { CopyButton } from "./CopyButton";
+import { formatProviderResponseForMd } from "../utils/copy-format-utils";
 import clsx from "clsx";
 
 interface ModelResponsePanelProps {
@@ -39,13 +41,23 @@ export const ModelResponsePanel: React.FC<ModelResponsePanelProps> = React.memo(
                         {provider?.name || providerId}
                     </h3>
                 </div>
-                <button
-                    onClick={onClose}
-                    className="text-text-muted hover:text-text-primary transition-colors p-1 rounded-md hover:bg-surface-highlight"
-                    aria-label="Close panel"
-                >
-                    ✕
-                </button>
+                <div className="flex items-center gap-1">
+                    <CopyButton
+                        text={formatProviderResponseForMd(
+                            state.latestResponse,
+                            provider?.name || providerId
+                        )}
+                        label="Copy response"
+                        variant="icon"
+                    />
+                    <button
+                        onClick={onClose}
+                        className="text-text-muted hover:text-text-primary transition-colors p-1 rounded-md hover:bg-surface-highlight"
+                        aria-label="Close panel"
+                    >
+                        ✕
+                    </button>
+                </div>
             </div>
 
             {/* Content */}

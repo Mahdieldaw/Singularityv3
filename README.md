@@ -2,46 +2,48 @@
 
 Singularity is a Chrome extension (Manifest V3) that orchestrates multi‑model AI conversations with real‑time streaming, local persistence, and reproducibility. It helps you compare providers side‑by‑side, compose their outputs, and keep a complete audit trail of every turn.
 
-## What it does
+## Key Features
 
-- Fan‑out prompts to multiple providers in parallel (ChatGPT, Claude, Gemini, Qwen) and stream responses as they arrive.
-- Optional “mapping” and “synthesis” steps to transform and compose provider outputs.
-- Optimistic UI with canonical backend IDs: the UI renders immediately, while the backend sends TURN_CREATED → PARTIAL_RESULT → WORKFLOW_STEP_UPDATE → TURN_FINALIZED messages. The UI merges canonical data on finalization (no ID swapping).
-- Append‑only history stored locally in IndexedDB. Provider continuation state lives in a fast lookup store keyed by [sessionId, providerId] for quick “extend” requests.
-- Recompute past steps without advancing the timeline, enabling reliable reproduction and experiments.
-- Built‑in observability: streaming deltas, per‑step updates, and clear turn lifecycle events.
+- **Parallel Fan-out**: Query multiple providers (ChatGPT, Claude, Gemini, Qwen) simultaneously.
+- **Pipeline Workflows**: Optional breakdown into "mapping" (options analysis) and "synthesis" (consensus) steps.
+- **Optimistic UI**: Immediate rendering with canonical backend ID reconciliation.
+- **Local Persistence**: Append-only history in IndexedDB with fast lookups.
+- **Recompute**: Re-run past steps without altering the timeline.
 
-## How it works (high level)
+## Documentation
 
-- Three request primitives: initialize (start), extend (continue), recompute (re‑run).
-- Backend pipeline:
-  1. Resolve: fetch required context (e.g., provider continuation state for a session)
-  2. Compile: build a plan of steps (batch prompt → optional mapping → optional synthesis)
-  3. Execute: stream partials, report step updates, persist results, then finalize the turn
-- UI state: map‑based storage for O(1) lookups and an ordered ID list for rendering. A StreamingBuffer batches DOM updates for smooth 60fps during heavy streaming.
+- **[Architecture Blueprint](Architecture%20Overview.md)**: High-level system map and philosophy.
+- **[Critical Flows](docs/flows.md)**: Detailed sequence diagrams (Initialize, Recompute, Error).
+- **[Debugging Guide](docs/debugging.md)**: Message tracing, state inspection, and common issues.
+- **[Contributing](docs/contributing.md)**: Guide for adding new providers and primitives.
+- **[Style Guide](docs/style-guide.md)**: Logo assets, sizing, and branding guidelines.
+- **[Core DNR Utilities](docs/dnr-utils.md)**: Guide for managing network rules and Arkose injection.
+- **[Privacy & Security](docs/privacy.md)**: Data handling and security policy.
 
-## Why it’s useful
+## Architecture Summary
 
-- Fast, streaming‑first comparisons across providers
-- Local, auditable history that never loses data
-- Clear lifecycle and error handling with unified step updates
-- Designed for reproducibility and iterative experimentation
+The system follows a clear **Resolve → Compile → Execute** pipeline:
 
-## What’s in this repo
+1.  **Resolve**: Fetches context (continuation IDs, history) for the request.
+2.  **Compile**: Generates a workflow plan (DAG of steps).
+3.  **Execute**: Runs steps (batch prompt, mapping, synthesis), streams partial results via a central message bus, and persists to IndexedDB.
 
-- src/core — connection handler, context resolver, workflow compiler, workflow engine
-- ui — React UI (state atoms, message handlers, components)
-- providers — adapters for supported models
-- shared — data contracts and message types
-- src/persistence — IndexedDB schema, adapter, and session management
-- Singularity System Architecture Overview.md — living architectural reference
+The frontend uses **Jotai** for state management (Map-based for O(1) access) and a **StreamingBuffer** for smooth 60fps updates during heavy IO.
 
-## Privacy & security
+## Directory Structure
 
-- No secrets committed to code; keep credentials in environment or provider settings.
-- Data stays local in your browser’s IndexedDB.
-- We follow “Security is truth” and “Code is truth”: observed behavior and running systems take precedence over assumptions.
+- `src/core`: Backend pipeline (connection, resolver, compiler, engine).
+- `src/providers`: LLM adapters (ChatGPT, Claude, Gemini).
+- `src/persistence`: IndexedDB storage manager and schema.
+- `ui`: React frontend (Vite).
+- `ui/state`: Global Jotai atoms.
+- `ui/assets`: Static assets and logos.
+- `shared`: Types, contracts, and constants.
 
-## Learn more
+## Submodule Notes
 
-For deeper architecture and contracts, see “Singularity System Architecture Overview.md” in the project root. It documents request primitives, message flows, persistence schema, and the Resolve → Compile → Execute pipeline.
+### Core: DNR Utilities (`src/core`)
+
+The `src/core` directory includes robust utilities for managing Chrome's **Declarative Net Request (DNR)** API, primarily for **Arkose Enforcement (AE)** header injection.
+   
+See **[docs/dnr-utils.md](docs/dnr-utils.md)** for the full architecture, API reference, and usage examples.

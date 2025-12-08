@@ -9,8 +9,10 @@ import MarkdownDisplay from "./MarkdownDisplay";
 import { LLM_PROVIDERS_CONFIG, PROVIDER_COLORS } from "../constants";
 import { getLatestResponse, normalizeResponseArray } from "../utils/turn-helpers";
 import { getProviderById } from "../providers/providerRegistry";
-import type { AiTurn, ProviderResponse } from "../types";
+import type { AiTurn, ProviderResponse } from "..";
 import clsx from "clsx";
+import { CopyButton } from "./CopyButton";
+import { formatDecisionMapForMd, formatGraphForMd } from "../utils/copy-format-utils";
 
 // ============================================================================
 // PARSING UTILITIES - Import from shared module (single source of truth)
@@ -835,7 +837,17 @@ export const DecisionMapSheet = React.memo(() => {
             </div>
 
             {/* Right: Spacer/Close (keeps tabs centered) */}
-            <div className="w-1/3 flex justify-end">
+            <div className="w-1/3 flex justify-end items-center gap-2">
+              <CopyButton
+                text={formatDecisionMapForMd(
+                  mappingText,
+                  optionsText,
+                  graphTopology
+                )}
+                label="Copy full decision map"
+                buttonText="Copy Map"
+                className="mr-2"
+              />
               <button
                 onClick={() => setOpenState(null)}
                 className="p-2 text-text-muted hover:text-text-primary hover:bg-white/5 rounded-full transition-colors"
@@ -857,8 +869,17 @@ export const DecisionMapSheet = React.memo(() => {
                   animate={{ opacity: 1 }}
                   exit={{ opacity: 0 }}
                   ref={containerRef}
-                  className="w-full h-full"
+                  className="w-full h-full relative"
                 >
+                  {graphTopology && (
+                    <div className="absolute top-4 right-4 z-50">
+                      <CopyButton
+                        text={formatGraphForMd(graphTopology)}
+                        label="Copy graph as list"
+                        variant="icon"
+                      />
+                    </div>
+                  )}
                   <DecisionMapGraph
                     nodes={adapted.nodes}
                     edges={adapted.edges}
@@ -894,8 +915,17 @@ export const DecisionMapSheet = React.memo(() => {
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   exit={{ opacity: 0 }}
-                  className="p-6 h-full overflow-y-auto"
+                  className="p-6 h-full overflow-y-auto relative"
                 >
+                  {mappingText && (
+                    <div className="absolute top-4 right-4 z-10">
+                      <CopyButton
+                        text={mappingText}
+                        label="Copy narrative"
+                        variant="icon"
+                      />
+                    </div>
+                  )}
                   {mappingText ? (
                     <div className="narrative-prose">
                       <MarkdownDisplay content={transformCitations(mappingText)} components={markdownComponents} />
@@ -912,8 +942,17 @@ export const DecisionMapSheet = React.memo(() => {
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   exit={{ opacity: 0 }}
-                  className="h-full overflow-y-auto"
+                  className="h-full overflow-y-auto relative"
                 >
+                  {optionsText && (
+                    <div className="absolute top-4 right-4 z-10">
+                      <CopyButton
+                        text={optionsText}
+                        label="Copy options"
+                        variant="icon"
+                      />
+                    </div>
+                  )}
                   <OptionsTab themes={parsedThemes} citationSourceOrder={citationSourceOrder} onCitationClick={handleCitationClick} />
                 </motion.div>
               )}

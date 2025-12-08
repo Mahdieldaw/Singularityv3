@@ -22,7 +22,7 @@ import type {
   ProviderKey,
   PrimitiveWorkflowRequest,
 } from "../../shared/contract";
-import type { TurnMessage, AiTurn, ProviderResponse } from "../types";
+import type { TurnMessage, AiTurn, ProviderResponse } from "..";
 
 export function useRoundActions() {
   const turnsMap = useAtomValue(turnsMapAtom);

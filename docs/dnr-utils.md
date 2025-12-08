@@ -1,6 +1,6 @@
 # HTOS Core DNR Utilities
 
-This directory contains core utilities for managing Chrome's Declarative Net Request (DNR) API within the HTOS extension, inspired by HTOS's approach to network rule management.
+This document details the core utilities for managing Chrome's Declarative Net Request (DNR) API within the extension.
 
 ## Overview
 
@@ -241,24 +241,6 @@ const ruleId = await DNRUtils.registerHeaderRule({
 });
 ```
 
-### Debugging
-
-```javascript
-// Enable debug mode to see rule matches
-DNRUtils.enableDebugMode();
-
-// Register a rule
-const ruleId = await DNRUtils.registerHeaderRule({
-  urlFilter: "https://debug.example.com/*",
-  headers: { "X-Debug": "enabled" },
-  provider: "debug-provider",
-});
-
-// Check console for debug output when requests match
-// Disable when done
-DNRUtils.disableDebugMode();
-```
-
 ### Automatic Cleanup
 
 ```javascript
@@ -275,130 +257,3 @@ const ruleId = await DNRUtils.registerTemporaryHeaderRule(
   60000,
 ); // Expires in 1 minute
 ```
-
-## Integration with Providers
-
-### ChatGPT Provider Example
-
-```javascript
-// In chatgpt.js
-import { ArkoseController } from "../HTOS/NetRulesManager.js";
-
-class ChatGPTSessionApi {
-  async _injectAEHeaders(headers, requirements) {
-    // Prepare headers for DNR injection
-    const headersToInject = {};
-
-    // Add sentinel token
-    if (sentinelToken) {
-      headersToInject["Openai-Sentinel-Chat-Requirements-Token"] =
-        sentinelToken;
-    }
-
-    // Add PoW token
-    if (powToken) {
-      headersToInject["Openai-Sentinel-Proof-Token"] = powToken;
-    }
-
-    // Add Arkose token
-    if (arkoseToken) {
-      headersToInject["Openai-Sentinel-Arkose-Token"] = arkoseToken;
-    }
-
-    // Inject via DNR
-    if (Object.keys(headersToInject).length > 0) {
-      await ArkoseController.injectAEHeaders({
-        urlFilter: "https://chatgpt.com/*",
-        headers: headersToInject,
-        provider: "chatgpt",
-        duration: 300000, // 5 minutes
-      });
-    }
-
-    return headers;
-  }
-}
-```
-
-## Error Handling
-
-The DNR utilities include comprehensive error handling:
-
-```javascript
-try {
-  await DNRUtils.registerHeaderRule({
-    urlFilter: "invalid-url",
-    headers: { "X-Test": "value" },
-  });
-} catch (error) {
-  console.error("DNR rule registration failed:", error);
-  // Handle error appropriately
-}
-```
-
-## Best Practices
-
-1. **Initialize Early** - Call `DNRUtils.initialize()` in your service worker startup
-2. **Use Provider Scoping** - Always specify a provider for easy cleanup
-3. **Set Reasonable Durations** - Don't create permanent rules unless necessary
-4. **Enable Cleanup** - Use `startPeriodicCleanup()` to prevent rule accumulation
-5. **Debug Sparingly** - Only enable debug mode during development
-6. **Handle Errors** - Wrap DNR calls in try-catch blocks
-7. **Clean Up** - Remove provider rules when switching contexts
-
-## Troubleshooting
-
-### Common Issues
-
-1. **Rules Not Applying**
-   - Check URL filter patterns
-   - Verify resource types match
-   - Enable debug mode to see rule matches
-
-2. **Service Worker Restart Issues**
-   - Ensure `initialize()` is called on startup
-   - Check chrome.storage.local permissions
-
-3. **Rule Limit Exceeded**
-   - Use `removeProviderRules()` to clean up
-   - Enable periodic cleanup
-   - Check rule count with `getActiveRules()`
-
-### Debug Commands
-
-```javascript
-// Check active rules
-const rules = await DNRUtils.getActiveRules();
-console.log("Active rules:", rules.length);
-
-// Enable debug logging
-DNRUtils.enableDebugMode();
-
-// Check persisted rules
-const stored = await chrome.storage.local.get(DNRUtils.STORAGE_KEY);
-console.log("Stored rules:", stored);
-```
-
-## Migration Notes
-
-When migrating from direct header modification to DNR:
-
-1. Replace direct `headers[name] = value` assignments
-2. Use `registerHeaderRule()` instead
-3. Add provider scoping for cleanup
-4. Consider rule duration for temporary headers
-5. Update error handling for async operations
-
-## Performance Considerations
-
-- DNR rules are processed by Chrome's network stack (faster than content scripts)
-- Rule registration is async but rule application is immediate
-- Periodic cleanup prevents rule accumulation
-- Session rules are faster than dynamic rules for temporary use
-
-## Security Notes
-
-- Rules are scoped to extension permissions
-- Headers are validated by Chrome's DNR implementation
-- No direct access to request/response bodies
-- Rules persist across service worker restarts (by design)

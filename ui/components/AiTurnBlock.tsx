@@ -6,14 +6,16 @@ import React, {
   useRef,
   useEffect,
 } from "react";
-import { useSetAtom, useAtomValue } from "jotai";
-import { toastAtom, activeSplitPanelAtom, isDecisionMapOpenAtom, synthesisProviderAtom } from "../state/atoms";
+import { useSetAtom, useAtomValue, useAtom } from "jotai";
+import { toastAtom, activeSplitPanelAtom, isDecisionMapOpenAtom, synthesisProviderAtom, includePromptInCopyAtom } from "../state/atoms";
 import { AiTurn, ProviderResponse, AppStep } from "../types";
 import MarkdownDisplay from "./MarkdownDisplay";
 import { LLM_PROVIDERS_CONFIG } from "../constants";
 import ClipsCarousel from "./ClipsCarousel";
-import { ChevronDownIcon, ChevronUpIcon, ListIcon } from "./Icons";
+import { ChevronDownIcon, ChevronUpIcon, ListIcon, SettingsIcon } from "./Icons";
 import { CouncilOrbs } from "./CouncilOrbs";
+import { CopyButton } from "./CopyButton";
+import { formatSynthesisForMd, formatTurnForMd } from "../utils/copy-format-utils";
 import { adaptGraphTopology } from "./experimental/graphAdapter";
 import { GraphTopology } from "../types";
 import {
@@ -242,6 +244,7 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
   const setActiveSplitPanel = useSetAtom(activeSplitPanelAtom);
   const setIsDecisionMapOpen = useSetAtom(isDecisionMapOpenAtom);
   const isDecisionMapOpen = useAtomValue(isDecisionMapOpenAtom);
+  const [includePromptInCopy, setIncludePromptInCopy] = useAtom(includePromptInCopyAtom);
 
   // State for Claude artifact overlay
   const [selectedArtifact, setSelectedArtifact] = useState<{
@@ -641,6 +644,31 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
     (aiTurn as any)?.input ??
     null;
 
+  const handleCopyFullTurn = useCallback(() => {
+    const md = formatTurnForMd(
+      aiTurn.id,
+      userPrompt,
+      effectiveActiveSynthTab?.response?.text || null,
+      effectiveActiveSynthTab?.providerId,
+      hasMapping && activeMappingPid ? { narrative: displayedMappingText, options: getOptions(), topology: graphTopology } : null,
+      allSources,
+      includePromptInCopy
+    );
+    navigator.clipboard.writeText(md);
+  }, [
+    aiTurn.id,
+    userPrompt,
+    effectiveActiveSynthTab?.response?.text,
+    effectiveActiveSynthTab?.providerId,
+    hasMapping,
+    activeMappingPid,
+    displayedMappingText,
+    getOptions,
+    graphTopology,
+    allSources,
+    includePromptInCopy
+  ]);
+
   // --- NEW: Crown Move Handler (Recompute) - REMOVED for historical turns ---
   // The crown is now static for historical turns. Recompute is handled via the button below.
 
@@ -658,7 +686,9 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
         </div>
       )}
 
-      <div className="ai-turn-block">
+      <div className="ai-turn-block relative group/turn">
+
+
         <div className="ai-turn-content flex flex-col gap-3">
 
           {/* SHARED LAYOUT CONTAINER */}
@@ -676,9 +706,54 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                   )}
                   style={{ padding: '28px 40px 96px' }}
                 >
+                  {/* OVERLAY: Floating Controls (Fade in on Group Hover) */}
+                  <div className="absolute inset-0 pointer-events-none z-20">
+                    <div className="flex flex-col justify-between h-full px-8 py-6 opacity-0 group-hover/turn:opacity-100 focus-within:opacity-100 transition-opacity duration-300 ease-out">
+
+                      {/* Top-Right: Copy Synthesis */}
+                      {effectiveActiveSynthTab?.response?.text && (
+                        <div className="self-end pointer-events-auto">
+                          <CopyButton
+                            text={formatSynthesisForMd(
+                              effectiveActiveSynthTab.response.text,
+                              effectiveActiveSynthTab.label
+                            )}
+                            label="Copy Synthesis"
+                            variant="icon"
+                            className="bg-surface/95 backdrop-blur-sm shadow-lg rounded-full"
+                          />
+                        </div>
+                      )}
+
+                      {/* Bottom: Copy Turn + Settings + (centered stuff will be pointer-events-auto) */}
+                      <div className="flex justify-between items-end mt-auto w-full pointer-events-auto">
+                        {/* Left: Copy Turn + Settings */}
+                        <div className="flex items-center gap-3">
+                          <CopyButton
+                            onCopy={handleCopyFullTurn}
+                            label="Copy full turn"
+                            className="bg-surface/95 backdrop-blur-sm shadow-lg rounded-lg text-xs font-medium px-3 py-1.5"
+                          >
+                            Copy Turn
+                          </CopyButton>
+
+                          <button
+                            className="bg-surface/95 backdrop-blur-sm shadow-lg rounded-full p-2 text-text-muted hover:text-text-primary transition-colors"
+                            onClick={() => setIncludePromptInCopy(!includePromptInCopy)}
+                            title={includePromptInCopy ? "Include User Prompt: ON" : "Include User Prompt: OFF"}
+                          >
+                            <SettingsIcon className={clsx("w-4 h-4", includePromptInCopy && "text-brand-400")} />
+                          </button>
+                        </div>
+
+                        {/* Right: empty (orbs are centered absolutely) */}
+                      </div>
+                    </div>
+                  </div>
+
                   {/* SYNTHESIS TABS UI */}
                   {synthesisTabs.length > 0 && (
-                    <div className="flex gap-2 overflow-x-auto pb-4 px-2 mb-2 no-scrollbar border-b border-border-subtle/50">
+                    <div className="relative z-10 flex gap-2 overflow-x-auto pb-4 px-2 mb-2 no-scrollbar border-b border-border-subtle/50">
                       {synthesisTabs.map((tab) => {
                         const isActive = tab.id === activeSynthTabId;
                         const isStreaming = tab.response.status === 'streaming';
@@ -716,7 +791,7 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                   {(() => {
                     if (!wasSynthRequested)
                       return (
-                        <div className="text-text-muted/70 italic text-center">
+                        <div className="text-text-muted/70 italic text-center relative z-10">
                           Synthesis not enabled for this turn.
                         </div>
                       );
@@ -735,7 +810,7 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                     // If specifically targeting synthesis recompute for a provider NOT yet in tabs (rare race condition), show loader
                     if (!activeTab && isSynthesisTarget) {
                       return (
-                        <div className="flex items-center justify-center gap-2 text-text-muted">
+                        <div className="flex items-center justify-center gap-2 text-text-muted relative z-10">
                           <span className="italic">
                             Starting synthesis...
                           </span>
@@ -747,7 +822,7 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                     // ONLY show placeholder if we have NO text yet
                     if (isGenerating && !latest?.text)
                       return (
-                        <div className="flex items-center justify-center gap-2 text-text-muted">
+                        <div className="flex items-center justify-center gap-2 text-text-muted relative z-10">
                           <span className="italic">
                             Synthesis generating
                           </span>
@@ -760,7 +835,7 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
 
                       if (take && take.status === "error") {
                         return (
-                          <div className="bg-intent-danger/15 border border-intent-danger text-intent-danger rounded-lg p-3">
+                          <div className="bg-intent-danger/15 border border-intent-danger text-intent-danger rounded-lg p-3 relative z-10">
                             <div className="text-xs mb-2">
                               {activeTab.label} · error
                             </div>
@@ -777,13 +852,13 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
 
                       if (!take)
                         return (
-                          <div className="text-text-muted">
+                          <div className="text-text-muted relative z-10">
                             No synthesis content.
                           </div>
                         );
 
                       return (
-                        <div className="animate-in fade-in duration-300">
+                        <div className="animate-in fade-in duration-300 relative z-10">
                           {(() => {
                             const cleanText = take.text || '';
                             const artifacts = take.artifacts || [];
@@ -818,14 +893,17 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                       );
                     }
                     return (
-                      <div className="flex items-center justify-center h-full text-text-muted italic">
+                      <div className="flex items-center justify-center h-full text-text-muted italic relative z-10">
                         Choose a model.
                       </div>
                     );
                   })()}
 
-                  {/* BOTTOM TRAY: Council Orbs INSIDE bubble - 28px from bottom */}
-                  <div className="absolute bottom-0 left-0 right-0 flex flex-col items-center gap-2 z-30" style={{ paddingBottom: '20px' }}>
+                  {/* BOTTOM TRAY: Council Orbs + Recompute INSIDE bubble - 28px from bottom */}
+                  <div
+                    className="absolute bottom-0 left-0 right-0 flex flex-col items-center gap-2 z-30 opacity-0 group-hover/turn:opacity-100 focus-within:opacity-100 transition-opacity duration-300 ease-out pointer-events-auto"
+                    style={{ paddingBottom: '20px' }}
+                  >
                     <CouncilOrbs
                       turnId={aiTurn.id}
                       providers={LLM_PROVIDERS_CONFIG}
@@ -864,7 +942,6 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                             {p.name}
                           </button>
                         ))}
-                        {/* Show currently active activeSynthPid as disabled or highlighted? */}
                       </div>
                     </div>
                   </div>

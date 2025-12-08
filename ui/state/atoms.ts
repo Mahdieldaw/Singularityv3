@@ -11,7 +11,7 @@ import type {
   UiPhase,
   AppStep,
   HistorySessionSummary,
-} from "../types";
+} from "..";
 
 // =============================================================================
 // ATOMIC STATE PRIMITIVES (Map + ID index)
@@ -283,6 +283,10 @@ export const isReducedMotionAtom = atomWithStorage<boolean>(
   "htos_reduced_motion",
   false,
 );
+export const includePromptInCopyAtom = atomWithStorage<boolean>(
+  "htos_include_prompt_in_copy",
+  true,
+);
 
 // Provider Contexts
 export const providerContextsAtom = atomWithImmer<Record<string, any>>({});
@@ -447,7 +451,7 @@ export const isDecisionMapVisibleAtom = atom((get) => get(isDecisionMapOpenAtom)
 // -----------------------------
 // Launchpad State
 // -----------------------------
-import type { LaunchpadDraft } from "../types";
+import type { LaunchpadDraft } from "..";
 
 export const launchpadDraftsAtom = atomWithStorage<LaunchpadDraft[]>(
   "htos_launchpad_drafts",

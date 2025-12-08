@@ -11,7 +11,7 @@ import {
   REFRESH_AUTH_STATUS,
 } from "../../shared/messaging";
 
-import type { HistorySessionSummary, HistoryApiResponse } from "../types";
+import type { HistorySessionSummary, HistoryApiResponse } from "..";
 import type { PrimitiveWorkflowRequest } from "../../shared/contract";
 import { PortHealthManager } from "./port-health-manager";
 
@@ -244,6 +244,13 @@ class ExtensionAPI {
     return this.queryBackend<HistorySessionSummary>({
       type: GET_HISTORY_SESSION,
       payload: { sessionId },
+    });
+  }
+
+  getSession(sessionId: string): Promise<any> {
+    return this.queryBackend<any>({
+      type: GET_HISTORY_SESSION,
+      payload: { sessionId }
     });
   }
 

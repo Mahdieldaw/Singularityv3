@@ -1,4 +1,4 @@
-import type { LLMProvider } from "../types";
+import type { LLMProvider } from "..";
 
 // Provider icons are light-weight and color-driven via tokens to remain dark-mode safe
 import { ChatGPTIcon, ClaudeIcon, GeminiIcon, QwenIcon } from "./providerIcons";

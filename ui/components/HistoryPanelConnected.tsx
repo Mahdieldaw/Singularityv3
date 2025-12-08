@@ -9,6 +9,8 @@ import {
 import { useChat } from "../hooks/useChat";
 import HistoryPanel from "./HistoryPanel";
 import api from "../services/extension-api";
+import { sanitizeSessionForExport } from "../utils/copy-format-utils";
+import { toastAtom } from "../state/atoms";
 const RenameDialog = React.lazy(() => import("./RenameDialog"));
 
 export default function HistoryPanelConnected() {
@@ -18,6 +20,7 @@ export default function HistoryPanelConnected() {
   const currentSessionId = useAtomValue(currentSessionIdAtom);
   const setHistorySessions = useSetAtom(historySessionsAtom);
   const setIsHistoryPanelOpen = useSetAtom(isHistoryPanelOpenAtom);
+  const setToast = useSetAtom(toastAtom);
   const { newChat, selectChat, deleteChat, deleteChats } = useChat();
 
   const [deletingIds, setDeletingIds] = useState<Set<string>>(new Set());
@@ -208,6 +211,34 @@ export default function HistoryPanelConnected() {
     }
   };
 
+  const handleExportChat = async (sessionId: string) => {
+    try {
+      const sessionPayload = await api.getSession(sessionId);
+      if (!sessionPayload) throw new Error("Could not fetch session data");
+
+      const exportData = sanitizeSessionForExport(sessionPayload);
+      const jsonString = JSON.stringify(exportData, null, 2);
+
+      const blob = new Blob([jsonString], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+
+      const safeTitle = (exportData.session.title || "session").replace(/[^a-z0-9]/gi, '_').toLowerCase();
+      link.download = `singularity_export_${safeTitle}_${exportData.exportedAt}.json`;
+
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+
+      setToast({ id: Date.now(), message: "Session exported successfully", type: "success" });
+    } catch (error) {
+      console.error("Export failed:", error);
+      setToast({ id: Date.now(), message: "Failed to export session", type: "error" });
+    }
+  };
+
   return (
     <>
       <HistoryPanel
@@ -220,6 +251,7 @@ export default function HistoryPanelConnected() {
         onRenameChat={(sessionId: string, currentTitle: string) =>
           openRenameDialog(sessionId, currentTitle)
         }
+        onExportChat={handleExportChat}
         deletingIds={deletingIds}
         isBatchMode={isBatchMode}
         selectedIds={selectedIds}

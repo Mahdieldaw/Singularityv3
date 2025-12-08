@@ -15,7 +15,7 @@ import {
 } from "../state/atoms";
 import { useClipActions } from "../hooks/useClipActions";
 import { useEligibility } from "../hooks/useEligibility";
-import type { AiTurn } from "../types";
+import type { AiTurn } from "..";
 
 interface AiTurnBlockConnectedProps {
   aiTurn: AiTurn;

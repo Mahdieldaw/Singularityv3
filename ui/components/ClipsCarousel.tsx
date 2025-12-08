@@ -1,5 +1,5 @@
 import React from "react";
-import { LLMProvider, ProviderResponse } from "../types";
+import { LLMProvider, ProviderResponse } from "..";
 
 interface ClipsCarouselProps {
   providers: LLMProvider[];

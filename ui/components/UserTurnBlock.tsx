@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from "react";
-import { UserTurn } from "../types";
+import { UserTurn } from "..";
 import { UserIcon, ChevronDownIcon, ChevronUpIcon } from "./Icons";
 import MarkdownDisplay from "./MarkdownDisplay";
 import clsx from "clsx";
@@ -7,45 +7,7 @@ import clsx from "clsx";
 import { useSetAtom } from "jotai";
 import { toastAtom } from "../state/atoms";
 
-const CopyButton = ({
-  text,
-  label,
-  onClick,
-}: {
-  text: string;
-  label: string;
-  onClick?: () => void;
-}) => {
-  const setToast = useSetAtom(toastAtom);
-  const [copied, setCopied] = useState(false);
-
-  const handleCopy = useCallback(
-    async (e: React.MouseEvent) => {
-      e.stopPropagation();
-      try {
-        await navigator.clipboard.writeText(text);
-        setCopied(true);
-        setToast({ id: Date.now(), message: 'Copied to clipboard', type: 'info' });
-        setTimeout(() => setCopied(false), 2000);
-        onClick?.();
-      } catch (error) {
-        console.error("Failed to copy text:", error);
-        setToast({ id: Date.now(), message: 'Failed to copy', type: 'error' });
-      }
-    },
-    [text, onClick, setToast],
-  );
-
-  return (
-    <button
-      onClick={handleCopy}
-      aria-label={label}
-      className="bg-surface-raised border border-border-subtle rounded-md px-2 py-1 text-text-muted text-xs cursor-pointer hover:bg-surface-highlight transition-all"
-    >
-      {copied ? "✓" : "📋"} {copied ? "Copied" : "Copy"}
-    </button>
-  );
-};
+import { CopyButton } from "./CopyButton";
 
 interface UserTurnBlockProps {
   userTurn: UserTurn;
@@ -118,7 +80,7 @@ const UserTurnBlock = ({
               )}
             </div>
             <div className="mt-auto flex justify-end">
-              <CopyButton text={userTurn.text} label="Copy user prompt" />
+              <CopyButton text={userTurn.text} label="Copy user prompt" buttonText="Copy" />
             </div>
           </>
         ) : (
@@ -137,6 +99,7 @@ const UserTurnBlock = ({
             <CopyButton
               text={String(userTurn.text || "")}
               label="Copy user prompt"
+              buttonText="Copy"
             />
           </div>
         )}

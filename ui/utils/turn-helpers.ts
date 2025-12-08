@@ -1,5 +1,5 @@
 // ui/utils/turn-helpers.ts - ALIGNED VERSION
-import type { AiTurn, ProviderResponse, UserTurn, ProviderKey } from "../types";
+import type { AiTurn, ProviderResponse, UserTurn, ProviderKey } from "..";
 import { PRIMARY_STREAMING_PROVIDER_IDS } from "../constants";
 
 /**

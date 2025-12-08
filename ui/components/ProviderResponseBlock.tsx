@@ -1,6 +1,6 @@
 // ProviderResponseBlock.tsx - LAYOUT CONTAINER
 import React, { useMemo, useCallback, useState, useEffect } from "react";
-import { LLMProvider, AppStep, ProviderResponse } from "../types";
+import { LLMProvider, AppStep, ProviderResponse } from "..";
 import { LLM_PROVIDERS_CONFIG } from "../constants";
 import { useAtom, useSetAtom } from "jotai";
 import { visibleProvidersAtom, swapSourceProviderAtom, toastAtom } from "../state/atoms";

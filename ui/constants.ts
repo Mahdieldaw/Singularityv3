@@ -1,4 +1,4 @@
-import { LLMProvider } from "./types";
+import { LLMProvider } from ".";
 
 import { INITIAL_PROVIDERS } from "./providers/providerRegistry";
 

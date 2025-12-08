@@ -14,11 +14,11 @@ import type {
   ProviderResponse as ContractProviderResponse,
   AiTurn as ContractAiTurn,
   PortMessage,
-} from "../shared/contract";
+} from "../../shared/contract";
 import {
   isUserTurn as isUserTurnContract,
   isAiTurn as isAiTurnContract,
-} from "../shared/contract";
+} from "../../shared/contract";
 
 // Import types from persistence layer (schema types)
 import type {
@@ -28,13 +28,13 @@ import type {
   UserTurnRecord,
   AiTurnRecord,
   ProviderResponseRecord,
-} from "../src/persistence/types";
+} from "../../src/persistence/types";
 
 // =============================================================================
 // RE-EXPORTED TYPES FROM SHARED CONTRACT
 // =============================================================================
 
-export type { ProviderKey, PortMessage } from "../shared/contract";
+export type { ProviderKey, PortMessage } from "../../shared/contract";
 
 // Provider response type (unified from contract)
 export type ProviderResponse = ContractProviderResponse;
@@ -51,7 +51,7 @@ export type {
   UserTurnRecord,
   AiTurnRecord,
   ProviderResponseRecord,
-} from "../src/persistence/types";
+} from "../../src/persistence/types";
 
 // =============================================================================
 // UI-SPECIFIC TYPES

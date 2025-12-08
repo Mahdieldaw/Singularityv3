@@ -20,8 +20,10 @@ if (fs.existsSync("ui/index.html")) {
 }
 
 // optional assets
-if (fs.existsSync("ui/index.css"))
-  fs.copyFileSync("ui/index.css", "dist/ui/index.css");
+if (fs.existsSync("ui/styles/index.css")) {
+  fs.mkdirSync("dist/ui/styles", { recursive: true });
+  fs.copyFileSync("ui/styles/index.css", "dist/ui/styles/index.css");
+}
 if (fs.existsSync("src/offscreen.html"))
   fs.copyFileSync("src/offscreen.html", "dist/offscreen.html");
 if (fs.existsSync("src/offscreen.css"))

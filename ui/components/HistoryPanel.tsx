@@ -1,5 +1,5 @@
 import React, { useEffect } from "react";
-import { HistorySessionSummary } from "../types";
+import { HistorySessionSummary } from "..";
 import logoIcon from "../assets/logos/logo-icon.svg";
 import { PlusIcon, TrashIcon, EllipsisHorizontalIcon } from "./Icons";
 
@@ -11,6 +11,7 @@ interface HistoryPanelProps {
   onSelectChat: (session: HistorySessionSummary) => void;
   onDeleteChat: (sessionId: string) => void;
   onRenameChat?: (sessionId: string, currentTitle: string) => void;
+  onExportChat?: (sessionId: string) => void;
   // IDs currently being deleted (optimistic UI feedback)
   deletingIds?: Set<string>;
   // Batch selection mode
@@ -29,6 +30,7 @@ const HistoryPanel = ({
   onSelectChat,
   onDeleteChat,
   onRenameChat,
+  onExportChat,
   deletingIds,
   isBatchMode = false,
   selectedIds,
@@ -209,10 +211,20 @@ const HistoryPanel = ({
                               <span className="text-xs">✏️</span> Rename
                             </button>
                             <button
+                              className="text-left px-3 py-2 text-sm hover:bg-surface-highlight text-text-primary flex items-center gap-2 transition-colors"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onExportChat && onExportChat(session.sessionId);
+                                setActiveMenuId(null);
+                              }}
+                            >
+                              <span className="text-xs">💾</span> Export JSON
+                            </button>
+                            <button
                               className={`text-left px-3 py-2 text-sm hover:bg-intent-danger/10 text-intent-danger flex items-center gap-2 transition-colors ${!!deletingIds &&
-                                  (deletingIds as Set<string>).has(session.sessionId)
-                                  ? "opacity-50 cursor-not-allowed"
-                                  : ""
+                                (deletingIds as Set<string>).has(session.sessionId)
+                                ? "opacity-50 cursor-not-allowed"
+                                : ""
                                 }`}
                               onClick={(e) => {
                                 e.stopPropagation();

@@ -10,11 +10,11 @@ import {
   providerIdsForTurnFamily,
 } from "../state/atoms";
 import { useAtom } from "jotai";
-import { ProviderKey, ProviderResponse } from "../types";
+import { ProviderKey, ProviderResponse } from "..";
 import ProviderResponseBlock from "./ProviderResponseBlock";
 import { LLM_PROVIDERS_CONFIG } from "../constants";
 import { getLatestResponse, normalizeResponseArray } from "../utils/turn-helpers";
-import type { AiTurn } from "../types";
+import type { AiTurn } from "..";
 import { normalizeProviderId } from "../utils/provider-id-mapper";
 import api from "../services/extension-api";
 import type { PrimitiveWorkflowRequest } from "../../shared/contract";

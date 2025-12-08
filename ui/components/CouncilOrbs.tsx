@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useMemo, useRef } from "react";
 import { useAtom, useAtomValue } from "jotai";
 import { providerEffectiveStateFamily, isSplitOpenAtom, synthesisProviderAtom, mappingProviderAtom, composerModelAtom, analystModelAtom, providerAuthStatusAtom, selectedModelsAtom } from "../state/atoms";
-import { LLMProvider } from "../types";
+import { LLMProvider } from "..";
 import { PROVIDER_COLORS } from "../constants";
 import { getProviderById } from "../providers/providerRegistry";
 import { setProviderLock } from "@shared/provider-locks";

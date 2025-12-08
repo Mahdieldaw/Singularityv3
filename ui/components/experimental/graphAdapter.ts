@@ -1,4 +1,4 @@
-import { GraphTopology, GraphNode, GraphEdge } from '../../types';
+import { GraphTopology, GraphNode, GraphEdge } from '../..';
 import { ClaimNode, ClaimEdge } from './DecisionMapGraph';
 
 /**
