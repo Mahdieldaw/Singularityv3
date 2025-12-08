@@ -1,92 +1,217 @@
-import { useEffect, useRef, useState } from "react";
-import { useAtom } from "jotai";
-import { chatInputValueAtom, selectedModelsAtom, composerModelAtom, analystModelAtom } from "../state/atoms";
+import React, { useEffect, useRef, useState, useCallback } from "react";
+import { useAtom, useSetAtom, useAtomValue } from "jotai";
+import {
+  chatInputValueAtom,
+  selectedModelsAtom,
+  composerModelAtom,
+  analystModelAtom,
+  isLoadingAtom,
+  isRefiningAtom,
+  isContinuationModeAtom,
+  activeProviderCountAtom,
+  isVisibleModeAtom,
+  isReducedMotionAtom,
+  chatInputHeightAtom,
+  isHistoryPanelOpenAtom,
+  isRefinerOpenAtom,
+  refinerDataAtom,
+  hasRejectedRefinementAtom,
+  activeProviderTargetAtom,
+  activeRecomputeStateAtom,
+  currentSessionIdAtom,
+  toastAtom,
+  analystDrawerOpenAtom,
+  originalPromptAtom,
+  composerDraftAtom,
+  currentRefinementStateAtom,
+  messageRefinementMetaAtom,
+  synthesisProviderAtom,
+} from "../state/atoms";
+import { useChat } from "../hooks/useChat";
+import api from "../services/extension-api";
+import RefinerBlock from "./RefinerBlock";
+import AnalystDrawer from "./AnalystDrawer";
 import { LLM_PROVIDERS_CONFIG } from "../constants";
 import { PROVIDER_LIMITS } from "../../shared/provider-limits";
 import { setProviderLock } from "../../shared/provider-locks";
 import { CouncilOrbs } from "./CouncilOrbs";
-import { synthesisProviderAtom } from "../state/atoms";
 
 interface ChatInputProps {
-  onSendPrompt: (prompt: string) => void;
-  onContinuation: (prompt: string) => void;
-  // Abort/Stop current workflow
-  onAbort?: () => void;
-  isLoading: boolean;
-  isRefining: boolean; // New prop
-  isReducedMotion?: boolean;
-  activeProviderCount: number;
-  isVisibleMode: boolean;
-  isContinuationMode: boolean;
-  // Mapping-specific
   onStartMapping?: (prompt: string) => void;
   canShowMapping?: boolean; // ModelTray has >=2 selected and prompt has content
   mappingTooltip?: string;
   mappingActive?: boolean; // disable input and toggles while active
-  onHeightChange?: (height: number) => void; // Callback for height changes
-  isHistoryPanelOpen?: boolean;
-  hasRejectedRefinement?: boolean;
-  // Refiner Props
-  isRefinerOpen?: boolean;
-  onUndoRefinement?: () => void;
-  onToggleAudit?: () => void;
-  onToggleVariants?: () => void;
-  onToggleExplanation?: () => void;
-  showAudit?: boolean;
-  showVariants?: boolean;
-  showExplanation?: boolean;
-  refinerContent?: React.ReactNode;
-  // New Refiner Actions
-  onExplain?: (prompt: string) => void;
-  onCompose?: (prompt: string) => void;
-  // Targeted Continuation
-  activeTarget?: { aiTurnId: string; providerId: string } | null;
-  onCancelTarget?: () => void;
-  // Composer/Analyst Refinement State
-  originalPrompt?: string | null;
-  composerDraft?: string | null;
-  currentRefinementState?: "composer" | "analyst" | "both" | null;
-  onRevert?: () => void;
-  onApplyDraft?: () => void;
 }
 
 const ChatInput = ({
-  onSendPrompt,
-  onContinuation,
-  onAbort,
-  isLoading,
-  isRefining, // Destructure new prop
-  isReducedMotion = false,
-  activeProviderCount,
-  isVisibleMode,
-  isContinuationMode,
   onStartMapping,
   canShowMapping = false,
   mappingTooltip,
   mappingActive = false,
-  onHeightChange,
-  isHistoryPanelOpen = false,
-  hasRejectedRefinement = false,
-  isRefinerOpen = false,
-  onUndoRefinement,
-  onToggleAudit,
-  onToggleVariants,
-  onToggleExplanation,
-  showAudit = false,
-  showVariants = false,
-  showExplanation = false,
-  refinerContent,
-  onExplain,
-  onCompose,
-  activeTarget,
-  onCancelTarget,
-  // Composer/Analyst Refinement State
-  originalPrompt,
-  composerDraft,
-  currentRefinementState,
-  onRevert,
-  onApplyDraft,
 }: ChatInputProps) => {
+  // --- CONNECTED STATE LOGIC ---
+  const [isLoading] = useAtom(isLoadingAtom as any) as [boolean, any];
+  const [isRefining] = useAtom(isRefiningAtom as any) as [boolean, any];
+  const [isContinuationMode] = useAtom(isContinuationModeAtom as any) as [boolean, any];
+  const [activeProviderCount] = useAtom(activeProviderCountAtom as any) as [number, any];
+  const [isVisibleMode] = useAtom(isVisibleModeAtom as any) as [boolean, any];
+  const [isReducedMotion] = useAtom(isReducedMotionAtom as any) as [boolean, any];
+  const [, setChatInputHeight] = useAtom(chatInputHeightAtom);
+  const [isHistoryOpen] = useAtom(isHistoryPanelOpenAtom); // Used for styling/layout context if needed?
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const isHistoryPanelOpen = !!isHistoryOpen; // Kept for prop parity if needed locally
+
+  const [isRefinerOpen, setIsRefinerOpen] = useAtom(isRefinerOpenAtom);
+  const [refinerData, setRefinerData] = useAtom(refinerDataAtom);
+  const [hasRejectedRefinement, setHasRejectedRefinement] = useAtom(hasRejectedRefinementAtom);
+  const setToast = useSetAtom(toastAtom);
+
+  const [showAudit, setShowAudit] = useState(false);
+  const [showVariants, setShowVariants] = useState(false);
+  const [showExplanation, setShowExplanation] = useState(false);
+
+  const { sendMessage, abort, refinePrompt } = useChat();
+
+  const [activeTarget, setActiveTarget] = useAtom(activeProviderTargetAtom);
+  const [currentSessionId] = useAtom(currentSessionIdAtom);
+  const setActiveRecomputeState = useSetAtom(activeRecomputeStateAtom);
+
+  // New refinement state
+  const [analystDrawerOpen, setAnalystDrawerOpen] = useAtom(analystDrawerOpenAtom);
+  const [originalPrompt, setOriginalPrompt] = useAtom(originalPromptAtom);
+  const [composerDraft, setComposerDraft] = useAtom(composerDraftAtom);
+  const [currentRefinementState, setCurrentRefinementState] = useAtom(currentRefinementStateAtom);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const setMessageRefinementMeta = useSetAtom(messageRefinementMetaAtom);
+
+  // Callbacks
+  const handleSend = useCallback((prompt: string) => {
+    const mode = isContinuationMode ? "continuation" : "new";
+    sendMessage(prompt, mode);
+    if (isRefinerOpen) {
+      setIsRefinerOpen(false);
+      setRefinerData(null);
+      // setChatInputValue(""); // handled in executeSend
+      setShowAudit(false);
+      setShowVariants(false);
+      setShowExplanation(false);
+    }
+  }, [sendMessage, isContinuationMode, isRefinerOpen, setIsRefinerOpen, setRefinerData]);
+
+  const onContinuation = useCallback(async (prompt: string) => {
+    if (activeTarget && currentSessionId) {
+      try {
+        setActiveRecomputeState({
+          aiTurnId: activeTarget.aiTurnId,
+          stepType: "batch",
+          providerId: activeTarget.providerId
+        });
+        const primitive: any = {
+          type: "recompute",
+          sessionId: currentSessionId,
+          sourceTurnId: activeTarget.aiTurnId,
+          stepType: "batch",
+          targetProvider: activeTarget.providerId,
+          userMessage: prompt,
+          useThinking: false,
+        };
+        await api.executeWorkflow(primitive);
+        setActiveTarget(null);
+        // setChatInputValue(""); // handled in executeSend
+      } catch (error: any) {
+        console.error("Failed to execute targeted recompute:", error);
+        setToast({ id: Date.now(), message: `Failed to branch ${activeTarget.providerId}: ${error.message || "Unknown error"}`, type: "error" });
+        setActiveRecomputeState(null);
+      }
+      return;
+    }
+    sendMessage(prompt, "continuation");
+    if (isRefinerOpen) {
+      setIsRefinerOpen(false);
+      setRefinerData(null);
+      setShowAudit(false);
+      setShowVariants(false);
+      setShowExplanation(false);
+    }
+  }, [sendMessage, isRefinerOpen, setIsRefinerOpen, setRefinerData, activeTarget, currentSessionId, setActiveTarget, setActiveRecomputeState, setToast]);
+
+  const onAbort = useCallback(() => { void abort(); }, [abort]);
+
+  const onUndoRefinement = useCallback(() => {
+    if (refinerData?.originalPrompt) {
+      setPrompt(refinerData.originalPrompt);
+    }
+    setIsRefinerOpen(false);
+    setRefinerData(null);
+    setShowAudit(false);
+    setShowVariants(false);
+    setShowExplanation(false);
+    setHasRejectedRefinement(true);
+  }, [refinerData, setIsRefinerOpen, setRefinerData, setHasRejectedRefinement]); // Note: using setPrompt from closure below, need to hoist or use atom setter
+
+  const onExplain = useCallback((prompt: string) => {
+    void refinePrompt(prompt, "explain").then(() => {
+      setAnalystDrawerOpen(true);
+      if (!originalPrompt) setOriginalPrompt(prompt);
+    });
+  }, [refinePrompt, setAnalystDrawerOpen, originalPrompt, setOriginalPrompt]);
+
+  const onCompose = useCallback((prompt: string) => {
+    if (!originalPrompt) setOriginalPrompt(prompt);
+    void refinePrompt(prompt, "compose").then(() => {
+      setCurrentRefinementState((prev) => prev === "analyst" ? "both" : "composer");
+    });
+  }, [refinePrompt, originalPrompt, setOriginalPrompt, setCurrentRefinementState]);
+
+  const onUseVariant = useCallback((variant: string) => {
+    setPrompt(variant);
+    setAnalystDrawerOpen(false);
+    setCurrentRefinementState((prev) => prev === "composer" ? "both" : "analyst");
+  }, [setAnalystDrawerOpen, setCurrentRefinementState]); // setPrompt via closure
+
+  const onPerfectThis = useCallback(() => {
+    const p = refinerData?.refinedPrompt || prompt || ""; // prompt via closure
+    setAnalystDrawerOpen(false);
+    onCompose(p);
+  }, [refinerData, prompt, setAnalystDrawerOpen, onCompose]);
+
+  const onRevert = useCallback(() => {
+    if (originalPrompt) {
+      const currentValue = refinerData?.refinedPrompt || "";
+      if (currentValue && currentValue !== originalPrompt) {
+        setComposerDraft(currentValue);
+      }
+      setPrompt(originalPrompt);
+      setCurrentRefinementState(null);
+      setIsRefinerOpen(false);
+      setRefinerData(null);
+    }
+  }, [originalPrompt, refinerData, setComposerDraft, setCurrentRefinementState, setIsRefinerOpen, setRefinerData]); // setPrompt via closure
+
+  const onApplyDraft = useCallback(() => {
+    if (composerDraft) {
+      setPrompt(composerDraft);
+      setComposerDraft(null);
+      setCurrentRefinementState("composer");
+    }
+  }, [composerDraft, setComposerDraft, setCurrentRefinementState]); // setPrompt via closure
+
+  const onCancelTarget = () => setActiveTarget(null);
+  const onToggleAudit = () => setShowAudit(!showAudit);
+  const onToggleVariants = () => setShowVariants(!showVariants);
+  const onToggleExplanation = () => setShowExplanation(!showExplanation);
+  const onHeightChange = setChatInputHeight;
+
+  // Clear active target when clicking outside
+  useEffect(() => {
+    if (!activeTarget) return;
+    const handleClickOutside = () => setActiveTarget(null);
+    document.addEventListener("click", handleClickOutside);
+    return () => document.removeEventListener("click", handleClickOutside);
+  }, [activeTarget, setActiveTarget]);
+
+
+  // --- PRESENTATION LOGIC ---
   const CHAT_INPUT_STORAGE_KEY = "htos_chat_input_value";
   const [prompt, setPrompt] = useAtom(chatInputValueAtom);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -225,7 +350,7 @@ const ChatInput = ({
     if (isContinuationMode) {
       onContinuation(trimmed);
     } else {
-      onSendPrompt(trimmed);
+      handleSend(trimmed);
     }
 
     if (!isRefinerOpen && !hasRejectedRefinement) {
@@ -369,7 +494,7 @@ const ChatInput = ({
           variant="active"
           onCrownMove={(pid) => {
             setSynthesisProvider(pid);
-            setProviderLock('synthesis', true); // Lock handled in chat input now? Or imported helper.
+            setProviderLock('synthesis', true);
           }}
         />
       </div>
@@ -620,7 +745,7 @@ const ChatInput = ({
             {/* Revert link - shown when we have an original prompt saved */}
             {originalPrompt && currentRefinementState && (
               <button
-                onClick={onRevert}
+                onClick={handleRevert}
                 className="text-text-muted hover:text-text-secondary transition-colors opacity-60 hover:opacity-100"
               >
                 ↩ Revert to original
@@ -630,7 +755,7 @@ const ChatInput = ({
             {/* Composer draft chip - shown after reverting */}
             {composerDraft && !currentRefinementState && (
               <button
-                onClick={onApplyDraft}
+                onClick={handleApplyDraft}
                 className="flex items-center gap-1 px-2 py-1 bg-brand-500/10 border border-brand-500/30 rounded-md text-brand-400 hover:bg-brand-500/20 transition-all"
               >
                 <span className="text-[10px]">✦</span>
@@ -640,8 +765,14 @@ const ChatInput = ({
           </div>
         )}
       </div>
+
+      {/* Analyst Drawer */}
+      <AnalystDrawer
+        onPerfectThis={onPerfectThis}
+        onUseVariant={onUseVariant}
+        isOpen={analystDrawerOpen}
+        onClose={() => setAnalystDrawerOpen(false)}
+      />
     </div>
   );
 };
-
-export default ChatInput;

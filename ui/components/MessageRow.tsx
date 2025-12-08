@@ -1,8 +1,8 @@
 import React, { useMemo } from "react";
 import { atom, useAtomValue } from "jotai";
 import { turnsMapAtom } from "../state/atoms";
-import UserTurnBlockConnected from "./UserTurnBlockConnected";
-import AiTurnBlockConnected from "./AiTurnBlockConnected";
+import UserTurnBlock from "./UserTurnBlock";
+import AiTurnBlock from "./AiTurnBlock";
 
 function MessageRow({ turnId }: { turnId: string }) {
   const turnAtom = useMemo(
@@ -21,9 +21,9 @@ function MessageRow({ turnId }: { turnId: string }) {
 
   const content =
     (message as any).type === "user" ? (
-      <UserTurnBlockConnected userTurn={message as any} />
+      <UserTurnBlock userTurn={message as any} />
     ) : (
-      <AiTurnBlockConnected aiTurn={message as any} />
+      <AiTurnBlock aiTurn={message as any} />
     );
 
   // Wrap each row with an anchor for scroll/highlight targeting

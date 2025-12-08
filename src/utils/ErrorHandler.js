@@ -3,7 +3,7 @@
  * Provides comprehensive error handling, recovery strategies, and fallback mechanisms
  */
 
-import { persistenceMonitor } from "../debug/PersistenceMonitor.js";
+import { persistenceMonitor } from "../core/PersistenceMonitor.js";
 
 // ============================================================
 // NEW: Provider authentication configuration

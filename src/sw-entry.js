@@ -37,9 +37,9 @@ import { authManager } from './core/auth-manager.js';
 import { SessionManager } from "./persistence/SessionManager.js";
 import { initializePersistenceLayer } from "./persistence/index.js";
 import { errorHandler } from "./utils/ErrorHandler.js";
-import { persistenceMonitor } from "./debug/PersistenceMonitor.js";
+import { persistenceMonitor } from "./core/PersistenceMonitor.js";
 // Prompt refinement service
-import { PromptRefinerService } from "./services/PromptRefinerService.ts";
+import { PromptRefinerService } from "./core/PromptRefinerService.ts";
 // ============================================================================
 // AUTH DETECTION SYSTEM
 // ============================================================================

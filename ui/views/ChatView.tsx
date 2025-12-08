@@ -14,7 +14,7 @@ import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import clsx from "clsx";
 
 import MessageRow from "../components/MessageRow";
-import ChatInputConnected from "../components/ChatInputConnected";
+import ChatInput from "../components/ChatInput";
 import WelcomeScreen from "../components/WelcomeScreen";
 import { useScrollPersistence } from "../hooks/useScrollPersistence";
 import { useChat } from "../hooks/useChat";
@@ -254,7 +254,7 @@ export default function ChatView() {
           isDecisionMapOpen && "opacity-0"
         )}
       >
-        <ChatInputConnected />
+        <ChatInput />
       </div>
     </div>
   );

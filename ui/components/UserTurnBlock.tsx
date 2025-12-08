@@ -4,24 +4,25 @@ import { UserIcon, ChevronDownIcon, ChevronUpIcon } from "./Icons";
 import MarkdownDisplay from "./MarkdownDisplay";
 import clsx from "clsx";
 
-import { useSetAtom } from "jotai";
-import { toastAtom } from "../state/atoms";
+import { useSetAtom, useAtom } from "jotai";
+import { toastAtom, turnExpandedStateFamily } from "../state/atoms";
 
 import { CopyButton } from "./CopyButton";
 
 interface UserTurnBlockProps {
   userTurn: UserTurn;
-  isExpanded: boolean;
-  onToggle: () => void;
+  // Props removed
+
   // Note: All props related to the action bar have been removed.
   // The UserTurnBlock is now a pure display component for the prompt.
 }
 
 const UserTurnBlock = ({
   userTurn,
-  isExpanded,
-  onToggle,
 }: UserTurnBlockProps) => {
+  const [isExpanded, setIsExpanded] = useAtom(turnExpandedStateFamily(userTurn.id));
+  const onToggle = useCallback(() => setIsExpanded((prev) => !prev), [setIsExpanded]);
+
   const date = new Date(userTurn.createdAt);
   const readableTimestamp = date.toLocaleString(undefined, {
     dateStyle: "medium",
