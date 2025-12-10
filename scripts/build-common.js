@@ -75,6 +75,8 @@ async function buildAll(isProduction = false, generateMeta = false) {
         splitting: true,
         outdir: "dist/ui",
         loader: { ".ts": "ts", ".tsx": "tsx", ".svg": "file", ".png": "file", ".jpg": "file", ".jpeg": "file" },
+        assetNames: "[name]",  // Remove hashes from asset filenames for stable Chrome extension paths
+        publicPath: "/ui/",    // Ensure CSS references assets relative to extension root
         jsx: "automatic",
     });
     results.push({ name: "ui", result: uiResult });
