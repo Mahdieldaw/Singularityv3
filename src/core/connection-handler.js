@@ -80,6 +80,13 @@ export class ConnectionHandler {
           case "EXECUTE_WORKFLOW":
             await this._handleExecuteWorkflow(message);
             break;
+          case 'RETRY_PROVIDERS':
+            if (this.workflowEngine && typeof this.workflowEngine.handleRetryRequest === 'function') {
+              await this.workflowEngine.handleRetryRequest(message);
+            } else {
+              console.warn('[ConnectionHandler] Retry requested but workflowEngine is not ready');
+            }
+            break;
 
           case "KEEPALIVE_PING":
             this.port.postMessage({

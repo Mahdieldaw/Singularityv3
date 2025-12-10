@@ -37,6 +37,9 @@ import {
   getLatestResponse,
 } from "../utils/turn-helpers";
 import clsx from "clsx";
+import ProviderErrorCard from "./ProviderErrorCard";
+import { useRetryProvider } from "../hooks/useRetryProvider";
+import { providerErrorsAtom, retryableProvidersAtom } from "../state/atoms";
 
 // --- Helper Functions ---
 function parseMappingResponse(response?: string | null) {
@@ -232,6 +235,14 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const { eligibilityMaps } = useEligibility();
   const [globalActiveRecomputeState] = useAtom(activeRecomputeStateAtom);
+  const providerErrors = useAtomValue(providerErrorsAtom);
+  const retryableProviders = useAtomValue(retryableProvidersAtom);
+  const { retryProviders } = useRetryProvider();
+
+  const getProviderName = useCallback((pid: string) => {
+    const cfg = LLM_PROVIDERS_CONFIG.find(p => String(p.id) === pid);
+    return cfg?.name || pid;
+  }, []);
 
   const onToggleSourceOutputs = useCallback(() => setShowSourceOutputs((prev) => !prev), [setShowSourceOutputs]);
 
@@ -1051,6 +1062,32 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                       </div>
                     );
                   })()}
+
+                  {/* Provider Errors (if any) */}
+                  {Object.entries(providerErrors || {}).length > 0 && (
+                    <div className="provider-errors-section mt-3">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-sm text-text-secondary">⚠️ Some providers encountered issues</span>
+                        {retryableProviders.length > 0 && aiTurn.sessionId && (
+                          <button
+                            onClick={() => retryProviders(aiTurn.sessionId as string, aiTurn.id, retryableProviders)}
+                            className="provider-error-card__retry-btn"
+                          >
+                            🔄 Retry All ({retryableProviders.length})
+                          </button>
+                        )}
+                      </div>
+                      {Object.entries(providerErrors).map(([pid, error]) => (
+                        <ProviderErrorCard
+                          key={pid}
+                          providerId={pid}
+                          providerName={getProviderName(pid)}
+                          error={error as any}
+                          onRetry={(error as any)?.retryable && aiTurn.sessionId ? () => retryProviders(aiTurn.sessionId as string, aiTurn.id, [pid]) : undefined}
+                        />
+                      ))}
+                    </div>
+                  )}
 
                   {/* BOTTOM TRAY: Council Orbs + Recompute INSIDE bubble - 28px from bottom */}
                   <div

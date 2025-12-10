@@ -22,51 +22,39 @@ export const PRIMARY_STREAMING_PROVIDER_IDS: string[] = [
 ];
 
 // Provider color mapping for orb animations
+
+
+// ui/constants.ts
+
 export const PROVIDER_COLORS: Record<string, string> = {
-  'claude-sonnet': '#d946ef',        // fuchsia-purple
-  'claude': '#d946ef',               // fuchsia-purple
-  'gemini-flash': '#8b5cf6',         // violet
-  'gemini-exp': '#8b5cf6',           // violet
-  'gemini': '#8b5cf6',               // violet
-  'grok': '#10b981',                 // emerald
-  'openai-4o': '#f59e0b',            // amber
-  'o1': '#f59e0b',                   // amber
-  'o3': '#f59e0b',                   // amber
-  'deepseek': '#06b6d4',             // cyan
-  'qwen': '#06b6d4',                 // cyan
-  'llama': '#06b6d4',                // cyan
-  'mistral': '#06b6d4',              // cyan
-  'default': '#64748b'               // slate fallback
+  'claude': '#E07850',
+  'gemini': '#3B82F6',
+  'gemini-pro': '#06B6D4',
+  'gemini-exp': '#8B5CF6',
+  'chatgpt': '#10A37F',
+  'qwen': '#F59E0B',
+  'default': '#64748B'
 };
 
-// Accent colors complementing the primary provider colors for richer gradients
 export const PROVIDER_ACCENT_COLORS: Record<string, string> = {
-  'claude-sonnet': '#a21caf',         // deeper fuchsia
-  'claude': '#a21caf',                // deeper fuchsia
-  'gemini-flash': '#6d28d9',          // deep violet
-  'gemini-exp': '#6d28d9',            // deep violet
-  'gemini': '#6d28d9',                // deep violet
-  'grok': '#047857',                  // deep emerald
-  'openai-4o': '#b45309',             // deep amber
-  'o1': '#b45309',                    // deep amber
-  'o3': '#b45309',                    // deep amber
-  'deepseek': '#0e7490',              // deep cyan
-  'qwen': '#0e7490',                  // deep cyan
-  'llama': '#0e7490',                 // deep cyan
-  'mistral': '#0e7490',               // deep cyan
-  'default': '#334155'                // deep slate
+  'claude': '#C75B3A',
+  'gemini': '#1D4ED8',
+  'gemini-pro': '#0891B2',
+  'gemini-exp': '#6D28D9',
+  'chatgpt': '#047857',
+  'qwen': '#D97706',
+  'default': '#475569'
 };
 
-// Workflow stage colors used by progress rings and badges
+// Keep workflow colors as-is
 export const WORKFLOW_STAGE_COLORS: Record<
   'idle' | 'thinking' | 'streaming' | 'complete' | 'error' | 'synthesizing',
   string
 > = {
   idle: 'rgba(255,255,255,0.35)',
-  thinking: '#A78BFA',       // violet-400
-  streaming: '#34D399',      // emerald-400
-  complete: '#60A5FA',       // blue-400
-  error: '#EF4444',          // red-500
-  synthesizing: '#F59E0B',   // amber-500
+  thinking: '#A78BFA',
+  streaming: '#34D399',
+  complete: '#60A5FA',
+  error: '#EF4444',
+  synthesizing: '#F59E0B',
 };
-

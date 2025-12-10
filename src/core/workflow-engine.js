@@ -1,5 +1,7 @@
 // src/core/workflow-engine.js - FIXED VERSION
 import { ArtifactProcessor } from '../../shared/artifact-processor.ts';
+import { getHealthTracker } from './provider-health-tracker.js';
+import { classifyError } from './error-classifier.js';
 import {
   errorHandler,
   createMultiProviderAuthError,
@@ -544,6 +546,7 @@ export class WorkflowEngine {
     this.port = port;
     // Keep track of the most recent finalized turn to align IDs with persistence
     this._lastFinalizedTurn = null;
+    this.healthTracker = getHealthTracker();
   }
 
   /**
@@ -1314,8 +1317,43 @@ ${prompt}
 Your job is to address what the user is actually asking, informed by but not focused on the previous context.`;
     }
 
+    // Provider health pre-check + initial progress emit
+    const providerStatuses = [];
+    const activeProviders = [];
+    try {
+      for (const pid of providers) {
+        const check = this.healthTracker.shouldAttempt(pid);
+        if (!check.allowed) {
+          providerStatuses.push({
+            providerId: pid,
+            status: 'skipped',
+            skippedReason: check.reason || 'circuit_open',
+            error: {
+              type: 'circuit_open',
+              message: 'Provider temporarily unavailable due to recent failures',
+              retryable: true,
+              retryAfterMs: check.retryAfterMs,
+            },
+          });
+        } else {
+          providerStatuses.push({ providerId: pid, status: 'queued', progress: 0 });
+          activeProviders.push(pid);
+        }
+      }
+      // Emit initial status
+      this.port.postMessage({
+        type: 'WORKFLOW_PROGRESS',
+        sessionId: context.sessionId,
+        aiTurnId: context.canonicalAiTurnId || 'unknown',
+        phase: 'batch',
+        providerStatuses,
+        completedCount: 0,
+        totalCount: providers.length,
+      });
+    } catch (_) { }
+
     return new Promise((resolve, reject) => {
-      this.orchestrator.executeParallelFanout(enhancedPrompt, providers, {
+      this.orchestrator.executeParallelFanout(enhancedPrompt, activeProviders, {
         sessionId: context.sessionId,
         useThinking,
         providerContexts,
@@ -1328,6 +1366,22 @@ Your job is to address what the user is actually asking, informed by but not foc
             chunk.text,
             "Prompt",
           );
+          try {
+            const entry = providerStatuses.find((s) => s.providerId === providerId);
+            if (entry) {
+              entry.status = 'streaming';
+              entry.progress = typeof entry.progress === 'number' ? entry.progress : undefined;
+              this.port.postMessage({
+                type: 'WORKFLOW_PROGRESS',
+                sessionId: context.sessionId,
+                aiTurnId: context.canonicalAiTurnId || 'unknown',
+                phase: 'batch',
+                providerStatuses,
+                completedCount: providerStatuses.filter((p) => p.status === 'completed').length,
+                totalCount: providers.length,
+              });
+            }
+          } catch (_) { }
         },
         onError: (error) => {
           try {
@@ -1389,6 +1443,15 @@ Your job is to address what the user is actually asking, informed by but not foc
               artifacts: processed.artifacts,
               ...(result.softError ? { softError: result.softError } : {}),
             };
+            try {
+              this.healthTracker.recordSuccess(providerId);
+              const entry = providerStatuses.find((s) => s.providerId === providerId);
+              if (entry) {
+                entry.status = 'completed';
+                entry.progress = 100;
+                if (entry.error) delete entry.error;
+              }
+            } catch (_) { }
           });
 
           errors.forEach((error, providerId) => {
@@ -1403,6 +1466,15 @@ Your job is to address what the user is actually asking, informed by but not foc
             if (isProviderAuthError(error)) {
               authErrors.push(error);
             }
+            try {
+              this.healthTracker.recordFailure(providerId, error);
+              const classified = classifyError(error);
+              const entry = providerStatuses.find((s) => s.providerId === providerId);
+              if (entry) {
+                entry.status = 'failed';
+                entry.error = classified;
+              }
+            } catch (_) { }
           });
 
           // Validate at least one provider succeeded
@@ -1426,6 +1498,34 @@ Your job is to address what the user is actually asking, informed by but not foc
             );
             return;
           }
+
+          // Emit final progress update for batch phase
+          try {
+            const completedCount = providerStatuses.filter((p) => p.status === 'completed').length;
+            this.port.postMessage({
+              type: 'WORKFLOW_PROGRESS',
+              sessionId: context.sessionId,
+              aiTurnId: context.canonicalAiTurnId || 'unknown',
+              phase: 'batch',
+              providerStatuses,
+              completedCount,
+              totalCount: providers.length,
+            });
+
+            const failedProviders = providerStatuses.filter((p) => p.status === 'failed');
+            const successfulProviders = providerStatuses.filter((p) => p.status === 'completed');
+            if (failedProviders.length > 0) {
+              this.port.postMessage({
+                type: 'WORKFLOW_PARTIAL_COMPLETE',
+                sessionId: context.sessionId,
+                aiTurnId: context.canonicalAiTurnId || 'unknown',
+                successfulProviders: successfulProviders.map((p) => p.providerId),
+                failedProviders: failedProviders.map((p) => ({ providerId: p.providerId, error: p.error })),
+                synthesisCompleted: false,
+                mappingCompleted: false,
+              });
+            }
+          } catch (_) { }
 
           resolve({
             results: formattedResults,
@@ -2141,6 +2241,35 @@ Your job is to address what the user is actually asking, informed by but not foc
         },
       );
     });
+  }
+
+  /**
+   * Handle retry requests from frontend: reset circuit, emit queued status.
+   * Actual re-execution should be triggered by orchestration layer with original context.
+   */
+  async handleRetryRequest(message) {
+    try {
+      const { sessionId, aiTurnId, providerIds, retryScope } = message || {};
+      console.log(`[WorkflowEngine] Retry requested for providers=${(providerIds||[]).join(', ')} scope=${retryScope}`);
+
+      try {
+        (providerIds || []).forEach((pid) => this.healthTracker.resetCircuit(pid));
+      } catch (_) { }
+
+      try {
+        this.port.postMessage({
+          type: 'WORKFLOW_PROGRESS',
+          sessionId: sessionId,
+          aiTurnId: aiTurnId,
+          phase: retryScope || 'batch',
+          providerStatuses: (providerIds || []).map((id) => ({ providerId: id, status: 'queued', progress: 0 })),
+          completedCount: 0,
+          totalCount: (providerIds || []).length,
+        });
+      } catch (_) { }
+    } catch (e) {
+      console.warn('[WorkflowEngine] handleRetryRequest failed:', e);
+    }
   }
 }
 export { extractGraphTopologyAndStrip };

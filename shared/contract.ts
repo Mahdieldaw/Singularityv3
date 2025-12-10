@@ -198,12 +198,7 @@ export interface WorkflowProgressMessage {
   sessionId: string;
   aiTurnId: string;
   phase: 'batch' | 'synthesis' | 'mapping';
-  providerStatuses: Array<{
-    providerId: string;
-    status: 'queued' | 'active' | 'streaming' | 'completed' | 'failed';
-    progress?: number; // 0-100 for streaming providers
-    error?: string;    // message on failure
-  }>;
+  providerStatuses: ProviderStatus[];
   completedCount: number;
   totalCount: number;
   estimatedTimeRemaining?: number; // milliseconds
@@ -241,8 +236,72 @@ export type PortMessage =
   | WorkflowStepUpdateMessage
   | WorkflowCompleteMessage
   | WorkflowProgressMessage
+  | WorkflowPartialCompleteMessage
+  | RetryProviderRequest
   | TurnFinalizedMessage
   | TurnCreatedMessage;
+
+// ============================================================================
+// SECTION 3b: ERROR RESILIENCE & RETRIES (SHARED TYPES)
+// ============================================================================
+
+/**
+ * Error classification for user-facing messaging and retry logic
+ */
+export type ProviderErrorType =
+  | 'rate_limit'      // 429 - Retryable after cooldown
+  | 'auth_expired'    // 401/403 - Requires re-login
+  | 'timeout'         // Request took too long - Retryable
+  | 'circuit_open'    // Too many recent failures - Auto-retry later
+  | 'content_filter'  // Response blocked by provider - Not retryable
+  | 'network'         // Connection failed - Retryable
+  | 'unknown';        // Catch-all - Maybe retryable
+
+export interface ProviderError {
+  type: ProviderErrorType;
+  message: string;
+  retryable: boolean;
+  retryAfterMs?: number;    // For rate limits
+  requiresReauth?: boolean; // For auth errors
+}
+
+/**
+ * Enhanced provider status in WORKFLOW_PROGRESS
+ */
+export interface ProviderStatus {
+  providerId: string;
+  status: 'queued' | 'active' | 'streaming' | 'completed' | 'failed' | 'skipped';
+  progress?: number;
+  error?: ProviderError;       // Detailed error info when status === 'failed'
+  skippedReason?: string;      // Why it was skipped (e.g., "circuit open")
+}
+
+/**
+ * Retry request from frontend
+ */
+export interface RetryProviderRequest {
+  type: 'RETRY_PROVIDERS';
+  sessionId: string;
+  aiTurnId: string;
+  providerIds: string[];       // Which providers to retry
+  retryScope: 'batch' | 'synthesis' | 'mapping'; // Which phase to retry
+}
+
+/**
+ * Partial completion message - sent when workflow completes with some failures
+ */
+export interface WorkflowPartialCompleteMessage {
+  type: 'WORKFLOW_PARTIAL_COMPLETE';
+  sessionId: string;
+  aiTurnId: string;
+  successfulProviders: string[];
+  failedProviders: Array<{
+    providerId: string;
+    error: ProviderError;
+  }>;
+  synthesisCompleted: boolean;
+  mappingCompleted: boolean;
+}
 
 // ============================================================================
 // SECTION 4: PERSISTENT DATA MODELS

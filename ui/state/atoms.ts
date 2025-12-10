@@ -484,3 +484,38 @@ export interface ProviderWorkflowState {
 // ProviderId -> { stage, progress }
 export const workflowProgressAtom = atom<Record<string, ProviderWorkflowState>>({});
 
+// =============================================================================
+// Error resilience state (per-current turn)
+// =============================================================================
+import type { ProviderError } from "@shared/contract";
+
+/**
+ * Track errors per provider for the current turn
+ */
+export const providerErrorsAtom = atom<Record<string, ProviderError>>({});
+
+/**
+ * Track which providers can be retried based on error classification
+ */
+export const retryableProvidersAtom = atom<string[]>((get) => {
+  const errors = get(providerErrorsAtom);
+  return Object.entries(errors)
+    .filter(([, err]) => !!err && !!err.retryable)
+    .map(([pid]) => pid);
+});
+
+/**
+ * Current workflow degradation status
+ */
+export const workflowDegradedAtom = atom<{
+  isDegraded: boolean;
+  successCount: number;
+  totalCount: number;
+  failedProviders: string[];
+}>({
+  isDegraded: false,
+  successCount: 0,
+  totalCount: 0,
+  failedProviders: []
+});
+

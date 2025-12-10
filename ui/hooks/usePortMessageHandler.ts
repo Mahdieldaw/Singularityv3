@@ -15,6 +15,8 @@ import {
   synthesisProviderAtom,
   lastActivityAtAtom,
   workflowProgressAtom,
+  providerErrorsAtom,
+  workflowDegradedAtom,
 } from "../state/atoms";
 import { activeRecomputeStateAtom, lastStreamingProviderAtom } from "../state/atoms";
 import { StreamingBuffer } from "../utils/streamingBuffer";
@@ -75,6 +77,8 @@ export function usePortMessageHandler() {
   const synthesisProvider = useAtomValue(synthesisProviderAtom);
   const setLastActivityAt = useSetAtom(lastActivityAtAtom);
   const setWorkflowProgress = useSetAtom(workflowProgressAtom);
+  const setProviderErrors = useSetAtom(providerErrorsAtom);
+  const setWorkflowDegraded = useSetAtom(workflowDegradedAtom);
   // Note: We rely on Jotai's per-atom update serialization; no manual pending cache
 
   const streamingBufferRef = useRef<StreamingBuffer | null>(null);
@@ -741,9 +745,40 @@ export function usePortMessageHandler() {
                 };
               }
               setWorkflowProgress(progressMap as any);
+
+              // NEW: Extract and store errors for retry controls
+              try {
+                const errors: Record<string, any> = {};
+                for (const status of providerStatuses) {
+                  if (status?.error) {
+                    errors[String(status.providerId)] = status.error;
+                  }
+                }
+                setProviderErrors(errors);
+              } catch (_) { }
             }
           } catch (e) {
             console.warn('[Port] Failed to process WORKFLOW_PROGRESS', e);
+          }
+          break;
+        }
+
+        case "WORKFLOW_PARTIAL_COMPLETE": {
+          try {
+            const partialMsg = message as any;
+            setWorkflowDegraded({
+              isDegraded: Array.isArray(partialMsg.failedProviders) && partialMsg.failedProviders.length > 0,
+              successCount: Array.isArray(partialMsg.successfulProviders) ? partialMsg.successfulProviders.length : 0,
+              totalCount: ((partialMsg.successfulProviders || []).length) + ((partialMsg.failedProviders || []).length),
+              failedProviders: (partialMsg.failedProviders || []).map((f: any) => f.providerId),
+            });
+            const errors: Record<string, any> = {};
+            for (const failed of partialMsg.failedProviders || []) {
+              errors[failed.providerId] = failed.error;
+            }
+            setProviderErrors(errors);
+          } catch (e) {
+            console.warn('[Port] Failed to process WORKFLOW_PARTIAL_COMPLETE', e);
           }
           break;
         }
