@@ -1,3 +1,8 @@
+/**
+ * @deprecated DEPRECATED: Side-by-side layout removed.
+ * Migrated to ModelResponsePanel + useProviderActions.
+ * Keep for reference until new system verified. Do not extend.
+ */
 // ProviderResponseBlock.tsx - LAYOUT CONTAINER
 import React, { useMemo, useCallback, useState, useEffect } from "react";
 import { LLMProvider, AppStep, ProviderResponse } from "../types";

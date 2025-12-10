@@ -519,3 +519,36 @@ export const workflowDegradedAtom = atom<{
   failedProviders: []
 });
 
+// =============================================================================
+// Streaming UX State (for Council Orbs visibility control)
+// =============================================================================
+
+/**
+ * Derived atom: true when a round is actively running
+ * Used to hide config orbs and show active turn orbs
+ */
+export const isRoundActiveAtom = atom((get) => {
+  const activeId = get(activeAiTurnIdAtom);
+  const isLoading = get(isLoadingAtom);
+  return activeId !== null && isLoading;
+});
+
+/**
+ * Track if we've auto-opened the split pane for the current turn
+ * Value is the turnId or null
+ */
+export const hasAutoOpenedPaneAtom = atom<string | null>(null);
+
+/**
+ * Track if we've auto-widened the left pane for synthesis this turn
+ * Value is the turnId or null
+ */
+export const hasAutoWidenedForSynthesisAtom = atom<string | null>(null);
+
+/**
+ * Split pane ratio (left pane percentage) for programmatic control
+ * Used by ChatView to sync with react-resizable-panels
+ */
+export const splitPaneRatioAtom = atom<number>(60);
+
+

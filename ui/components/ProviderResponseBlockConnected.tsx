@@ -1,3 +1,8 @@
+/**
+ * @deprecated DEPRECATED: Side-by-side layout removed.
+ * Logic migrated to useProviderActions hook and ModelResponsePanel.
+ * Keep for reference until new system verified. Do not extend.
+ */
 import React, { useMemo, useCallback } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
 import {

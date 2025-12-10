@@ -27,6 +27,7 @@ import {
   messageRefinementMetaAtom,
   synthesisProviderAtom,
   workflowProgressAtom,
+  isRoundActiveAtom,
 } from "../state/atoms";
 import { useChat } from "../hooks/useChat";
 import api from "../services/extension-api";
@@ -61,6 +62,9 @@ const ChatInput = ({
   const [isHistoryOpen] = useAtom(isHistoryPanelOpenAtom); // Used for styling/layout context if needed?
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const isHistoryPanelOpen = !!isHistoryOpen; // Kept for prop parity if needed locally
+
+  // Streaming UX: hide config orbs during active round
+  const isRoundActive = useAtomValue(isRoundActiveAtom);
 
   // --- PRESENTATION LOGIC HOISTED ---
   const CHAT_INPUT_STORAGE_KEY = "htos_chat_input_value";
@@ -491,19 +495,29 @@ const ChatInput = ({
   return (
     <div className="w-full flex justify-center flex-col items-center pointer-events-auto gap-2">
 
-      {/* Active Council Orbs (Top Border) */}
-      <div className="w-full max-w-[min(800px,calc(100%-32px))] px-3 z-20">
-        <CouncilOrbs
-          providers={LLM_PROVIDERS_CONFIG}
-          voiceProviderId={synthesisProvider || 'claude'}
-          variant="active"
-          workflowProgress={workflowProgress as any}
-          onCrownMove={(pid) => {
-            setSynthesisProvider(pid);
-            setProviderLock('synthesis', true);
-          }}
-        />
-      </div>
+      {/* Config Orbs - Hidden during active round */}
+      {!isRoundActive && (
+        <div className="w-full max-w-[min(800px,calc(100%-32px))] px-3 z-20">
+          <CouncilOrbs
+            providers={LLM_PROVIDERS_CONFIG}
+            voiceProviderId={synthesisProvider || 'claude'}
+            variant="active"
+            workflowProgress={workflowProgress as any}
+            onCrownMove={(pid) => {
+              setSynthesisProvider(pid);
+              setProviderLock('synthesis', true);
+            }}
+          />
+        </div>
+      )}
+
+      {/* Hint when round is active */}
+      {isRoundActive && (
+        <div className="flex items-center gap-2 text-xs text-text-muted py-2 text-center opacity-70">
+          <span className="w-2 h-2 rounded-full bg-brand-400 animate-pulse" />
+          Click a glowing orb to see that response
+        </div>
+      )}
 
       <div className="flex gap-2.5 items-center relative w-full max-w-[min(800px,calc(100%-32px))] p-3 bg-input backdrop-blur-xl border border-border-subtle rounded-3xl flex-wrap">
 

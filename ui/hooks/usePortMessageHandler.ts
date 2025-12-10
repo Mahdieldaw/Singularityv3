@@ -17,6 +17,11 @@ import {
   workflowProgressAtom,
   providerErrorsAtom,
   workflowDegradedAtom,
+  activeSplitPanelAtom,
+  isSplitOpenAtom,
+  hasAutoOpenedPaneAtom,
+  hasAutoWidenedForSynthesisAtom,
+  splitPaneRatioAtom,
 } from "../state/atoms";
 import { activeRecomputeStateAtom, lastStreamingProviderAtom } from "../state/atoms";
 import { StreamingBuffer } from "../utils/streamingBuffer";
@@ -79,6 +84,15 @@ export function usePortMessageHandler() {
   const setWorkflowProgress = useSetAtom(workflowProgressAtom);
   const setProviderErrors = useSetAtom(providerErrorsAtom);
   const setWorkflowDegraded = useSetAtom(workflowDegradedAtom);
+
+  // Auto-open split pane state
+  const isSplitOpen = useAtomValue(isSplitOpenAtom);
+  const setActiveSplitPanel = useSetAtom(activeSplitPanelAtom);
+  const hasAutoOpenedPane = useAtomValue(hasAutoOpenedPaneAtom);
+  const setHasAutoOpenedPane = useSetAtom(hasAutoOpenedPaneAtom);
+  const hasAutoWidened = useAtomValue(hasAutoWidenedForSynthesisAtom);
+  const setHasAutoWidened = useSetAtom(hasAutoWidenedForSynthesisAtom);
+  const setSplitPaneRatio = useSetAtom(splitPaneRatioAtom);
   // Note: We rely on Jotai's per-atom update serialization; no manual pending cache
 
   const streamingBufferRef = useRef<StreamingBuffer | null>(null);
@@ -756,6 +770,33 @@ export function usePortMessageHandler() {
                 }
                 setProviderErrors(errors);
               } catch (_) { }
+
+              // AUTO-OPEN SPLIT PANE: On first streaming provider
+              const activeId = activeAiTurnIdRef.current;
+              if (activeId && hasAutoOpenedPane !== activeId && phase === 'batch') {
+                const firstStreaming = providerStatuses.find(
+                  (ps: any) => ps.status === 'streaming' || ps.status === 'active'
+                );
+
+                if (firstStreaming && !isSplitOpen) {
+                  setActiveSplitPanel({
+                    turnId: activeId,
+                    providerId: String(firstStreaming.providerId)
+                  });
+                  setSplitPaneRatio(70); // Left pane 70%, right pane 30%
+                  setHasAutoOpenedPane(activeId);
+                }
+              }
+
+              // AUTO-WIDEN FOR SYNTHESIS: When synthesis phase starts
+              if (
+                activeId &&
+                phase === 'synthesis' &&
+                hasAutoWidened !== activeId
+              ) {
+                setSplitPaneRatio(75); // Widen left pane to 75%
+                setHasAutoWidened(activeId);
+              }
             }
           } catch (e) {
             console.warn('[Port] Failed to process WORKFLOW_PROGRESS', e);
@@ -792,6 +833,10 @@ export function usePortMessageHandler() {
           setIsLoading(false);
           setUiPhase("awaiting_action");
           setLastActivityAt(Date.now());
+
+          // Reset streaming UX state for next round
+          setHasAutoOpenedPane(null);
+          setHasAutoWidened(null);
           // Do NOT clear activeAiTurnId here; wait for TURN_FINALIZED
           break;
         }
@@ -810,6 +855,14 @@ export function usePortMessageHandler() {
       mappingEnabled,
       mappingProvider,
       synthesisProvider,
+      // Auto-open split pane dependencies
+      isSplitOpen,
+      setActiveSplitPanel,
+      hasAutoOpenedPane,
+      setHasAutoOpenedPane,
+      hasAutoWidened,
+      setHasAutoWidened,
+      setSplitPaneRatio,
     ],
   );
 

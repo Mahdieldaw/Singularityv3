@@ -1,3 +1,8 @@
+/**
+ * @deprecated DEPRECATED: Side-by-side card layout removed.
+ * Features migrated to ModelResponsePanel.
+ * Keep for reference until new system verified. Do not extend.
+ */
 // ProviderCard.tsx - Isolated provider card component
 import React, { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { useAtomValue, useAtom, useSetAtom } from "jotai";

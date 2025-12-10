@@ -39,7 +39,13 @@ import {
 import clsx from "clsx";
 import ProviderErrorCard from "./ProviderErrorCard";
 import { useRetryProvider } from "../hooks/useRetryProvider";
-import { providerErrorsAtom, retryableProvidersAtom } from "../state/atoms";
+import {
+  providerErrorsAtom,
+  retryableProvidersAtom,
+  activeAiTurnIdAtom,
+  isLoadingAtom,
+  workflowProgressAtom
+} from "../state/atoms";
 
 // --- Helper Functions ---
 function parseMappingResponse(response?: string | null) {
@@ -238,6 +244,12 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
   const providerErrors = useAtomValue(providerErrorsAtom);
   const retryableProviders = useAtomValue(retryableProvidersAtom);
   const { retryProviders } = useRetryProvider();
+
+  // Streaming UX: determine if this is the active running turn
+  const activeAiTurnId = useAtomValue(activeAiTurnIdAtom);
+  const globalIsLoading = useAtomValue(isLoadingAtom);
+  const workflowProgress = useAtomValue(workflowProgressAtom);
+  const isThisTurnActive = activeAiTurnId === aiTurn.id && globalIsLoading;
 
   const getProviderName = useCallback((pid: string) => {
     const cfg = LLM_PROVIDERS_CONFIG.find(p => String(p.id) === pid);
@@ -1089,10 +1101,14 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                     </div>
                   )}
 
-                  {/* BOTTOM TRAY: Council Orbs + Recompute INSIDE bubble - 28px from bottom */}
+                  {/* BOTTOM TRAY: Council Orbs + Recompute - Positioned BELOW bubble */}
                   <div
-                    className="absolute bottom-0 left-0 right-0 flex flex-col items-center gap-2 z-30 opacity-0 group-hover/turn:opacity-100 focus-within:opacity-100 transition-opacity duration-300 ease-out pointer-events-none"
-                    style={{ paddingBottom: '20px' }}
+                    className={clsx(
+                      "absolute -bottom-14 left-0 right-0 flex flex-col items-center gap-2 z-30 transition-opacity duration-300 ease-out pointer-events-none",
+                      isThisTurnActive
+                        ? "opacity-100"  // Always visible during active round
+                        : "opacity-0 group-hover/turn:opacity-100 focus-within:opacity-100"  // Hover-only for historical
+                    )}
                   >
                     <div className="pointer-events-auto">
                       <CouncilOrbs
@@ -1104,38 +1120,48 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                         // onCrownMove disabled for historical
                         onTrayExpand={() => setIsDecisionMapOpen({ turnId: aiTurn.id })}
                         isTrayExpanded={isDecisionMapOpen?.turnId === aiTurn.id}
-                        variant="historical"
+                        variant={isThisTurnActive ? "active" : "historical"}
+                        workflowProgress={isThisTurnActive ? workflowProgress as any : undefined}
                       />
                     </div>
 
-                    {/* Recompute Button & Dropdown */}
-                    <div className="relative group z-30 pointer-events-auto">
-                      <button
-                        className="flex items-center gap-1.5 px-3 py-1 bg-surface-raised border border-border-subtle rounded-full text-xs font-medium text-text-secondary hover:bg-surface-highlight hover:text-text-primary transition-all shadow-sm"
-                      >
-                        <span className="opacity-70">⚡</span>
-                        <span>Recompute</span>
-                        <ChevronDownIcon className="w-3 h-3 opacity-50" />
-                      </button>
-
-                      {/* Hover/Focus Dropdown */}
-                      <div className="absolute top-full left-1/2 -translate-x-1/2 mt-1 min-w-[160px] bg-surface-raised border border-border-subtle rounded-xl shadow-elevated p-1.5 hidden group-hover:block transition-all animate-in fade-in zoom-in-95 duration-150">
-                        <div className="text-[10px] text-text-muted px-2 py-1 font-medium uppercase tracking-wider">Select Provider</div>
-                        {LLM_PROVIDERS_CONFIG.map(p => (
-                          <button
-                            key={p.id}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              if (onClipClick) onClipClick("synthesis", String(p.id));
-                            }}
-                            className="w-full text-left px-2 py-1.5 rounded-lg text-xs hover:bg-surface-highlight text-text-secondary hover:text-text-primary flex items-center gap-2"
-                          >
-                            <span className={`w-2 h-2 rounded-full`} style={{ backgroundColor: p.color || '#ccc' }} />
-                            {p.name}
-                          </button>
-                        ))}
+                    {/* Hint text for active orbs */}
+                    {isThisTurnActive && (
+                      <div className="text-[11px] text-text-muted opacity-60 pointer-events-none">
+                        Click a glowing orb to see that response
                       </div>
-                    </div>
+                    )}
+
+                    {/* Recompute Button & Dropdown - Only for historical */}
+                    {!isThisTurnActive && (
+                      <div className="relative group z-30 pointer-events-auto">
+                        <button
+                          className="flex items-center gap-1.5 px-3 py-1 bg-surface-raised border border-border-subtle rounded-full text-xs font-medium text-text-secondary hover:bg-surface-highlight hover:text-text-primary transition-all shadow-sm"
+                        >
+                          <span className="opacity-70">⚡</span>
+                          <span>Recompute</span>
+                          <ChevronDownIcon className="w-3 h-3 opacity-50" />
+                        </button>
+
+                        {/* Hover/Focus Dropdown */}
+                        <div className="absolute top-full left-1/2 -translate-x-1/2 mt-1 min-w-[160px] bg-surface-raised border border-border-subtle rounded-xl shadow-elevated p-1.5 hidden group-hover:block transition-all animate-in fade-in zoom-in-95 duration-150">
+                          <div className="text-[10px] text-text-muted px-2 py-1 font-medium uppercase tracking-wider">Select Provider</div>
+                          {LLM_PROVIDERS_CONFIG.map(p => (
+                            <button
+                              key={p.id}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (onClipClick) onClipClick("synthesis", String(p.id));
+                              }}
+                              className="w-full text-left px-2 py-1.5 rounded-lg text-xs hover:bg-surface-highlight text-text-secondary hover:text-text-primary flex items-center gap-2"
+                            >
+                              <span className={`w-2 h-2 rounded-full`} style={{ backgroundColor: p.color || '#ccc' }} />
+                              {p.name}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   {/* Right Arrow Removed */}

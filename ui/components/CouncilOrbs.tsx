@@ -24,12 +24,12 @@ interface CouncilOrbsProps {
 
 // Workflow stage type for progress indicator used by Orbs
 export type WorkflowStage =
-  | 'idle'
-  | 'thinking'
-  | 'streaming'
-  | 'complete'
-  | 'error'
-  | 'synthesizing';
+    | 'idle'
+    | 'thinking'
+    | 'streaming'
+    | 'complete'
+    | 'error'
+    | 'synthesizing';
 
 export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
     turnId,
@@ -250,7 +250,7 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
                 variant === "active" && "council-orb-bar--active"
             )}>
                 {/* Left side orbs */}
-                <div className={clsx("council-orb-group council-orb-group--left") }>
+                <div className={clsx("council-orb-group council-orb-group--left")}>
                     {leftOrbs.map((p) => {
                         const pid = String(p.id);
                         return (
@@ -310,7 +310,7 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
                 </div>
 
                 {/* Right side orbs */}
-                <div className={clsx("council-orb-group council-orb-group--right") }>
+                <div className={clsx("council-orb-group council-orb-group--right")}>
                     {rightOrbs.map((p) => {
                         const pid = String(p.id);
                         return (
@@ -560,6 +560,30 @@ const Orb: React.FC<OrbProps> = ({
     const circumference = 2 * Math.PI * 18; // r=18
     const progressOffset = circumference - (workflowProgress / 100) * circumference;
 
+    // Track stage transitions for per-orb animations
+    const prevStageRef = useRef<WorkflowStage>(workflowStage);
+    const [animationClass, setAnimationClass] = useState<string>('');
+
+    useEffect(() => {
+        const prevStage = prevStageRef.current;
+
+        // Detect "start streaming" transition
+        if (prevStage !== 'streaming' && workflowStage === 'streaming') {
+            setAnimationClass('council-orb--start-pulse');
+            const timer = setTimeout(() => setAnimationClass(''), 600);
+            return () => clearTimeout(timer);
+        }
+
+        // Detect "completion" transition
+        if (prevStage !== 'complete' && workflowStage === 'complete') {
+            setAnimationClass('council-orb--complete-flash');
+            const timer = setTimeout(() => setAnimationClass(''), 500);
+            return () => clearTimeout(timer);
+        }
+
+        prevStageRef.current = workflowStage;
+    }, [workflowStage]);
+
     return (
         <div
             className={clsx(
@@ -630,7 +654,10 @@ const Orb: React.FC<OrbProps> = ({
 
                     // Crown Mode Selection Target
                     isCrownMode && !isVoice && "ring-2 ring-brand-500/50 ring-offset-1 ring-offset-surface cursor-crosshair animate-pulse",
-                    disabled && "opacity-50 cursor-not-allowed"
+                    disabled && "opacity-50 cursor-not-allowed",
+
+                    // Per-orb stage transition animations
+                    animationClass
                 )}
                 style={{
                     '--model-color': primaryColor,

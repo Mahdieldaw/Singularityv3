@@ -8,9 +8,10 @@ import {
   currentSessionIdAtom,
   isSplitOpenAtom,
   activeSplitPanelAtom,
-  isDecisionMapOpenAtom
+  isDecisionMapOpenAtom,
+  splitPaneRatioAtom
 } from "../state/atoms";
-import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
+import { Panel, PanelGroup, PanelResizeHandle, ImperativePanelGroupHandle } from "react-resizable-panels";
 import clsx from "clsx";
 
 import MessageRow from "../components/MessageRow";
@@ -37,6 +38,15 @@ export default function ChatView() {
   const setActiveSplitPanel = useSetAtom(activeSplitPanelAtom);
   const isDecisionMapOpen = useAtomValue(isDecisionMapOpenAtom);
   const setDecisionMapOpen = useSetAtom(isDecisionMapOpenAtom);
+  const splitPaneRatio = useAtomValue(splitPaneRatioAtom);
+  const panelGroupRef = useRef<ImperativePanelGroupHandle>(null);
+
+  // Sync split pane ratio to panel layout (for auto-open/widen)
+  useEffect(() => {
+    if (panelGroupRef.current && isSplitOpen) {
+      panelGroupRef.current.setLayout([splitPaneRatio, 100 - splitPaneRatio]);
+    }
+  }, [splitPaneRatio, isSplitOpen]);
 
   // Smart Defaults
   useSmartProviderDefaults();
@@ -147,17 +157,13 @@ export default function ChatView() {
                 row.classList.remove('shadow-glow-brand-soft');
               }, 1200);
             }
-            // Focus provider card if requested
+            // Focus provider card if requested - open split pane directly
             if (targetProviderId) {
               setTimeout(() => {
-                document.dispatchEvent(
-                  new CustomEvent("htos:scrollToProvider", {
-                    detail: {
-                      aiTurnId: targetTurnId,
-                      providerId: targetProviderId,
-                    },
-                  }),
-                );
+                setActiveSplitPanel({
+                  turnId: targetTurnId,
+                  providerId: targetProviderId
+                });
               }, 120);
             }
           } catch (e) {
@@ -201,7 +207,7 @@ export default function ChatView() {
       {showWelcome ? (
         <WelcomeScreen />
       ) : (
-        <PanelGroup direction="horizontal" className="flex-1">
+        <PanelGroup ref={panelGroupRef} direction="horizontal" className="flex-1">
           {/* LEFT: Main Thread */}
           <Panel defaultSize={60} minSize={35}>
             <Virtuoso
