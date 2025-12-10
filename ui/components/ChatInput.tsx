@@ -26,6 +26,7 @@ import {
   currentRefinementStateAtom,
   messageRefinementMetaAtom,
   synthesisProviderAtom,
+  workflowProgressAtom,
 } from "../state/atoms";
 import { useChat } from "../hooks/useChat";
 import api from "../services/extension-api";
@@ -485,6 +486,7 @@ const ChatInput = ({
   const showAbortBtn = !!onAbort && isLoading;
 
   const providerName = activeTarget ? LLM_PROVIDERS_CONFIG.find(p => p.id === activeTarget.providerId)?.name || activeTarget.providerId : "";
+  const workflowProgress = useAtomValue(workflowProgressAtom);
 
   return (
     <div className="w-full flex justify-center flex-col items-center pointer-events-auto gap-2">
@@ -495,6 +497,7 @@ const ChatInput = ({
           providers={LLM_PROVIDERS_CONFIG}
           voiceProviderId={synthesisProvider || 'claude'}
           variant="active"
+          workflowProgress={workflowProgress as any}
           onCrownMove={(pid) => {
             setSynthesisProvider(pid);
             setProviderLock('synthesis', true);

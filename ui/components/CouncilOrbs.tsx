@@ -1,8 +1,8 @@
-import React, { useState, useCallback, useMemo, useRef } from "react";
+import React, { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import { useAtom, useAtomValue } from "jotai";
 import { providerEffectiveStateFamily, isSplitOpenAtom, synthesisProviderAtom, mappingProviderAtom, composerModelAtom, analystModelAtom, providerAuthStatusAtom, selectedModelsAtom } from "../state/atoms";
 import { LLMProvider } from "../types";
-import { PROVIDER_COLORS } from "../constants";
+import { PROVIDER_COLORS, PROVIDER_ACCENT_COLORS, WORKFLOW_STAGE_COLORS } from "../constants";
 import { getProviderById } from "../providers/providerRegistry";
 import { setProviderLock } from "@shared/provider-locks";
 import clsx from "clsx";
@@ -18,7 +18,18 @@ interface CouncilOrbsProps {
     visibleProviderIds?: string[]; // Optional filter for visible orbs
     variant?: "tray" | "divider" | "welcome" | "historical" | "active";
     isEditMode?: boolean; // When true, auto-open the model selection menu
+    // New: per-provider workflow progress (providerId -> { stage, progress })
+    workflowProgress?: Record<string, { stage: WorkflowStage; progress?: number }>;
 }
+
+// Workflow stage type for progress indicator used by Orbs
+export type WorkflowStage =
+  | 'idle'
+  | 'thinking'
+  | 'streaming'
+  | 'complete'
+  | 'error'
+  | 'synthesizing';
 
 export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
     turnId,
@@ -31,6 +42,7 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
     variant = "tray",
     visibleProviderIds,
     isEditMode = false,
+    workflowProgress = {},
 }) => {
     const [hoveredOrb, setHoveredOrb] = useState<string | null>(null);
     const [isCrownMode, setIsCrownMode] = useState(false);
@@ -234,11 +246,11 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
             {/* Orb bar with centered voice and fanned others */}
             {/* Active variant gets a glass-morphic container for visual separation */}
             <div className={clsx(
-                "council-orb-bar flex items-center justify-center relative transition-all",
-                variant === "active" ? "gap-4 scale-90 bg-surface-raised/80 backdrop-blur-xl border border-white/10 rounded-2xl shadow-xl px-6 py-3" : ""
-            )} style={{ maxWidth: '480px', margin: '0 auto', height: variant === "active" ? 'auto' : '60px' }}>
+                "council-orb-bar flex items-center justify-center relative",
+                variant === "active" && "council-orb-bar--active"
+            )}>
                 {/* Left side orbs */}
-                <div className={clsx("flex items-center justify-end", variant === "active" ? "gap-3" : "gap-[28px]")} style={{ flex: 1, paddingRight: variant === "active" ? '16px' : '40px' }}>
+                <div className={clsx("council-orb-group council-orb-group--left") }>
                     {leftOrbs.map((p) => {
                         const pid = String(p.id);
                         return (
@@ -257,6 +269,8 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
                                 isSelected={variant === "active" ? !!selectedModels[pid] : undefined}
                                 onLongPressStart={() => handleLongPressStart(pid)}
                                 onLongPressCancel={handleLongPressCancel}
+                                workflowStage={workflowProgress[pid]?.stage}
+                                workflowProgress={workflowProgress[pid]?.progress}
                             />
                         );
                     })}
@@ -265,13 +279,10 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
                 {/* CENTER: Voice Orb */}
                 <div
                     className={clsx(
-                        "council-voice-zone relative flex items-center justify-center",
-                        variant !== "divider" && "cursor-pointer"
+                        "council-voice-zone",
+                        variant !== "divider" && variant !== "active" && "cursor-pointer"
                     )}
-                    style={{ width: variant === "active" ? '48px' : '80px', height: variant === "active" ? '48px' : '80px', flexShrink: 0 }}
                     onClick={variant !== "divider" && variant !== "active" ? onTrayExpand : undefined}
-                    onMouseDown={() => handleLongPressStart(String(voiceProviderId))}
-                    onMouseUp={handleLongPressCancel}
                 >
                     {variant !== "active" && <div className="council-glass-ring" />}
 
@@ -290,16 +301,16 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
                             onCrownClick={handleCrownClick}
                             hoveredOrb={hoveredOrb}
                             variant={variant as any}
-                            onLongPressStart={() => handleLongPressStart(String(voiceProviderId))}
-                            onLongPressCancel={handleLongPressCancel}
                             disabled={authStatus && authStatus[String(activeVoiceObj.id)] === false}
                             isSelected={true} // Voice is always selected/active
+                            workflowStage={workflowProgress[String(activeVoiceObj.id)]?.stage}
+                            workflowProgress={workflowProgress[String(activeVoiceObj.id)]?.progress}
                         />
                     )}
                 </div>
 
                 {/* Right side orbs */}
-                <div className={clsx("flex items-center justify-start", variant === "active" ? "gap-3" : "gap-[28px]")} style={{ flex: 1, paddingLeft: variant === "active" ? '16px' : '40px' }}>
+                <div className={clsx("council-orb-group council-orb-group--right") }>
                     {rightOrbs.map((p) => {
                         const pid = String(p.id);
                         return (
@@ -318,6 +329,8 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
                                 isSelected={variant === "active" ? !!selectedModels[pid] : undefined}
                                 onLongPressStart={() => handleLongPressStart(pid)}
                                 onLongPressCancel={handleLongPressCancel}
+                                workflowStage={workflowProgress[pid]?.stage}
+                                workflowProgress={workflowProgress[pid]?.progress}
                             />
                         );
                     })}
@@ -345,9 +358,7 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
 
             {/* Crown Mode Indicator */}
             {isCrownMode && (
-                <div className="absolute -top-10 left-1/2 -translate-x-1/2 bg-surface-raised border border-brand-500 text-brand-500 text-xs px-2 py-1 rounded-md shadow-sm animate-bounce whitespace-nowrap z-50">
-                    Select new voice
-                </div>
+                <div className="council-crown-indicator">Select new voice</div>
             )}
 
             {isMenuOpen && (
@@ -502,6 +513,9 @@ interface OrbProps {
     onLongPressCancel?: () => void;
     disabled?: boolean;
     isSelected?: boolean;
+    // Workflow progress (optional)
+    workflowStage?: WorkflowStage;
+    workflowProgress?: number; // 0-100
 }
 
 const Orb: React.FC<OrbProps> = ({
@@ -517,7 +531,9 @@ const Orb: React.FC<OrbProps> = ({
     onLongPressStart,
     onLongPressCancel,
     disabled = false,
-    isSelected
+    isSelected,
+    workflowStage = 'idle',
+    workflowProgress = 0,
 }) => {
     const pid = String(provider.id);
     const state = useAtomValue(providerEffectiveStateFamily({ turnId, providerId: pid }));
@@ -527,8 +543,10 @@ const Orb: React.FC<OrbProps> = ({
     const hasError = variant !== "active" && state.latestResponse?.status === 'error';
     const isHovered = hoveredOrb === pid;
 
-    // Get model color and logo
-    const modelColor = PROVIDER_COLORS[pid] || PROVIDER_COLORS['default'];
+    // Get colors and logo
+    const primaryColor = PROVIDER_COLORS[pid] || PROVIDER_COLORS['default'];
+    const accentColor = PROVIDER_ACCENT_COLORS[pid] || PROVIDER_ACCENT_COLORS['default'];
+    const stageColor = WORKFLOW_STAGE_COLORS[workflowStage] || WORKFLOW_STAGE_COLORS.idle;
     const providerConfig = getProviderById(pid);
     const logoSrc = providerConfig?.logoSrc || '';
 
@@ -538,28 +556,53 @@ const Orb: React.FC<OrbProps> = ({
 
     // In historical mode, it's always "active" because we filter list upstream vs "active" mode where we show all
 
+    // Progress ring geometry for workflow progress
+    const circumference = 2 * Math.PI * 18; // r=18
+    const progressOffset = circumference - (workflowProgress / 100) * circumference;
+
     return (
-        <div className="relative flex items-center justify-center">
+        <div
+            className={clsx(
+                "council-orb-wrapper",
+                isVoice && "council-orb-wrapper--voice",
+                isActiveVariant && !showAsActive && !isVoice && "council-orb-wrapper--inactive"
+            )}
+        >
             {/* Crown Icon for Voice Provider */}
             {isVoice && (
-                <div
+                <button
+                    type="button"
                     className={clsx(
-                        "absolute z-10 text-[10px] transition-all",
-                        isActiveVariant ? "-top-4" : "-top-3",
-                        // Active Crown: Vibrant, interactive, pulsing
-                        isActiveVariant && !isCrownMode && "text-amber-400 cursor-pointer hover:scale-125 animate-pulse",
-                        // Historical Crown: Muted "relic" state (slate/gray), static, still clickable for context
-                        variant === "historical" && "text-slate-500/50 cursor-default",
-                        // Crown Mode: Highlight selection state
-                        isCrownMode && "text-brand-500 scale-125 animate-pulse cursor-pointer"
+                        "council-crown",
+                        isActiveVariant && !isCrownMode && "council-crown--active",
+                        variant === "historical" && "council-crown--historical",
+                        isCrownMode && "council-crown--selecting"
                     )}
-                    onClick={(e) => {
-                        if (variant !== "historical") onCrownClick(e);
-                    }}
-                    title={variant === "historical" ? "Synthesizer for this turn" : "Current Voice (Click to change)"}
+                    onClick={(e) => { if (variant !== "historical") onCrownClick(e); }}
+                    title={variant === "historical" ? "Synthesizer for this turn" : "Click to change voice"}
                 >
                     👑
-                </div>
+                </button>
+            )}
+
+            {/* Workflow Progress Ring */}
+            {workflowStage !== 'idle' && (
+                <svg className="council-progress-ring" viewBox="0 0 44 44">
+                    <circle cx="22" cy="22" r="18" fill="none" stroke="currentColor" strokeWidth="2" className="opacity-20" />
+                    <circle
+                        cx="22"
+                        cy="22"
+                        r="18"
+                        fill="none"
+                        stroke={stageColor}
+                        strokeWidth="2.5"
+                        strokeLinecap="round"
+                        strokeDasharray={circumference}
+                        strokeDashoffset={progressOffset}
+                        className="council-progress-ring__progress"
+                        style={{ transform: 'rotate(-90deg)', transformOrigin: 'center' }}
+                    />
+                </svg>
             )}
 
             <button
@@ -590,7 +633,9 @@ const Orb: React.FC<OrbProps> = ({
                     disabled && "opacity-50 cursor-not-allowed"
                 )}
                 style={{
-                    '--model-color': modelColor,
+                    '--model-color': primaryColor,
+                    '--orb-color': primaryColor,
+                    '--orb-accent': accentColor,
                     '--rotation': `${Math.random() * 360}deg`,
                     '--logo-src': logoSrc ? `url('${logoSrc}')` : 'none'
                 } as React.CSSProperties}
@@ -599,17 +644,43 @@ const Orb: React.FC<OrbProps> = ({
                 onClick={onClick}
                 onMouseDown={onLongPressStart}
                 onMouseUp={onLongPressCancel}
-            />
+            >
+                {/* Internal orb layers for enhanced visuals */}
+                <div className="council-orb__core" />
+                <div className="council-orb__glow" />
+                <div className="council-orb__spinner" />
+                {logoSrc && (
+                    <div className="council-orb__logo" style={{ backgroundImage: `url('${logoSrc}')` }} />
+                )}
+                {(isStreaming || workflowStage === 'streaming') && <div className="council-orb__pulse" />}
+            </button>
+
+            {/* Workflow Stage Indicator */}
+            {workflowStage !== 'idle' && workflowStage !== 'complete' && (
+                <div className="council-stage-badge" style={{ backgroundColor: stageColor }}>
+                    {workflowStage === 'thinking' && '🤔'}
+                    {workflowStage === 'streaming' && '💬'}
+                    {workflowStage === 'synthesizing' && '✨'}
+                    {workflowStage === 'error' && '⚠️'}
+                </div>
+            )}
 
             {/* Tooltip */}
             {isHovered && (
-                <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 whitespace-nowrap z-20">
-                    <div className="bg-surface-raised border border-border-subtle text-text-primary text-xs px-2 py-1 rounded shadow-lg">
-                        {provider.name}
-                        {variant !== "active" && state.latestResponse?.status === 'streaming' && " (Generating...)"}
-                        {variant !== "active" && state.latestResponse?.status === 'error' && " (Error)"}
-                        {isActiveVariant && !showAsActive && !isVoice && " (Click to Enable)"}
-                    </div>
+                <div className="council-tooltip">
+                    <span className="council-tooltip__name">{provider.name}</span>
+                    {workflowStage !== 'idle' && (
+                        <span className="council-tooltip__stage">
+                            {workflowStage === 'thinking' && 'Processing...'}
+                            {workflowStage === 'streaming' && `Generating (${workflowProgress}%)`}
+                            {workflowStage === 'synthesizing' && 'Synthesizing...'}
+                            {workflowStage === 'complete' && 'Complete'}
+                            {workflowStage === 'error' && 'Error'}
+                        </span>
+                    )}
+                    {isActiveVariant && !showAsActive && !isVoice && (
+                        <span className="council-tooltip__action">Click to enable</span>
+                    )}
                 </div>
             )}
         </div>

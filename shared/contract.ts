@@ -192,6 +192,23 @@ export interface WorkflowCompleteMessage {
   error?: string;
 }
 
+// Real-time workflow progress telemetry for UI (optional but recommended)
+export interface WorkflowProgressMessage {
+  type: 'WORKFLOW_PROGRESS';
+  sessionId: string;
+  aiTurnId: string;
+  phase: 'batch' | 'synthesis' | 'mapping';
+  providerStatuses: Array<{
+    providerId: string;
+    status: 'queued' | 'active' | 'streaming' | 'completed' | 'failed';
+    progress?: number; // 0-100 for streaming providers
+    error?: string;    // message on failure
+  }>;
+  completedCount: number;
+  totalCount: number;
+  estimatedTimeRemaining?: number; // milliseconds
+}
+
 export interface TurnCreatedMessage {
   type: "TURN_CREATED";
   sessionId: string;
@@ -223,6 +240,7 @@ export type PortMessage =
   | PartialResultMessage
   | WorkflowStepUpdateMessage
   | WorkflowCompleteMessage
+  | WorkflowProgressMessage
   | TurnFinalizedMessage
   | TurnCreatedMessage;
 

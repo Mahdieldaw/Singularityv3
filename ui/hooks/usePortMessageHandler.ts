@@ -14,6 +14,7 @@ import {
   mappingProviderAtom,
   synthesisProviderAtom,
   lastActivityAtAtom,
+  workflowProgressAtom,
 } from "../state/atoms";
 import { activeRecomputeStateAtom, lastStreamingProviderAtom } from "../state/atoms";
 import { StreamingBuffer } from "../utils/streamingBuffer";
@@ -73,6 +74,7 @@ export function usePortMessageHandler() {
   const mappingProvider = useAtomValue(mappingProviderAtom);
   const synthesisProvider = useAtomValue(synthesisProviderAtom);
   const setLastActivityAt = useSetAtom(lastActivityAtAtom);
+  const setWorkflowProgress = useSetAtom(workflowProgressAtom);
   // Note: We rely on Jotai's per-atom update serialization; no manual pending cache
 
   const streamingBufferRef = useRef<StreamingBuffer | null>(null);
@@ -710,6 +712,38 @@ export function usePortMessageHandler() {
             if (message.isRecompute) {
               setActiveRecomputeState(null);
             }
+          }
+          break;
+        }
+
+        case "WORKFLOW_PROGRESS": {
+          try {
+            const { providerStatuses, phase } = message as any;
+            const mapStatusToStage = (
+              status: 'queued' | 'active' | 'streaming' | 'completed' | 'failed',
+              phase: 'batch' | 'synthesis' | 'mapping'
+            ) => {
+              if (status === 'queued') return 'idle';
+              if (status === 'active') return phase === 'synthesis' ? 'synthesizing' : 'thinking';
+              if (status === 'streaming') return 'streaming';
+              if (status === 'completed') return 'complete';
+              if (status === 'failed') return 'error';
+              return 'idle';
+            };
+            if (Array.isArray(providerStatuses)) {
+              const progressMap: Record<string, { stage: string; progress?: number; error?: string }> = {};
+              for (const ps of providerStatuses) {
+                const pid = String(ps.providerId);
+                progressMap[pid] = {
+                  stage: mapStatusToStage(ps.status, phase),
+                  progress: typeof ps.progress === 'number' ? ps.progress : undefined,
+                  error: ps.error,
+                };
+              }
+              setWorkflowProgress(progressMap as any);
+            }
+          } catch (e) {
+            console.warn('[Port] Failed to process WORKFLOW_PROGRESS', e);
           }
           break;
         }

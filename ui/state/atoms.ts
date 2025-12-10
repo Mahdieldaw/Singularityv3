@@ -463,3 +463,24 @@ export const launchpadOpenAtom = atom<boolean>(false);
 
 export const showLaunchpadTabAtom = atom((get) => get(launchpadDraftsAtom).length > 0);
 
+// =============================================================================
+// Workflow Progress (for Council Orbs UI)
+// =============================================================================
+
+export type WorkflowStage =
+  | 'idle'
+  | 'thinking'
+  | 'streaming'
+  | 'complete'
+  | 'error'
+  | 'synthesizing';
+
+export interface ProviderWorkflowState {
+  stage: WorkflowStage;
+  progress?: number; // 0-100
+  error?: string;
+}
+
+// ProviderId -> { stage, progress }
+export const workflowProgressAtom = atom<Record<string, ProviderWorkflowState>>({});
+
