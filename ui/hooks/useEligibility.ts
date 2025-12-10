@@ -2,7 +2,7 @@
 import { useMemo, useCallback } from "react";
 import { useAtomValue } from "jotai";
 import { messagesAtom } from "../state/atoms";
-import type { AiTurn, UserTurn } from "..";
+import type { AiTurn, UserTurn } from "../types";
 
 export interface EligibilityMap {
   synthMap: Record<string, { disabled: boolean; reason?: string }>;

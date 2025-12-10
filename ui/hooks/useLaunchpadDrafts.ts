@@ -1,7 +1,7 @@
 import { useAtom, useSetAtom } from "jotai";
 import { useCallback } from "react";
 import { launchpadDraftsAtom, launchpadOpenAtom } from "../state/atoms";
-import type { LaunchpadDraft } from "..";
+import type { LaunchpadDraft } from "../types";
 
 export function useLaunchpadDrafts() {
     const [drafts, setDrafts] = useAtom(launchpadDraftsAtom);

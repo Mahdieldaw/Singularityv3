@@ -11,7 +11,7 @@ import {
   REFRESH_AUTH_STATUS,
 } from "../../shared/messaging";
 
-import type { HistorySessionSummary, HistoryApiResponse } from "..";
+import type { HistorySessionSummary, HistoryApiResponse } from "../types";
 import type { PrimitiveWorkflowRequest } from "../../shared/contract";
 import { PortHealthManager } from "./port-health-manager";
 

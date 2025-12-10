@@ -1054,23 +1054,25 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
 
                   {/* BOTTOM TRAY: Council Orbs + Recompute INSIDE bubble - 28px from bottom */}
                   <div
-                    className="absolute bottom-0 left-0 right-0 flex flex-col items-center gap-2 z-30 opacity-0 group-hover/turn:opacity-100 focus-within:opacity-100 transition-opacity duration-300 ease-out pointer-events-auto"
+                    className="absolute bottom-0 left-0 right-0 flex flex-col items-center gap-2 z-30 opacity-0 group-hover/turn:opacity-100 focus-within:opacity-100 transition-opacity duration-300 ease-out pointer-events-none"
                     style={{ paddingBottom: '20px' }}
                   >
-                    <CouncilOrbs
-                      turnId={aiTurn.id}
-                      providers={LLM_PROVIDERS_CONFIG}
-                      voiceProviderId={displayedVoicePid}
-                      visibleProviderIds={visibleProviderIds}
-                      onOrbClick={(pid) => setActiveSplitPanel({ turnId: aiTurn.id, providerId: pid })}
-                      // onCrownMove disabled for historical
-                      onTrayExpand={() => setIsDecisionMapOpen({ turnId: aiTurn.id })}
-                      isTrayExpanded={isDecisionMapOpen?.turnId === aiTurn.id}
-                      variant="historical"
-                    />
+                    <div className="pointer-events-auto">
+                      <CouncilOrbs
+                        turnId={aiTurn.id}
+                        providers={LLM_PROVIDERS_CONFIG}
+                        voiceProviderId={displayedVoicePid}
+                        visibleProviderIds={visibleProviderIds}
+                        onOrbClick={(pid) => setActiveSplitPanel({ turnId: aiTurn.id, providerId: pid })}
+                        // onCrownMove disabled for historical
+                        onTrayExpand={() => setIsDecisionMapOpen({ turnId: aiTurn.id })}
+                        isTrayExpanded={isDecisionMapOpen?.turnId === aiTurn.id}
+                        variant="historical"
+                      />
+                    </div>
 
                     {/* Recompute Button & Dropdown */}
-                    <div className="relative group z-30">
+                    <div className="relative group z-30 pointer-events-auto">
                       <button
                         className="flex items-center gap-1.5 px-3 py-1 bg-surface-raised border border-border-subtle rounded-full text-xs font-medium text-text-secondary hover:bg-surface-highlight hover:text-text-primary transition-all shadow-sm"
                       >

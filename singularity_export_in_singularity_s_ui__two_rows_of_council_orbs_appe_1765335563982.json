@@ -1,0 +1,26 @@
+{
+  "version": "1.0",
+  "exportedAt": 1765335563982,
+  "session": {
+    "id": "session-1765068369069-sxaxei",
+    "title": "In Singularity’s UI, two rows of council orbs appe",
+    "sessionId": "session-1765068369069-sxaxei",
+    "turns": [
+      {
+        "role": "user",
+        "timestamp": 1765335563982,
+        "content": "Unknown turn type"
+      },
+      {
+        "role": "user",
+        "timestamp": 1765335563982,
+        "content": "Unknown turn type"
+      },
+      {
+        "role": "user",
+        "timestamp": 1765335563982,
+        "content": "Unknown turn type"
+      }
+    ]
+  }
+}

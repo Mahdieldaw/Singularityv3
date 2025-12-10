@@ -222,3 +222,84 @@ export function applyStreamingUpdates(
     }
   });
 }
+
+/**
+ * Transforms raw backend "rounds" (from fullSession.turns) into normalized UserTurn/AiTurn objects
+ * mirroring the logic in useChat.ts selectChat
+ */
+export function normalizeBackendRoundsToTurns(
+  rawTurns: any[],
+  sessionId: string
+): Array<UserTurn | AiTurn> {
+  if (!rawTurns) return [];
+  const normalized: Array<UserTurn | AiTurn> = [];
+
+  rawTurns.forEach((round: any) => {
+    // 1. Extract UserTurn
+    if (round.user && round.user.text) {
+      const userTurn: UserTurn = {
+        type: "user",
+        id: round.userTurnId || round.user.id || `user-${round.createdAt}`,
+        text: round.user.text,
+        createdAt: round.user.createdAt || round.createdAt || Date.now(),
+        sessionId: sessionId,
+      };
+      normalized.push(userTurn);
+    }
+
+    // 2. Extract AiTurn
+    const providers = round.providers || {};
+    const hasProviderData = Object.keys(providers).length > 0;
+
+    if (hasProviderData) {
+      // Transform providers object to batchResponses (arrays per provider)
+      const batchResponses: Record<string, ProviderResponse[]> = {};
+      Object.entries(providers).forEach(([providerId, data]: [string, any]) => {
+        const arr: ProviderResponse[] = Array.isArray(data)
+          ? (data as ProviderResponse[])
+          : [
+            {
+              providerId: providerId as ProviderKey,
+              text: (data?.text as string) || "",
+              status: "completed",
+              createdAt: round.completedAt || round.createdAt || Date.now(),
+              updatedAt: round.completedAt || round.createdAt || Date.now(),
+              meta: data?.meta || {},
+            },
+          ];
+        batchResponses[providerId] = arr;
+      });
+
+      // Normalize synthesis/mapping responses to arrays
+      const normalizeSynthMap = (
+        raw: any
+      ): Record<string, ProviderResponse[]> => {
+        if (!raw) return {};
+        const result: Record<string, ProviderResponse[]> = {};
+        Object.entries(raw).forEach(([pid, val]: [string, any]) => {
+          if (Array.isArray(val)) {
+            result[pid] = val;
+          } else {
+            result[pid] = [val];
+          }
+        });
+        return result;
+      };
+
+      const aiTurn: AiTurn = {
+        type: "ai",
+        id: round.aiTurnId || `ai-${round.completedAt || Date.now()}`,
+        userTurnId: round.userTurnId,
+        sessionId: sessionId,
+        threadId: "default-thread",
+        createdAt: round.completedAt || round.createdAt || Date.now(),
+        batchResponses,
+        synthesisResponses: normalizeSynthMap(round.synthesisResponses),
+        mappingResponses: normalizeSynthMap(round.mappingResponses),
+      };
+      normalized.push(aiTurn);
+    }
+  });
+
+  return normalized;
+}

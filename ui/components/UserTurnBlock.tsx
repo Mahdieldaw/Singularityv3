@@ -1,20 +1,16 @@
-import React, { useState, useCallback } from "react";
-import { UserTurn } from "..";
+import React, { useCallback } from "react";
+import { useAtom } from "jotai";
+import { turnExpandedStateFamily } from "../state/atoms";
+import { UserTurn } from "../types";
 import { UserIcon, ChevronDownIcon, ChevronUpIcon } from "./Icons";
 import MarkdownDisplay from "./MarkdownDisplay";
+import { CopyButton } from "./CopyButton";
 import clsx from "clsx";
 
-import { useSetAtom, useAtom } from "jotai";
-import { toastAtom, turnExpandedStateFamily } from "../state/atoms";
-
-import { CopyButton } from "./CopyButton";
 
 interface UserTurnBlockProps {
   userTurn: UserTurn;
-  // Props removed
 
-  // Note: All props related to the action bar have been removed.
-  // The UserTurnBlock is now a pure display component for the prompt.
 }
 
 const UserTurnBlock = ({

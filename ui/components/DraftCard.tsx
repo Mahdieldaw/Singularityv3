@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from "react";
 import { cn } from "../utils/cn";
-import type { LaunchpadDraft } from "..";
+import type { LaunchpadDraft } from "../types";
 
 interface DraftCardProps {
     draft: LaunchpadDraft;

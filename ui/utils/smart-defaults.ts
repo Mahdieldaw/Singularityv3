@@ -1,4 +1,4 @@
-import { LLMProvider } from "..";
+import { LLMProvider } from "../types";
 
 // Priority list for Synthesis (Single Speaker)
 // Claude as strongest, gemini 3.0 exp next in line, then Qwen, Then gemini 2.5 pro, then chatgpt, then gemini default

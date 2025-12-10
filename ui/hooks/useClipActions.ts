@@ -2,7 +2,7 @@ import { useCallback } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
 import { turnsMapAtom, alertTextAtom, synthesisProviderAtom, mappingProviderAtom } from "../state/atoms";
 import { useRoundActions } from "./useRoundActions";
-import type { AiTurn } from "..";
+import type { AiTurn } from "../types";
 import { PRIMARY_STREAMING_PROVIDER_IDS } from "../constants";
 
 export function useClipActions() {

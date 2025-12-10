@@ -119,6 +119,127 @@ export function formatTurnForMd(
     return md;
 }
 
+export function formatSessionForMarkdown(fullSession: { title: string, turns: TurnMessage[] }): string {
+    let md = `# Session Title: ${fullSession.title}\n\n`;
+
+    // We iterate through turns. We need to pair User + AI turn if possible, or just dump them.
+    // The turn structure is linear: User -> AI -> User -> AI.
+    // Sometimes User -> User (if error/retry) or AI -> AI (unlikely).
+
+    // A simple robust way is just to iterate.
+    // However, AiTurn contains batch/synth/map which are reactions to the *preceding* user turn.
+    // formatTurnForMd is designed to take pieces.
+
+    // Let's iterate and process each AiTurn, looking back for its UserTurn if needed, OR just render sequentially.
+    // Actually formatTurnForMd seems to be designed to render a "Round".
+
+    let lastUserTurn: UserTurn | null = null;
+
+    fullSession.turns.forEach(turn => {
+        if (isUserTurn(turn)) {
+            lastUserTurn = turn;
+            // We don't render immediately? Or do we?
+            // If we render immediately, we might duplicate if AiTurn also renders it.
+            // But formatTurnForMd takes `userPrompt`.
+            // Let's assume we render "Rounds" keyed by AiTurn.
+            // But what if there is no AiTurn (last turn is user)?
+            // We should render it.
+        } else if (isAiTurn(turn)) {
+            // Found AI turn. Render the pair.
+            const aiTurn = turn as AiTurn;
+
+            // Resolve effective user prompt
+            // If aiTurn.userTurnId matches lastUserTurn.id, use that.
+            // Else find it? (But we just have the array here).
+            let userPrompt = null;
+            if (lastUserTurn && lastUserTurn.id === aiTurn.userTurnId) {
+                userPrompt = lastUserTurn.text;
+                lastUserTurn = null; // Mark as consumed
+            } else {
+                // Fallback: try to find in array? Or just ignore?
+                // If we missed the user turn (e.g. it was consumed by previous AI turn?? No, 1:1 usually)
+                // If the array is ordered, we likely saw it.
+            }
+
+            // Extract Synthesis
+            let synthesisText = null;
+            let synthesisProviderId = undefined;
+            let decisionMap = null;
+
+            // Synthesis
+            const synthPid = (aiTurn.meta as any)?.synthesizer;
+            const synthResponses = aiTurn.synthesisResponses || {};
+            let targetSynthPid = synthPid;
+            if (!targetSynthPid) {
+                targetSynthPid = Object.keys(synthResponses).find(pid => {
+                    const arr = synthResponses[pid];
+                    return Array.isArray(arr) && arr.some(r => r.text);
+                });
+            }
+            if (targetSynthPid && synthResponses[targetSynthPid]) {
+                const resps = synthResponses[targetSynthPid];
+                const latest = Array.isArray(resps) ? resps[resps.length - 1] : resps;
+                if (latest && latest.text) {
+                    synthesisText = latest.text;
+                    synthesisProviderId = targetSynthPid;
+                }
+            }
+
+            // Decision Map
+            const mapPid = (aiTurn.meta as any)?.mapper;
+            const mapResponses = aiTurn.mappingResponses || {};
+            let targetMapPid = mapPid;
+            if (!targetMapPid) {
+                targetMapPid = Object.keys(mapResponses).find(pid => {
+                    const arr = mapResponses[pid];
+                    return Array.isArray(arr) && arr.some(r => r.text);
+                });
+            }
+            if (targetMapPid && mapResponses[targetMapPid]) {
+                const resps = mapResponses[targetMapPid];
+                const latest = Array.isArray(resps) ? resps[resps.length - 1] : resps;
+                if (latest && latest.text) {
+                    const meta = (latest as any).meta || {};
+                    decisionMap = {
+                        narrative: latest.text,
+                        options: meta.allAvailableOptions || null,
+                        topology: meta.graphTopology || null
+                    };
+                }
+            }
+
+            // Batch Responses (flatten to single latest)
+            const batchResponses: Record<string, ProviderResponse> = {};
+            Object.entries(aiTurn.batchResponses || {}).forEach(([pid, val]) => {
+                const arr = Array.isArray(val) ? val : [val];
+                const latest = arr[arr.length - 1]; // ProviderResponse
+                if (latest) {
+                    batchResponses[pid] = latest;
+                }
+            });
+
+
+            md += formatTurnForMd(
+                aiTurn.id,
+                userPrompt,
+                synthesisText,
+                synthesisProviderId,
+                decisionMap,
+                batchResponses,
+                !!userPrompt // include prompt if we found it
+            );
+            md += "\n---\n\n";
+        }
+    });
+
+    // If there's a dangling user turn at the end (no AI response yet)
+    if (lastUserTurn) {
+        md += `## User\n\n${(lastUserTurn as UserTurn).text}\n\n`;
+    }
+
+    return md;
+}
+
 // ============================================================================
 // JSON EXPORT UTILITIES (SAF - Singularity Archive Format)
 // ============================================================================
@@ -161,13 +282,26 @@ interface SanitizedAiTurn {
         text: string;
         modelName?: string;
     }[];
+    // Internal/Sensitive data (Only included in 'full' mode)
+    providerContexts?: Record<string, any>;
+    batchResponses?: Record<string, ProviderResponse[]>; // Full history if needed? The spec says "councilMemberOutputs" which is flat.
+    // Actually, for "Full Backup", we should probably include the RAW turn object or a richer structure?
+    // But the user asked for "providerContexts" specifically to be resumable.
+    // And "isOptimistic", etc.
+    meta?: any;
 }
 
 /**
  * Sanitizes a full session payload for export.
  * STRICTLY WHITELISTS fields to prevent leaking of providerContexts, cursors, or tokens.
+ * 
+ * @param fullSession The session data with normalized turns
+ * @param mode 'safe' (default) removes sensitive data; 'full' preserves it for backup.
  */
-export function sanitizeSessionForExport(fullSession: FullSessionPayload): SingularityExport {
+export function sanitizeSessionForExport(
+    fullSession: { id: string, title: string, sessionId: string, turns: TurnMessage[] },
+    mode: 'safe' | 'full' = 'safe'
+): SingularityExport {
     const sanitizedTurns: SanitizedTurn[] = fullSession.turns.map(turn => {
         if (isUserTurn(turn)) {
             return {
@@ -180,16 +314,11 @@ export function sanitizeSessionForExport(fullSession: FullSessionPayload): Singu
         if (isAiTurn(turn)) {
             // 1. Extract Synthesis
             let synthesis: SanitizedAiTurn['synthesis'] | undefined;
-            // We need to determine WHICH synthesis was "active".
-            // For export, we might just look at metadata or take the first completed.
-            // Let's rely on metadata if present, else scan.
             const synthPid = (turn.meta as any)?.synthesizer;
             const synthResponses = turn.synthesisResponses || {};
 
-            // Default to the one in meta, or the first one we find
             let targetSynthPid = synthPid;
             if (!targetSynthPid) {
-                // Find first with text
                 targetSynthPid = Object.keys(synthResponses).find(pid => {
                     const arr = synthResponses[pid];
                     return Array.isArray(arr) && arr.some(r => r.text);
@@ -203,7 +332,6 @@ export function sanitizeSessionForExport(fullSession: FullSessionPayload): Singu
                     synthesis = {
                         providerId: targetSynthPid,
                         text: latest.text,
-                        // We don't have strict modelName stored in response usually, but maybe in providerContext (which we don't access here per turn)
                     };
                 }
             }
@@ -223,21 +351,12 @@ export function sanitizeSessionForExport(fullSession: FullSessionPayload): Singu
 
             if (targetMapPid && mapResponses[targetMapPid]) {
                 const resps = mapResponses[targetMapPid];
-                const latest = Array.isArray(resps) ? resps[resps.length - 1] : resps; // as ProviderResponse
+                const latest = Array.isArray(resps) ? resps[resps.length - 1] : resps;
                 if (latest && latest.text) {
-                    // We need to parse it to get clean narrative vs options vs topology?
-                    // The JSON spec asks for narrative, optionsList, graphTopology.
-                    // We can try to use the meta if available, or just raw text if not parsed yet.
-                    // Ideally we re-use the parsing logic, but simpler is safer:
-                    // If we have meta options/topology, use them.
                     const meta = (latest as any).meta || {};
-
                     decisionMap = {
                         providerId: targetMapPid,
-                        narrative: latest.text, // Warning: this is full text. Ideally we strip options?
-                        // For "System Restore", raw text + explicit fields is best.
-                        // Current UI displays "narrative" as just the text. 
-                        // Let's keep text as narrative for now to be safe and lossless.
+                        narrative: latest.text,
                         options: meta.allAvailableOptions || null,
                         graphTopology: meta.graphTopology || null
                     };
@@ -258,13 +377,32 @@ export function sanitizeSessionForExport(fullSession: FullSessionPayload): Singu
                 }
             });
 
-            return {
+            const base: SanitizedAiTurn = {
                 role: "council",
-                timestamp: (turn as any).createdAt || Date.now(), // AiTurn interface in contract doesn't force createdAt, check persistence
+                timestamp: (turn as any).createdAt || Date.now(),
                 synthesis,
                 decisionMap,
                 councilMemberOutputs
-            } as SanitizedAiTurn;
+            };
+
+            if (mode === 'full') {
+                // In full mode, we attach extra metadata for valid resumption
+                // We might want to pass through the original 'turn' mostly intact, 
+                // but let's stick to the schema and add fields.
+                base.meta = turn.meta;
+                // Provider contexts are usually stored at the session level, not turn level?
+                // Wait, `FullSessionPayload` has `providerContexts`.
+                // The `AiTurn` has `providerContexts` in persistence but maybe not in UI type?
+                // Contract AiTurn doesn't have it.
+                // Persistence AiTurnRecord HAS it.
+
+                // If the UI turn object has it (it might satisfy the index signature or be missing types), we include it.
+                if ((turn as any).providerContexts) {
+                    base.providerContexts = (turn as any).providerContexts;
+                }
+            }
+
+            return base;
         }
 
         // Fallback for unknown turn types
@@ -275,7 +413,7 @@ export function sanitizeSessionForExport(fullSession: FullSessionPayload): Singu
         } as SanitizedUserTurn;
     });
 
-    return {
+    const exportObj: SingularityExport = {
         version: "1.0",
         exportedAt: Date.now(),
         session: {
@@ -285,4 +423,11 @@ export function sanitizeSessionForExport(fullSession: FullSessionPayload): Singu
             turns: sanitizedTurns
         }
     };
+
+    // If Full Backup, include top-level provider contexts
+    if (mode === 'full' && (fullSession as any).providerContexts) {
+        (exportObj.session as any).providerContexts = (fullSession as any).providerContexts;
+    }
+
+    return exportObj;
 }

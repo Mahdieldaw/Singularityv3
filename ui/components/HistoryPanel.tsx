@@ -9,9 +9,10 @@ import {
 } from "../state/atoms";
 import { useChat } from "../hooks/useChat";
 import api from "../services/extension-api";
-import { sanitizeSessionForExport } from "../utils/copy-format-utils";
+import { normalizeBackendRoundsToTurns } from "../utils/turn-helpers";
+import { formatSessionForMarkdown, sanitizeSessionForExport } from "../utils/copy-format-utils";
 import logoIcon from "../assets/logos/logo-icon.svg";
-import { PlusIcon, TrashIcon, EllipsisHorizontalIcon } from "./Icons";
+import { PlusIcon, TrashIcon, EllipsisHorizontalIcon, ChevronRightIcon } from "./Icons";
 import { HistorySessionSummary } from "../types";
 
 const RenameDialog = React.lazy(() => import("./RenameDialog"));
@@ -35,6 +36,7 @@ export default function HistoryPanel() {
   const [renameDefaultTitle, setRenameDefaultTitle] = useState<string>("");
   const [isRenaming, setIsRenaming] = useState<boolean>(false);
   const [activeMenuId, setActiveMenuId] = React.useState<string | null>(null);
+  const [showExportSubmenu, setShowExportSubmenu] = useState<string | null>(null);
 
   useEffect(() => {
     const handleClickOutside = () => setActiveMenuId(null);
@@ -224,21 +226,40 @@ export default function HistoryPanel() {
     }
   };
 
-  const handleExportChat = async (sessionId: string) => {
+  const handleExportChat = async (sessionId: string, format: 'json-safe' | 'json-full' | 'markdown') => {
     try {
       const sessionPayload = await api.getSession(sessionId);
       if (!sessionPayload) throw new Error("Could not fetch session data");
 
-      const exportData = sanitizeSessionForExport(sessionPayload);
-      const jsonString = JSON.stringify(exportData, null, 2);
+      // Normalize the raw backend rounds to proper TurnMessage[]
+      const normalizedTurns = normalizeBackendRoundsToTurns(sessionPayload.turns || [], sessionId);
+      const normalizedSession = {
+        ...sessionPayload,
+        turns: normalizedTurns
+      };
 
-      const blob = new Blob([jsonString], { type: "application/json" });
+      let blob: Blob;
+      let filename: string;
+
+      if (format === 'markdown') {
+        const markdown = formatSessionForMarkdown(normalizedSession);
+        blob = new Blob([markdown], { type: "text/markdown" });
+        filename = `singularity_export_${(normalizedSession.title || "session").replace(/[^a-z0-9]/gi, '_').toLowerCase()}.md`;
+      } else {
+        const mode = format === 'json-full' ? 'full' : 'safe';
+        const exportData = sanitizeSessionForExport(normalizedSession, mode);
+        const jsonString = JSON.stringify(exportData, null, 2);
+        blob = new Blob([jsonString], { type: "application/json" });
+
+        const safeTitle = (exportData.session.title || "session").replace(/[^a-z0-9]/gi, '_').toLowerCase();
+        const suffix = format === 'json-full' ? '_backup' : '';
+        filename = `singularity_export_${safeTitle}${suffix}_${exportData.exportedAt}.json`;
+      }
+
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-
-      const safeTitle = (exportData.session.title || "session").replace(/[^a-z0-9]/gi, '_').toLowerCase();
-      link.download = `singularity_export_${safeTitle}_${exportData.exportedAt}.json`;
+      link.download = filename;
 
       document.body.appendChild(link);
       link.click();
@@ -413,16 +434,55 @@ export default function HistoryPanel() {
                               >
                                 <span className="text-xs">✏️</span> Rename
                               </button>
-                              <button
-                                className="text-left px-3 py-2 text-sm hover:bg-surface-highlight text-text-primary flex items-center gap-2 transition-colors"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleExportChat(session.sessionId);
-                                  setActiveMenuId(null);
-                                }}
+                              <div
+                                className="relative group"
+                                onMouseEnter={() => setShowExportSubmenu(session.sessionId)}
+                                onMouseLeave={() => setShowExportSubmenu(null)}
                               >
-                                <span className="text-xs">💾</span> Export JSON
-                              </button>
+                                <button
+                                  className="w-full text-left px-3 py-2 text-sm hover:bg-surface-highlight text-text-primary flex items-center justify-between transition-colors"
+                                >
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-xs">💾</span> Export
+                                  </div>
+                                  <ChevronRightIcon className="w-4 h-4 text-text-muted" />
+                                </button>
+
+                                {showExportSubmenu === session.sessionId && (
+                                  <div className="absolute left-full top-0 ml-1 w-48 bg-surface-raised border border-border-subtle rounded-lg shadow-lg overflow-hidden flex flex-col py-1 z-30">
+                                    <button
+                                      className="text-left px-3 py-2 text-sm hover:bg-surface-highlight text-text-primary transition-colors"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleExportChat(session.sessionId, 'json-safe');
+                                        setActiveMenuId(null);
+                                      }}
+                                    >
+                                      JSON (Safe)
+                                    </button>
+                                    <button
+                                      className="text-left px-3 py-2 text-sm hover:bg-surface-highlight text-text-primary transition-colors"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleExportChat(session.sessionId, 'json-full');
+                                        setActiveMenuId(null);
+                                      }}
+                                    >
+                                      JSON (Full Backup)
+                                    </button>
+                                    <button
+                                      className="text-left px-3 py-2 text-sm hover:bg-surface-highlight text-text-primary transition-colors"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleExportChat(session.sessionId, 'markdown');
+                                        setActiveMenuId(null);
+                                      }}
+                                    >
+                                      Markdown
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
                               <button
                                 className={`text-left px-3 py-2 text-sm hover:bg-intent-danger/10 text-intent-danger flex items-center gap-2 transition-colors ${!!deletingIds &&
                                   (deletingIds as Set<string>).has(session.sessionId)
