@@ -61,6 +61,11 @@ const ChatInput = ({
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const isHistoryPanelOpen = !!isHistoryOpen; // Kept for prop parity if needed locally
 
+  // --- PRESENTATION LOGIC HOISTED ---
+  const CHAT_INPUT_STORAGE_KEY = "htos_chat_input_value";
+  const [prompt, setPrompt] = useAtom(chatInputValueAtom);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+
   const [isRefinerOpen, setIsRefinerOpen] = useAtom(isRefinerOpenAtom);
   const [refinerData, setRefinerData] = useAtom(refinerDataAtom);
   const [hasRejectedRefinement, setHasRejectedRefinement] = useAtom(hasRejectedRefinementAtom);
@@ -212,9 +217,7 @@ const ChatInput = ({
 
 
   // --- PRESENTATION LOGIC ---
-  const CHAT_INPUT_STORAGE_KEY = "htos_chat_input_value";
-  const [prompt, setPrompt] = useAtom(chatInputValueAtom);
-  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  // (prompt and textareaRef hoisted above to fix closure access)
 
   // Long-press state
   const [showMenu, setShowMenu] = useState(false);
@@ -733,9 +736,13 @@ const ChatInput = ({
           </div>
         )}
 
-        {isRefinerOpen && refinerContent && (
+        {isRefinerOpen && (
           <div className="w-full mt-3">
-            {refinerContent}
+            <RefinerBlock
+              showAudit={showAudit}
+              showVariants={showVariants}
+              showExplanation={showExplanation}
+            />
           </div>
         )}
 
@@ -745,7 +752,7 @@ const ChatInput = ({
             {/* Revert link - shown when we have an original prompt saved */}
             {originalPrompt && currentRefinementState && (
               <button
-                onClick={handleRevert}
+                onClick={onRevert}
                 className="text-text-muted hover:text-text-secondary transition-colors opacity-60 hover:opacity-100"
               >
                 ↩ Revert to original
@@ -755,7 +762,7 @@ const ChatInput = ({
             {/* Composer draft chip - shown after reverting */}
             {composerDraft && !currentRefinementState && (
               <button
-                onClick={handleApplyDraft}
+                onClick={onApplyDraft}
                 className="flex items-center gap-1 px-2 py-1 bg-brand-500/10 border border-brand-500/30 rounded-md text-brand-400 hover:bg-brand-500/20 transition-all"
               >
                 <span className="text-[10px]">✦</span>
@@ -770,9 +777,9 @@ const ChatInput = ({
       <AnalystDrawer
         onPerfectThis={onPerfectThis}
         onUseVariant={onUseVariant}
-        isOpen={analystDrawerOpen}
-        onClose={() => setAnalystDrawerOpen(false)}
       />
     </div>
   );
 };
+
+export default ChatInput;

@@ -1,12 +1,13 @@
 import React, { useMemo } from "react";
 import { atom, useAtomValue } from "jotai";
+import { selectAtom } from "jotai/utils";
 import { turnsMapAtom } from "../state/atoms";
 import UserTurnBlock from "./UserTurnBlock";
 import AiTurnBlock from "./AiTurnBlock";
 
 function MessageRow({ turnId }: { turnId: string }) {
   const turnAtom = useMemo(
-    () => atom((get) => get(turnsMapAtom).get(turnId)),
+    () => selectAtom(turnsMapAtom, (map) => map.get(turnId)),
     [turnId],
   );
   const message = useAtomValue(turnAtom);

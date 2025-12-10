@@ -1,12 +1,14 @@
 import React from "react";
+import { useAtom } from "jotai";
+import { alertTextAtom } from "../state/atoms";
 
-interface BannerProps {
-  text: string;
-  onClose: () => void;
-  onOpen?: () => void;
-}
+const Banner: React.FC = () => {
+  const [alertText, setAlertText] = useAtom(alertTextAtom as any);
+  if (!alertText) return null;
 
-const Banner: React.FC<BannerProps> = ({ text, onClose, onOpen }) => {
+  const handleClose = () => setAlertText(null);
+  const text = String(alertText);
+
   return (
     <div
       role="status"
@@ -15,16 +17,8 @@ const Banner: React.FC<BannerProps> = ({ text, onClose, onOpen }) => {
     >
       <span className="text-xs leading-snug">{text}</span>
       <div className="ml-auto flex gap-2">
-        {onOpen && (
-          <button
-            onClick={onOpen}
-            className="bg-chip-soft text-text-secondary border border-border-subtle rounded-md px-2 py-1 text-xs cursor-pointer hover:bg-surface-highlight transition-colors"
-          >
-            Open
-          </button>
-        )}
         <button
-          onClick={onClose}
+          onClick={handleClose}
           aria-label="Close notice"
           className="bg-transparent text-text-muted border border-border-subtle rounded-md px-2 py-1 text-xs cursor-pointer hover:bg-surface-highlight hover:text-text-secondary transition-colors"
         >

@@ -1,4 +1,4 @@
-import { AiTurn, GraphTopology, ProviderResponse, UserTurn, TurnMessage, isUserTurn, isAiTurn, HistorySessionSummary, FullSessionPayload } from "..";
+import { AiTurn, GraphTopology, ProviderResponse, UserTurn, TurnMessage, isUserTurn, isAiTurn, HistorySessionSummary, FullSessionPayload } from "../types";
 import { LLM_PROVIDERS_CONFIG } from "../constants";
 
 // ============================================================================

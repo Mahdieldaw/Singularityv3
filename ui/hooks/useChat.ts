@@ -43,7 +43,7 @@ import type {
   UserTurn,
   AiTurn,
   ProviderResponse,
-} from "..";
+} from "../types";
 
 export function useChat() {
   // Reads
@@ -302,7 +302,7 @@ export function useChat() {
                         round.completedAt || round.createdAt || Date.now(),
                       updatedAt:
                         round.completedAt || round.createdAt || Date.now(),
-                      meta: (data?.meta as any) || {},
+                      meta: data?.meta || {},
                     },
                   ];
                 batchResponses[providerId] = arr;

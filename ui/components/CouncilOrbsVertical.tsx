@@ -2,6 +2,7 @@ import React, { useState, useMemo } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
 import { activeSplitPanelAtom, providerEffectiveStateFamily, turnsMapAtom } from "../state/atoms";
 import { LLM_PROVIDERS_CONFIG } from "../constants";
+import type { AiTurn } from "../types";
 import clsx from "clsx";
 
 interface CouncilOrbsVerticalProps {
@@ -27,14 +28,12 @@ export const CouncilOrbsVertical: React.FC<CouncilOrbsVerticalProps> = React.mem
     // Determine contributing providers
     const contributingIds = useMemo(() => {
         if (!turn || turn.type !== 'ai') return [];
-        const aiTurn = turn as any; // Cast to access response fields
+        const aiTurn = turn as unknown as AiTurn; // Safe cast since we checked type === 'ai'
         const batchKeys = Object.keys(aiTurn.batchResponses || {});
-        const hiddenKeys = Object.keys(aiTurn.hiddenBatchOutputs || {});
         const synthesizerKey = aiTurn.meta?.synthesizer;
         const mapperKey = aiTurn.meta?.mapper;
         return Array.from(new Set([
             ...batchKeys,
-            ...hiddenKeys,
             ...(synthesizerKey ? [synthesizerKey] : []),
             ...(mapperKey ? [mapperKey] : []),
         ]));

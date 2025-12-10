@@ -586,24 +586,8 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
         sources[pid] = latest;
       }
     });
-    if (aiTurn.hiddenBatchOutputs) {
-      Object.entries(aiTurn.hiddenBatchOutputs).forEach(
-        ([providerId, response]) => {
-          if (!sources[providerId]) {
-            const typedResponse = response as ProviderResponse;
-            sources[providerId] = {
-              providerId,
-              text: typedResponse.text || "",
-              status: "completed" as const,
-              createdAt: typedResponse.createdAt || Date.now(),
-              updatedAt: typedResponse.updatedAt || Date.now(),
-            } as ProviderResponse;
-          }
-        }
-      );
-    }
     return sources;
-  }, [aiTurn.batchResponses, aiTurn.hiddenBatchOutputs]);
+  }, [aiTurn.batchResponses]);
 
   const hasSources = Object.keys(allSources).length > 0;
   const providerIds = useMemo(

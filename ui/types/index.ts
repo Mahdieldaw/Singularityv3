@@ -100,7 +100,6 @@ export interface UserTurn {
  */
 export interface AiTurn extends Omit<ContractAiTurn, "type"> {
   type: "ai";
-  hiddenBatchOutputs?: Record<string, ProviderResponse>;
   // UI-only fields for efficient dependency tracking in React hooks
   synthesisVersion?: number;
   mappingVersion?: number;
@@ -149,32 +148,7 @@ export interface FullSessionPayload {
   providerContexts: Record<string, any>;
 }
 
-// =============================================================================
-// DECISION GRAPH TOPOLOGY
-// =============================================================================
-
-/** Represents a node in the decision graph topology. */
-export interface GraphNode {
-  id: string;
-  label: string;
-  theme: string;
-  supporters: number[];
-  support_count: number;
-}
-
-/** Represents an edge in the decision graph topology. */
-export interface GraphEdge {
-  source: string;
-  target: string;
-  type: 'conflicts' | 'complements' | 'prerequisite';
-  reason: string;
-}
-
-/** The complete graph topology structure from mapper output. */
-export interface GraphTopology {
-  nodes: GraphNode[];
-  edges: GraphEdge[];
-}
+export type { GraphNode, GraphEdge, GraphTopology } from "../../shared/contract";
 
 // =============================================================================
 // LAUNCHPAD TYPES

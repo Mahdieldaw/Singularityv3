@@ -231,6 +231,30 @@ export type PortMessage =
 // These are the core data entities representing the application's state.
 // ============================================================================
 
+// ============================================================================
+// GRAPH TOPOLOGY TYPES
+// ============================================================================
+
+export interface GraphNode {
+  id: string;
+  label: string;
+  theme: string;
+  supporters: number[];
+  support_count: number;
+}
+
+export interface GraphEdge {
+  source: string;
+  target: string;
+  type: 'conflicts' | 'complements' | 'prerequisite';
+  reason: string;
+}
+
+export interface GraphTopology {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+}
+
 export interface ProviderResponse {
   providerId: string;
   text: string;
@@ -249,6 +273,13 @@ export interface ProviderResponse {
     parentMessageId?: string;
     tokenCount?: number;
     thinkingUsed?: boolean;
+    _rawError?: string;
+    graphTopology?: GraphTopology;
+    allAvailableOptions?: string;
+    citationSourceOrder?: Record<string | number, string>;
+    synthesizer?: string;
+    mapper?: string;
+    [key: string]: any; // Keep index signature for genuinely unknown provider metadata, but we've explicitly typed the known ones.
   };
 }
 

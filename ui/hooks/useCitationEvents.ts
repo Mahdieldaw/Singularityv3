@@ -153,18 +153,20 @@ export function useCitationEvents(
       }
     };
 
-    document.addEventListener("click", onClick, true);
-    document.addEventListener("mousedown", onMouseDown, true);
-    document.addEventListener("mouseup", onMouseUp, true);
-    document.addEventListener("pointerdown", onPointerDown, true);
+    // Use {capture: true, passive: false} to allow preventDefault() without browser warnings
+    const nonPassive = { capture: true, passive: false };
+    document.addEventListener("click", onClick, nonPassive);
+    document.addEventListener("mousedown", onMouseDown, nonPassive);
+    document.addEventListener("mouseup", onMouseUp, nonPassive);
+    document.addEventListener("pointerdown", onPointerDown, nonPassive);
     // Some environments dispatch auxclick for middle-click; capture to block new-tab
-    document.addEventListener("auxclick", onMouseDown as any, true);
+    document.addEventListener("auxclick", onMouseDown as any, nonPassive);
     return () => {
-      document.removeEventListener("click", onClick, true);
-      document.removeEventListener("mousedown", onMouseDown, true);
-      document.removeEventListener("mouseup", onMouseUp, true);
-      document.removeEventListener("pointerdown", onPointerDown, true);
-      document.removeEventListener("auxclick", onMouseDown as any, true);
+      document.removeEventListener("click", onClick, nonPassive);
+      document.removeEventListener("mousedown", onMouseDown, nonPassive);
+      document.removeEventListener("mouseup", onMouseUp, nonPassive);
+      document.removeEventListener("pointerdown", onPointerDown, nonPassive);
+      document.removeEventListener("auxclick", onMouseDown as any, nonPassive);
     };
   }, [handleCitationClick]);
 }

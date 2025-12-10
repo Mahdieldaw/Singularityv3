@@ -1,5 +1,5 @@
 // ui/utils/turn-helpers.ts - ALIGNED VERSION
-import type { AiTurn, ProviderResponse, UserTurn, ProviderKey } from "..";
+import type { AiTurn, ProviderResponse, UserTurn, ProviderKey } from "../types";
 import { PRIMARY_STREAMING_PROVIDER_IDS } from "../constants";
 
 /**
@@ -124,9 +124,9 @@ export function applyStreamingUpdates(
   updates.forEach(({ providerId, text: delta, status, responseType }) => {
     if (responseType === "batch") {
       // Update batch responses (array per provider)
-      if (!aiTurn.batchResponses) aiTurn.batchResponses = {} as any;
+      if (!aiTurn.batchResponses) aiTurn.batchResponses = {};
       const arr = normalizeResponseArray(
-        (aiTurn as any).batchResponses[providerId],
+        aiTurn.batchResponses[providerId],
       );
 
       // Check if we should start a new response (branching/retry)
@@ -143,7 +143,7 @@ export function applyStreamingUpdates(
           text: (latest.text || "") + delta,
           status: status as any,
           updatedAt: Date.now(),
-        } as any;
+        };
       } else if (isLatestTerminal && !isNewStream) {
         // Edge case: late arrival of terminal update for already terminal response?
         // Or maybe just updating metadata. For safety, we update the latest.
@@ -152,7 +152,7 @@ export function applyStreamingUpdates(
           text: (latest.text || "") + delta,
           status: status as any,
           updatedAt: Date.now(),
-        } as any;
+        };
       } else {
         // Create new response (either first one, or branching from terminal)
         arr.push({
@@ -161,10 +161,10 @@ export function applyStreamingUpdates(
           status: status as any,
           createdAt: Date.now(),
           updatedAt: Date.now(),
-        } as any);
+        });
       }
 
-      (aiTurn as any).batchResponses[providerId] = arr as any;
+      aiTurn.batchResponses[providerId] = arr;
     } else if (responseType === "synthesis") {
       // Update synthesis responses (array per provider)
       if (!aiTurn.synthesisResponses) aiTurn.synthesisResponses = {};

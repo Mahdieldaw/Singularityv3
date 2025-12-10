@@ -9,7 +9,7 @@ import MarkdownDisplay from "./MarkdownDisplay";
 import { LLM_PROVIDERS_CONFIG, PROVIDER_COLORS } from "../constants";
 import { getLatestResponse, normalizeResponseArray } from "../utils/turn-helpers";
 import { getProviderById } from "../providers/providerRegistry";
-import type { AiTurn, ProviderResponse } from "..";
+import type { AiTurn, ProviderResponse } from "../types";
 import clsx from "clsx";
 import { CopyButton } from "./CopyButton";
 import { formatDecisionMapForMd, formatGraphForMd } from "../utils/copy-format-utils";
@@ -194,7 +194,7 @@ function escapeRegex(str: string): string {
 
 interface SupporterOrbsProps {
   supporters: (string | number)[];
-  citationSourceOrder?: Record<number, string>; // Maps citation number -> provider ID
+  citationSourceOrder?: Record<string | number, string>; // Maps citation number (or 'S') -> provider ID
   onOrbClick?: (providerId: string) => void;
   size?: 'small' | 'large';
 }
@@ -205,7 +205,7 @@ const SupporterOrbs: React.FC<SupporterOrbsProps> = ({ supporters, citationSourc
     // Handle 'S' as synthesizer identifier
     if (s === 'S' || s === 's') {
       // For synthesizer, return the synthesis provider from metadata or use gemini as fallback
-      const synthProviderId = (citationSourceOrder as any)?.['S'] || 'gemini';
+      const synthProviderId = citationSourceOrder?.['S'] || 'gemini';
       return getProviderById(synthProviderId) || null;
     }
     // If it's a number and we have citationSourceOrder, use it
@@ -518,7 +518,7 @@ const MapperSelector: React.FC<MapperSelectorProps> = ({ aiTurn, activeProviderI
               // Check for previous error (e.g. input length)
               const latestResp = getLatestResponse(aiTurn.mappingResponses?.[pid]);
               const hasError = latestResp?.status === 'error';
-              const errorMessage = hasError ? ((latestResp?.meta as any)?._rawError || "Failed") : null;
+              const errorMessage = hasError ? (latestResp?.meta?._rawError || "Failed") : null;
 
               // Determine if we should disable interaction
               // We disable if unauthorized, but maybe we allow retry on error? 
@@ -655,9 +655,9 @@ export const DecisionMapSheet = React.memo(() => {
   }, [activeMappingPid, mappingResponses]);
 
   const graphTopology = useMemo(() => {
-    const fromMeta = (latestMapping as any)?.meta?.graphTopology || null;
+    const fromMeta = latestMapping?.meta?.graphTopology || null;
     if (fromMeta) return fromMeta;
-    const rawText = (latestMapping as any)?.text || null;
+    const rawText = latestMapping?.text || null;
     return extractGraphTopologyFromText(rawText);
   }, [latestMapping]);
 
@@ -670,7 +670,7 @@ export const DecisionMapSheet = React.memo(() => {
   }, [latestMapping]);
 
   const optionsText = useMemo(() => {
-    let fromMeta = (latestMapping as any)?.meta?.allAvailableOptions || null;
+    let fromMeta = latestMapping?.meta?.allAvailableOptions || null;
     if (fromMeta) {
       // Use shared cleanup function to strip any trailing GRAPH_TOPOLOGY
       return cleanOptionsText(fromMeta);
@@ -684,9 +684,9 @@ export const DecisionMapSheet = React.memo(() => {
 
   // Extract citation source order from mapping metadata for correct citation-to-model mapping
   const citationSourceOrder = useMemo(() => {
-    const metaOrder = (latestMapping as any)?.meta?.citationSourceOrder || null;
+    const metaOrder = latestMapping?.meta?.citationSourceOrder || null;
     if (metaOrder && typeof metaOrder === 'object') {
-      return metaOrder as Record<number, string>;
+      return metaOrder as Record<string | number, string>;
     }
     // Fallback: build from active batch responses in order
     if (aiTurn) {
@@ -702,7 +702,7 @@ export const DecisionMapSheet = React.memo(() => {
 
   const handleCitationClick = useCallback((modelNumber: number) => {
     try {
-      const metaOrder = (latestMapping as any)?.meta?.citationSourceOrder || null;
+      const metaOrder = latestMapping?.meta?.citationSourceOrder || null;
       let providerId: string | undefined;
       if (metaOrder && typeof metaOrder === 'object') {
         providerId = metaOrder[modelNumber];

@@ -6,9 +6,9 @@ import { useHistoryLoader } from "./hooks/useHistoryLoader";
 import { useResponsiveLoadingGuard } from "./hooks/useLoadingWatchdog";
 import ChatView from "./views/ChatView";
 import Header from "./components/Header";
-const HistoryPanelConnected = React.lazy(() => import("./components/HistoryPanelConnected"));
-import BannerConnected from "./components/BannerConnected";
-import CompactModelTrayConnected from "./components/CompactModelTrayConnected";
+const HistoryPanel = React.lazy(() => import("./components/HistoryPanel"));
+import Banner from "./components/Banner";
+
 const SettingsPanel = React.lazy(() => import("./components/SettingsPanel"));
 import { Toast } from "./components/Toast";
 import { isHistoryPanelOpenAtom } from "./state/atoms";
@@ -56,7 +56,7 @@ export default function App() {
   return (
     <div className="flex flex-col h-screen w-screen bg-app-gradient min-h-0">
       <Header />
-      <BannerConnected />
+      <Banner />
 
       {/* Main content area */}
       <div className="flex flex-1 relative min-h-0">
@@ -82,7 +82,7 @@ export default function App() {
               className="fixed top-0 left-0 w-[320px] h-screen z-[3000]"
             >
               <Suspense fallback={null}>
-                <HistoryPanelConnected />
+                <HistoryPanel />
               </Suspense>
             </div>
           </>
