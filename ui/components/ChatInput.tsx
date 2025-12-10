@@ -777,6 +777,7 @@ const ChatInput = ({
       <AnalystDrawer
         onPerfectThis={onPerfectThis}
         onUseVariant={onUseVariant}
+
       />
     </div>
   );

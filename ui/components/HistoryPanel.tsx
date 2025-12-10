@@ -1,4 +1,5 @@
 import React, { useMemo, useState, Suspense, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { useAtomValue, useSetAtom } from "jotai";
 import {
   historySessionsAtom,
@@ -35,18 +36,90 @@ export default function HistoryPanel() {
   const [renameSessionId, setRenameSessionId] = useState<string | null>(null);
   const [renameDefaultTitle, setRenameDefaultTitle] = useState<string>("");
   const [isRenaming, setIsRenaming] = useState<boolean>(false);
-  const [activeMenuId, setActiveMenuId] = React.useState<string | null>(null);
-  const [showExportSubmenu, setShowExportSubmenu] = useState<string | null>(null);
+  /* New State for Menus */
+  const [activeMenu, setActiveMenu] = useState<{ id: string; top: number; left: number; align: 'top' | 'bottom' } | null>(null);
+  const [searchTerm, setSearchTerm] = useState("");
+
+  /* New State for Submenu Position */
+  const [exportSubmenuPos, setExportSubmenuPos] = useState<{ top: number; left: number; sessionId: string; align: 'top' | 'bottom' } | null>(null);
+
+  const submenuTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
+  const submenuRef = React.useRef<HTMLDivElement>(null);
+  const menuRef = React.useRef<HTMLDivElement>(null); // For main menu
+
+  const handleSubmenuEnter = (sessionId: string, rect: DOMRect) => {
+    if (submenuTimeoutRef.current) {
+      clearTimeout(submenuTimeoutRef.current);
+      submenuTimeoutRef.current = null;
+    }
+
+    // Check vertical space for submenu (approx height ~150px)
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const submenuHeight = 150;
+    const align = spaceBelow < submenuHeight ? 'top' : 'bottom';
+
+    // If aligning top, we position it so its bottom aligns with the trigger's bottom (or slightly above)
+    // Actually simpler: 
+    // If 'bottom', top = rect.top
+    // If 'top', top = rect.bottom - submenuHeight (approx) OR we let CSS handle bottom positioning?
+    // Let's pass the strictly calculated top coordinate.
+
+    let top = rect.top;
+    if (align === 'top') {
+      // Shift up by height of submenu
+      top = rect.bottom - submenuHeight + 10; // +10 fudge factor to keep overlap
+    }
+
+    setExportSubmenuPos({
+      sessionId,
+      top: align === 'bottom' ? rect.top : (rect.bottom - submenuHeight), // simplified attempt, will refine with portal style
+      left: rect.right,
+      align
+    });
+  };
+
+  const handleSubmenuLeave = () => {
+    submenuTimeoutRef.current = setTimeout(() => {
+      setExportSubmenuPos(null);
+    }, 150); // 150ms grace period
+  };
+
+  // Ensure cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (submenuTimeoutRef.current) clearTimeout(submenuTimeoutRef.current);
+    };
+  }, []);
 
   useEffect(() => {
-    const handleClickOutside = () => setActiveMenuId(null);
-    window.addEventListener("click", handleClickOutside);
-    return () => window.removeEventListener("click", handleClickOutside);
+    const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as Node;
+      // Don't close if clicking inside the export submenu or main menu
+      if (submenuRef.current?.contains(target) || menuRef.current?.contains(target)) {
+        return;
+      }
+      setActiveMenu(null);
+      setExportSubmenuPos(null);
+    };
+    window.addEventListener("mousedown", handleClickOutside); // Mousedown is better for immediate closure
+    return () => window.removeEventListener("mousedown", handleClickOutside);
   }, []);
+
+  // Derived State
+  const filteredSessions = useMemo(() => {
+    if (!searchTerm) return sessions;
+    const lower = searchTerm.toLowerCase();
+    return sessions.filter((s) => s.title?.toLowerCase().includes(lower));
+  }, [sessions, searchTerm]);
 
   // Handlers
   const handleNewChat = () => {
     newChat();
+    setIsHistoryPanelOpen(false);
+  };
+
+  const handleSelectSession = (session: HistorySessionSummary) => {
+    selectChat(session);
     setIsHistoryPanelOpen(false);
   };
 
@@ -85,7 +158,7 @@ export default function HistoryPanel() {
       const stillExists = refreshed.some(
         (s: any) => (s.sessionId || s.id) === sessionId,
       );
-      // If the deleted session is gone and was active, clear the chat view immediately
+      // If the deleted session was active, clear the chat view immediately
       if (!stillExists && currentSessionId === sessionId) {
         newChat();
       }
@@ -192,7 +265,6 @@ export default function HistoryPanel() {
     try {
       const res = await api.renameSession(sessionId, newTitle);
 
-      // ✅ FIX: Just check if updated is false/undefined, don't access .error
       if (!res?.updated) {
         throw new Error("Rename failed");
       }
@@ -256,272 +328,353 @@ export default function HistoryPanel() {
         filename = `singularity_export_${safeTitle}${suffix}_${exportData.exportedAt}.json`;
       }
 
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = filename;
 
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
+      // Use a timeout to ensure the DOM update happens and separate from the sync stack if needed
+      setTimeout(() => {
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = filename;
+        link.style.display = 'none';
 
-      setToast({ id: Date.now(), message: "Session exported successfully", type: "success" });
+        document.body.appendChild(link);
+        link.click();
+
+        // Delay cleanup to ensure download starts
+        setTimeout(() => {
+          document.body.removeChild(link);
+          URL.revokeObjectURL(url);
+        }, 1000);
+      }, 0);
+
+      setToast({ id: Date.now(), message: "Export started...", type: "success" });
     } catch (error) {
       console.error("Export failed:", error);
       setToast({ id: Date.now(), message: "Failed to export session", type: "error" });
     }
   };
 
+  if (!isOpen) return null;
 
   return (
     <>
-      <div className="relative w-full h-full bg-surface-soft/90 backdrop-blur-xl border-r border-border-subtle text-text-secondary p-5 overflow-y-auto overflow-x-hidden flex flex-col">
-        {isOpen && (
-          <>
-            <div className="flex items-center gap-2 mb-4 px-1">
-              <img src={logoIcon} alt="Singularity" className="w-6 h-6" />
-              <span className="font-semibold text-lg text-text-primary">History</span>
-            </div>
-            <div className="flex gap-2">
-              <button
-                onClick={handleNewChat}
-                className="flex-1 flex items-center justify-center px-3 py-2.5 rounded-lg border border-border-subtle bg-brand-500/15 text-text-secondary cursor-pointer mb-3 transition-all duration-200 hover:bg-brand-500/20 hover:border-border-strong"
-                title="Start a new chat"
-              >
-                <PlusIcon className="w-5 h-5" />
-              </button>
-              <button
-                onClick={() => {
-                  if (!isBatchMode) {
-                    handleToggleBatchMode();
-                    return;
-                  }
-                  const count = selectedIds ? selectedIds.size : 0;
-                  if (count > 0) {
-                    handleConfirmBatchDelete();
-                  } else {
-                    // If none selected, exit batch mode
-                    handleToggleBatchMode();
-                  }
-                }}
-                className={`flex-1 flex items-center justify-center px-3 py-2.5 rounded-lg border cursor-pointer mb-3 transition-all duration-200 ${isBatchMode
-                  ? "bg-intent-danger/15 border-intent-danger/45 text-text-secondary hover:bg-intent-danger/20"
-                  : "bg-brand-500/15 border-border-subtle text-text-secondary hover:bg-brand-500/20 hover:border-border-strong"
-                  }`}
-                title={
-                  isBatchMode
-                    ? "Confirm delete selected chats"
-                    : "Select chats to delete"
-                }
-              >
-                {isBatchMode ? (
-                  <span className="text-sm font-medium">
-                    {selectedIds && selectedIds.size ? `Delete (${selectedIds.size})` : "Delete"}
-                  </span>
-                ) : (
-                  <TrashIcon className="w-5 h-5" />
-                )}
-              </button>
-            </div>
-            <div className="history-items flex-grow overflow-y-auto">
-              {isLoading ? (
-                <p className="text-text-muted text-sm text-center mt-5">
-                  Loading history...
-                </p>
-              ) : sessions.length === 0 ? (
-                <p className="text-text-muted text-sm text-center mt-5">
-                  No chat history yet.
-                </p>
-              ) : (
-                (sessions as HistorySessionSummary[])
-                  .filter((s) => s && s.sessionId)
-                  .sort(
-                    (a, b) =>
-                      (b.lastActivity || b.startTime || 0) -
-                      (a.lastActivity || a.startTime || 0),
-                  )
-                  .map((session: HistorySessionSummary) => (
-                    <div
-                      key={session.id}
-                      onClick={() => {
-                        const isDeleting =
-                          !!deletingIds &&
-                          (deletingIds as Set<string>).has(session.sessionId);
-                        if (isDeleting) return; // disable selection while deletion is pending
-                        if (isBatchMode) {
-                          handleToggleSelected(session.sessionId);
-                        } else {
-                          selectChat(session);
-                        }
-                      }}
-                      className={`p-2.5 px-3 rounded-lg text-base cursor-pointer mb-2 flex items-start justify-between gap-2 transition-all duration-200 
-                        ${session.sessionId === currentSessionId
-                          ? "bg-brand-500/10 text-text-primary shadow-sm"
-                          : "bg-chip text-text-secondary hover:bg-surface-highlight"
-                        }
-                        ${!!deletingIds && (deletingIds as Set<string>).has(session.sessionId)
-                          ? "opacity-60 pointer-events-none"
-                          : ""
-                        }`}
-                      role="button"
-                      tabIndex={0}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" || e.key === " ") {
-                          e.preventDefault();
-                          const isDeleting =
-                            !!deletingIds &&
-                            (deletingIds as Set<string>).has(session.sessionId);
-                          if (!isDeleting) {
-                            if (isBatchMode) {
-                              handleToggleSelected(session.sessionId);
-                            } else {
-                              selectChat(session);
-                            }
-                          }
-                        }
-                      }}
-                      title={session.title}
-                    >
-                      <div className="flex items-center gap-2 flex-1">
-                        {isBatchMode && (
-                          <input
-                            type="checkbox"
-                            checked={
-                              !!selectedIds &&
-                              (selectedIds as Set<string>).has(session.sessionId)
-                            }
-                            onChange={(e) => {
-                              e.stopPropagation();
-                              handleToggleSelected(session.sessionId);
-                            }}
-                            aria-label={`Select ${session.title} for deletion`}
-                            className="flex-shrink-0 accent-brand-500"
-                          />
-                        )}
-                        <span className="overflow-wrap-anywhere break-words whitespace-normal">
-                          {session.title}
-                        </span>
-                      </div>
-                      {!isBatchMode && (
-                        <div className="relative ml-2">
-                          <button
-                            className="p-1 rounded-md hover:bg-surface-highlight text-text-secondary transition-colors"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setActiveMenuId(
-                                activeMenuId === session.sessionId
-                                  ? null
-                                  : session.sessionId,
-                              );
-                            }}
-                          >
-                            <EllipsisHorizontalIcon className="w-5 h-5" />
-                          </button>
+      <div
+        className="fixed inset-0 bg-black/50 z-40"
+        onClick={(e) => {
+          // Don't close if clicking submenu or main menu (already handled by mousedown, but for safety)
+          if (submenuRef.current?.contains(e.target as Node) || menuRef.current?.contains(e.target as Node)) {
+            return;
+          }
+          setIsHistoryPanelOpen(false);
+        }}
+      />
 
-                          {activeMenuId === session.sessionId && (
-                            <div
-                              className="absolute right-0 top-full mt-1 w-32 bg-surface-raised border border-border-subtle rounded-lg shadow-lg z-20 overflow-hidden flex flex-col py-1"
-                              onClick={(e) => e.stopPropagation()}
-                            >
-                              <button
-                                className="text-left px-3 py-2 text-sm hover:bg-surface-highlight text-text-primary flex items-center gap-2 transition-colors"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  openRenameDialog(session.sessionId, session.title);
-                                  setActiveMenuId(null);
-                                }}
-                              >
-                                <span className="text-xs">✏️</span> Rename
-                              </button>
-                              <div
-                                className="relative group"
-                                onMouseEnter={() => setShowExportSubmenu(session.sessionId)}
-                                onMouseLeave={() => setShowExportSubmenu(null)}
-                              >
-                                <button
-                                  className="w-full text-left px-3 py-2 text-sm hover:bg-surface-highlight text-text-primary flex items-center justify-between transition-colors"
-                                >
-                                  <div className="flex items-center gap-2">
-                                    <span className="text-xs">💾</span> Export
-                                  </div>
-                                  <ChevronRightIcon className="w-4 h-4 text-text-muted" />
-                                </button>
+      {/* Portal for Export Submenu */}
+      {exportSubmenuPos && createPortal(
+        <div
+          ref={submenuRef}
+          className="fixed z-[10000] w-48 bg-surface-raised border border-border-subtle rounded-lg shadow-xl flex flex-col py-1"
+          style={{
+            top: exportSubmenuPos.top,
+            left: exportSubmenuPos.left,
+            pointerEvents: 'auto',
+          }}
+          onMouseEnter={() => {
+            if (submenuTimeoutRef.current) {
+              clearTimeout(submenuTimeoutRef.current);
+              submenuTimeoutRef.current = null;
+            }
+          }}
+          onMouseLeave={handleSubmenuLeave}
+          onClick={(e) => {
+            e.stopPropagation();
+          }}
+        >
+          <button
+            type="button"
+            className="text-left px-3 py-2 text-sm hover:bg-surface-highlight text-text-primary transition-colors"
+            onMouseDown={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              const sessionId = exportSubmenuPos.sessionId;
+              setActiveMenu(null);
+              setExportSubmenuPos(null);
+              handleExportChat(sessionId, 'json-safe');
+            }}
+          >
+            JSON (Safe)
+          </button>
+          <button
+            type="button"
+            className="text-left px-3 py-2 text-sm hover:bg-surface-highlight text-text-primary transition-colors"
+            onMouseDown={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              const sessionId = exportSubmenuPos.sessionId;
+              setActiveMenu(null);
+              setExportSubmenuPos(null);
+              handleExportChat(sessionId, 'json-full');
+            }}
+          >
+            JSON (Full Backup)
+          </button>
+          <button
+            type="button"
+            className="text-left px-3 py-2 text-sm hover:bg-surface-highlight text-text-primary transition-colors"
+            onMouseDown={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              const sessionId = exportSubmenuPos.sessionId;
+              setActiveMenu(null);
+              setExportSubmenuPos(null);
+              handleExportChat(sessionId, 'markdown');
+            }}
+          >
+            Markdown
+          </button>
+        </div>,
+        document.body
+      )}
 
-                                {showExportSubmenu === session.sessionId && (
-                                  <div className="absolute left-full top-0 ml-1 w-48 bg-surface-raised border border-border-subtle rounded-lg shadow-lg overflow-hidden flex flex-col py-1 z-30">
-                                    <button
-                                      className="text-left px-3 py-2 text-sm hover:bg-surface-highlight text-text-primary transition-colors"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        handleExportChat(session.sessionId, 'json-safe');
-                                        setActiveMenuId(null);
-                                      }}
-                                    >
-                                      JSON (Safe)
-                                    </button>
-                                    <button
-                                      className="text-left px-3 py-2 text-sm hover:bg-surface-highlight text-text-primary transition-colors"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        handleExportChat(session.sessionId, 'json-full');
-                                        setActiveMenuId(null);
-                                      }}
-                                    >
-                                      JSON (Full Backup)
-                                    </button>
-                                    <button
-                                      className="text-left px-3 py-2 text-sm hover:bg-surface-highlight text-text-primary transition-colors"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        handleExportChat(session.sessionId, 'markdown');
-                                        setActiveMenuId(null);
-                                      }}
-                                    >
-                                      Markdown
-                                    </button>
-                                  </div>
-                                )}
-                              </div>
-                              <button
-                                className={`text-left px-3 py-2 text-sm hover:bg-intent-danger/10 text-intent-danger flex items-center gap-2 transition-colors ${!!deletingIds &&
-                                  (deletingIds as Set<string>).has(session.sessionId)
-                                  ? "opacity-50 cursor-not-allowed"
-                                  : ""
-                                  }`}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  if (
-                                    !!deletingIds &&
-                                    (deletingIds as Set<string>).has(session.sessionId)
-                                  )
-                                    return;
-                                  handleDeleteChat(session.sessionId);
-                                  setActiveMenuId(null);
-                                }}
-                              >
-                                <span className="text-xs">🗑️</span> Delete
-                              </button>
-                            </div>
+      {/* Portal for Main Menu */}
+      {activeMenu && createPortal(
+        <div
+          ref={menuRef}
+          className="fixed z-[9999] w-32 bg-surface-raised border border-border-subtle rounded-lg shadow-xl flex flex-col py-1"
+          style={{
+            top: activeMenu.align === 'bottom' ? activeMenu.top : undefined,
+            bottom: activeMenu.align === 'top' ? (window.innerHeight - activeMenu.top) : undefined,
+            left: activeMenu.left,
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button
+            className="text-left px-3 py-2 text-sm hover:bg-surface-highlight text-text-primary flex items-center gap-2 transition-colors"
+            onClick={(e) => {
+              e.stopPropagation();
+              // Find the session title from sessions list
+              const sess = sessions.find(s => (s.sessionId || s.id) === activeMenu.id);
+              if (sess) openRenameDialog(sess.sessionId || sess.id, sess.title);
+              setActiveMenu(null);
+            }}
+          >
+            <span className="text-xs">✏️</span> Rename
+          </button>
+
+          <div
+            className="relative w-full"
+            onMouseEnter={(e) => {
+              if (submenuTimeoutRef.current) {
+                clearTimeout(submenuTimeoutRef.current);
+                submenuTimeoutRef.current = null;
+              }
+              const rect = e.currentTarget.getBoundingClientRect();
+              handleSubmenuEnter(activeMenu.id, rect);
+            }}
+            onMouseLeave={handleSubmenuLeave}
+          >
+            <button
+              className="w-full text-left px-3 py-2 text-sm hover:bg-surface-highlight text-text-primary flex items-center justify-between transition-colors"
+            >
+              <div className="flex items-center gap-2">
+                <span className="text-xs">💾</span> Export
+              </div>
+              <ChevronRightIcon className="w-4 h-4 text-text-muted" />
+            </button>
+          </div>
+
+          <div className="h-px bg-border-subtle my-1" />
+
+          <button
+            className="text-left px-3 py-2 text-sm hover:bg-intent-danger/10 text-intent-danger flex items-center gap-2 transition-colors"
+            onClick={(e) => {
+              e.stopPropagation();
+              handleDeleteChat(activeMenu.id);
+              setActiveMenu(null);
+            }}
+          >
+            <span className="text-xs">🗑️</span> Delete
+          </button>
+        </div>,
+        document.body
+      )}
+
+      <div className="relative w-full h-full bg-surface-base shadow-2xl z-50 flex flex-col border-r border-border-subtle">
+        {/* Header */}
+        <div className="p-4 border-b border-border-subtle flex items-center justify-between bg-surface-base/95 backdrop-blur-sm sticky top-0 z-10">
+          <div className="flex items-center gap-2">
+            <img src={logoIcon} className="w-6 h-6" alt="Singularity" />
+            <h2 className="text-lg font-semibold text-text-primary">History</h2>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleNewChat}
+              className="p-2 hover:bg-surface-highlight rounded-full transition-colors text-text-secondary hover:text-primary-500"
+              title="New Chat"
+            >
+              <PlusIcon className="w-5 h-5" />
+            </button>
+          </div>
+        </div>
+
+        {/* Search */}
+        <div className="p-4 border-b border-border-subtle">
+          <input
+            type="text"
+            placeholder="Search conversations..."
+            className="w-full bg-surface-input border border-border-subtle rounded-md px-3 py-2 text-sm text-text-primary focus:outline-none focus:ring-1 focus:ring-primary-500 placeholder-text-muted"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+          />
+        </div>
+
+        {/* Batch Actions */}
+        <div className="px-4 pt-2 flex gap-2">
+          <button
+            onClick={() => {
+              if (!isBatchMode) {
+                handleToggleBatchMode();
+                return;
+              }
+              const count = selectedIds ? selectedIds.size : 0;
+              if (count > 0) {
+                handleConfirmBatchDelete();
+              } else {
+                // If none selected, exit batch mode
+                handleToggleBatchMode();
+              }
+            }}
+            className={`flex-1 flex items-center justify-center px-3 py-2 rounded-lg border cursor-pointer transition-all duration-200 text-sm ${isBatchMode
+              ? "bg-intent-danger/15 border-intent-danger/45 text-text-secondary hover:bg-intent-danger/20"
+              : "bg-surface-raised border-border-subtle text-text-secondary hover:bg-surface-highlight hover:border-border-strong"
+              }`}
+          >
+            <div className="flex items-center gap-2">
+              <TrashIcon className="w-4 h-4" />
+              <span>{isBatchMode ? (selectedIds.size > 0 ? `Delete (${selectedIds.size})` : "Delete") : "Select"}</span>
+            </div>
+          </button>
+        </div>
+
+        {/* List */}
+        <div className="flex-1 overflow-y-auto overflow-x-hidden p-2 space-y-2">
+          {isLoading ? (
+            <div className="flex items-center justify-center py-8 text-text-muted text-sm">
+              Loading history...
+            </div>
+          ) : filteredSessions.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-8 text-text-muted text-sm gap-2">
+              <span className="text-2xl">📭</span>
+              <span>No conversations found</span>
+            </div>
+          ) : (
+            [...filteredSessions]
+              .sort((a, b) => (b.lastActivity || 0) - (a.lastActivity || 0))
+              .map((session) => {
+                const isActive = currentSessionId === session.sessionId;
+                const isBatchModeParams = session.title?.toLowerCase().includes("batch");
+
+                return (
+                  <div
+                    key={session.id || session.sessionId}
+                    className={`
+                    group relative rounded-lg border transition-all duration-200 cursor-pointer
+                    ${isActive
+                        ? "bg-surface-highlight border-primary-500/50 shadow-sm"
+                        : "bg-surface-raised border-transparent hover:border-border-subtle"
+                      }
+                    ${!!deletingIds && deletingIds.has(session.sessionId) ? "opacity-50 pointer-events-none" : ""}
+                  `}
+                    onClick={() => {
+                      const isDeleting = !!deletingIds && deletingIds.has(session.sessionId);
+                      if (isDeleting) return;
+                      if (isBatchMode) {
+                        handleToggleSelected(session.sessionId);
+                      } else {
+                        handleSelectSession(session);
+                      }
+                    }}
+                  >
+                    <div className="p-3">
+                      <div className="flex justify-between items-start gap-2">
+                        <div className="flex items-center gap-2 flex-1 min-w-0">
+                          {isBatchMode && (
+                            <input
+                              type="checkbox"
+                              checked={selectedIds.has(session.sessionId)}
+                              onChange={(e) => {
+                                e.stopPropagation();
+                                handleToggleSelected(session.sessionId);
+                              }}
+                              className="flex-shrink-0 accent-brand-500"
+                            />
                           )}
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 text-xs text-text-muted mb-1">
+                              <span>{new Date(session.lastActivity || session.startTime).toLocaleDateString()}</span>
+                              {session.messageCount > 0 && (
+                                <span className="bg-surface-highlight px-1.5 py-0.5 rounded-full text-[10px]">
+                                  {session.messageCount} msg
+                                </span>
+                              )}
+                            </div>
+                            <span className="overflow-wrap-anywhere break-words whitespace-normal text-sm font-medium text-text-primary block leading-tight">
+                              {session.title || "Untitled Chat"}
+                            </span>
+                          </div>
                         </div>
-                      )}
+
+                        {!isBatchMode && !isBatchModeParams && (
+                          <div className="relative ml-1 -mr-1">
+                            <button
+                              className="p-1 rounded-md hover:bg-surface-base text-text-secondary transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100"
+                              onClick={(e) => {
+                                e.stopPropagation();
+
+                                // Calculate position for main menu
+                                const rect = e.currentTarget.getBoundingClientRect();
+                                const spaceBelow = window.innerHeight - rect.bottom;
+                                const menuHeight = 120; // Approx height of main menu
+
+                                const align = spaceBelow < menuHeight ? 'top' : 'bottom';
+
+                                // Toggle: close if already open for this session
+                                if (activeMenu && activeMenu.id === session.sessionId) {
+                                  setActiveMenu(null);
+                                } else {
+                                  setActiveMenu({
+                                    id: session.sessionId,
+                                    left: rect.right - 130, // Shift left to align
+                                    top: align === 'bottom' ? rect.bottom : (rect.top),
+                                    align
+                                  });
+                                }
+                              }}
+                            >
+                              <EllipsisHorizontalIcon className="w-5 h-5" />
+                            </button>
+                            {/* Main Menu Portal handles the rest */}
+                          </div>
+                        )}
+                      </div>
                     </div>
-                  ))
-              )}
-            </div>
-          </>
-        )}
+                  </div>
+                );
+              })
+          )}
+        </div>
       </div>
 
       <Suspense fallback={null}>
-        <RenameDialog
-          isOpen={!!renameSessionId}
-          onClose={closeRenameDialog}
-          onRename={handleRenameChat}
-          defaultTitle={renameDefaultTitle}
-          isRenaming={isRenaming}
-        />
+        {renameSessionId && (
+          <RenameDialog
+            isOpen={!!renameSessionId}
+            onClose={closeRenameDialog}
+            onRename={handleRenameChat}
+            defaultTitle={renameDefaultTitle}
+            isRenaming={isRenaming}
+          />
+        )}
       </Suspense>
     </>
   );

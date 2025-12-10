@@ -426,7 +426,30 @@ export function sanitizeSessionForExport(
 
     // If Full Backup, include top-level provider contexts
     if (mode === 'full' && (fullSession as any).providerContexts) {
-        (exportObj.session as any).providerContexts = (fullSession as any).providerContexts;
+        // Clone and strip 'text' from contexts to avoid duplication with turn data
+        // We only need the metadata (cursors, tokens, ids) for continuation.
+        // The actual text content is already preserved in the turns.
+        const contexts = (fullSession as any).providerContexts;
+        const strippedContexts: Record<string, any> = {};
+
+        Object.entries(contexts).forEach(([pid, ctx]: [string, any]) => {
+            // Keep everything EXCEPT 'text'
+            const { text, ...rest } = ctx;
+
+            // Deep clone meta to allow deletion
+            let meta = rest.meta ? { ...rest.meta } : {};
+
+            // Strip redundant extracted data
+            if (meta.allAvailableOptions) delete meta.allAvailableOptions;
+            if (meta.graphTopology) delete meta.graphTopology;
+
+            strippedContexts[pid] = {
+                ...rest,
+                meta
+            };
+        });
+
+        (exportObj.session as any).providerContexts = strippedContexts;
     }
 
     return exportObj;

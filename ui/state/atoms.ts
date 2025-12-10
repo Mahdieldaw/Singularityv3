@@ -53,9 +53,10 @@ export const providerResponsesForTurnAtom = atom(
         if (arr.length > 0) out[pid] = arr[arr.length - 1] as ProviderResponse;
       });
       // Merge any hidden outputs that are not present
-      Object.entries(aiTurn.hiddenBatchOutputs || {}).forEach(([pid, resp]) => {
-        if (!out[pid]) out[pid] = resp as ProviderResponse;
-      });
+      // Legacy hiddenBatchOutputs logic removed
+      // Object.entries(aiTurn.hiddenBatchOutputs || {}).forEach(([pid, resp]) => {
+      //   if (!out[pid]) out[pid] = resp as ProviderResponse;
+      // });
       return out;
     },
 );

@@ -235,6 +235,8 @@ export function normalizeBackendRoundsToTurns(
   const normalized: Array<UserTurn | AiTurn> = [];
 
   rawTurns.forEach((round: any) => {
+    if (!round) return;
+
     // 1. Extract UserTurn
     if (round.user && round.user.text) {
       const userTurn: UserTurn = {
@@ -296,6 +298,7 @@ export function normalizeBackendRoundsToTurns(
         batchResponses,
         synthesisResponses: normalizeSynthMap(round.synthesisResponses),
         mappingResponses: normalizeSynthMap(round.mappingResponses),
+        meta: round.meta || {},
       };
       normalized.push(aiTurn);
     }

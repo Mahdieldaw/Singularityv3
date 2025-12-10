@@ -892,6 +892,26 @@ async function handleUnifiedMessage(message, sender, sendResponse) {
               });
             }
 
+            // Fetch provider contexts
+            let providerContexts = {};
+            try {
+              if (sm.adapter.getContextsBySessionId) {
+                const contexts = await sm.adapter.getContextsBySessionId(sessionId);
+                // Convert array to Record<providerId, meta/context>
+                (contexts || []).forEach(ctx => {
+                  if (ctx && ctx.providerId) {
+                    providerContexts[ctx.providerId] = {
+                      ...(ctx.meta || {}),
+                      ...(ctx.contextData || {}),
+                      metadata: ctx.metadata || null
+                    };
+                  }
+                });
+              }
+            } catch (ctxErr) {
+              console.warn("[SW] Failed to fetch provider contexts:", ctxErr);
+            }
+
             // Respond with FullSessionPayload format expected by UI
             sendResponse({
               success: true,
@@ -905,7 +925,7 @@ async function handleUnifiedMessage(message, sender, sendResponse) {
                     (sessionRecord.updatedAt || sessionRecord.lastActivity)) ||
                   0,
                 turns: rounds,
-                providerContexts: {},
+                providerContexts: providerContexts,
               },
             });
           } catch (assembleError) {

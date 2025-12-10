@@ -567,7 +567,7 @@ const Orb: React.FC<OrbProps> = ({
                 className={clsx(
                     "council-orb transition-all duration-300 ease-out",
                     // Shape and Size
-                    isVoice ? (isActiveVariant ? "w-10 h-10" : "council-orb-voice") : (isActiveVariant ? "w-8 h-8" : "council-orb-regular"),
+                    isVoice ? "council-orb-voice" : "council-orb-regular",
 
                     // Historical Mode: Static orbs (no heavy animation), but still interactive
                     variant === "historical" && "council-orb-historical",
@@ -579,11 +579,11 @@ const Orb: React.FC<OrbProps> = ({
                     // Active Mode Selection Dimming
                     // Unselected: Distinctly "Off" but visible logos. Low opacity (40%) + Grayscale.
                     // Hover brings it to life (Full Opacity + Color + Bloom).
-                    isActiveVariant && !showAsActive && !isVoice && "opacity-40 grayscale scale-90 hover:opacity-100 hover:grayscale-0 hover:scale-105 hover:shadow-[0_0_15px_-3px_var(--model-color)] transition-all duration-300",
+                    isActiveVariant && !showAsActive && !isVoice && "opacity-90 brightness-90 scale-100 hover:opacity-100 hover:brightness-100 hover:scale-105 hover:shadow-[0_0_15px_-3px_var(--model-color)] transition-all duration-300",
 
                     // Selected: "On" State. Full Opacity, Color, Glow.
                     // Added brightness boost to combat "dullness".
-                    isActiveVariant && showAsActive && "opacity-100 grayscale-0 shadow-[0_0_20px_-4px_var(--model-color)] ring-1 ring-[var(--model-color)]/50 scale-110 z-10 brightness-110",
+                    isActiveVariant && showAsActive && "opacity-100 shadow-[0_0_20px_-4px_var(--model-color)] ring-1 ring-[var(--model-color)]/50 scale-125 z-10",
 
                     // Crown Mode Selection Target
                     isCrownMode && !isVoice && "ring-2 ring-brand-500/50 ring-offset-1 ring-offset-surface cursor-crosshair animate-pulse",
@@ -592,7 +592,7 @@ const Orb: React.FC<OrbProps> = ({
                 style={{
                     '--model-color': modelColor,
                     '--rotation': `${Math.random() * 360}deg`,
-                    '--logo-src': logoSrc ? `url(${logoSrc})` : 'none'
+                    '--logo-src': logoSrc ? `url('${logoSrc}')` : 'none'
                 } as React.CSSProperties}
                 onMouseEnter={() => onHover(pid)}
                 onMouseLeave={() => onHover(null)}
