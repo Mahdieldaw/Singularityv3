@@ -956,6 +956,18 @@
     z-index: 0;
   }
 
+  /* Override: Active variant should have no borders */
+  .council-orb-bar--active {
+    border-top: none !important;
+    border-bottom: none !important;
+    padding: 0 !important;
+    background: transparent !important;
+  }
+
+  .council-orb-bar--active::before {
+    display: none !important;
+  }
+
   /* Glass ring around voice orb */
   .council-glass-ring {
     position: absolute;

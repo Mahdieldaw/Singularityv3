@@ -850,9 +850,9 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
 
 
   return (
-    <div className="turn-block pb-4 mt-4">
+    <div className="turn-block pb-32 mt-4">
       {userPrompt && (
-        <div className="user-prompt-block mt-16 mb-8">
+        <div className="user-prompt-block mt-24 mb-8">
           <div className="text-xs text-text-muted mb-1.5">
             Your Prompt
           </div>
@@ -877,7 +877,7 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                 {/* Synthesis Bubble */}
                 <div
                   className={clsx(
-                    "synthesis-bubble bg-surface rounded-3xl border border-border-subtle shadow-sm relative transition-all duration-300",
+                    "synthesis-bubble bg-surface rounded-3xl border border-border-subtle shadow-sm relative z-10 transition-all duration-300",
                     isEditingNextTurn && "opacity-60 ring-2 ring-brand-400/50"
                   )}
                   style={{ padding: '28px 40px 88px' }}
@@ -1110,7 +1110,7 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                         : "opacity-0 group-hover/turn:opacity-100 focus-within:opacity-100"
                     )}
                   >
-                    <div className="pointer-events-auto translate-x-4">
+                    <div className="pointer-events-auto translate-x-5">
                       <CouncilOrbs
                         turnId={aiTurn.id}
                         providers={LLM_PROVIDERS_CONFIG}

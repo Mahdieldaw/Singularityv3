@@ -233,7 +233,7 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
                 variant === "tray" && "council-tray",
                 variant === "divider" && "council-divider",
                 variant === "historical" && "council-historical",
-                variant === "active" && "council-active w-full flex justify-center py-2 px-4",
+                variant === "active" && "council-active w-full flex justify-center py-0 px-4 !bg-transparent !shadow-none !border-none",
                 shouldDim && "council-historical-dimmed",
                 shouldDimInSplitMode && "council-tray-dimmed-split"
             )}
@@ -336,9 +336,9 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
                     })}
                 </div>
 
-                {/* Settings Button for Active Mode */}
+                {/* Settings Button for Active Mode - positioned at far right edge */}
                 {variant === "active" && (
-                    <div className="absolute -right-8 top-1/2 -translate-y-1/2">
+                    <div className="absolute right-[-140px] top-1/2 -translate-y-1/2">
                         <button
                             onClick={(e) => {
                                 e.stopPropagation();

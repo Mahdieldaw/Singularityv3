@@ -493,11 +493,11 @@ const ChatInput = ({
   const workflowProgress = useAtomValue(workflowProgressAtom);
 
   return (
-    <div className="w-full flex justify-center flex-col items-center pointer-events-auto">
+    <div className="flex justify-center flex-col items-center pointer-events-auto">
 
-      {/* Config Orbs - Float above input, very close to it */}
+      {/* Config Orbs - Float above input, hugging the top edge */}
       {!isRoundActive && (
-        <div className="flex justify-center mb-0 z-10">
+        <div className="relative w-full max-w-[min(900px,calc(100%-24px))] flex justify-center mb-[-8px] z-10 !bg-transparent">
           <CouncilOrbs
             providers={LLM_PROVIDERS_CONFIG}
             voiceProviderId={synthesisProvider || 'claude'}
@@ -520,7 +520,7 @@ const ChatInput = ({
       )}
 
       {/* Main chat input container - wider to match/exceed synthesis bubble width */}
-      <div className="flex gap-2.5 items-center relative w-full max-w-[min(900px,calc(100%-24px))] p-3 bg-surface border border-border-subtle/60 rounded-t-2xl rounded-b-2xl flex-wrap">
+      <div className="flex gap-2.5 items-center relative w-full max-w-[min(900px,calc(100%-24px))] p-3 bg-surface border border-border-subtle/60 rounded-t-2xl rounded-b-2xl flex-wrap z-[100] shadow-elevated">
 
         {/* Targeted Mode Banner */}
         {activeTarget && (

@@ -203,11 +203,11 @@ export default function ChatView() {
   }, [turnIds, currentSessionId, selectChat]);
 
   return (
-    <div className="chat-view flex flex-col h-full w-full flex-1 min-h-0">
+    <div className="chat-view flex flex-col h-full w-full flex-1 min-h-0 relative">
       {showWelcome ? (
         <WelcomeScreen />
       ) : (
-        <PanelGroup ref={panelGroupRef} direction="horizontal" className="flex-1">
+        <PanelGroup ref={panelGroupRef} direction="horizontal" className="flex-1 h-full">
           {/* LEFT: Main Thread */}
           <Panel defaultSize={60} minSize={35}>
             <Virtuoso
@@ -219,6 +219,7 @@ export default function ChatView() {
               increaseViewportBy={{ top: 300, bottom: 200 }}
               components={{
                 Scroller: ScrollerComponent as unknown as React.ComponentType<any>,
+                Footer: () => <div style={{ height: 160 }} /> // Spacer for absolute input
               }}
               itemContent={itemContent}
               computeItemKey={(index, turnId) => turnId || `fallback-${index}`}
@@ -259,7 +260,7 @@ export default function ChatView() {
 
       <div
         className={clsx(
-          "sticky left-0 w-full z-[3000] flex flex-col items-center pointer-events-none pb-1 bg-transparent transition-opacity duration-300",
+          "absolute left-1/2 -translate-x-1/2 max-w-[min(900px,calc(100%-24px))] z-[50] flex flex-col items-center pointer-events-none transition-opacity duration-300",
           showWelcome ? "bottom-[16px]" : "bottom-0",
           isDecisionMapOpen && "opacity-0"
         )}

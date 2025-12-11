@@ -183,7 +183,7 @@ export const ModelResponsePanel: React.FC<ModelResponsePanelProps> = React.memo(
             </div>
 
             {/* Content */}
-            <div className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden p-4 custom-scrollbar">
+            <div className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden p-4 custom-scrollbar relative z-10">
                 {/* Main response */}
                 <div className="prose prose-sm max-w-none dark:prose-invert break-words" style={{ overflowWrap: 'anywhere' }}>
                     <MarkdownDisplay content={derivedState.text || (derivedState.isError ? "Error occurred" : "Empty response")} />
