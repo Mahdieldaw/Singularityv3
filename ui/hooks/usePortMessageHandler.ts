@@ -339,6 +339,10 @@ export function usePortMessageHandler() {
           setActiveAiTurnId(null);
           setLastActivityAt(Date.now());
 
+          // Reset streaming UX state flags on finalization
+          setHasAutoOpenedPane(null);
+          setHasAutoWidened(null);
+
           break;
         }
 
