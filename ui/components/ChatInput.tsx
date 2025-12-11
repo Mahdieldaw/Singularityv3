@@ -495,311 +495,308 @@ const ChatInput = ({
   return (
     <div className="w-full flex justify-center flex-col items-center pointer-events-auto">
 
+      {/* Config Orbs - Float above input, very close to it */}
+      {!isRoundActive && (
+        <div className="flex justify-center mb-0 z-10">
+          <CouncilOrbs
+            providers={LLM_PROVIDERS_CONFIG}
+            voiceProviderId={synthesisProvider || 'claude'}
+            variant="active"
+            workflowProgress={workflowProgress as any}
+            onCrownMove={(pid) => {
+              setSynthesisProvider(pid);
+              setProviderLock('synthesis', true);
+            }}
+          />
+        </div>
+      )}
+
       {/* Hint when round is active */}
       {isRoundActive && (
-        <div className="flex items-center gap-2 text-xs text-text-muted py-1.5 text-center opacity-70">
+        <div className="flex items-center gap-2 text-xs text-text-muted py-1 text-center opacity-70">
           <span className="w-2 h-2 rounded-full bg-brand-400 animate-pulse" />
           Click a glowing orb to see that response
         </div>
       )}
 
-      <div className="flex flex-col gap-0 relative w-full max-w-[min(800px,calc(100%-32px))] bg-surface/80 backdrop-blur-sm border border-border-subtle/50 rounded-2xl overflow-hidden">
+      {/* Main chat input container - wider to match/exceed synthesis bubble width */}
+      <div className="flex gap-2.5 items-center relative w-full max-w-[min(900px,calc(100%-24px))] p-3 bg-surface border border-border-subtle/60 rounded-t-2xl rounded-b-2xl flex-wrap">
 
-        {/* Config Orbs - Integrated as top row, hidden during active round */}
-        {!isRoundActive && (
-          <div className="flex justify-center py-1">
-            <CouncilOrbs
-              providers={LLM_PROVIDERS_CONFIG}
-              voiceProviderId={synthesisProvider || 'claude'}
-              variant="active"
-              workflowProgress={workflowProgress as any}
-              onCrownMove={(pid) => {
-                setSynthesisProvider(pid);
-                setProviderLock('synthesis', true);
-              }}
-            />
+        {/* Targeted Mode Banner */}
+        {activeTarget && (
+          <div className="w-full flex items-center justify-between bg-brand-500/10 border border-brand-500/20 rounded-lg px-3 py-1.5 mb-1 animate-in slide-in-from-bottom-2 duration-200">
+            <div className="flex items-center gap-2 text-xs font-medium text-brand-400">
+              <span className="w-1.5 h-1.5 rounded-full bg-brand-500 animate-pulse" />
+              Targeting {providerName}
+            </div>
+            <button
+              onClick={onCancelTarget}
+              className="text-xs text-text-muted hover:text-text-primary px-1.5 py-0.5 rounded hover:bg-surface-highlight transition-colors"
+            >
+              Cancel
+            </button>
           </div>
         )}
 
-        {/* Main input area */}
-        <div className="flex gap-2.5 items-center p-2.5 flex-wrap">
-
-          {/* Targeted Mode Banner */}
-          {activeTarget && (
-            <div className="w-full flex items-center justify-between bg-brand-500/10 border border-brand-500/20 rounded-lg px-3 py-1.5 mb-1 animate-in slide-in-from-bottom-2 duration-200">
-              <div className="flex items-center gap-2 text-xs font-medium text-brand-400">
-                <span className="w-1.5 h-1.5 rounded-full bg-brand-500 animate-pulse" />
-                Targeting {providerName}
-              </div>
-              <button
-                onClick={onCancelTarget}
-                className="text-xs text-text-muted hover:text-text-primary px-1.5 py-0.5 rounded hover:bg-surface-highlight transition-colors"
-              >
-                Cancel
-              </button>
-            </div>
-          )}
-
-          <div className="flex-1 relative min-w-[200px] flex flex-col gap-2">
-            <textarea
-              ref={textareaRef}
-              value={prompt}
-              onChange={handleInputChange}
-              placeholder={
-                activeTarget
-                  ? `Continue conversation with ${providerName}...`
-                  : isContinuationMode
-                    ? "Continue the conversation with your follow-up message..."
-                    : "Ask anything... Singularity will orchestrate multiple AI models for you."
+        <div className="flex-1 relative min-w-[200px] flex flex-col gap-2">
+          <textarea
+            ref={textareaRef}
+            value={prompt}
+            onChange={handleInputChange}
+            placeholder={
+              activeTarget
+                ? `Continue conversation with ${providerName}...`
+                : isContinuationMode
+                  ? "Continue the conversation with your follow-up message..."
+                  : "Ask anything... Singularity will orchestrate multiple AI models for you."
+            }
+            rows={1}
+            className={`w-full min-h-[38px] px-3 py-2 bg-transparent border-none text-text-primary text-base font-inherit resize-none outline-none overflow-y-auto ${isReducedMotion ? '' : 'transition-all duration-200 ease-out'} placeholder:text-text-muted ${isNudgeFrozen ? 'opacity-50 cursor-not-allowed' : ''}`}
+            onKeyDown={(e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+              if (e.key === "Enter" && !e.shiftKey && prompt.trim()) {
+                e.preventDefault();
+                handleSubmit(e);
               }
-              rows={1}
-              className={`w-full min-h-[38px] px-3 py-2 bg-transparent border-none text-text-primary text-base font-inherit resize-none outline-none overflow-y-auto ${isReducedMotion ? '' : 'transition-all duration-200 ease-out'} placeholder:text-text-muted ${isNudgeFrozen ? 'opacity-50 cursor-not-allowed' : ''}`}
-              onKeyDown={(e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-                if (e.key === "Enter" && !e.shiftKey && prompt.trim()) {
-                  e.preventDefault();
-                  handleSubmit(e);
-                }
-              }}
-              disabled={isLoading || isNudgeFrozen}
-              onFocus={() => {
-                setIsFocused(true);
-                if (activeTarget) {
-                  onCancelTarget?.();
-                }
-              }}
-              onBlur={() => {
-                setIsFocused(false);
-                // Immediately hide idle nudge on blur
-                if (nudgeType === "idle") {
-                  setNudgeVisible(false);
-                }
-              }}
-            />
+            }}
+            disabled={isLoading || isNudgeFrozen}
+            onFocus={() => {
+              setIsFocused(true);
+              if (activeTarget) {
+                onCancelTarget?.();
+              }
+            }}
+            onBlur={() => {
+              setIsFocused(false);
+              // Immediately hide idle nudge on blur
+              if (nudgeType === "idle") {
+                setNudgeVisible(false);
+              }
+            }}
+          />
 
-            {/* Inline Nudge Chips */}
-            <div className={`flex items-center gap-2 overflow-hidden transition-all duration-300 ease-in-out ${nudgeVisible ? 'max-h-10 opacity-100 mt-1 mb-1' : 'max-h-0 opacity-0 mt-0 mb-0'}`}>
-              {isSending && (
-                <div className="absolute left-0 bottom-0 top-0 w-[4px] bg-brand-500 animate-pulse rounded-r-full h-full opacity-60"
-                  style={{ height: `${nudgeProgress}%`, maxHeight: '100%', transition: 'height 50ms linear' }}
-                />
-              )}
-
-              <button
-                onClick={(e) => {
-                  e.preventDefault();
-                  handleNudgeCompose();
-                }}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-surface-highlight/40 hover:bg-brand-500/10 hover:border-brand-500/30 border border-transparent rounded-full text-xs transition-all group animate-in slide-in-from-left-2 duration-300"
-              >
-                <span className="text-brand-400">✨</span>
-                <span className="text-text-secondary group-hover:text-brand-300">{composerText}</span>
-              </button>
-
-              <div className="w-px h-3 bg-border-subtle" />
-
-              <button
-                onClick={(e) => {
-                  e.preventDefault();
-                  handleNudgeAnalyst();
-                }}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-surface-highlight/40 hover:bg-brand-500/10 hover:border-brand-500/30 border border-transparent rounded-full text-xs transition-all group animate-in slide-in-from-left-4 duration-300 delay-75"
-              >
-                <span className="text-brand-400">🧠</span>
-                <span className="text-text-secondary group-hover:text-brand-300">{analystText}</span>
-              </button>
-            </div>
-
-            {/* Length Validation Feedback */}
-            {(isWarning || isOverLimit) && (
-              <div className={`absolute bottom-full left-0 mb-2 px-3 py-1.5 rounded-lg text-xs font-medium backdrop-blur-md border animate-in fade-in slide-in-from-bottom-1 ${isOverLimit
-                ? "bg-intent-danger/10 border-intent-danger/30 text-intent-danger"
-                : "bg-intent-warning/10 border-intent-warning/30 text-intent-warning"
-                }`}>
-                {isOverLimit ? (
-                  <span>
-                    ⚠️ Input too long for {limitingProvider} ({inputLength.toLocaleString()} / {maxLength.toLocaleString()})
-                  </span>
-                ) : (
-                  <span>
-                    Approaching limit for {limitingProvider} ({inputLength.toLocaleString()} / {maxLength.toLocaleString()})
-                  </span>
-                )}
-              </div>
-            )}
-          </div>
-
-          <div
-            className="flex items-center gap-1.5 px-2.5 py-1.5 bg-chip-soft border border-border-subtle rounded-full text-text-secondary text-xs whitespace-nowrap opacity-90 cursor-default"
-            role="status"
-            aria-live="polite"
-            title={`System: ${isLoading ? "Working…" : "Ready"} • Providers: ${activeProviderCount} • Mode: ${isVisibleMode ? "Visible" : "Headless"}`}
-          >
-            <span
-              aria-hidden="true"
-              className={`inline-block w-2 h-2 rounded-full ${isLoading ? 'bg-intent-warning animate-pulse' : 'bg-intent-success'} ${!isReducedMotion && !isLoading ? 'animate-pulse' : ''}`}
-            />
-            <span className="text-text-muted">System</span>
-            <span>• {activeProviderCount}</span>
-          </div>
-
-          {/* Send/Draft/Launch Button */}
-          <div className="relative">
-            <button
-              type="button"
-              onClick={handleSubmit}
-              onMouseDown={handleMouseDown}
-              onMouseUp={handleMouseUp}
-              onMouseLeave={handleMouseLeave}
-              disabled={isDisabled}
-              className={`px-3.5 h-[38px] rounded-2xl text-white font-semibold cursor-pointer flex items-center gap-2 min-w-[90px] justify-center ${isDisabled ? 'opacity-50' : 'opacity-100'} ${(isRefinerOpen || hasRejectedRefinement) ? 'bg-gradient-to-br from-brand-500 to-brand-400 shadow-card' : 'bg-gradient-to-r from-brand-500 to-brand-400'} ${isReducedMotion ? '' : 'transition-all duration-200 ease-out'}`}
-            >
-              {isLoading ? (
-                <div className="loading-spinner"></div>
-              ) : (
-                <>
-                  <span className="text-base">
-                    {(isRefinerOpen || hasRejectedRefinement) ? "🚀" : (isContinuationMode ? "💬" : "✨")}
-                  </span>
-                  <span>{buttonText}</span>
-                </>
-              )}
-            </button>
-
-            {/* Long-press Menu */}
-            {showMenu && (
-              <div
-                ref={menuRef}
-                className="absolute bottom-full right-0 mb-2 w-36 bg-surface-base border border-border-subtle rounded-xl shadow-lg overflow-hidden z-50 animate-in fade-in zoom-in-95 duration-200"
-              >
-                <button
-                  onClick={() => handleMenuAction("compose")}
-                  className="w-full px-4 py-2.5 text-left text-sm text-text-primary hover:bg-surface-highlight flex items-center gap-2 transition-colors"
-                >
-                  <span>✨</span> Compose
-                </button>
-                <button
-                  onClick={() => handleMenuAction("explain")}
-                  className="w-full px-4 py-2.5 text-left text-sm text-text-primary hover:bg-surface-highlight flex items-center gap-2 transition-colors"
-                >
-                  <span>🧠</span> Explain
-                </button>
-              </div>
-            )}
-          </div>
-
-          {/* Abort/Stop Button - visible while loading */}
-          {showAbortBtn && (
-            <button
-              type="button"
-              onClick={() => onAbort?.()}
-              title="Stop current workflow"
-              className={`px-3 h-[38px] bg-intent-danger/15 border border-intent-danger/45 rounded-2xl text-intent-danger font-semibold cursor-pointer flex items-center gap-2 min-w-[90px] justify-center ${isReducedMotion ? '' : 'transition-all duration-200 ease-out'}`}
-            >
-              <span className="text-base">⏹️</span>
-              <span>Stop</span>
-            </button>
-          )}
-
-          {/* Mapping Button (ChatInput path) */}
-          {showMappingBtn && (
-            <button
-              type="button"
-              onClick={() => {
-                onStartMapping?.(prompt.trim());
-                setPrompt("");
-                try {
-                  localStorage.removeItem(CHAT_INPUT_STORAGE_KEY);
-                } catch { }
-              }}
-              disabled={isLoading || mappingActive}
-              title={mappingTooltip || "Mapping with selected models"}
-              className={`px-3 h-[38px] bg-chip-soft border border-border-subtle rounded-2xl text-text-secondary font-semibold cursor-pointer flex items-center gap-2 min-w-[110px] justify-center hover:bg-surface-highlight ${isLoading || mappingActive ? 'opacity-50' : 'opacity-100'} ${isReducedMotion ? '' : 'transition-all duration-200 ease-out'}`}
-            >
-              <span className="text-base">🧩</span>
-              <span>Mapping</span>
-            </button>
-          )}
-
-          {/* Refiner Controls Toolbar */}
-          {isRefinerOpen && (
-            <div className="w-full flex items-center justify-between pt-3 mt-1 border-t border-border-subtle animate-[fadeIn_0.3s_ease-out] flex-wrap">
-              <div className="flex gap-3">
-                <button
-                  onClick={onUndoRefinement}
-                  className="bg-none border-none text-intent-danger cursor-pointer text-sm font-semibold flex items-center gap-1.5 px-2 py-1 rounded-md transition-all duration-200 hover:bg-intent-danger/10"
-                >
-                  <span>❌</span> Reject
-                </button>
-
-                <button
-                  onClick={onToggleExplanation}
-                  className={`bg-none border-none cursor-pointer text-sm font-semibold flex items-center gap-1 px-2 py-1 rounded-md transition-all duration-200 hover:bg-surface-highlight ${showExplanation ? 'text-brand-400' : 'text-text-muted'}`}
-                >
-                  <span className={`transform transition-transform duration-200 ${showExplanation ? 'rotate-90' : 'rotate-0'}`}>▸</span> Explanation
-                </button>
-              </div>
-
-              <div className="flex gap-3">
-                <button
-                  onClick={onToggleAudit}
-                  className={`bg-none border-none cursor-pointer text-sm font-semibold flex items-center gap-1 px-2 py-1 rounded-md transition-all duration-200 hover:bg-surface-highlight ${showAudit ? 'text-intent-warning' : 'text-text-muted'}`}
-                >
-                  <span className={`transform transition-transform duration-200 ${showAudit ? 'rotate-90' : 'rotate-0'}`}>▸</span> Audit
-                </button>
-                <button
-                  onClick={onToggleVariants}
-                  className={`bg-none border-none cursor-pointer text-sm font-semibold flex items-center gap-1 px-2 py-1 rounded-md transition-all duration-200 hover:bg-surface-highlight ${showVariants ? 'text-brand-400' : 'text-text-muted'}`}
-                >
-                  <span className={`transform transition-transform duration-200 ${showVariants ? 'rotate-90' : 'rotate-0'}`}>▸</span> Variants
-                </button>
-              </div>
-            </div>
-          )}
-
-          {isRefinerOpen && (
-            <div className="w-full mt-3">
-              <RefinerBlock
-                showAudit={showAudit}
-                showVariants={showVariants}
-                showExplanation={showExplanation}
+          {/* Inline Nudge Chips */}
+          <div className={`flex items-center gap-2 overflow-hidden transition-all duration-300 ease-in-out ${nudgeVisible ? 'max-h-10 opacity-100 mt-1 mb-1' : 'max-h-0 opacity-0 mt-0 mb-0'}`}>
+            {isSending && (
+              <div className="absolute left-0 bottom-0 top-0 w-[4px] bg-brand-500 animate-pulse rounded-r-full h-full opacity-60"
+                style={{ height: `${nudgeProgress}%`, maxHeight: '100%', transition: 'height 50ms linear' }}
               />
-            </div>
-          )}
+            )}
 
-          {/* Revert Link and Composer Draft Chip */}
-          {(originalPrompt || composerDraft) && (
-            <div className="w-full flex items-center gap-3 mt-2 text-xs">
-              {/* Revert link - shown when we have an original prompt saved */}
-              {originalPrompt && currentRefinementState && (
-                <button
-                  onClick={onRevert}
-                  className="text-text-muted hover:text-text-secondary transition-colors opacity-60 hover:opacity-100"
-                >
-                  ↩ Revert to original
-                </button>
-              )}
+            <button
+              onClick={(e) => {
+                e.preventDefault();
+                handleNudgeCompose();
+              }}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-surface-highlight/40 hover:bg-brand-500/10 hover:border-brand-500/30 border border-transparent rounded-full text-xs transition-all group animate-in slide-in-from-left-2 duration-300"
+            >
+              <span className="text-brand-400">✨</span>
+              <span className="text-text-secondary group-hover:text-brand-300">{composerText}</span>
+            </button>
 
-              {/* Composer draft chip - shown after reverting */}
-              {composerDraft && !currentRefinementState && (
-                <button
-                  onClick={onApplyDraft}
-                  className="flex items-center gap-1 px-2 py-1 bg-brand-500/10 border border-brand-500/30 rounded-md text-brand-400 hover:bg-brand-500/20 transition-all"
-                >
-                  <span className="text-[10px]">✦</span>
-                  <span>Composer draft</span>
-                </button>
+            <div className="w-px h-3 bg-border-subtle" />
+
+            <button
+              onClick={(e) => {
+                e.preventDefault();
+                handleNudgeAnalyst();
+              }}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-surface-highlight/40 hover:bg-brand-500/10 hover:border-brand-500/30 border border-transparent rounded-full text-xs transition-all group animate-in slide-in-from-left-4 duration-300 delay-75"
+            >
+              <span className="text-brand-400">🧠</span>
+              <span className="text-text-secondary group-hover:text-brand-300">{analystText}</span>
+            </button>
+          </div>
+
+          {/* Length Validation Feedback */}
+          {(isWarning || isOverLimit) && (
+            <div className={`absolute bottom-full left-0 mb-2 px-3 py-1.5 rounded-lg text-xs font-medium backdrop-blur-md border animate-in fade-in slide-in-from-bottom-1 ${isOverLimit
+              ? "bg-intent-danger/10 border-intent-danger/30 text-intent-danger"
+              : "bg-intent-warning/10 border-intent-warning/30 text-intent-warning"
+              }`}>
+              {isOverLimit ? (
+                <span>
+                  ⚠️ Input too long for {limitingProvider} ({inputLength.toLocaleString()} / {maxLength.toLocaleString()})
+                </span>
+              ) : (
+                <span>
+                  Approaching limit for {limitingProvider} ({inputLength.toLocaleString()} / {maxLength.toLocaleString()})
+                </span>
               )}
             </div>
           )}
         </div>
 
-        {/* Analyst Drawer */}
-        <AnalystDrawer
-          onPerfectThis={onPerfectThis}
-          onUseVariant={onUseVariant}
+        <div
+          className="flex items-center gap-1.5 px-2.5 py-1.5 bg-chip-soft border border-border-subtle rounded-full text-text-secondary text-xs whitespace-nowrap opacity-90 cursor-default"
+          role="status"
+          aria-live="polite"
+          title={`System: ${isLoading ? "Working…" : "Ready"} • Providers: ${activeProviderCount} • Mode: ${isVisibleMode ? "Visible" : "Headless"}`}
+        >
+          <span
+            aria-hidden="true"
+            className={`inline-block w-2 h-2 rounded-full ${isLoading ? 'bg-intent-warning animate-pulse' : 'bg-intent-success'} ${!isReducedMotion && !isLoading ? 'animate-pulse' : ''}`}
+          />
+          <span className="text-text-muted">System</span>
+          <span>• {activeProviderCount}</span>
+        </div>
 
-        />
+        {/* Send/Draft/Launch Button */}
+        <div className="relative">
+          <button
+            type="button"
+            onClick={handleSubmit}
+            onMouseDown={handleMouseDown}
+            onMouseUp={handleMouseUp}
+            onMouseLeave={handleMouseLeave}
+            disabled={isDisabled}
+            className={`px-3.5 h-[38px] rounded-2xl text-white font-semibold cursor-pointer flex items-center gap-2 min-w-[90px] justify-center ${isDisabled ? 'opacity-50' : 'opacity-100'} ${(isRefinerOpen || hasRejectedRefinement) ? 'bg-gradient-to-br from-brand-500 to-brand-400 shadow-card' : 'bg-gradient-to-r from-brand-500 to-brand-400'} ${isReducedMotion ? '' : 'transition-all duration-200 ease-out'}`}
+          >
+            {isLoading ? (
+              <div className="loading-spinner"></div>
+            ) : (
+              <>
+                <span className="text-base">
+                  {(isRefinerOpen || hasRejectedRefinement) ? "🚀" : (isContinuationMode ? "💬" : "✨")}
+                </span>
+                <span>{buttonText}</span>
+              </>
+            )}
+          </button>
+
+          {/* Long-press Menu */}
+          {showMenu && (
+            <div
+              ref={menuRef}
+              className="absolute bottom-full right-0 mb-2 w-36 bg-surface-base border border-border-subtle rounded-xl shadow-lg overflow-hidden z-50 animate-in fade-in zoom-in-95 duration-200"
+            >
+              <button
+                onClick={() => handleMenuAction("compose")}
+                className="w-full px-4 py-2.5 text-left text-sm text-text-primary hover:bg-surface-highlight flex items-center gap-2 transition-colors"
+              >
+                <span>✨</span> Compose
+              </button>
+              <button
+                onClick={() => handleMenuAction("explain")}
+                className="w-full px-4 py-2.5 text-left text-sm text-text-primary hover:bg-surface-highlight flex items-center gap-2 transition-colors"
+              >
+                <span>🧠</span> Explain
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Abort/Stop Button - visible while loading */}
+        {showAbortBtn && (
+          <button
+            type="button"
+            onClick={() => onAbort?.()}
+            title="Stop current workflow"
+            className={`px-3 h-[38px] bg-intent-danger/15 border border-intent-danger/45 rounded-2xl text-intent-danger font-semibold cursor-pointer flex items-center gap-2 min-w-[90px] justify-center ${isReducedMotion ? '' : 'transition-all duration-200 ease-out'}`}
+          >
+            <span className="text-base">⏹️</span>
+            <span>Stop</span>
+          </button>
+        )}
+
+        {/* Mapping Button (ChatInput path) */}
+        {showMappingBtn && (
+          <button
+            type="button"
+            onClick={() => {
+              onStartMapping?.(prompt.trim());
+              setPrompt("");
+              try {
+                localStorage.removeItem(CHAT_INPUT_STORAGE_KEY);
+              } catch { }
+            }}
+            disabled={isLoading || mappingActive}
+            title={mappingTooltip || "Mapping with selected models"}
+            className={`px-3 h-[38px] bg-chip-soft border border-border-subtle rounded-2xl text-text-secondary font-semibold cursor-pointer flex items-center gap-2 min-w-[110px] justify-center hover:bg-surface-highlight ${isLoading || mappingActive ? 'opacity-50' : 'opacity-100'} ${isReducedMotion ? '' : 'transition-all duration-200 ease-out'}`}
+          >
+            <span className="text-base">🧩</span>
+            <span>Mapping</span>
+          </button>
+        )}
+
+        {/* Refiner Controls Toolbar */}
+        {isRefinerOpen && (
+          <div className="w-full flex items-center justify-between pt-3 mt-1 border-t border-border-subtle animate-[fadeIn_0.3s_ease-out] flex-wrap">
+            <div className="flex gap-3">
+              <button
+                onClick={onUndoRefinement}
+                className="bg-none border-none text-intent-danger cursor-pointer text-sm font-semibold flex items-center gap-1.5 px-2 py-1 rounded-md transition-all duration-200 hover:bg-intent-danger/10"
+              >
+                <span>❌</span> Reject
+              </button>
+
+              <button
+                onClick={onToggleExplanation}
+                className={`bg-none border-none cursor-pointer text-sm font-semibold flex items-center gap-1 px-2 py-1 rounded-md transition-all duration-200 hover:bg-surface-highlight ${showExplanation ? 'text-brand-400' : 'text-text-muted'}`}
+              >
+                <span className={`transform transition-transform duration-200 ${showExplanation ? 'rotate-90' : 'rotate-0'}`}>▸</span> Explanation
+              </button>
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={onToggleAudit}
+                className={`bg-none border-none cursor-pointer text-sm font-semibold flex items-center gap-1 px-2 py-1 rounded-md transition-all duration-200 hover:bg-surface-highlight ${showAudit ? 'text-intent-warning' : 'text-text-muted'}`}
+              >
+                <span className={`transform transition-transform duration-200 ${showAudit ? 'rotate-90' : 'rotate-0'}`}>▸</span> Audit
+              </button>
+              <button
+                onClick={onToggleVariants}
+                className={`bg-none border-none cursor-pointer text-sm font-semibold flex items-center gap-1 px-2 py-1 rounded-md transition-all duration-200 hover:bg-surface-highlight ${showVariants ? 'text-brand-400' : 'text-text-muted'}`}
+              >
+                <span className={`transform transition-transform duration-200 ${showVariants ? 'rotate-90' : 'rotate-0'}`}>▸</span> Variants
+              </button>
+            </div>
+          </div>
+        )}
+
+        {isRefinerOpen && (
+          <div className="w-full mt-3">
+            <RefinerBlock
+              showAudit={showAudit}
+              showVariants={showVariants}
+              showExplanation={showExplanation}
+            />
+          </div>
+        )}
+
+        {/* Revert Link and Composer Draft Chip */}
+        {(originalPrompt || composerDraft) && (
+          <div className="w-full flex items-center gap-3 mt-2 text-xs">
+            {/* Revert link - shown when we have an original prompt saved */}
+            {originalPrompt && currentRefinementState && (
+              <button
+                onClick={onRevert}
+                className="text-text-muted hover:text-text-secondary transition-colors opacity-60 hover:opacity-100"
+              >
+                ↩ Revert to original
+              </button>
+            )}
+
+            {/* Composer draft chip - shown after reverting */}
+            {composerDraft && !currentRefinementState && (
+              <button
+                onClick={onApplyDraft}
+                className="flex items-center gap-1 px-2 py-1 bg-brand-500/10 border border-brand-500/30 rounded-md text-brand-400 hover:bg-brand-500/20 transition-all"
+              >
+                <span className="text-[10px]">✦</span>
+                <span>Composer draft</span>
+              </button>
+            )}
+          </div>
+        )}
       </div>
+
+      {/* Analyst Drawer */}
+      <AnalystDrawer
+        onPerfectThis={onPerfectThis}
+        onUseVariant={onUseVariant}
+
+      />
     </div>
   );
 };

@@ -18,7 +18,7 @@
 :root {
   --council-orb-size: 24px;
   --council-orb-size-voice: 32px;
-  --council-orb-gap: 16px;
+  --council-orb-gap: 24px;
   --council-transition-smooth: cubic-bezier(0.4, 0, 0.2, 1);
   --council-transition-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
 }
@@ -58,6 +58,10 @@
   border-radius: 0;
   padding: 0;
   box-shadow: none;
+}
+
+.council-orb-bar--active::before {
+  display: none;
 }
 
 /* Groups */
