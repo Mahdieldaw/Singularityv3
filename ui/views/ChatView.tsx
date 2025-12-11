@@ -231,10 +231,14 @@ export default function ChatView() {
             <>
               {/* Divider with Orbs */}
               <PanelResizeHandle className="w-1.5 bg-border-subtle hover:bg-brand-500/50 transition-colors cursor-col-resize relative z-10">
-                {/* Adjacent Orb Column - pointer-events-none wrapper */}
+                {/* Adjacent Orb Column - uses fixed Y centering to prevent shift when ChatInput changes */}
                 <div
-                  className="divider-handle absolute top-1/2 -translate-y-1/2 left-0 -translate-x-full w-10 flex flex-col items-center justify-center gap-2 bg-surface-raised border-y border-l border-border-subtle rounded-l-xl shadow-sm z-20"
-                  style={{ pointerEvents: 'none' }}
+                  className="divider-handle absolute left-0 -translate-x-full w-10 flex flex-col items-center justify-center gap-2 bg-surface-raised border-y border-l border-border-subtle rounded-l-xl shadow-sm z-20"
+                  style={{
+                    pointerEvents: 'none',
+                    top: 'calc(50vh - 60px)',  // Center relative to viewport height, offset for ChatInput
+                    transform: 'translateX(-100%)'
+                  }}
                 >
                   <div className="orb-bar pointer-events-auto cursor-default" style={{ cursor: 'default' }}>
                     <CouncilOrbsVertical />

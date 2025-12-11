@@ -850,7 +850,7 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
 
 
   return (
-    <div className="turn-block pb-8 border-b border-border-subtle mb-4">
+    <div className="turn-block pb-6 mb-2">
       {userPrompt && (
         <div className="user-prompt-block mb-2">
           <div className="text-xs text-text-muted mb-1.5">
@@ -1120,7 +1120,7 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                         // onCrownMove disabled for historical
                         onTrayExpand={() => setIsDecisionMapOpen({ turnId: aiTurn.id })}
                         isTrayExpanded={isDecisionMapOpen?.turnId === aiTurn.id}
-                        variant={isThisTurnActive ? "active" : "historical"}
+                        variant="historical"
                         workflowProgress={isThisTurnActive ? workflowProgress as any : undefined}
                       />
                     </div>
