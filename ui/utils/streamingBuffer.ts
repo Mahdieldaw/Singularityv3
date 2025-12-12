@@ -1,5 +1,5 @@
 // src/ui/utils/streamingBuffer.ts
-type ResponseType = "batch" | "synthesis" | "mapping";
+type ResponseType = "batch" | "synthesis" | "mapping" | "refiner";
 
 interface BatchUpdate {
   providerId: string;

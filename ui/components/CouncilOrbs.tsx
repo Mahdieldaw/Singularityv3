@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import { useAtom, useAtomValue } from "jotai";
-import { providerEffectiveStateFamily, isSplitOpenAtom, synthesisProviderAtom, mappingProviderAtom, composerModelAtom, analystModelAtom, providerAuthStatusAtom, selectedModelsAtom } from "../state/atoms";
+import { providerEffectiveStateFamily, isSplitOpenAtom, synthesisProviderAtom, mappingProviderAtom, composerModelAtom, analystModelAtom, providerAuthStatusAtom, selectedModelsAtom, refinerProviderAtom } from "../state/atoms";
 import { LLMProvider } from "../types";
 import { PROVIDER_COLORS, PROVIDER_ACCENT_COLORS, WORKFLOW_STAGE_COLORS } from "../constants";
 import { getProviderById } from "../providers/providerRegistry";
@@ -53,6 +53,7 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
     const authStatus = useAtomValue(providerAuthStatusAtom);
     const [synthesisProvider, setSynthesisProvider] = useAtom(synthesisProviderAtom);
     const [mapProviderVal, setMapProvider] = useAtom(mappingProviderAtom);
+    const [refinerProvider, setRefinerProvider] = useAtom(refinerProviderAtom);
     const [composerVal, setComposer] = useAtom(composerModelAtom);
     const [analystVal, setAnalyst] = useAtom(analystModelAtom);
     const [selectedModels, setSelectedModels] = useAtom(selectedModelsAtom);
@@ -209,6 +210,18 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
         }
     };
 
+    const handleSelectRefiner = (pid: string) => {
+        if (refinerProvider === pid) {
+            setRefinerProvider(null);
+        } else {
+            setRefinerProvider(pid);
+            try {
+                localStorage.setItem('htos_refiner_locked', 'true');
+                chrome?.storage?.local?.set?.({ provider_lock_settings: { refiner_locked: true } });
+            } catch { }
+        }
+    };
+
     const handleSelectComposer = (pid: string) => {
         setComposer(pid);
         try {
@@ -224,6 +237,7 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
             chrome?.storage?.local?.set?.({ provider_lock_settings: { analyst_locked: true } });
         } catch { }
     };
+
 
     return (
         <div
@@ -434,6 +448,31 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
                                             title={isUnauthorized ? `Login required for ${p.name}` : undefined}
                                         >
                                             {selected && <span>✏️</span>}
+                                            <span>{p.name}</span> {isUnauthorized ? "🔒" : ""}
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                        <div>
+                            <div className="flex items-center gap-2 mb-2 text-sm"><span>🔒</span><span>Refiner</span></div>
+                            <div className="flex flex-wrap gap-2">
+                                {allProviders.map(p => {
+                                    const pid = String(p.id);
+                                    const selected = String(refinerProvider || '') === pid;
+                                    const isUnauthorized = authStatus && authStatus[pid] === false;
+                                    return (
+                                        <button
+                                            key={`r-${pid}`}
+                                            onClick={() => !isUnauthorized && handleSelectRefiner(pid)}
+                                            disabled={isUnauthorized}
+                                            className={clsx("px-2 py-2 rounded-md text-xs border flex flex-col items-center gap-1 min-w-[96px]",
+                                                selected ? "bg-brand-500/15 border-brand-500 text-text-primary" : "bg-chip border-border-subtle text-text-secondary",
+                                                isUnauthorized && "opacity-50 cursor-not-allowed"
+                                            )}
+                                            title={isUnauthorized ? `Login required for ${p.name}` : undefined}
+                                        >
+                                            {selected && <span>🔒</span>}
                                             <span>{p.name}</span> {isUnauthorized ? "🔒" : ""}
                                         </button>
                                     );

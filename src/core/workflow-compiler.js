@@ -106,6 +106,21 @@ export class WorkflowCompiler {
       mappingStepId = mappingStep.stepId;
     }
 
+    // Refiner step (if requested and dependencies exist)
+    if (this._needsRefinerStep(request, resolvedContext)) {
+      const lastSynthesisStep =
+        steps.filter((s) => s.type === "synthesis").slice(-1)[0] || null;
+      const lastMappingStep =
+        steps.filter((s) => s.type === "mapping").slice(-1)[0] || null;
+
+      const refinerStep = this._createRefinerStep(request, resolvedContext, {
+        batchStepId,
+        synthesisStepId: lastSynthesisStep?.stepId,
+        mappingStepId: lastMappingStep?.stepId,
+      });
+      steps.push(refinerStep);
+    }
+
     const workflowContext = this._buildWorkflowContext(
       request,
       resolvedContext,
@@ -235,6 +250,45 @@ export class WorkflowCompiler {
     };
   }
 
+  _createRefinerStep(request, context, linkIds = {}) {
+    // defaults to synthesizer if not specified
+    const refinerProvider =
+      context.type === "recompute"
+        ? context.targetProvider
+        : request.refiner || this._getDefaultRefiner(request);
+
+    const stepId = `refiner-${refinerProvider}-${Date.now()}`;
+
+    if (context.type === "recompute") {
+      return {
+        stepId,
+        type: "refiner",
+        payload: {
+          refinerProvider,
+          sourceHistorical: {
+            turnId: context.sourceTurnId,
+            responseType: "batch",
+          },
+          originalPrompt: context.sourceUserMessage,
+        },
+      };
+    }
+
+    return {
+      stepId,
+      type: "refiner",
+      payload: {
+        refinerProvider,
+        sourceStepIds: linkIds.batchStepId ? [linkIds.batchStepId] : undefined,
+        synthesisStepIds: linkIds.synthesisStepId
+          ? [linkIds.synthesisStepId]
+          : undefined,
+        mappingStepIds: linkIds.mappingStepId ? [linkIds.mappingStepId] : undefined,
+        originalPrompt: request.userMessage,
+      },
+    };
+  }
+
   // ============================================================================
   // DECISION LOGIC (Pure)
   // ============================================================================
@@ -253,6 +307,18 @@ export class WorkflowCompiler {
     }
     // Check primitive property
     return !!request.includeSynthesis;
+  }
+
+  _needsRefinerStep(request, context) {
+    if (context.type === "recompute") {
+      return context.stepType === "refiner";
+    }
+    // Check primitive property: Refiner requires synthesis and mapping to generally make sense in this pipeline
+    return (
+      !!request.includeSynthesis &&
+      !!request.includeMapping &&
+      !!request.includeRefiner
+    );
   }
 
   // ============================================================================
@@ -314,6 +380,10 @@ export class WorkflowCompiler {
       if (stored) return stored;
     } catch { }
     return request.providers?.[0] || "claude";
+  }
+
+  _getDefaultRefiner(request) {
+    return this._getDefaultSynthesizer(request);
   }
 
   _generateWorkflowId(contextType) {

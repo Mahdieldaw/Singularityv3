@@ -118,6 +118,7 @@ export class SessionManager {
       batchResponseCount: this.countResponses(result.batchOutputs),
       synthesisResponseCount: this.countResponses(result.synthesisOutputs),
       mappingResponseCount: this.countResponses(result.mappingOutputs),
+      refinerResponseCount: this.countResponses(result.refinerOutputs),
       lastContextSummary: null, // Initial turn has no previous context
       meta: await this._attachRunIdMeta(aiTurnId),
     };
@@ -221,6 +222,7 @@ export class SessionManager {
       batchResponseCount: this.countResponses(result.batchOutputs),
       synthesisResponseCount: this.countResponses(result.synthesisOutputs),
       mappingResponseCount: this.countResponses(result.mappingOutputs),
+      refinerResponseCount: this.countResponses(result.refinerOutputs),
       meta: await this._attachRunIdMeta(aiTurnId),
     };
     await this.adapter.put("turns", aiTurnRecord);
@@ -275,6 +277,8 @@ export class SessionManager {
       output = result?.synthesisOutputs?.[targetProvider];
     else if (stepType === "mapping")
       output = result?.mappingOutputs?.[targetProvider];
+    else if (stepType === "refiner")
+      output = result?.refinerOutputs?.[targetProvider];
 
     if (!output) {
       console.warn(
@@ -336,6 +340,9 @@ export class SessionManager {
         else if (stepType === "mapping")
           freshTurn.mappingResponseCount =
             (freshTurn.mappingResponseCount || 0) + 1;
+        else if (stepType === "refiner")
+          freshTurn.refinerResponseCount =
+            (freshTurn.refinerResponseCount || 0) + 1;
 
         // Update snapshot context ONLY for batch retries
         if (stepType === "batch") {
@@ -450,6 +457,26 @@ export class SessionManager {
         aiTurnId,
         providerId,
         responseType: "mapping",
+        responseIndex: 0,
+        text: output?.text || "",
+        status: output?.status || "completed",
+        meta: output?.meta || {},
+        createdAt: now,
+        updatedAt: now,
+        completedAt: now,
+      });
+    }
+    // Refiner
+    for (const [providerId, output] of Object.entries(
+      result?.refinerOutputs || {},
+    )) {
+      const respId = `pr-${sessionId}-${aiTurnId}-${providerId}-refiner-0-${now}-${count++}`;
+      await this.adapter.put("provider_responses", {
+        id: respId,
+        sessionId,
+        aiTurnId,
+        providerId,
+        responseType: "refiner",
         responseIndex: 0,
         text: output?.text || "",
         status: output?.status || "completed",

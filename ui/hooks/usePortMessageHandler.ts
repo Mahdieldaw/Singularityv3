@@ -38,7 +38,7 @@ import { LLM_PROVIDERS_CONFIG } from "../constants";
  * CRITICAL: Step type detection must match backend stepId patterns
  * Backend generates: 'batch-<timestamp>', 'synthesis-<provider>-<timestamp>', 'mapping-<provider>-<timestamp>'
  */
-function getStepType(stepId: string): "batch" | "synthesis" | "mapping" | null {
+function getStepType(stepId: string): "batch" | "synthesis" | "mapping" | "refiner" | null {
   if (!stepId || typeof stepId !== "string") return null;
 
   // Match backend patterns exactly
@@ -46,6 +46,8 @@ function getStepType(stepId: string): "batch" | "synthesis" | "mapping" | null {
     return "synthesis";
   if (stepId.startsWith("mapping-") || stepId.includes("-mapping-"))
     return "mapping";
+  if (stepId.startsWith("refiner-") || stepId.includes("-refiner-"))
+    return "refiner";
   if (stepId.startsWith("batch-") || stepId.includes("prompt")) return "batch";
 
   console.warn(`[Port] Unknown stepId pattern: ${stepId}`);
@@ -58,7 +60,7 @@ function getStepType(stepId: string): "batch" | "synthesis" | "mapping" | null {
  */
 function extractProviderFromStepId(
   stepId: string,
-  stepType: "synthesis" | "mapping",
+  stepType: "synthesis" | "mapping" | "refiner",
 ): string | null {
   // Support provider IDs with hyphens/dots/etc., assuming last segment is numeric timestamp
   const re = new RegExp(`^${stepType}-(.+)-(\\d+)$`);
@@ -576,6 +578,15 @@ export function usePortMessageHandler() {
                         baseEntry,
                       ),
                     };
+                  } else if (stepType === "refiner") {
+                    aiTurn.refinerResponses = {
+                      ...(aiTurn.refinerResponses || {}),
+                      [normalizedId]: updateResponseList(
+                        aiTurn.refinerResponses?.[normalizedId],
+                        baseEntry,
+                      ),
+                    };
+                    aiTurn.refinerVersion = (aiTurn.refinerVersion ?? 0) + 1;
                   }
 
                   // CRITICAL: ensure the Map entry is observed as changed
@@ -617,7 +628,8 @@ export function usePortMessageHandler() {
                 let providerId: string | null | undefined = result?.providerId;
                 if (
                   (!providerId || typeof providerId !== "string") &&
-                  (stepType === "synthesis" || stepType === "mapping")
+                  (!providerId || typeof providerId !== "string") &&
+                  (stepType === "synthesis" || stepType === "mapping" || stepType === "refiner")
                 ) {
                   providerId = extractProviderFromStepId(stepId, stepType);
                 }
@@ -723,6 +735,32 @@ export function usePortMessageHandler() {
                         ...(aiTurn.batchResponses || {}),
                         [providerId!]: arr as any,
                       } as any;
+                    } else if (stepType === "refiner") {
+                      const arr = Array.isArray(aiTurn.refinerResponses?.[providerId!])
+                        ? [...(aiTurn.refinerResponses![providerId!] as any[])]
+                        : [];
+                      if (arr.length > 0) {
+                        const latest = arr[arr.length - 1] as any;
+                        arr[arr.length - 1] = {
+                          ...latest,
+                          status: "error",
+                          text: errText || (latest?.text ?? ""),
+                          updatedAt: now,
+                        } as any;
+                      } else {
+                        arr.push({
+                          providerId: providerId!,
+                          text: errText || "",
+                          status: "error",
+                          createdAt: now,
+                          updatedAt: now,
+                        } as any);
+                      }
+                      aiTurn.refinerResponses = {
+                        ...(aiTurn.refinerResponses || {}),
+                        [providerId!]: arr as any,
+                      } as any;
+                      aiTurn.refinerVersion = (aiTurn.refinerVersion ?? 0) + 1;
                     }
                   });
                 }

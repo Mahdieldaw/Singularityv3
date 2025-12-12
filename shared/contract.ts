@@ -7,7 +7,7 @@ export type ProviderKey =
   | "gemini-pro"
   | "chatgpt"
   | "qwen";
-export type WorkflowStepType = "prompt" | "synthesis" | "mapping";
+export type WorkflowStepType = "prompt" | "synthesis" | "mapping" | "refiner";
 export type SynthesisStrategy = "continuation" | "fresh";
 
 // ============================================================================
@@ -30,8 +30,10 @@ export interface InitializeRequest {
   providers: ProviderKey[];
   includeMapping: boolean;
   includeSynthesis: boolean;
+  includeRefiner?: boolean;
   synthesizer?: ProviderKey;
   mapper?: ProviderKey;
+  refiner?: ProviderKey;
   useThinking?: boolean;
   providerMeta?: Partial<Record<ProviderKey, any>>;
   clientUserTurnId?: string; // Optional: client-side provisional ID for the user's turn.
@@ -50,6 +52,8 @@ export interface ExtendRequest {
   includeSynthesis: boolean;
   synthesizer?: ProviderKey;
   mapper?: ProviderKey;
+  refiner?: ProviderKey;
+  includeRefiner?: boolean;
   useThinking?: boolean;
   providerMeta?: Partial<Record<ProviderKey, any>>;
   clientUserTurnId?: string; // Optional: client-side provisional ID for the user's turn.
@@ -62,7 +66,7 @@ export interface RecomputeRequest {
   type: "recompute";
   sessionId: string;
   sourceTurnId: string;
-  stepType: "synthesis" | "mapping" | "batch";
+  stepType: "synthesis" | "mapping" | "batch" | "refiner";
   targetProvider: ProviderKey;
   userMessage?: string;
   useThinking?: boolean;
@@ -105,10 +109,22 @@ export interface MappingStepPayload
   mappingProvider: ProviderKey;
 }
 
+export interface RefinerStepPayload {
+  refinerProvider: ProviderKey;
+  sourceStepIds?: string[];
+  synthesisStepIds?: string[];
+  mappingStepIds?: string[];
+  sourceHistorical?: {
+    turnId: string;
+    responseType: string;
+  };
+  originalPrompt: string;
+}
+
 export interface WorkflowStep {
   stepId: string;
   type: WorkflowStepType;
-  payload: PromptStepPayload | SynthesisStepPayload | MappingStepPayload;
+  payload: PromptStepPayload | SynthesisStepPayload | MappingStepPayload | RefinerStepPayload;
 }
 
 export interface WorkflowContext {
@@ -151,7 +167,7 @@ export interface RecomputeContext {
   frozenBatchOutputs: Record<ProviderKey, ProviderResponse>;
   latestMappingOutput?: { providerId: string; text: string; meta: any } | null;
   providerContextsAtSourceTurn: Record<ProviderKey, { meta: any }>;
-  stepType: "synthesis" | "mapping" | "batch";
+  stepType: "synthesis" | "mapping" | "batch" | "refiner";
   targetProvider: ProviderKey;
   sourceUserMessage: string;
 }
@@ -372,6 +388,7 @@ export interface AiTurn {
   batchResponses: Record<string, ProviderResponse[]>;
   synthesisResponses: Record<string, ProviderResponse[]>;
   mappingResponses: Record<string, ProviderResponse[]>;
+  refinerResponses?: Record<string, ProviderResponse[]>;
   meta?: {
     branchPointTurnId?: string;
     replacesId?: string;
@@ -406,6 +423,9 @@ export function isSynthesisPayload(
 }
 export function isMappingPayload(payload: any): payload is MappingStepPayload {
   return "mappingProvider" in payload;
+}
+export function isRefinerPayload(payload: any): payload is RefinerStepPayload {
+  return "refinerProvider" in payload;
 }
 export function isUserTurn(turn: any): turn is { type: "user" } {
   return !!turn && typeof turn === "object" && turn.type === "user";

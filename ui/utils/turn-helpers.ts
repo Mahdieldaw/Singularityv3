@@ -118,7 +118,7 @@ export function applyStreamingUpdates(
     providerId: string;
     text: string;
     status: string;
-    responseType: "batch" | "synthesis" | "mapping";
+    responseType: "batch" | "synthesis" | "mapping" | "refiner";
   }>,
 ) {
   updates.forEach(({ providerId, text: delta, status, responseType }) => {
@@ -220,6 +220,33 @@ export function applyStreamingUpdates(
       aiTurn.mappingResponses[providerId] = arr;
       aiTurn.mappingVersion = (aiTurn.mappingVersion ?? 0) + 1;
     }
+    else if (responseType === "refiner") {
+      // Update refiner responses (array per provider)
+      if (!aiTurn.refinerResponses) aiTurn.refinerResponses = {};
+      const arr = normalizeResponseArray(aiTurn.refinerResponses[providerId]);
+
+      const latest = arr.length > 0 ? arr[arr.length - 1] : undefined;
+      const isLatestTerminal = latest && (latest.status === "completed" || latest.status === "error");
+
+      if (latest && !isLatestTerminal) {
+        arr[arr.length - 1] = {
+          ...latest,
+          text: (latest.text || "") + delta,
+          status: status as any,
+          updatedAt: Date.now(),
+        };
+      } else {
+        arr.push({
+          providerId: providerId as ProviderKey,
+          text: delta,
+          status: status as any,
+          createdAt: Date.now(),
+        });
+      }
+
+      aiTurn.refinerResponses[providerId] = arr;
+      aiTurn.refinerVersion = (aiTurn.refinerVersion ?? 0) + 1;
+    }
   });
 }
 
@@ -298,6 +325,7 @@ export function normalizeBackendRoundsToTurns(
         batchResponses,
         synthesisResponses: normalizeSynthMap(round.synthesisResponses),
         mappingResponses: normalizeSynthMap(round.mappingResponses),
+        refinerResponses: normalizeSynthMap(round.refinerResponses),
         meta: round.meta || {},
       };
       normalized.push(aiTurn);

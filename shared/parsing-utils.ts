@@ -241,3 +241,237 @@ export function parseMappingResponse(response: string | null | undefined): {
         graphTopology: topology,
     };
 }
+
+// ============================================================================
+// REFINER OUTPUT PARSING
+// ============================================================================
+
+export interface RefinerOutput {
+    confidenceScore: number;
+    rationale: string;
+    presentationStrategy: string;
+    strategyRationale: string;
+    gaps: Array<{ title: string; explanation: string }>;
+    honestAssessment: string;
+    metaPattern?: string;
+    synthesisAccuracy?: {
+        preserved: string[];
+        overclaimed: string[];
+        missed: Record<string, string[]>;
+    };
+    verificationTriggers?: Array<{
+        claim: string;
+        why: string;
+        sourceType: string;
+    }>;
+    reframingSuggestion?: {
+        issue: string;
+        betterQuestion: string;
+        unlocks: string;
+    };
+}
+
+/**
+ * Parse Refiner output from markdown text
+ */
+export function parseRefinerOutput(text: string): RefinerOutput {
+    if (!text || typeof text !== 'string') {
+        return createEmptyRefinerOutput();
+    }
+
+    const normalized = normalizeText(text);
+
+    return {
+        confidenceScore: extractConfidenceScore(normalized),
+        rationale: extractSection(normalized, 'rationale'),
+        presentationStrategy: extractPresentationStrategy(normalized),
+        strategyRationale: extractSection(normalized, 'why', 'strategy'),
+        gaps: extractGaps(normalized),
+        honestAssessment: extractSection(normalized, 'honest assessment'),
+        metaPattern: extractSection(normalized, 'meta-pattern') || undefined,
+        synthesisAccuracy: extractSynthesisAccuracy(normalized),
+        verificationTriggers: extractVerificationTriggers(normalized),
+        reframingSuggestion: extractReframingSuggestion(normalized),
+    };
+}
+
+function createEmptyRefinerOutput(): RefinerOutput {
+    return {
+        confidenceScore: 0.5,
+        rationale: 'No refiner output available',
+        presentationStrategy: 'confident_with_caveats',
+        strategyRationale: '',
+        gaps: [],
+        honestAssessment: '',
+    };
+}
+
+function extractConfidenceScore(text: string): number {
+    // Match: **Confidence Score: 0.82** or Confidence Score: [0.82]
+    const match = text.match(/confidence\s+score[:\s]*\*?\*?[\[\(]?(\d+\.?\d*)/i);
+    if (match && match[1]) {
+        const score = parseFloat(match[1]);
+        return isNaN(score) ? 0.5 : Math.max(0, Math.min(1, score));
+    }
+    return 0.5;
+}
+
+function extractPresentationStrategy(text: string): string {
+    // Match: **Recommended**: confident_with_caveats
+    const match = text.match(/recommended[:\s]*\*?\*?\s*([a-z_]+)/i);
+    return match?.[1] || 'confident_with_caveats';
+}
+
+function extractSection(text: string, sectionName: string, subsection?: string): string {
+    // Build regex to find section header and capture content until next header
+    const escapedName = sectionName.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+
+    // Match: ### Section Name or **Section Name** with optional subsection
+    let pattern;
+    if (subsection) {
+        const escapedSub = subsection.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+        pattern = new RegExp(
+            `(?:^|\\n)[#*\\s]*${escapedName}[#*\\s]*\\n?[\\s\\S]*?${escapedSub}[:\\s]*([^\\n]+)`,
+            'i'
+        );
+    } else {
+        pattern = new RegExp(
+            `(?:^|\\n)[#*\\s]*${escapedName}[#*\\s]*:?\\s*\\n([\\s\\S]*?)(?=\\n#{1,3}\\s|\\n\\*\\*[A-Z]|$)`,
+            'i'
+        );
+    }
+
+    const match = text.match(pattern);
+    return match?.[1]?.trim() || '';
+}
+
+function extractGaps(text: string): Array<{ title: string; explanation: string }> {
+    const gaps: Array<{ title: string; explanation: string }> = [];
+
+    // Find Gap Detection section
+    const gapSection = text.match(/gap\s+detection[:\s]*([\s\S]*?)(?=\n#{1,3}|\n\*\*[A-Z]|$)/i);
+    if (!gapSection) return gaps;
+
+    const content = gapSection[1];
+
+    // Match: **Gap 1: Title** — explanation or Gap 1: **Title** — explanation
+    const gapPattern = /gap\s+\d+[:\s]*\*?\*?([^*—\n]+)\*?\*?\s*[—-]\s*([^\n]+)/gi;
+
+    let match;
+    while ((match = gapPattern.exec(content)) !== null) {
+        gaps.push({
+            title: match[1].trim(),
+            explanation: match[2].trim(),
+        });
+    }
+
+    return gaps;
+}
+
+function parseBulletPoints(text: string): string[] {
+    if (!text) return [];
+    return text
+        .split(/\n/)
+        .map(line => line.trim())
+        .filter(line => line.match(/^[-*•]\s+/))
+        .map(line => line.replace(/^[-*•]\s+/, '').trim())
+        .filter(line => line.length > 0);
+}
+
+function parseMissedEvents(text: string): Record<string, string[]> {
+    const result: Record<string, string[]> = {};
+    if (!text) return result;
+
+    const lines = parseBulletPoints(text);
+    for (const line of lines) {
+        // Try to match provider pattern: **Provider**: Content or Provider: Content
+        // Match start of line
+        const match = line.match(/^\*\*?([a-zA-Z0-9_\-\.\s]+)\*\*?:?\s*(.+)$/);
+        if (match) {
+            const providerName = match[1].trim().toLowerCase(); // Normalize for matching?
+            // Ideally we keep original case or map to ID. 
+            // Since we don't have the config here, we use the extracted string as key.
+            // UI will need to fuzzy match or prompt should use exact IDs.
+            const content = match[2].trim();
+            if (!result[providerName]) result[providerName] = [];
+            result[providerName].push(content);
+        } else {
+            // Fallback for unassigned points -> 'unknown' or 'global'
+            if (!result['global']) result['global'] = [];
+            result['global'].push(line);
+        }
+    }
+    return result;
+}
+
+function extractSynthesisAccuracy(text: string): RefinerOutput['synthesisAccuracy'] {
+    const section = text.match(/synthesis\s+accuracy[:\s]*([\s\S]*?)(?=\n#{1,3}|\n\*\*[A-Z]|$)/i);
+    if (!section) return undefined;
+
+    const content = section[1];
+
+    const preservedBlock = content.match(/preserved[:\s]*([^\n]*(?:\n(?!overclaimed|missed)[^\n]*)*)/i);
+    const overclaimedBlock = content.match(/overclaimed[:\s]*([^\n]*(?:\n(?!preserved|missed)[^\n]*)*)/i);
+    const missedBlock = content.match(/missed[:\s]*([^\n]*(?:\n(?!preserved|overclaimed)[^\n]*)*)/i);
+
+    if (!preservedBlock && !overclaimedBlock && !missedBlock) return undefined;
+
+    return {
+        preserved: preservedBlock ? parseBulletPoints(preservedBlock[1]) : [],
+        overclaimed: overclaimedBlock ? parseBulletPoints(overclaimedBlock[1]) : [],
+        missed: missedBlock ? parseMissedEvents(missedBlock[1]) : {},
+    };
+}
+
+function extractVerificationTriggers(text: string): RefinerOutput['verificationTriggers'] {
+    const section = text.match(/verification\s+triggers[:\s]*([\s\S]*?)(?=\n#{1,3}|\n\*\*[A-Z]|$)/i);
+    if (!section) return undefined;
+
+    const content = section[1];
+
+    // Check for "None required" or similar
+    if (/none\s+(?:required|needed)/i.test(content)) return undefined;
+
+    const triggers: Array<{ claim: string; why: string; sourceType: string }> = [];
+
+    // Match trigger blocks (claim/why/source can be in any order)
+    const blocks = content.split(/\n\s*\n/);
+
+    for (const block of blocks) {
+        const claim = block.match(/claim[:\s]*[""]?([^""]+)[""]?/i);
+        const why = block.match(/why[:\s]*([^\n]+)/i);
+        const sourceType = block.match(/source(?:\s+type)?[:\s]*([^\n]+)/i);
+
+        if (claim || why || sourceType) {
+            triggers.push({
+                claim: claim?.[1]?.trim() || '',
+                why: why?.[1]?.trim() || '',
+                sourceType: sourceType?.[1]?.trim() || '',
+            });
+        }
+    }
+
+    return triggers.length > 0 ? triggers : undefined;
+}
+
+function extractReframingSuggestion(text: string): RefinerOutput['reframingSuggestion'] {
+    const section = text.match(/reframing\s+suggestion[:\s]*([\s\S]*?)(?=\n#{1,3}|\n\*\*[A-Z]|$)/i);
+    if (!section) return undefined;
+
+    const content = section[1];
+
+    // Check for "Only if query is flawed" or similar skip indicators
+    if (/only\s+if|not\s+needed/i.test(content) && content.length < 100) return undefined;
+
+    const issue = content.match(/issue[:\s]*([^\n]+)/i);
+    const betterQuestion = content.match(/better\s+question[:\s]*[""]?([^""]+)[""]?/i);
+    const unlocks = content.match(/unlocks[:\s]*([^\n]+)/i);
+
+    if (!issue && !betterQuestion && !unlocks) return undefined;
+
+    return {
+        issue: issue?.[1]?.trim() || '',
+        betterQuestion: betterQuestion?.[1]?.trim() || '',
+        unlocks: unlocks?.[1]?.trim() || '',
+    };
+}

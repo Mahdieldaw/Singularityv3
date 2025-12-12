@@ -46,6 +46,9 @@ import {
   isLoadingAtom,
   workflowProgressAtom
 } from "../state/atoms";
+import { useRefinerOutput } from "../hooks/useRefinerOutput";
+import { RefinerCardsSection } from "./RefinerCardsSection";
+import { ReframingBanner } from "./ReframingBanner";
 
 // --- Helper Functions ---
 function parseMappingResponse(response?: string | null) {
@@ -250,6 +253,8 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
   const globalIsLoading = useAtomValue(isLoadingAtom);
   const workflowProgress = useAtomValue(workflowProgressAtom);
   const isThisTurnActive = activeAiTurnId === aiTurn.id && globalIsLoading;
+
+  const { output: refinerOutput } = useRefinerOutput(aiTurn.id);
 
   const getProviderName = useCallback((pid: string) => {
     const cfg = LLM_PROVIDERS_CONFIG.find(p => String(p.id) === pid);
@@ -882,6 +887,13 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                   )}
                   style={{ padding: '28px 40px 88px' }}
                 >
+                  {/* Use padding top to accommodate banner if present? No, standard padding is fine */}
+                  {refinerOutput?.reframingSuggestion && (
+                    <div className="mb-6 relative z-30 pointer-events-auto mx-[-12px]">
+                      <ReframingBanner suggestion={refinerOutput.reframingSuggestion} />
+                    </div>
+                  )}
+
                   {/* OVERLAY: Floating Controls (Fade in on Group Hover) */}
                   <div className="absolute inset-0 pointer-events-none z-20">
                     <div className="flex flex-col justify-between h-full px-8 py-6 opacity-0 group-hover/turn:opacity-100 focus-within:opacity-100 transition-opacity duration-300 ease-out">
@@ -1065,6 +1077,12 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                               </>
                             );
                           })()}
+
+                          {refinerOutput && (
+                            <div className="mt-6 pt-6 border-t border-border-subtle">
+                              <RefinerCardsSection output={refinerOutput} />
+                            </div>
+                          )}
                         </div>
                       );
                     }

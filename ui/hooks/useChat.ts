@@ -12,6 +12,7 @@ import {
   mappingEnabledAtom,
   mappingProviderAtom,
   synthesisProviderAtom,
+  refinerProviderAtom,
   powerUserModeAtom,
   thinkOnChatGPTAtom,
   activeAiTurnIdAtom,
@@ -56,6 +57,7 @@ export function useChat() {
   const thinkOnChatGPT = useAtomValue(thinkOnChatGPTAtom);
   const currentSessionId = useAtomValue(currentSessionIdAtom);
   const turnIds = useAtomValue(turnIdsAtom);
+  const refinerProvider = useAtomValue(refinerProviderAtom);
 
   const refinerData = useAtomValue(refinerDataAtom);
   const isRefinerOpen = useAtomValue(isRefinerOpenAtom);

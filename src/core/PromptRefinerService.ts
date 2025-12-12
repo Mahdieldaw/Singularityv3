@@ -1,4 +1,5 @@
 // src/services/PromptRefinerService.ts
+import { RefinerOutput } from '../../shared/parsing-utils';
 
 interface TurnContext {
   userPrompt: string;
@@ -594,6 +595,139 @@ No composed prompt was provided. Analyze the USER_FRAGMENT directly.
     refinerModelId?: string
   ): Promise<RefinerResult | null> {
     return this.runComposer(draftPrompt, turnContext, refinerModelId);
+  }
+
+  /**
+   * Run the Refiner meta-analysis on completed turn
+   */
+  async runRefinerAnalysis(
+    userPrompt: string,
+    synthesisText: string,
+    mapperNarrative: string,
+    batchResponses: Record<string, { text: string; providerId: string }>,
+    refinerModelId?: string
+  ): Promise<RefinerOutput | null> {
+    try {
+      const modelId = refinerModelId || this.authorModel; // Reuse composer model as default
+
+      // Build model outputs block
+      const modelOutputsBlock = Object.entries(batchResponses)
+        .map(([providerId, response], idx) => {
+          return `<model_${idx + 1} provider="${providerId}">\n${response.text}\n</model_${idx + 1}>`;
+        })
+        .join('\n\n');
+
+      const refinerPrompt = `You are an epistemic auditor assessing the *reliability* of reasoning, not its content.
+You witnessed: User query → ${Object.keys(batchResponses).length} models responded → Synthesizer unified → Mapper cataloged tensions.
+**Your task: How much should the user trust this output?**
+---
+<user_prompt>${userPrompt}</user_prompt>
+<synthesis>${synthesisText}</synthesis>
+<decision_map>${mapperNarrative}</decision_map>
+<raw_outputs>${modelOutputsBlock}</raw_outputs>
+---
+## Analysis Framework
+**1. Query & Consensus**
+- Query type: Factual / Analytical / Creative / Procedural?
+- Agreement: Universal (${Object.keys(batchResponses).length}/${Object.keys(batchResponses).length} = groupthink risk?) | Strong (4-5/${Object.keys(batchResponses).length}) | Split (3/${Object.keys(batchResponses).length} = context-dependent) | Scattered (<3 = bad question?)
+- Did models agree on reasoning or just conclusions? (Reasoning alignment = stronger)
+- Which model dissented? Was dissent buried by synthesis?
+
+**2. Failure Modes**
+- Confident uniformity without hedging → hallucination risk
+- Specific numbers/dates without sources → confabulation
+- All models answering outside their domain → unreliable
+- Synthesis added confidence raw outputs didn't warrant?
+
+**3. Gap Detection** *(Output at least 3)*
+Surface what's missing:
+- Unanswered sub-questions or adjacent-topic drift
+- Unstated assumptions the answer depends on
+- Temporal blindness (outdated?)
+- Missing perspectives (geographic, professional, contrarian)
+- Insights from raw outputs that synthesis dropped
+
+**Relevance Filter**: Only flag gaps that would change the user's decision or action.
+If batch models discussed topics outside the query's stated scope (e.g., mobile for a desktop query),
+note the scope mismatch but don't treat it as a gap requiring action.
+
+**4. Meta-Pattern**
+What does the *shape* of agreement/disagreement reveal that no model stated?
+---
+## Output Structure
+### Reliability Assessment
+**Confidence Score: [0.0-1.0]**
+- 0.9+: Universal consensus on verifiable facts. Safe to act.
+- 0.7-0.89: Strong consensus, minor peripheral dissent.
+- 0.5-0.69: Meaningful divergence. Verify before acting.
+- 0.3-0.49: Significant disagreement or hallucination risk. Hypothesis only.
+- <0.3: Unreliable. Scattered or flawed query.
+
+**Rationale**: [2-3 sentences—what drove score up/down]
+---
+### Presentation Strategy
+Choose one:
+- **definitive**: High confidence factual answer
+- **confident_with_caveats**: Add "based on X assumption" framing
+- **options_forward**: Lead with decision map, synthesis secondary
+- **context_dependent**: Frame as "it depends on..."
+- **low_confidence**: Show uncertainty banner prominently
+- **needs_verification**: Trigger search before presenting
+- **query_problematic**: Surface reframing first
+
+**Recommended**: [choice]
+**Why**: [1 sentence]
+---
+### Verification Triggers
+Flag claims needing external verification (only if verification would change behavior):
+- **Claim**: [quote]
+- **Why**: [date-sensitive / high-stakes / suspiciously uniform]
+- **Source type**: [documentation / academic / news]
+
+*(If none needed, state "None required—[reason]")*
+---
+### Reframing Suggestion
+*(Only if query is flawed)*
+- **Issue**: [what's ambiguous/limiting]
+- **Better question**: "[reframe]"
+- **Unlocks**: [what this enables]
+---
+### Synthesis Accuracy
+- **Preserved**: [what synthesis got right]
+- **Overclaimed**: [added confidence not warranted]
+- **Missed**: [dropped insights from raw outputs, and WHICH PROVIDER said it]
+---
+### Gap Detection
+- **Gap 1**: [Title] — [explanation]
+- **Gap 2**: [Title] — [explanation]
+- **Gap 3**: [Title] — [explanation]
+
+*(If <3 exist: "Unusually complete—only N gaps:" then list)*
+---
+### Meta-Pattern
+[What does the shape of agreement/disagreement reveal?]
+---
+### Honest Assessment
+[2-4 sentences of direct advice: How reliable really? Biggest risk? What would you do?]
+---
+## Rules
+- Assess, don't invent. Evaluate, don't replace.
+- Low scores are rare but meaningful. High scores are earned.
+- Your value: seeing what others missed.
+
+Begin.`;
+
+      console.log(`[PromptRefinerService] Running Refiner Analysis (${modelId})...`);
+      const responseRaw = await this._callModel(modelId, refinerPrompt);
+      const responseText = this._extractPlainText(responseRaw?.text || '');
+
+      // Parse using shared utility
+      const { parseRefinerOutput } = await import('../../shared/parsing-utils.js');
+      return parseRefinerOutput(responseText);
+    } catch (e) {
+      console.warn('[PromptRefinerService] Refiner analysis failed:', e);
+      return null;
+    }
   }
 
   private _parseRefinerResponse(text: string): RefinerResult {

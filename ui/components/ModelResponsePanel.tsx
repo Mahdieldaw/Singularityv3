@@ -17,6 +17,8 @@ import { ArtifactOverlay, Artifact } from "./ArtifactOverlay";
 import { ChevronDownIcon, ChevronUpIcon } from "./Icons";
 import { CopyButton } from "./CopyButton";
 import { formatProviderResponseForMd } from "../utils/copy-format-utils";
+import { useRefinerOutput } from "../hooks/useRefinerOutput";
+import { BuriedInsightCard } from "./BuriedInsightCard";
 import clsx from "clsx";
 
 interface ModelResponsePanelProps {
@@ -64,6 +66,11 @@ export const ModelResponsePanel: React.FC<ModelResponsePanelProps> = React.memo(
 
         return { status, text, hasText, isStreaming, isError, artifacts };
     }, [latestResponse, streamingState.activeProviderId, providerId]);
+
+    const { output: refinerOutput } = useRefinerOutput(turnId);
+    const missedInsights = useMemo(() => {
+        return refinerOutput?.synthesisAccuracy?.missed?.[providerId];
+    }, [refinerOutput, providerId]);
 
     // Branching visual state
     const isBranching = activeRecompute?.providerId === providerId &&
@@ -184,6 +191,14 @@ export const ModelResponsePanel: React.FC<ModelResponsePanelProps> = React.memo(
 
             {/* Content */}
             <div className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden p-4 custom-scrollbar relative z-10">
+                {/* Missed Insights Card */}
+                {missedInsights && missedInsights.length > 0 && (
+                    <BuriedInsightCard
+                        points={missedInsights}
+                        providerName={provider?.name || providerId}
+                    />
+                )}
+
                 {/* Main response */}
                 <div className="prose prose-sm max-w-none dark:prose-invert break-words" style={{ overflowWrap: 'anywhere' }}>
                     <MarkdownDisplay content={derivedState.text || (derivedState.isError ? "Error occurred" : "Empty response")} />

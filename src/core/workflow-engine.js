@@ -212,6 +212,7 @@ function buildSynthesisPrompt(
   sourceResults,
   synthesisProvider,
   mappingResult = null,
+  extractedOptions = null,
 ) {
   console.log(`[WorkflowEngine] buildSynthesisPrompt called with:`, {
     originalPromptLength: originalPrompt?.length,
@@ -219,6 +220,7 @@ function buildSynthesisPrompt(
     synthesisProvider,
     hasMappingResult: !!mappingResult,
     mappingResultText: mappingResult?.text?.length,
+    hasExtractedOptions: !!extractedOptions,
   });
 
   // Filter out only the synthesizing model's own response from batch outputs
@@ -248,36 +250,50 @@ function buildSynthesisPrompt(
     mappingSectionPreview: mappingSection.substring(0, 100) + "...",
   });
 
-  const finalPrompt = `Your task is to create a response to the user's prompt, leveraging all available outputs, resources and insights,  that could *only exist* because all of these models responded first to:
+  // Determine content for the two prompt sections
+  const allOptionsBlock = extractedOptions || "(No options catalog available)";
+
+  // If we have extracted options, we rely on them and treat raw outputs as secondary/referenced
+  // If we don't, we must provide the raw batch results
+  const sourceContent = extractedOptions
+    ? "(See Claims Inventory above)"
+    : otherResults;
+
+  const finalPrompt = `Your task is to create a response to the user's prompt, leveraging the full landscape of approaches and insights, that could *only exist* because all of these models responded first to:
 
 <original_user_query>
 ${originalPrompt}
 </original_user_query>
 
 Process:
-Review your earlier response from the conversation history above.
-Review all batch outputs from other models below.
-Each reflects a different way of understanding the question—different assumptions, priorities, and mental models. These are not drafts to judge, but perspectives to understand.
-Look at the tensions between responses not as problems to resolve, but as clues to depth. Where models diverge sharply, something important is being implied but not stated. Where they agree too easily, a blind spot may be forming. Your job is to surface what's beneath—what the user might actually be navigating.
+You already responded to this query—your earlier response is in your conversation history above. That was one perspective among many. Now you're shifting roles: from contributor to synthesizer.
+
+Below is every distinct approach extracted from all models, including yours—deduplicated, labeled, catalogued. Each reflects a different way of understanding the question—different assumptions, priorities, and mental models. These are not drafts to judge, but perspectives to understand.
+
+Treat tensions between approaches not as disagreements to fix, but as clues to the deeper structure of what the user is actually navigating. Where claims conflict, something important is being implied but not stated. Where they agree too easily, a blind spot may be forming. Your job is to surface what's beneath.
+
+<claims_inventory>
+${allOptionsBlock}
+</claims_inventory>
+
 
 
 Output Requirements:
 Don't select the strongest argument. Don't average positions. Instead, imagine a frame where all the strongest insights make sense—not as compromises, but as natural expressions of different facets of a larger truth. Build that frame. Speak from it.
 
-
 Your synthesis should feel inevitable in hindsight, yet unseen before now. It should carry the energy of discovery, not summation.
+
 - Respond directly to the user's original question with the synthesized answer
 - Present as a unified, coherent response rather than comparative analysis
-- Do not analyze or compare the source outputs OUTLOUD in your response
+- Do not reference "the models" or "the claims" in your output—the user should experience insight, not watch you work
+
+When outputting your synthesis, be sure to start with a "The Short Answer" title which gives a brief overview of your whole response in no more than a paragraph or two, before writing a "The Long Answer" header which contains your actual response.
+
 
 
 <model_outputs>
-${otherResults}
-</model_outputs>
-
-Begin.
-
-When outputting your synthesis, be sure to start with a "The Short Answer" title which gives a brief overview of your whole response in no more than a paragraph or two, before writing a "The Long Answer" header which contains your actual response.`;
+${sourceContent}
+</model_outputs>`;
 
   return finalPrompt;
 }
@@ -285,7 +301,6 @@ When outputting your synthesis, be sure to start with a "The Short Answer" title
 function buildMappingPrompt(
   userPrompt,
   sourceResults,
-  synthesisText = "",
   citationOrder = [],
 ) {
   // Build MODEL 1, MODEL 2 numbered blocks with optional provider labels
@@ -304,51 +319,49 @@ function buildMappingPrompt(
     })
     .join("\n\n");
 
-  return `You are not a synthesizer. You are a provenance tracker and option cataloger, a mirror that reveals what others cannot see.
+  return `You are not a synthesizer. You are a provenance tracker and option cataloger, a mirror that reveals what others cannot see. You are building the terrain from which synthesis will emerge.
 
-CRUCIAL: Before writing, extract every distinct approach/stance/capability from synthesis + raw outputs. Assign each a permanent canonical label (max 6 words, precise, unique). These labels link narrative ↔ options ↔ graph—reuse them verbatim throughout.
+CRUCIAL: Before writing, extract every distinct approach/stance/capability from the batch outputs. Assign each a permanent canonical label (max 6 words, precise, unique). These labels link narrative ↔ options ↔ graph—reuse them verbatim throughout.
 
-Task: Present ALL insights from the model outputs below in their most useful form for decision-making on the user's prompt that maps the terrain and catalogs every approach.
+Do not invent options not present in inputs. If unclear, surface the ambiguity.
+Citation indices [1], [2]... correspond to model order in <model_outputs>.
+
+Present ALL insights from the model outputs below in their most useful form for decision-making on the user's prompt that maps the terrain and catalogs every approach.
 
 <user_prompt>: ${String(userPrompt || "")} </user_prompt>
-
-A synthesis has been created:
-<synthesis>${synthesisText}</synthesis>
 
 <model_outputs>:
 ${modelOutputsBlock}
 </model_outputs>
-
 **Task 1: Narrative**
 
 Write a fluid, insightful narrative that explains:
 - Where models agreed (and why that might be a blind spot)
-- Where they diverged (and what that reveals)
-- Trade-offs each model made
-- Questions the synthesis didn't answer
+- Where they diverged (and what that reveals about differing assumptions)
+- Trade-offs each approach made
+- Questions left open by all approaches
 
-**Surface the invisible** — Highlight consensus (2+ models) and unique insights (single model) naturally.
+**Surface the invisible** — Highlight consensus (≥2 models) and unique insights (single model) naturally.
 **Map the landscape** — Group similar ideas, preserving tensions and contradictions.
 **Frame the choices** — Present alternatives as "If you prioritize X, this path fits because Y."
 **Anticipate the journey** — End with "This naturally leads to questions about..." based on tensions identified.
 
 Embed citations [1], [2, 3] throughout. When discussing an approach, use its canonical label in **bold** as a recognizable anchor.
 
-**Internal reasoning (never output):**
-- What Everyone Sees / The Tensions / The Unique Insights / The Choice Framework / Confidence Check
-
-Output as a natural response to the user's prompt—fluid, insightful, model names redacted. Build feedback as emergent wisdom—evoke clarity, agency, and subtle awe.
+Output as a natural response to the user's prompt—fluid, insightful, model names redacted. Build the narrative as emergent wisdom—evoke clarity, agency, and discovery.
 
 **Task 2: All Options Inventory**
 
 After your narrative, add exactly:
-"===ALL_AVAILABLE_OPTIONS==="
+===ALL_AVAILABLE_OPTIONS===
 
-List EVERY distinct approach from synthesis + raw outputs (including any the synthesis missed):
-- **[Canonical Label]:** 1-2 sentence summary [1, 3, 5]
+List EVERY distinct approach from the batch outputs:
+- **[Canonical Label]:** 1-2 sentence summary [citations]
 - Group by theme
 - Deduplicate rigorously
 - Order by prevalence
+
+This inventory feeds directly into synthesis—completeness matters.
 
 **Task 3: Topology (for visualization)**
 
@@ -383,9 +396,7 @@ Edge types:
 
 Only include edges where clear relationships exist. Every node needs ≥1 edge.
 
-Labels must match exactly across narrative, options, and graph nodes.
-
-Begin.`;
+Labels must match exactly across narrative, options, and graph nodes.`;
 }
 
 // Track last seen text per provider/session for delta streaming
@@ -808,50 +819,92 @@ export class WorkflowEngine {
           }
         }
       };
-      await Promise.all([
-        (async () => {
-          for (const step of synthesisSteps) {
-            try {
-              const result = await this.executeSynthesisStep(
-                step,
-                context,
-                stepResults,
-                workflowContexts,
-                resolvedContext,
-              );
-              stepResults.set(step.stepId, { status: "completed", result });
-              this.port.postMessage({
-                type: "WORKFLOW_STEP_UPDATE",
-                sessionId: context.sessionId,
-                stepId: step.stepId,
-                status: "completed",
-                result,
-                isRecompute: resolvedContext?.type === "recompute",
-                sourceTurnId: resolvedContext?.sourceTurnId,
-              });
-            } catch (error) {
-              console.error(
-                `[WorkflowEngine] Synthesis step ${step.stepId} failed:`,
-                error,
-              );
-              stepResults.set(step.stepId, {
-                status: "failed",
-                error: error.message,
-              });
-              this.port.postMessage({
-                type: "WORKFLOW_STEP_UPDATE",
-                sessionId: context.sessionId,
-                stepId: step.stepId,
-                status: "failed",
-                error: error.message,
-                isRecompute: resolvedContext?.type === "recompute",
-                sourceTurnId: resolvedContext?.sourceTurnId,
-              });
-            }
-          }
-        })(),
-        mappingLoop(),
-      ]);
+
+      // 2. Execute mapping steps first (Sequential)
+      await mappingLoop();
+
+      // 3. Execute synthesis steps (Sequential, after mapping)
+      // Now synthesis steps can access mapping results/options
+      for (const step of synthesisSteps) {
+        try {
+          const result = await this.executeSynthesisStep(
+            step,
+            context,
+            stepResults,
+            workflowContexts,
+            resolvedContext,
+          );
+          stepResults.set(step.stepId, { status: "completed", result });
+          this.port.postMessage({
+            type: "WORKFLOW_STEP_UPDATE",
+            sessionId: context.sessionId,
+            stepId: step.stepId,
+            status: "completed",
+            result,
+            // Attach recompute metadata for UI routing/clearing
+            isRecompute: resolvedContext?.type === "recompute",
+            sourceTurnId: resolvedContext?.sourceTurnId,
+          });
+        } catch (error) {
+          console.error(
+            `[WorkflowEngine] Synthesis step ${step.stepId} failed:`,
+            error,
+          );
+          stepResults.set(step.stepId, {
+            status: "failed",
+            error: error.message,
+          });
+          this.port.postMessage({
+            type: "WORKFLOW_STEP_UPDATE",
+            sessionId: context.sessionId,
+            stepId: step.stepId,
+            status: "failed",
+            error: error.message,
+            isRecompute: resolvedContext?.type === "recompute",
+            sourceTurnId: resolvedContext?.sourceTurnId,
+          });
+        }
+      }
+
+      // 4. Refiner Step (Sequential, after synthesis/mapping)
+      const refinerSteps = steps.filter((step) => step.type === "refiner");
+      for (const step of refinerSteps) {
+        try {
+          const result = await this.executeRefinerStep(
+            step,
+            context,
+            stepResults,
+          );
+          stepResults.set(step.stepId, { status: "completed", result });
+          this.port.postMessage({
+            type: "WORKFLOW_STEP_UPDATE",
+            sessionId: context.sessionId,
+            stepId: step.stepId,
+            status: "completed",
+            result,
+            isRecompute: resolvedContext?.type === "recompute",
+            sourceTurnId: resolvedContext?.sourceTurnId,
+          });
+        } catch (error) {
+          console.error(
+            `[WorkflowEngine] Refiner step ${step.stepId} failed:`,
+            error,
+          );
+          stepResults.set(step.stepId, {
+            status: "failed",
+            error: error.message,
+          });
+          this.port.postMessage({
+            type: "WORKFLOW_STEP_UPDATE",
+            sessionId: context.sessionId,
+            stepId: step.stepId,
+            status: "failed",
+            error: error.message,
+            isRecompute: resolvedContext?.type === "recompute",
+            sourceTurnId: resolvedContext?.sourceTurnId,
+          });
+        }
+      }
 
       // ========================================================================
       // Persistence: Consolidated single call with complete results
@@ -861,6 +914,7 @@ export class WorkflowEngine {
           batchOutputs: {},
           synthesisOutputs: {},
           mappingOutputs: {},
+          refinerOutputs: {},
         };
         const stepById = new Map((steps || []).map((s) => [s.stepId, s]));
         stepResults.forEach((stepResult, stepId) => {
@@ -877,6 +931,10 @@ export class WorkflowEngine {
             const providerId = step.payload?.mappingProvider;
             if (providerId)
               result.mappingOutputs[providerId] = stepResult.result;
+          } else if (step.type === "refiner") {
+            const providerId = step.payload?.refinerProvider;
+            if (providerId)
+              result.refinerOutputs[providerId] = stepResult.result;
           }
         });
 
@@ -990,6 +1048,7 @@ export class WorkflowEngine {
       const batchResponses = {};
       const synthesisResponses = {};
       const mappingResponses = {};
+      const refinerResponses = {};
       let primarySynthesizer = null;
       let primaryMapper = null;
 
@@ -1048,13 +1107,29 @@ export class WorkflowEngine {
             primaryMapper = providerId;
             break;
           }
+          case "refiner": {
+            const providerId = result?.providerId;
+            if (!providerId) return;
+            if (!refinerResponses[providerId])
+              refinerResponses[providerId] = [];
+            refinerResponses[providerId].push({
+              providerId,
+              text: result?.text || "",
+              status: result?.status || "completed",
+              createdAt: timestamp,
+              updatedAt: timestamp,
+              meta: result?.meta || {}, // The full Refiner output object might be here or in text
+            });
+            break;
+          }
         }
       });
 
       const hasData =
         Object.keys(batchResponses).length > 0 ||
         Object.keys(synthesisResponses).length > 0 ||
-        Object.keys(mappingResponses).length > 0;
+        Object.keys(mappingResponses).length > 0 ||
+        Object.keys(refinerResponses).length > 0;
 
       if (!hasData) {
         console.log("[WorkflowEngine] No AI responses to finalize");
@@ -1071,6 +1146,7 @@ export class WorkflowEngine {
         batchResponses,
         synthesisResponses,
         mappingResponses,
+        refinerResponses,
         meta: {
           synthesizer: primarySynthesizer,
           mapper: primaryMapper,
@@ -1207,6 +1283,85 @@ export class WorkflowEngine {
     } catch (_) { }
 
     return providerContexts;
+    return providerContexts;
+  }
+
+  /**
+   * Execute Refiner Step
+   */
+  async executeRefinerStep(step, context, stepResults) {
+    const {
+      refinerProvider,
+      sourceStepIds,
+      originalPrompt,
+      synthesisStepIds,
+      mappingStepIds,
+    } = step.payload;
+
+    // 1. Gather Batch Responses from the first source step (the batch step)
+    const batchStepResults = stepResults.get(sourceStepIds?.[0])?.result?.results || {};
+    const batchResponses = {};
+    Object.entries(batchStepResults).forEach(([pid, res]) => {
+      if (res && res.text) {
+        batchResponses[pid] = { text: res.text, providerId: pid };
+      }
+    });
+
+    // 2. Gather Synthesis Text (from first completed synthesis step)
+    let synthesisText = "";
+    if (synthesisStepIds && synthesisStepIds.length > 0) {
+      for (const id of synthesisStepIds) {
+        const res = stepResults.get(id);
+        if (res?.status === "completed" && res.result?.text) {
+          synthesisText = res.result.text;
+          break;
+        }
+      }
+    }
+
+    // 3. Gather Mapping Narrative (from first completed mapping step)
+    let mappingText = "";
+    if (mappingStepIds && mappingStepIds.length > 0) {
+      for (const id of mappingStepIds) {
+        const res = stepResults.get(id);
+        if (res?.status === "completed" && res.result?.text) {
+          mappingText = res.result.text;
+          break;
+        }
+      }
+    }
+
+    // 4. Import & Run Service
+    // Note: promptRefinerService.ts is in same directory
+    // We use dynamic import compatible with the environment
+    const mod = await import('./PromptRefinerService.ts');
+    const PromptRefinerService = mod.PromptRefinerService;
+
+    // Instantiate with refiner provider
+    const service = new PromptRefinerService({ refinerModel: refinerProvider });
+
+    const output = await service.runRefinerAnalysis(
+      originalPrompt,
+      synthesisText,
+      mappingText,
+      batchResponses,
+      refinerProvider
+    );
+
+    if (!output) {
+      throw new Error("Refiner analysis returned null (failed or empty)");
+    }
+
+    return {
+      providerId: refinerProvider,
+      output, // The raw object
+      text: JSON.stringify(output), // Store specific text representation if needed
+      meta: {
+        confidenceScore: output.confidenceScore,
+        presentationStrategy: output.presentationStrategy,
+      },
+      status: "completed"
+    };
   }
 
   // ==========================================================================
@@ -1837,11 +1992,14 @@ Your job is to address what the user is actually asking, informed by but not foc
 
     // Helper to execute synthesis with a specific provider
     const runSynthesis = async (providerId) => {
+      const extractedOptions = mappingResult?.meta?.allAvailableOptions || null;
+
       const synthPrompt = buildSynthesisPrompt(
         payload.originalPrompt,
         sourceData,
         providerId,
         mappingResult,
+        extractedOptions
       );
 
       // ✅ RESTORED: Log prompt length for debugging
@@ -2007,37 +2165,6 @@ Your job is to address what the user is actually asking, informed by but not foc
       } sources: ${sourceData.map((s) => s.providerId).join(", ")}`,
     );
 
-    // Resolve synthesis text from prior synthesis step or recompute context
-    let synthesisText = "";
-    try {
-      if (
-        Array.isArray(payload.synthesisStepIds) &&
-        payload.synthesisStepIds.length > 0
-      ) {
-        for (const synthStepId of payload.synthesisStepIds) {
-          const synthResult = previousResults.get(synthStepId);
-          if (
-            synthResult?.status === "completed" &&
-            synthResult.result?.text &&
-            String(synthResult.result.text).trim().length > 0
-          ) {
-            synthesisText = synthResult.result.text;
-            break;
-          }
-        }
-      } else if (
-        resolvedContext?.type === "recompute" &&
-        resolvedContext?.latestSynthesisOutput?.text
-      ) {
-        synthesisText = resolvedContext.latestSynthesisOutput.text;
-      }
-    } catch (e) {
-      logger.warn(
-        "[WorkflowEngine] Failed to resolve synthesisText for mapping:",
-        e,
-      );
-    }
-
     // Compute citation order mapping number→providerId
     const providerOrder = Array.isArray(payload.providerOrder)
       ? payload.providerOrder
@@ -2049,7 +2176,6 @@ Your job is to address what the user is actually asking, informed by but not foc
     const mappingPrompt = buildMappingPrompt(
       payload.originalPrompt,
       sourceData,
-      "",
       citationOrder,
     );
 
@@ -2200,7 +2326,7 @@ Your job is to address what the user is actually asking, informed by but not foc
   async handleRetryRequest(message) {
     try {
       const { sessionId, aiTurnId, providerIds, retryScope } = message || {};
-      console.log(`[WorkflowEngine] Retry requested for providers=${(providerIds||[]).join(', ')} scope=${retryScope}`);
+      console.log(`[WorkflowEngine] Retry requested for providers=${(providerIds || []).join(', ')} scope=${retryScope}`);
 
       try {
         (providerIds || []).forEach((pid) => this.healthTracker.resetCircuit(pid));

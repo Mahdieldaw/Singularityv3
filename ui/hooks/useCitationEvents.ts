@@ -12,11 +12,11 @@ export function useCitationEvents(
           : null;
         const citeEl = target
           ? (target.closest(
-              "[data-citation-number], [data-citation]",
-            ) as HTMLElement | null)
+            "[data-citation-number], [data-citation]",
+          ) as HTMLElement | null)
           : null;
         if (!anchor && !citeEl) return;
-        e.preventDefault();
+        if (e.cancelable) e.preventDefault();
         e.stopPropagation();
         let num = NaN;
         if (anchor) {
@@ -47,11 +47,11 @@ export function useCitationEvents(
           : null;
         const citeEl = target
           ? (target.closest(
-              "[data-citation-number], [data-citation]",
-            ) as HTMLElement | null)
+            "[data-citation-number], [data-citation]",
+          ) as HTMLElement | null)
           : null;
         if (!anchor && !citeEl) return;
-        e.preventDefault();
+        if (e.cancelable) e.preventDefault();
         e.stopPropagation();
         let num = NaN;
         if (anchor) {
@@ -82,14 +82,14 @@ export function useCitationEvents(
           : null;
         const citeEl = target
           ? (target.closest(
-              "[data-citation-number], [data-citation]",
-            ) as HTMLElement | null)
+            "[data-citation-number], [data-citation]",
+          ) as HTMLElement | null)
           : null;
         if (!anchor && !citeEl) return;
         const isAux = (e as any).button && (e as any).button !== 0;
         const isModifier = e.ctrlKey || (e as any).metaKey;
         if (isAux || isModifier) {
-          e.preventDefault();
+          if (e.cancelable) e.preventDefault();
           e.stopPropagation();
           let num = NaN;
           if (anchor) {
@@ -121,14 +121,14 @@ export function useCitationEvents(
           : null;
         const citeEl = target
           ? (target.closest(
-              "[data-citation-number], [data-citation]",
-            ) as HTMLElement | null)
+            "[data-citation-number], [data-citation]",
+          ) as HTMLElement | null)
           : null;
         if (!anchor && !citeEl) return;
         const isAux = e.button !== 0;
         const isModifier = e.ctrlKey || (e as any).metaKey;
         if (isAux || isModifier) {
-          e.preventDefault();
+          if (e.cancelable) e.preventDefault();
           e.stopPropagation();
           let num = NaN;
           if (anchor) {

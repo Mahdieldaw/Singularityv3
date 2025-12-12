@@ -53,12 +53,12 @@ export const DraftCard: React.FC<DraftCardProps> = ({
     };
 
     const handleDragOver = (e: React.DragEvent) => {
-        e.preventDefault(); // Necessary to allow dropping
+        if (e.cancelable) e.preventDefault(); // Necessary to allow dropping, but check cancelable for safety
         e.dataTransfer.dropEffect = "move";
     };
 
     const handleDrop = (e: React.DragEvent) => {
-        e.preventDefault();
+        if (e.cancelable) e.preventDefault();
         const fromIndexStr = e.dataTransfer.getData("application/x-draft-index");
         if (fromIndexStr) {
             const fromIndex = parseInt(fromIndexStr, 10);

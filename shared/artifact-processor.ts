@@ -19,7 +19,7 @@ export interface ProcessedResponse {
 
 export class ArtifactProcessor {
     private artifactRegex = /<document\s+([^>]+)>([\s\S]*?)<\/document>/g;
-    private attrRegex = /(\w+)="([^"]*)"/g;
+    private attrRegex = /(\w+)=(?:"([^"]*)"|'([^']*)'|([^>\s]+))/g;
 
     /**
      * Process AI response text and extract artifacts
@@ -47,7 +47,9 @@ export class ArtifactProcessor {
             // Reset regex for attribute parsing
             this.attrRegex.lastIndex = 0;
             while ((attrMatch = this.attrRegex.exec(attrString)) !== null) {
-                attributes[attrMatch[1]] = attrMatch[2];
+                const key = attrMatch[1];
+                const value = attrMatch[2] || attrMatch[3] || attrMatch[4] || '';
+                attributes[key] = value;
             }
 
             // Auto-detect type if missing (pass identifier for filename-based detection)

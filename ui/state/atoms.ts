@@ -254,6 +254,10 @@ export const synthesisProviderAtom = atomWithStorage<string | null>(
   "htos_synthesis_provider",
   null,
 );
+export const refinerProviderAtom = atomWithStorage<string | null>(
+  "htos_refiner_provider",
+  null,
+);
 
 /**
  * Provider locks - stored in chrome.storage.local for backend access

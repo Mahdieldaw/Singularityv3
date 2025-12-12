@@ -103,6 +103,7 @@ export interface AiTurn extends Omit<ContractAiTurn, "type"> {
   // UI-only fields for efficient dependency tracking in React hooks
   synthesisVersion?: number;
   mappingVersion?: number;
+  refinerVersion?: number;
 }
 
 /** The union type for any message in the chat timeline. This is the main type for the `messages` state array. */
