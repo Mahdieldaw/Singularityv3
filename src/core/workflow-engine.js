@@ -763,55 +763,7 @@ export class WorkflowEngine {
         }
       }
 
-      const runSynthesisThenMapping = !request?.preferMappingFirst;
-
-      // 2. Execute synthesis or mapping next depending on preference flag
-      if (runSynthesisThenMapping) {
-        for (const step of synthesisSteps) {
-          try {
-            const result = await this.executeSynthesisStep(
-              step,
-              context,
-              stepResults,
-              workflowContexts,
-              resolvedContext,
-            );
-            stepResults.set(step.stepId, { status: "completed", result });
-            this.port.postMessage({
-              type: "WORKFLOW_STEP_UPDATE",
-              sessionId: context.sessionId,
-              stepId: step.stepId,
-              status: "completed",
-              result,
-              // Attach recompute metadata for UI routing/clearing
-              isRecompute: resolvedContext?.type === "recompute",
-              sourceTurnId: resolvedContext?.sourceTurnId,
-            });
-          } catch (error) {
-            console.error(
-              `[WorkflowEngine] Synthesis step ${step.stepId} failed:`,
-              error,
-            );
-            stepResults.set(step.stepId, {
-              status: "failed",
-              error: error.message,
-            });
-            this.port.postMessage({
-              type: "WORKFLOW_STEP_UPDATE",
-              sessionId: context.sessionId,
-              stepId: step.stepId,
-              status: "failed",
-              error: error.message,
-              // Attach recompute metadata for UI routing/clearing
-              isRecompute: resolvedContext?.type === "recompute",
-              sourceTurnId: resolvedContext?.sourceTurnId,
-            });
-            // Continue with other synthesis steps even if one fails
-          }
-        }
-      }
-
-      // 3. Execute mapping (order depends on preference)
+      // 2/3. Execute synthesis and mapping in parallel (no dependency)
       const mappingLoop = async () => {
         for (const step of mappingSteps) {
           try {
@@ -856,52 +808,50 @@ export class WorkflowEngine {
           }
         }
       };
-
-      if (runSynthesisThenMapping) {
-        await mappingLoop();
-      } else {
-        // Run mapping first, then synthesis
-        await mappingLoop();
-        for (const step of synthesisSteps) {
-          try {
-            const result = await this.executeSynthesisStep(
-              step,
-              context,
-              stepResults,
-              workflowContexts,
-              resolvedContext,
-            );
-            stepResults.set(step.stepId, { status: "completed", result });
-            this.port.postMessage({
-              type: "WORKFLOW_STEP_UPDATE",
-              sessionId: context.sessionId,
-              stepId: step.stepId,
-              status: "completed",
-              result,
-              isRecompute: resolvedContext?.type === "recompute",
-              sourceTurnId: resolvedContext?.sourceTurnId,
-            });
-          } catch (error) {
-            console.error(
-              `[WorkflowEngine] Synthesis step ${step.stepId} failed:`,
-              error,
-            );
-            stepResults.set(step.stepId, {
-              status: "failed",
-              error: error.message,
-            });
-            this.port.postMessage({
-              type: "WORKFLOW_STEP_UPDATE",
-              sessionId: context.sessionId,
-              stepId: step.stepId,
-              status: "failed",
-              error: error.message,
-              isRecompute: resolvedContext?.type === "recompute",
-              sourceTurnId: resolvedContext?.sourceTurnId,
-            });
+      await Promise.all([
+        (async () => {
+          for (const step of synthesisSteps) {
+            try {
+              const result = await this.executeSynthesisStep(
+                step,
+                context,
+                stepResults,
+                workflowContexts,
+                resolvedContext,
+              );
+              stepResults.set(step.stepId, { status: "completed", result });
+              this.port.postMessage({
+                type: "WORKFLOW_STEP_UPDATE",
+                sessionId: context.sessionId,
+                stepId: step.stepId,
+                status: "completed",
+                result,
+                isRecompute: resolvedContext?.type === "recompute",
+                sourceTurnId: resolvedContext?.sourceTurnId,
+              });
+            } catch (error) {
+              console.error(
+                `[WorkflowEngine] Synthesis step ${step.stepId} failed:`,
+                error,
+              );
+              stepResults.set(step.stepId, {
+                status: "failed",
+                error: error.message,
+              });
+              this.port.postMessage({
+                type: "WORKFLOW_STEP_UPDATE",
+                sessionId: context.sessionId,
+                stepId: step.stepId,
+                status: "failed",
+                error: error.message,
+                isRecompute: resolvedContext?.type === "recompute",
+                sourceTurnId: resolvedContext?.sourceTurnId,
+              });
+            }
           }
-        }
-      }
+        })(),
+        mappingLoop(),
+      ]);
 
       // ========================================================================
       // Persistence: Consolidated single call with complete results
@@ -2099,7 +2049,7 @@ Your job is to address what the user is actually asking, informed by but not foc
     const mappingPrompt = buildMappingPrompt(
       payload.originalPrompt,
       sourceData,
-      synthesisText,
+      "",
       citationOrder,
     );
 

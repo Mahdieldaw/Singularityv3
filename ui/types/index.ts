@@ -155,11 +155,19 @@ export type { GraphNode, GraphEdge, GraphTopology } from "../../shared/contract"
 // =============================================================================
 
 /** Represents a saved draft in the Launchpad drawer. */
+export interface LaunchpadDraftSection {
+  id: string;
+  title: string;
+  text: string;
+}
+
 export interface LaunchpadDraft {
   id: string;
   title: string;
   text: string;
   source: "composer" | "analyst-audit" | "analyst-variant";
   createdAt: number;
+  primarySectionId?: string;
+  sections?: LaunchpadDraftSection[];
 }
 

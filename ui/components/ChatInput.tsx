@@ -31,8 +31,7 @@ import {
 } from "../state/atoms";
 import { useChat } from "../hooks/useChat";
 import api from "../services/extension-api";
-import RefinerBlock from "./RefinerBlock";
-import AnalystDrawer from "./AnalystDrawer";
+// Legacy inline refiner and analyst drawer are deprecated in favor of Launchpad
 import { LLM_PROVIDERS_CONFIG } from "../constants";
 import { PROVIDER_LIMITS } from "../../shared/provider-limits";
 import { setProviderLock } from "../../shared/provider-locks";
@@ -160,11 +159,11 @@ const ChatInput = ({
   }, [refinerData, setIsRefinerOpen, setRefinerData, setHasRejectedRefinement]); // Note: using setPrompt from closure below, need to hoist or use atom setter
 
   const onExplain = useCallback((prompt: string) => {
+    // Route results to Launchpad (handled in useChat). Do not open legacy drawers.
     void refinePrompt(prompt, "explain").then(() => {
-      setAnalystDrawerOpen(true);
       if (!originalPrompt) setOriginalPrompt(prompt);
     });
-  }, [refinePrompt, setAnalystDrawerOpen, originalPrompt, setOriginalPrompt]);
+  }, [refinePrompt, originalPrompt, setOriginalPrompt]);
 
   const onCompose = useCallback((prompt: string) => {
     if (!originalPrompt) setOriginalPrompt(prompt);
@@ -330,8 +329,8 @@ const ChatInput = ({
     // Clear existing idle timer
     if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
 
-    // Set new timer for idle detection (reduced to 2s for snappier chaining feel if refined)
-    const idleTime = currentRefinementState ? 2000 : 3200;
+    // Set new timer for idle detection: always 2s
+    const idleTime = 2000;
 
     idleTimerRef.current = setTimeout(() => {
       setNudgeType("idle");
@@ -718,85 +717,10 @@ const ChatInput = ({
           </button>
         )}
 
-        {/* Refiner Controls Toolbar */}
-        {isRefinerOpen && (
-          <div className="w-full flex items-center justify-between pt-3 mt-1 border-t border-border-subtle animate-[fadeIn_0.3s_ease-out] flex-wrap">
-            <div className="flex gap-3">
-              <button
-                onClick={onUndoRefinement}
-                className="bg-none border-none text-intent-danger cursor-pointer text-sm font-semibold flex items-center gap-1.5 px-2 py-1 rounded-md transition-all duration-200 hover:bg-intent-danger/10"
-              >
-                <span>❌</span> Reject
-              </button>
-
-              <button
-                onClick={onToggleExplanation}
-                className={`bg-none border-none cursor-pointer text-sm font-semibold flex items-center gap-1 px-2 py-1 rounded-md transition-all duration-200 hover:bg-surface-highlight ${showExplanation ? 'text-brand-400' : 'text-text-muted'}`}
-              >
-                <span className={`transform transition-transform duration-200 ${showExplanation ? 'rotate-90' : 'rotate-0'}`}>▸</span> Explanation
-              </button>
-            </div>
-
-            <div className="flex gap-3">
-              <button
-                onClick={onToggleAudit}
-                className={`bg-none border-none cursor-pointer text-sm font-semibold flex items-center gap-1 px-2 py-1 rounded-md transition-all duration-200 hover:bg-surface-highlight ${showAudit ? 'text-intent-warning' : 'text-text-muted'}`}
-              >
-                <span className={`transform transition-transform duration-200 ${showAudit ? 'rotate-90' : 'rotate-0'}`}>▸</span> Audit
-              </button>
-              <button
-                onClick={onToggleVariants}
-                className={`bg-none border-none cursor-pointer text-sm font-semibold flex items-center gap-1 px-2 py-1 rounded-md transition-all duration-200 hover:bg-surface-highlight ${showVariants ? 'text-brand-400' : 'text-text-muted'}`}
-              >
-                <span className={`transform transition-transform duration-200 ${showVariants ? 'rotate-90' : 'rotate-0'}`}>▸</span> Variants
-              </button>
-            </div>
-          </div>
-        )}
-
-        {isRefinerOpen && (
-          <div className="w-full mt-3">
-            <RefinerBlock
-              showAudit={showAudit}
-              showVariants={showVariants}
-              showExplanation={showExplanation}
-            />
-          </div>
-        )}
-
-        {/* Revert Link and Composer Draft Chip */}
-        {(originalPrompt || composerDraft) && (
-          <div className="w-full flex items-center gap-3 mt-2 text-xs">
-            {/* Revert link - shown when we have an original prompt saved */}
-            {originalPrompt && currentRefinementState && (
-              <button
-                onClick={onRevert}
-                className="text-text-muted hover:text-text-secondary transition-colors opacity-60 hover:opacity-100"
-              >
-                ↩ Revert to original
-              </button>
-            )}
-
-            {/* Composer draft chip - shown after reverting */}
-            {composerDraft && !currentRefinementState && (
-              <button
-                onClick={onApplyDraft}
-                className="flex items-center gap-1 px-2 py-1 bg-brand-500/10 border border-brand-500/30 rounded-md text-brand-400 hover:bg-brand-500/20 transition-all"
-              >
-                <span className="text-[10px]">✦</span>
-                <span>Composer draft</span>
-              </button>
-            )}
-          </div>
-        )}
+        {/* Legacy refiner/analyst inline UI removed; use Launchpad for review */}
       </div>
 
-      {/* Analyst Drawer */}
-      <AnalystDrawer
-        onPerfectThis={onPerfectThis}
-        onUseVariant={onUseVariant}
-
-      />
+      {/* Analyst Drawer removed */}
     </div>
   );
 };

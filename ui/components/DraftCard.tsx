@@ -1,6 +1,8 @@
 import React, { useState, useRef, useEffect } from "react";
 import { cn } from "../utils/cn";
 import type { LaunchpadDraft } from "../types";
+import { useAtom } from "jotai";
+import { chatInputValueAtom } from "../state/atoms";
 
 interface DraftCardProps {
     draft: LaunchpadDraft;
@@ -23,9 +25,11 @@ export const DraftCard: React.FC<DraftCardProps> = ({
     onSendToAnalyst,
     onReorder,
 }) => {
+    const [chatInputValue, setChatInputValue] = useAtom(chatInputValueAtom);
     const [isEditing, setIsEditing] = useState(false);
     const [text, setText] = useState(draft.text);
     const [isDragging, setIsDragging] = useState(false);
+    const [openSections, setOpenSections] = useState<Record<string, boolean>>({});
     const cardRef = useRef<HTMLDivElement>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -42,9 +46,6 @@ export const DraftCard: React.FC<DraftCardProps> = ({
         e.dataTransfer.effectAllowed = "move";
         // Store only the index as plain text
         e.dataTransfer.setData("application/x-draft-index", index.toString());
-
-        // Set a custom drag image or let the browser handle it... 
-        // Browser default is usually fine for cards.
     };
 
     const handleDragEnd = () => {
@@ -66,6 +67,28 @@ export const DraftCard: React.FC<DraftCardProps> = ({
             }
         }
     };
+
+    const extractToInput = (content: string) => {
+        setChatInputValue(content);
+    };
+
+    const mainText = (() => {
+        const d: any = draft as any;
+        if (Array.isArray(d.sections) && d.sections.length > 0) {
+            const primaryId = d.primarySectionId || d.sections[0]?.id;
+            const primary = d.sections.find((s: any) => s.id === primaryId) || d.sections[0];
+            return primary?.text || draft.text;
+        }
+        return draft.text;
+    })();
+
+    const allText = (() => {
+        const d: any = draft as any;
+        if (Array.isArray(d.sections) && d.sections.length > 0) {
+            return d.sections.map((s: any) => `${s.title}\n\n${s.text}`).join("\n\n\n");
+        }
+        return draft.text;
+    })();
 
     const handleBlur = () => {
         setIsEditing(false);
@@ -127,19 +150,13 @@ export const DraftCard: React.FC<DraftCardProps> = ({
                 isDragging && "opacity-40 scale-95",
                 swipeOffset < 0 && "cursor-grabbing"
             )}
-            draggable={!isEditing}
-            onDragStart={handleDragStart}
-            onDragEnd={handleDragEnd}
+            // Drag & drop: only enable drop targets on the card; dragging starts from the grip only.
             onDragOver={handleDragOver}
             onDrop={handleDrop}
             // Swipe handlers attached to container
             onTouchStart={handleTouchStart}
             onTouchMove={handleTouchMove}
             onTouchEnd={handleTouchEnd}
-            // For mouse simulation of swipe (optional, but requested "touch/mouse events")
-            // We'll skip mouse swipe to avoid conflict with text selection/drag, 
-            // but implemented for completeness if user uses mouse like touch.
-            // Usually better to keep mouse for drag-reorder and touch for swipe-delete.
             style={{ transform: `translateX(${swipeOffset}px)` }}
         >
             {/* Background delete indicator (revealed on swipe) */}
@@ -156,9 +173,14 @@ export const DraftCard: React.FC<DraftCardProps> = ({
                 "hover:border-opacity-50 hover:shadow-lg"
             )}>
 
-                {/* Header: Grip + Title */}
+                {/* Header: Grip + Title + Extract buttons */}
                 <div className="flex items-center gap-3 mb-2">
-                    <div className="cursor-grab active:cursor-grabbing text-border-subtle hover:text-text-secondary p-1 -ml-1">
+                    <div
+                        className="cursor-grab active:cursor-grabbing text-border-subtle hover:text-text-secondary p-1 -ml-1"
+                        draggable={!isEditing}
+                        onDragStart={handleDragStart}
+                        onDragEnd={handleDragEnd}
+                    >
                         {/* 6-dots grip icon */}
                         <svg width="12" height="20" viewBox="0 0 12 20" fill="currentColor">
                             <circle cx="3" cy="4" r="1.5" />
@@ -172,34 +194,102 @@ export const DraftCard: React.FC<DraftCardProps> = ({
                     <h3 className="text-xs font-bold uppercase tracking-wider opacity-90 flex-1 truncate">
                         {draft.title}
                     </h3>
-                    <div className="text-[10px] text-text-muted opacity-50">
-                        {new Date(draft.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    <div className="flex items-center gap-2 ml-auto">
+                        <button
+                            onClick={(e) => { e.stopPropagation(); extractToInput(mainText + "\n\n" + chatInputValue); }}
+                            className="px-2 py-1 text-[10px] bg-chip-soft hover:bg-surface-highlight border border-border-subtle rounded-md text-text-secondary"
+                            title="Extract main to input"
+                        >
+                            Extract main →
+                        </button>
+                        <button
+                            onClick={(e) => { e.stopPropagation(); extractToInput(allText + "\n\n" + chatInputValue); }}
+                            className="px-2 py-1 text-[10px] bg-chip-soft hover:bg-surface-highlight border border-border-subtle rounded-md text-text-secondary"
+                            title="Extract all to input"
+                        >
+                            Extract all →
+                        </button>
+                        <div className="text-[10px] text-text-muted opacity-50">
+                            {new Date(draft.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </div>
                     </div>
                 </div>
 
                 {/* Content Body */}
-                <div
-                    className="min-h-[60px] cursor-text"
-                    onClick={() => setIsEditing(true)}
-                >
-                    {isEditing ? (
-                        <textarea
-                            ref={textareaRef}
-                            value={text}
-                            onChange={(e) => setText(e.target.value)}
-                            onBlur={handleBlur}
-                            className="w-full bg-transparent text-sm text-text-primary resize-none outline-none leading-relaxed"
-                            autoFocus
-                        />
-                    ) : (
-                        <p className="text-sm text-text-primary leading-relaxed whitespace-pre-wrap line-clamp-6 opacity-90">
-                            {text}
-                        </p>
-                    )}
-                </div>
+                {Array.isArray((draft as any).sections) && (draft as any).sections.length > 0 ? (
+                    <div className="flex flex-col gap-3">
+                        {/* Primary section first if provided */}
+                        {(() => {
+                            const d: any = draft as any;
+                            const sections = d.sections as Array<{ id: string; title: string; text: string }>;
+                            const primaryId: string | undefined = d.primarySectionId;
+                            const ordered = primaryId ? [
+                                ...sections.filter(s => s.id === primaryId),
+                                ...sections.filter(s => s.id !== primaryId)
+                            ] : sections;
+                            return ordered.map((sec, idx) => (
+                                <div key={sec.id} className="rounded-lg border border-border-subtle/60 bg-surface">
+                                    <button
+                                        className="w-full flex items-center justify-between px-3 py-2 text-left"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            setOpenSections((prev) => ({ ...prev, [sec.id]: !prev[sec.id] }));
+                                        }}
+                                    >
+                                        <div className="text-xs font-semibold text-text-secondary uppercase tracking-wider flex items-center gap-1">
+                                            <span className={`transition-transform ${openSections[sec.id] !== false ? '' : '-rotate-90'}`}>▸</span>
+                                            {sec.title}
+                                        </div>
+                                        <button
+                                            onClick={(e) => { e.stopPropagation(); extractToInput(sec.text + "\n\n" + chatInputValue); }}
+                                            className="px-2 py-1 text-xs bg-chip-soft hover:bg-surface-highlight border border-border-subtle rounded-md text-text-secondary"
+                                            title="Extract this section to input"
+                                        >
+                                            Extract →
+                                        </button>
+                                    </button>
+                                    {openSections[sec.id] !== false && (
+                                        <div className="px-3 pb-3 text-sm text-text-primary whitespace-pre-wrap leading-relaxed max-h-64 overflow-y-auto">
+                                            {sec.text}
+                                        </div>
+                                    )}
+                                </div>
+                            ));
+                        })()}
+                    </div>
+                ) : (
+                    <div
+                        className="min-h-[60px] cursor-text"
+                        onClick={() => setIsEditing(true)}
+                    >
+                        {isEditing ? (
+                            <textarea
+                                ref={textareaRef}
+                                value={text}
+                                onChange={(e) => setText(e.target.value)}
+                                onBlur={handleBlur}
+                                className="w-full bg-transparent text-sm text-text-primary resize-none outline-none leading-relaxed max-h-64 overflow-y-auto"
+                                autoFocus
+                            />
+                        ) : (
+                            <div className="text-sm text-text-primary leading-relaxed whitespace-pre-wrap opacity-90 max-h-64 overflow-y-auto">
+                                {text}
+                            </div>
+                        )}
+                    </div>
+                )}
 
                 {/* Action Bar */}
                 <div className="flex items-center gap-2 mt-4 pt-3 border-t border-border-subtle/30 opacity-80 group-hover:opacity-100 transition-opacity">
+                    <button
+                        onClick={(e) => { e.stopPropagation(); extractToInput(mainText + "\n\n" + chatInputValue); }}
+                        className="px-3 py-1.5 bg-chip-soft hover:bg-surface-highlight text-text-secondary border border-border-subtle rounded-lg text-xs transition-colors flex items-center gap-1.5"
+                        title="Extract main to input"
+                    >
+                        <span>→</span>
+                        <span>Extract</span>
+                    </button>
+
                     <button
                         onClick={(e) => { e.stopPropagation(); onSend(); }}
                         className="flex-1 px-3 py-1.5 bg-brand-500/20 hover:bg-brand-500/30 text-brand-400 text-xs font-bold rounded-lg transition-colors flex items-center justify-center gap-1.5"

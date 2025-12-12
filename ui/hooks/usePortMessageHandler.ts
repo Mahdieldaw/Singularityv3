@@ -87,6 +87,7 @@ export function usePortMessageHandler() {
 
   // Auto-open split pane state
   const isSplitOpen = useAtomValue(isSplitOpenAtom);
+  const activeSplitPanel = useAtomValue(activeSplitPanelAtom);
   const setActiveSplitPanel = useSetAtom(activeSplitPanelAtom);
   const hasAutoOpenedPane = useAtomValue(hasAutoOpenedPaneAtom);
   const setHasAutoOpenedPane = useSetAtom(hasAutoOpenedPaneAtom);
@@ -94,6 +95,12 @@ export function usePortMessageHandler() {
   const setHasAutoWidened = useSetAtom(hasAutoWidenedForSynthesisAtom);
   const setSplitPaneRatio = useSetAtom(splitPaneRatioAtom);
   // Note: We rely on Jotai's per-atom update serialization; no manual pending cache
+
+  // Refs to avoid stale closure values during streaming updates
+  const isSplitOpenRef = useRef<boolean>(false);
+  useEffect(() => { isSplitOpenRef.current = isSplitOpen; }, [isSplitOpen]);
+  const activeSplitPanelRef = useRef<{ turnId: string; providerId: string } | null>(null);
+  useEffect(() => { activeSplitPanelRef.current = activeSplitPanel; }, [activeSplitPanel]);
 
   const streamingBufferRef = useRef<StreamingBuffer | null>(null);
   const activeAiTurnIdRef = useRef<string | null>(null);
@@ -775,14 +782,14 @@ export function usePortMessageHandler() {
                 setProviderErrors(errors);
               } catch (_) { }
 
-              // AUTO-OPEN SPLIT PANE: On first streaming provider
+              // AUTO-OPEN SPLIT PANE: On first streaming provider (do not override if already open or user-selected)
               const activeId = activeAiTurnIdRef.current;
               if (activeId && hasAutoOpenedPane !== activeId && phase === 'batch') {
                 const firstStreaming = providerStatuses.find(
                   (ps: any) => ps.status === 'streaming' || ps.status === 'active'
                 );
 
-                if (firstStreaming && !isSplitOpen) {
+                if (firstStreaming && !isSplitOpenRef.current && !activeSplitPanelRef.current) {
                   setActiveSplitPanel({
                     turnId: activeId,
                     providerId: String(firstStreaming.providerId)
