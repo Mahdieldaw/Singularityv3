@@ -23,7 +23,7 @@ export const RefinerSynthesisAccuracy: React.FC<RefinerSectionProps> = ({ output
             <SynthesisAccuracySection
                 preserved={synthesisAccuracy.preserved}
                 overclaimed={synthesisAccuracy.overclaimed}
-            // missed prop intentionally omitted to avoid clutter in chat stream (shown in provider panel/audit)
+                missed={synthesisAccuracy.missed}
             />
         </div>
     );
@@ -47,6 +47,9 @@ export const RefinerEpistemicAudit: React.FC<RefinerAuditProps> = ({ output, raw
 
     const {
         confidenceScore,
+        rationale,
+        presentationStrategy,
+        strategyRationale,
         honestAssessment,
         gaps,
         verificationTriggers,
@@ -66,9 +69,35 @@ export const RefinerEpistemicAudit: React.FC<RefinerAuditProps> = ({ output, raw
             </div>
 
             {/* Assessment */}
+            {rationale && (
+                <div className="bg-indigo-500/10 border border-indigo-500/20 rounded-xl p-5">
+                    <div className="flex items-center gap-2 mb-2">
+                        <span className="w-2 h-2 rounded-full bg-indigo-400" />
+                        <h4 className="text-xs font-bold text-indigo-200 uppercase tracking-wider">Reliability Rationale</h4>
+                    </div>
+                    <div className="text-sm text-white/90 leading-relaxed">{rationale}</div>
+                </div>
+            )}
             {honestAssessment && (
                 <div className="text-sm text-white/90 leading-relaxed border-l-4 border-indigo-500 pl-4 py-2 italic bg-indigo-500/5 rounded-r-lg">
                     "{honestAssessment}"
+                </div>
+            )}
+
+            {presentationStrategy && (
+                <div className="bg-sky-500/10 border border-sky-500/20 rounded-xl p-5">
+                    <div className="flex items-center gap-2 mb-2">
+                        <span className="w-2 h-2 rounded-full bg-sky-400" />
+                        <h4 className="text-xs font-bold text-sky-200 uppercase tracking-wider">Presentation Strategy</h4>
+                    </div>
+                    <div className="text-sm text-white/90">
+                        <strong className="text-sky-300">Recommended:</strong> {presentationStrategy}
+                    </div>
+                    {strategyRationale && (
+                        <div className="text-sm text-white/80 mt-2">
+                            <strong className="text-sky-300">Why:</strong> {strategyRationale}
+                        </div>
+                    )}
                 </div>
             )}
 
@@ -97,6 +126,16 @@ export const RefinerEpistemicAudit: React.FC<RefinerAuditProps> = ({ output, raw
                             </li>
                         ))}
                     </ul>
+                </div>
+            )}
+
+            {output.metaPattern && (
+                <div className="bg-fuchsia-500/10 border border-fuchsia-500/20 rounded-xl p-5">
+                    <div className="flex items-center gap-2 mb-2">
+                        <span className="w-2 h-2 rounded-full bg-fuchsia-400" />
+                        <h4 className="text-xs font-bold text-fuchsia-200 uppercase tracking-wider">Meta-Pattern</h4>
+                    </div>
+                    <div className="text-sm text-white/90 leading-relaxed">{output.metaPattern}</div>
                 </div>
             )}
 

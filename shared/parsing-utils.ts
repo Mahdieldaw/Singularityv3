@@ -292,7 +292,7 @@ export function parseRefinerOutput(text: string): RefinerOutput {
         confidenceScore: extractConfidenceScore(normalized),
         rationale: extractSection(normalized, 'rationale'),
         presentationStrategy: extractPresentationStrategy(normalized),
-        strategyRationale: extractSection(normalized, 'why', 'strategy'),
+        strategyRationale: extractSection(normalized, 'presentation strategy', 'why'),
         gaps: extractGaps(normalized),
         honestAssessment: extractSection(normalized, 'honest assessment'),
         metaPattern: extractSection(normalized, 'meta-pattern') || undefined,
@@ -410,26 +410,25 @@ function extractPresentationStrategy(text: string): string {
 }
 
 function extractSection(text: string, sectionName: string, subsection?: string): string {
-    // Build regex to find section header and capture content until next header
     const escapedName = sectionName.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
 
-    // Match: ### Section Name or **Section Name** with optional subsection
-    let pattern;
     if (subsection) {
         const escapedSub = subsection.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
-        pattern = new RegExp(
-            `(?:^|\\n)[#*\\s]*${escapedName}[#*\\s]*\\n?[\\s\\S]*?${escapedSub}[:\\s]*([^\\n]+)`,
-            'i'
-        );
-    } else {
-        pattern = new RegExp(
-            `(?:^|\\n)[#*\\s]*${escapedName}[#*\\s]*:?\\s*\\n([\\s\\S]*?)(?=\\n#{1,3}\\s|\\n\\*\\*[A-Z]|$)`,
-            'i'
-        );
+        const parentHeader = new RegExp(`(?:^|\\n)#{1,3}\\s*${escapedName}[^\\n]*\\n([\\s\\S]*?)(?=\\n#{1,3}|$)`, 'i');
+        const parentMatch = text.match(parentHeader);
+        const scope = parentMatch?.[1] || text;
+        const labelInline = new RegExp(`\\*{0,2}\\s*${escapedSub}\\s*\\*{0,2}\\s*:?\\s*([\\s\\S]*?)(?=\\n\\*\\*|\\n#{1,3}|\\n---|$)`, 'i');
+        const inlineMatch = scope.match(labelInline);
+        return inlineMatch?.[1]?.trim() || '';
     }
 
-    const match = text.match(pattern);
-    return match?.[1]?.trim() || '';
+    const inline = new RegExp(`\\*{0,2}\\s*${escapedName}\\s*\\*{0,2}\\s*:?\\s*([\\s\\S]*?)(?=\\n\\*\\*|\\n#{1,3}|\\n---|$)`, 'i');
+    const inlineMatch = text.match(inline);
+    if (inlineMatch && inlineMatch[1]) return inlineMatch[1].trim();
+
+    const header = new RegExp(`(?:^|\\n)#{1,3}\\s*${escapedName}[^\\n]*\\n([\\s\\S]*?)(?=\\n#{1,3}|\\n\\*\\*[A-Z]|\\n---|$)`, 'i');
+    const headerMatch = text.match(header);
+    return headerMatch?.[1]?.trim() || '';
 }
 
 function extractGaps(text: string): Array<{ title: string; explanation: string }> {
@@ -470,50 +469,52 @@ function parseListFlexible(text: string): string[] {
     const bullets = parseBulletPoints(text);
     if (bullets.length > 0) return bullets;
 
-    // Split on newlines, trim, and keep substantive lines
-    const lines = String(text || '')
+    const raw = String(text || '').trim();
+    const lines = raw
         .split(/\n/)
         .map(l => l.trim())
         .filter(l => l.length > 0);
 
-    // If no lines or only one long paragraph, return as a single item
-    if (lines.length === 0) return [];
-    if (lines.length === 1) return [lines[0]];
+    if (lines.length > 1) return lines;
+    if (!raw) return [];
 
-    return lines;
+    const bySeparators = raw
+        .split(/\s*[;|•·]+\s+/)
+        .map(s => s.trim())
+        .filter(s => s.length > 0);
+
+    if (bySeparators.length > 1) return bySeparators;
+
+    return [raw];
 }
 
 function parseMissedEvents(text: string): Record<string, string[]> {
     const result: Record<string, string[]> = {};
     if (!text) return result;
 
-    // Try bullets first; if none, fall back to line-based parsing
-    const rawLines = parseListFlexible(text);
-    for (const raw of rawLines) {
-        const line = raw.trim();
-        if (!line) continue;
+    const rawItems = parseListFlexible(text);
+    for (const raw of rawItems) {
+        const segments = raw
+            .split(/\s*;\s*|\s*\|\s*/)
+            .map(s => s.trim())
+            .filter(s => s.length > 0);
 
-        // Match formats:
-        // 1) **Provider**: Content
-        // 2) Provider: Content
-        // 3) Provider's Content
-        let match = line.match(/^\*\*?([a-zA-Z0-9_\-\.\s]+)\*\*?:?\s*(.+)$/);
-        if (!match) {
-            match = line.match(/^([a-zA-Z0-9_\-\.]+)'s\s+(.+)$/);
-        }
+        for (const seg of segments) {
+            const line = seg.trim();
+            if (!line) continue;
 
-        if (match) {
-            const providerRaw = match[1].trim();
-            const content = match[2].trim();
-            const providerKey = providerRaw.toLowerCase();
-            if (!result[providerKey]) result[providerKey] = [];
-            if (!result[providerKey].includes(content)) {
-                result[providerKey].push(content);
-            }
-        } else {
-            if (!result['global']) result['global'] = [];
-            if (!result['global'].includes(line)) {
-                result['global'].push(line);
+            let match = line.match(/^\*\*?([a-zA-Z0-9_\-\.\s]+)\*\*?:?\s*(.+)$/);
+            if (!match) match = line.match(/^([a-zA-Z0-9_\-\.]+)'s\s+(.+)$/);
+
+            if (match) {
+                const providerRaw = match[1].trim();
+                const content = match[2].trim();
+                const providerKey = providerRaw.toLowerCase();
+                if (!result[providerKey]) result[providerKey] = [];
+                if (!result[providerKey].includes(content)) result[providerKey].push(content);
+            } else {
+                if (!result['global']) result['global'] = [];
+                if (!result['global'].includes(line)) result['global'].push(line);
             }
         }
     }
