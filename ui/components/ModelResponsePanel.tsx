@@ -69,7 +69,10 @@ export const ModelResponsePanel: React.FC<ModelResponsePanelProps> = React.memo(
 
     const { output: refinerOutput } = useRefinerOutput(turnId);
     const missedInsights = useMemo(() => {
-        return refinerOutput?.synthesisAccuracy?.missed?.[providerId];
+        const missed = refinerOutput?.synthesisAccuracy?.missed || {};
+        const providerSpecific = missed?.[providerId] || [];
+        const global = missed?.global || [];
+        return [...providerSpecific, ...global];
     }, [refinerOutput, providerId]);
 
     // Branching visual state

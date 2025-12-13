@@ -270,6 +270,7 @@ export type ProviderErrorType =
   | 'timeout'         // Request took too long - Retryable
   | 'circuit_open'    // Too many recent failures - Auto-retry later
   | 'content_filter'  // Response blocked by provider - Not retryable
+  | 'input_too_long'  // Input exceeds provider limit - Not retryable
   | 'network'         // Connection failed - Retryable
   | 'unknown';        // Catch-all - Maybe retryable
 

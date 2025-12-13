@@ -48,6 +48,7 @@ import {
 } from "../state/atoms";
 import { useRefinerOutput } from "../hooks/useRefinerOutput";
 import { RefinerSynthesisAccuracy } from "./RefinerCardsSection";
+import { ConfidenceBadge } from "./ConfidenceBadge";
 import { ReframingBanner } from "./ReframingBanner";
 
 // --- Helper Functions ---
@@ -1080,6 +1081,11 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
 
                           {refinerOutput && (
                             <div className="mt-6 pt-6 border-t border-border-subtle">
+                              {typeof refinerOutput.confidenceScore === 'number' && (
+                                <div className="mb-3">
+                                  <ConfidenceBadge score={refinerOutput.confidenceScore} />
+                                </div>
+                              )}
                               <RefinerSynthesisAccuracy output={refinerOutput} />
                             </div>
                           )}

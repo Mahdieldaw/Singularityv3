@@ -1,5 +1,6 @@
 // src/services/PromptRefinerService.ts
 import { RefinerOutput } from '../../shared/parsing-utils';
+import { PROVIDER_LIMITS } from '../../shared/provider-limits';
 
 interface TurnContext {
   userPrompt: string;
@@ -300,6 +301,12 @@ No composed prompt was provided. Analyze the USER_FRAGMENT directly.
   }
 
   private async _callModel(modelId: string, prompt: string): Promise<any> {
+    const pid = (modelId || '').toLowerCase() as keyof typeof PROVIDER_LIMITS;
+    const limits = PROVIDER_LIMITS[pid];
+    const promptLength = (prompt || '').length;
+    if (limits && promptLength > limits.maxInputChars) {
+      throw new Error(`INPUT_TOO_LONG: Prompt length ${promptLength} exceeds limit ${limits.maxInputChars} for ${modelId}`);
+    }
     const registry =
       (globalThis as any).__HTOS_SW?.getProviderRegistry?.() ||
       (globalThis as any).providerRegistry;

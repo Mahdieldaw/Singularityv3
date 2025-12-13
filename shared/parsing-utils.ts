@@ -281,6 +281,13 @@ export function parseRefinerOutput(text: string): RefinerOutput {
 
     const normalized = normalizeText(text);
 
+    // 1. Try JSON parsing first (for robustness)
+    const jsonResult = tryParseJsonRefinerOutput(normalized);
+    if (jsonResult) {
+        return jsonResult;
+    }
+
+    // 2. Fallback to Regex extraction
     return {
         confidenceScore: extractConfidenceScore(normalized),
         rationale: extractSection(normalized, 'rationale'),
@@ -292,6 +299,86 @@ export function parseRefinerOutput(text: string): RefinerOutput {
         synthesisAccuracy: extractSynthesisAccuracy(normalized),
         verificationTriggers: extractVerificationTriggers(normalized),
         reframingSuggestion: extractReframingSuggestion(normalized),
+    };
+}
+
+function tryParseJsonRefinerOutput(text: string): RefinerOutput | null {
+    try {
+        let jsonText = text.trim();
+        
+        // Handle code blocks
+        const codeBlockMatch = jsonText.match(/```(?:json)?\s*([\s\S]*?)```/i);
+        if (codeBlockMatch) {
+            jsonText = codeBlockMatch[1].trim();
+        }
+
+        // Handle stringified JSON (starts and ends with quote)
+        if (jsonText.startsWith('"') && jsonText.endsWith('"')) {
+            try {
+                // First parse to unescape the string
+                const unquoted = JSON.parse(jsonText);
+                if (typeof unquoted === 'string') {
+                    jsonText = unquoted.trim();
+                } else if (typeof unquoted === 'object') {
+                    // It was just a quoted JSON object? Rare but possible
+                    return normalizeRefinerObject(unquoted);
+                }
+            } catch {
+                // If failed, assume it wasn't a valid stringified JSON, continue
+            }
+        }
+
+        // Find JSON boundaries
+        const firstBrace = jsonText.indexOf('{');
+        const lastBrace = jsonText.lastIndexOf('}');
+        
+        if (firstBrace === -1 || lastBrace === -1) return null;
+        
+        const candidate = jsonText.substring(firstBrace, lastBrace + 1);
+        const parsed = JSON.parse(candidate);
+        
+        if (parsed && typeof parsed === 'object') {
+            return normalizeRefinerObject(parsed);
+        }
+    } catch (e) {
+        // Silent failure for JSON parsing, fallback to regex
+    }
+    return null;
+}
+
+function normalizeRefinerObject(parsed: any): RefinerOutput | null {
+    // Validate minimal requirements or just map best effort
+    // We check for at least one characteristic field to confirm it's not some other JSON
+    if (!('confidenceScore' in parsed) && !('honestAssessment' in parsed) && !('presentationStrategy' in parsed)) {
+        return null;
+    }
+
+    // Normalize synthesisAccuracy.missed
+    let synthesisAccuracy = parsed.synthesisAccuracy;
+    if (synthesisAccuracy && synthesisAccuracy.missed) {
+        if (Array.isArray(synthesisAccuracy.missed)) {
+            // Convert array to Record<string, string[]>
+            // Assuming the array contains strings describing missed items
+            synthesisAccuracy = {
+                ...synthesisAccuracy,
+                missed: {
+                    "global": synthesisAccuracy.missed.map(String)
+                }
+            };
+        }
+    }
+
+    return {
+        confidenceScore: typeof parsed.confidenceScore === 'number' ? parsed.confidenceScore : 0.5,
+        rationale: parsed.rationale || '',
+        presentationStrategy: parsed.presentationStrategy || 'confident_with_caveats',
+        strategyRationale: parsed.strategyRationale || '',
+        gaps: Array.isArray(parsed.gaps) ? parsed.gaps : [],
+        honestAssessment: parsed.honestAssessment || '',
+        metaPattern: parsed.metaPattern,
+        synthesisAccuracy: synthesisAccuracy,
+        verificationTriggers: parsed.verificationTriggers,
+        reframingSuggestion: parsed.reframingSuggestion
     };
 }
 
@@ -378,27 +465,56 @@ function parseBulletPoints(text: string): string[] {
         .filter(line => line.length > 0);
 }
 
+// Fallback parser: when bullets are not present, treat each non-empty line as an item
+function parseListFlexible(text: string): string[] {
+    const bullets = parseBulletPoints(text);
+    if (bullets.length > 0) return bullets;
+
+    // Split on newlines, trim, and keep substantive lines
+    const lines = String(text || '')
+        .split(/\n/)
+        .map(l => l.trim())
+        .filter(l => l.length > 0);
+
+    // If no lines or only one long paragraph, return as a single item
+    if (lines.length === 0) return [];
+    if (lines.length === 1) return [lines[0]];
+
+    return lines;
+}
+
 function parseMissedEvents(text: string): Record<string, string[]> {
     const result: Record<string, string[]> = {};
     if (!text) return result;
 
-    const lines = parseBulletPoints(text);
-    for (const line of lines) {
-        // Try to match provider pattern: **Provider**: Content or Provider: Content
-        // Match start of line
-        const match = line.match(/^\*\*?([a-zA-Z0-9_\-\.\s]+)\*\*?:?\s*(.+)$/);
+    // Try bullets first; if none, fall back to line-based parsing
+    const rawLines = parseListFlexible(text);
+    for (const raw of rawLines) {
+        const line = raw.trim();
+        if (!line) continue;
+
+        // Match formats:
+        // 1) **Provider**: Content
+        // 2) Provider: Content
+        // 3) Provider's Content
+        let match = line.match(/^\*\*?([a-zA-Z0-9_\-\.\s]+)\*\*?:?\s*(.+)$/);
+        if (!match) {
+            match = line.match(/^([a-zA-Z0-9_\-\.]+)'s\s+(.+)$/);
+        }
+
         if (match) {
-            const providerName = match[1].trim().toLowerCase(); // Normalize for matching?
-            // Ideally we keep original case or map to ID. 
-            // Since we don't have the config here, we use the extracted string as key.
-            // UI will need to fuzzy match or prompt should use exact IDs.
+            const providerRaw = match[1].trim();
             const content = match[2].trim();
-            if (!result[providerName]) result[providerName] = [];
-            result[providerName].push(content);
+            const providerKey = providerRaw.toLowerCase();
+            if (!result[providerKey]) result[providerKey] = [];
+            if (!result[providerKey].includes(content)) {
+                result[providerKey].push(content);
+            }
         } else {
-            // Fallback for unassigned points -> 'unknown' or 'global'
             if (!result['global']) result['global'] = [];
-            result['global'].push(line);
+            if (!result['global'].includes(line)) {
+                result['global'].push(line);
+            }
         }
     }
     return result;
@@ -417,8 +533,8 @@ function extractSynthesisAccuracy(text: string): RefinerOutput['synthesisAccurac
     if (!preservedBlock && !overclaimedBlock && !missedBlock) return undefined;
 
     return {
-        preserved: preservedBlock ? parseBulletPoints(preservedBlock[1]) : [],
-        overclaimed: overclaimedBlock ? parseBulletPoints(overclaimedBlock[1]) : [],
+        preserved: preservedBlock ? parseListFlexible(preservedBlock[1]) : [],
+        overclaimed: overclaimedBlock ? parseListFlexible(overclaimedBlock[1]) : [],
         missed: missedBlock ? parseMissedEvents(missedBlock[1]) : {},
     };
 }

@@ -26,6 +26,11 @@ export const ERROR_DISPLAY_TEXT = {
     description: 'This provider blocked the response. Try rephrasing your request.',
     icon: '🚫'
   },
+  input_too_long: {
+    title: 'Input Too Long',
+    description: 'Your message exceeds this provider\'s input limit. Shorten it and resend.',
+    icon: '📏'
+  },
   network: {
     title: 'Connection Failed',
     description: 'Could not reach the provider. Check your connection.',

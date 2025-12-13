@@ -275,6 +275,10 @@ const ChatInput = ({
 
   const executeSend = (text: string) => {
     const trimmed = text.trim();
+    if (isOverLimit) {
+      setToast({ id: Date.now(), message: `Input too long for ${limitingProvider} (${inputLength.toLocaleString()} / ${maxLength.toLocaleString()})`, type: "error" });
+      return;
+    }
     if (isContinuationMode) {
       onContinuation(trimmed);
     } else {
@@ -290,6 +294,10 @@ const ChatInput = ({
   const handleSubmit = (e?: React.FormEvent | React.KeyboardEvent) => {
     if (e) e.preventDefault();
     if (isLoading || !prompt.trim()) return;
+    if (isOverLimit) {
+      setToast({ id: Date.now(), message: `Input too long for ${limitingProvider} (${inputLength.toLocaleString()} / ${maxLength.toLocaleString()})`, type: "error" });
+      return;
+    }
 
     // Prevent send if menu was just triggered
     if (hasTriggeredMenuRef.current) {
@@ -317,11 +325,11 @@ const ChatInput = ({
         const progress = (currentStep / steps) * 100;
         setNudgeProgress(progress);
 
-        if (currentStep >= steps) {
-          if (nudgeTimerRef.current) clearInterval(nudgeTimerRef.current);
-          executeSend(prompt);
-        }
-      }, INTERVAL);
+          if (currentStep >= steps) {
+            if (nudgeTimerRef.current) clearInterval(nudgeTimerRef.current);
+            executeSend(prompt);
+          }
+        }, INTERVAL);
 
       return;
     }

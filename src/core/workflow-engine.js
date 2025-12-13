@@ -1504,8 +1504,53 @@ ${prompt}
       });
     } catch (_) { }
 
+    // Input length validation per provider
+    const promptLength = enhancedPrompt.length;
+    const allowedProviders = [];
+    const skippedProviders = [];
+    try {
+      for (const pid of activeProviders) {
+        const limits = PROVIDER_LIMITS[pid];
+        if (limits && promptLength > limits.maxInputChars) {
+          skippedProviders.push(pid);
+        } else {
+          allowedProviders.push(pid);
+        }
+      }
+      if (skippedProviders.length > 0) {
+        skippedProviders.forEach((pid) => {
+          try {
+            const entry = providerStatuses.find((s) => s.providerId === pid);
+            if (entry) {
+              entry.status = 'skipped';
+              entry.skippedReason = 'input_too_long';
+              entry.error = { type: 'input_too_long', message: `Prompt length ${promptLength} exceeds limit for ${pid}`, retryable: true };
+            } else {
+              providerStatuses.push({ providerId: pid, status: 'skipped', skippedReason: 'input_too_long', error: { type: 'input_too_long', message: `Prompt length ${promptLength} exceeds limit for ${pid}`, retryable: true } });
+            }
+          } catch (_) { }
+        });
+        try {
+          this.port.postMessage({
+            type: 'WORKFLOW_PROGRESS',
+            sessionId: context.sessionId,
+            aiTurnId: context.canonicalAiTurnId || 'unknown',
+            phase: 'batch',
+            providerStatuses,
+            completedCount: providerStatuses.filter((p) => p.status === 'completed').length,
+            totalCount: providerStatuses.length,
+          });
+        } catch (_) { }
+      }
+      if (allowedProviders.length === 0) {
+        throw new Error(`INPUT_TOO_LONG: Prompt length ${promptLength} exceeds limits for all selected providers`);
+      }
+    } catch (e) {
+      return Promise.reject(e);
+    }
+
     return new Promise((resolve, reject) => {
-      this.orchestrator.executeParallelFanout(enhancedPrompt, activeProviders, {
+      this.orchestrator.executeParallelFanout(enhancedPrompt, allowedProviders, {
         sessionId: context.sessionId,
         useThinking,
         providerContexts,
@@ -2024,7 +2069,6 @@ ${prompt}
 
       }
     } else {
-      // Simplified recompute: use pre-fetched latestMappingOutput from resolvedContext
       if (
         !mappingResult &&
         resolvedContext?.type === "recompute" &&
@@ -2034,6 +2078,18 @@ ${prompt}
         wdbg(
           `[WorkflowEngine] Using pre-fetched historical mapping from ${mappingResult.providerId}`,
         );
+      }
+      if (!mappingResult) {
+        try {
+          previousResults.forEach((val) => {
+            if (!mappingResult && val && val.result && val.result.meta && val.result.meta.allAvailableOptions) {
+              mappingResult = val.result;
+            }
+          });
+          if (mappingResult) {
+            wdbg(`[WorkflowEngine] Found mapping result in previousResults (meta.allAvailableOptions present)`);
+          }
+        } catch (_) { }
       }
     }
 
