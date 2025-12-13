@@ -47,7 +47,7 @@ import {
   workflowProgressAtom
 } from "../state/atoms";
 import { useRefinerOutput } from "../hooks/useRefinerOutput";
-import { RefinerCardsSection } from "./RefinerCardsSection";
+import { RefinerSynthesisAccuracy } from "./RefinerCardsSection";
 import { ReframingBanner } from "./ReframingBanner";
 
 // --- Helper Functions ---
@@ -1080,7 +1080,7 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
 
                           {refinerOutput && (
                             <div className="mt-6 pt-6 border-t border-border-subtle">
-                              <RefinerCardsSection output={refinerOutput} />
+                              <RefinerSynthesisAccuracy output={refinerOutput} />
                             </div>
                           )}
                         </div>

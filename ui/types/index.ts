@@ -168,6 +168,7 @@ export interface LaunchpadDraft {
   text: string;
   source: "composer" | "analyst-audit" | "analyst-variant";
   createdAt: number;
+  originalPrompt?: string;
   primarySectionId?: string;
   sections?: LaunchpadDraftSection[];
 }

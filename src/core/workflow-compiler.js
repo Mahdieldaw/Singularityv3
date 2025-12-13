@@ -313,10 +313,9 @@ export class WorkflowCompiler {
     if (context.type === "recompute") {
       return context.stepType === "refiner";
     }
-    // Check primitive property: Refiner requires synthesis and mapping to generally make sense in this pipeline
+    // Check primitive property: Refiner requires synthesis
     return (
       !!request.includeSynthesis &&
-      !!request.includeMapping &&
       !!request.includeRefiner
     );
   }
@@ -371,7 +370,7 @@ export class WorkflowCompiler {
       const stored = localStorage.getItem("htos_mapping_provider");
       if (stored) return stored;
     } catch { }
-    return request.providers?.[0] || "claude";
+    return request.providers?.[0] || "Gemini";
   }
 
   _getDefaultSynthesizer(request) {
@@ -383,7 +382,11 @@ export class WorkflowCompiler {
   }
 
   _getDefaultRefiner(request) {
-    return this._getDefaultSynthesizer(request);
+    try {
+      const stored = localStorage.getItem("htos_last_refiner_model");
+      if (stored) return stored;
+    } catch { }
+    return request.providers?.[0] || "claude";
   }
 
   _generateWorkflowId(contextType) {

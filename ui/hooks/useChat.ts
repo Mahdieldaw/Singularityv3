@@ -19,9 +19,8 @@ import {
   currentAppStepAtom,
   uiPhaseAtom,
   isHistoryPanelOpenAtom,
-  refinerDataAtom,
-  isRefinerOpenAtom,
-  isRefiningAtom, // Import new atom
+
+  iscomposingAtom, // Import new atom
   composerModelAtom, // Import new atom
   analystModelAtom,
   chatInputValueAtom,
@@ -59,8 +58,7 @@ export function useChat() {
   const turnIds = useAtomValue(turnIdsAtom);
   const refinerProvider = useAtomValue(refinerProviderAtom);
 
-  const refinerData = useAtomValue(refinerDataAtom);
-  const isRefinerOpen = useAtomValue(isRefinerOpenAtom);
+
   const chatInputValue = useAtomValue(chatInputValueAtom);
 
   // Writes
@@ -73,9 +71,8 @@ export function useChat() {
   const setCurrentAppStep = useSetAtom(currentAppStepAtom);
   const setUiPhase = useSetAtom(uiPhaseAtom);
   const setIsHistoryPanelOpen = useSetAtom(isHistoryPanelOpenAtom);
-  const setRefinerData = useSetAtom(refinerDataAtom);
-  const setIsRefinerOpen = useSetAtom(isRefinerOpenAtom);
-  const setIsRefining = useSetAtom(isRefiningAtom); // Set new atom
+
+  const setiscomposing = useSetAtom(iscomposingAtom); // Set new atom
   const setHasRejectedRefinement = useSetAtom(hasRejectedRefinementAtom);
   const setActiveTarget = useSetAtom(activeProviderTargetAtom);
 
@@ -133,6 +130,15 @@ export function useChat() {
           effectiveMappingProvider
         );
 
+        const fallbackRefiner = (() => {
+          try {
+            return localStorage.getItem("htos_refiner_provider") || localStorage.getItem("htos_last_refiner_model");
+          } catch {
+            return null;
+          }
+        })();
+        const effectiveRefinerProvider = refinerProvider || fallbackRefiner || null;
+
         const isInitialize =
           mode === "new" && (!currentSessionId || turnIds.length === 0);
 
@@ -172,6 +178,10 @@ export function useChat() {
             mapper: shouldUseMapping
               ? (effectiveMappingProvider as ProviderKey)
               : undefined,
+            refiner: shouldUseSynthesis && effectiveRefinerProvider // Only run refiner if synthesis acts (it audits synthesis)
+              ? (effectiveRefinerProvider as ProviderKey)
+              : undefined,
+            includeRefiner: !!(shouldUseSynthesis && effectiveRefinerProvider),
             useThinking: computeThinkFlag({
               modeThinkButtonOn: thinkOnChatGPT,
               input: prompt,
@@ -192,6 +202,10 @@ export function useChat() {
             mapper: shouldUseMapping
               ? (effectiveMappingProvider as ProviderKey)
               : undefined,
+            refiner: shouldUseSynthesis && effectiveRefinerProvider
+              ? (effectiveRefinerProvider as ProviderKey)
+              : undefined,
+            includeRefiner: !!(shouldUseSynthesis && effectiveRefinerProvider),
             useThinking: computeThinkFlag({
               modeThinkButtonOn: thinkOnChatGPT,
               input: prompt,
@@ -339,6 +353,7 @@ export function useChat() {
               batchResponses,
               synthesisResponses: normalizeSynthMap(round.synthesisResponses),
               mappingResponses: normalizeSynthMap(round.mappingResponses),
+              refinerResponses: normalizeSynthMap(round.refinerResponses),
             };
             newIds.push(aiTurn.id);
             newMap.set(aiTurn.id, aiTurn);
@@ -442,11 +457,11 @@ export function useChat() {
 
   const setChatInputValue = useSetAtom(chatInputValueAtom);
 
-  const refinePrompt = useCallback(
-    async (draftPrompt: string, mode: "compose" | "explain") => {
+  const runComposerFlow = useCallback(
+    async (draftPrompt: string, mode: "compose" | "explain", originalPromptContext?: string) => {
       if (!draftPrompt || !draftPrompt.trim()) return;
 
-      setIsRefining(true); // Set loading state
+      setiscomposing(true);
 
       try {
         const lastTurnId = turnIds[turnIds.length - 1];
@@ -483,15 +498,6 @@ export function useChat() {
           }
         }
 
-        // Determine the effective original prompt (Re-roll logic)
-        // If we are already refining AND the user hasn't edited the output, use the preserved original.
-        // If the user HAS edited the text, treat that edit as the new "original" draft.
-        const isUnchangedOutput = isRefinerOpen && refinerData?.refinedPrompt === draftPrompt;
-
-        const effectiveOriginal = (isUnchangedOutput && refinerData?.originalPrompt)
-          ? refinerData.originalPrompt
-          : draftPrompt;
-
         const context = {
           userPrompt,
           synthesisText,
@@ -501,69 +507,53 @@ export function useChat() {
           isInitialize: !currentSessionId || turnIds.length === 0,
         };
 
+        // Determine the User Intent (Original Prompt)
+        // If provided (chaining), use it. Otherwise, if starting fresh, the input IS the original.
+        const effectiveOriginal = originalPromptContext || draftPrompt;
+
         if (mode === "compose") {
-          // Compose Mode: Run Composer with optional Analyst critique
-          const analystCritique = refinerData?.audit;
-          // Use effectiveOriginal to ensure we refine the user's intent, not the previous AI output
-          const result = await api.runComposer(effectiveOriginal, context, composerModel, analystCritique);
+          // Compose Mode: Run Composer
+          // Note: In new flow, we don't automatically pass critique unless we chain it. 
+          // For now, simple run.
+          const result = await api.runComposer(draftPrompt, context, composerModel);
 
           if (result) {
-            // Preserve parsed data for potential future use, but do not mutate chat input or open legacy drawers
-            setRefinerData({
-              refinedPrompt: result.refinedPrompt,
-              explanation: result.explanation,
-              originalPrompt: effectiveOriginal,
-              audit: refinerData?.audit,
-              variants: refinerData?.variants
-            });
-
-            // Capture Composer output to Launchpad and auto-open drawer
-            const snippet = (effectiveOriginal || draftPrompt || "").slice(0, 60).trim();
-            const newDraft = {
+            const snippet = (result.refinedPrompt || "").slice(0, 60).trim();
+            const newDraft: any = {
               id: `draft-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
               title: `Composer – ${snippet}`,
               text: result.refinedPrompt,
-              source: "composer" as const,
+              source: "composer",
               createdAt: Date.now(),
+              originalPrompt: effectiveOriginal, // PERSIST INTENT
               primarySectionId: 'refined',
               sections: [
                 { id: 'refined', title: 'Refined Prompt', text: result.refinedPrompt },
                 ...(result.explanation ? [{ id: 'notes', title: 'Notes', text: result.explanation }] : [])
               ],
-            } as any;
+            };
             setLaunchpadDrafts(prev => [newDraft, ...prev]);
             setLaunchpadOpen(true);
           }
         } else {
           // Explain Mode: Run Analyst
-          // We analyze the current text box content (draftPrompt) as the "candidate"
-          // But we use effectiveOriginal as the "fragment" (user intent) context
-
+          // analyze the current text box content (draftPrompt) as the "candidate"
           const candidatePrompt = draftPrompt;
 
           const result = await api.runAnalyst(
-            effectiveOriginal, // Fragment: The original user intent
+            effectiveOriginal, // User Intent
             context,
-            candidatePrompt, // Composed/Candidate: What we are analyzing
+            candidatePrompt, // The Text to Analyze
             analystModel,
             effectiveOriginal
           );
 
           if (result) {
-            // Preserve parsed data for potential future use, but do not open legacy drawers
-            setRefinerData((prev) => ({
-              refinedPrompt: candidatePrompt,
-              explanation: prev?.explanation || "",
-              originalPrompt: effectiveOriginal,
-              audit: result.audit,
-              variants: result.variants
-            }));
-
-            // Capture Analyst output as a single card with sections and auto-open drawer
             const ts = Date.now();
-            const snippet = (effectiveOriginal || candidatePrompt || "").slice(0, 60).trim();
+            const snippet = (candidatePrompt || "").slice(0, 60).trim();
             const sections: any[] = [];
             const primaryId = 'audit';
+
             const auditText = result.audit || "";
             if (auditText) {
               sections.push({ id: 'audit', title: 'Audit', text: auditText });
@@ -572,39 +562,37 @@ export function useChat() {
               const numbered = result.variants.map((v, i) => `${i + 1}. ${v}`).join('\n\n');
               sections.push({ id: 'variants', title: 'Variants', text: numbered });
             }
-            const analystDraft = {
+
+            const analystDraft: any = {
               id: `draft-${ts}-${Math.random().toString(36).slice(2, 8)}`,
               title: `Analyst – ${snippet}`,
               text: auditText || (result.variants || []).join('\n\n'),
-              source: "analyst-audit" as const,
+              source: "analyst-audit",
               createdAt: ts,
+              originalPrompt: effectiveOriginal, // PERSIST INTENT
               primarySectionId: primaryId,
               sections,
-            } as any;
+            };
             setLaunchpadDrafts(prev => [analystDraft, ...prev]);
             setLaunchpadOpen(true);
           }
         }
 
       } catch (err) {
-        console.error("Failed to refine prompt:", err);
+        console.error("Failed to run composer flow:", err);
       } finally {
-        setIsRefining(false); // Ensure loading is cleared
+        setiscomposing(false);
       }
     },
     [
       turnIds,
       turnsMap,
-      setRefinerData,
-      setIsRefinerOpen,
-      setIsRefining,
+      setiscomposing,
       currentSessionId,
-      setChatInputValue,
       composerModel,
       analystModel,
-      refinerData,
-      chatInputValue,
-      isRefinerOpen,
+      setLaunchpadDrafts,
+      setLaunchpadOpen
     ],
   );
 
@@ -634,7 +622,7 @@ export function useChat() {
     deleteChat,
     deleteChats,
     abort,
-    refinePrompt,
+    runComposerFlow,
     messages,
   };
 }

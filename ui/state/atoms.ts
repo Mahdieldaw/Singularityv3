@@ -263,9 +263,10 @@ export const refinerProviderAtom = atomWithStorage<string | null>(
  * Provider locks - stored in chrome.storage.local for backend access
  * UI writes, backend reads. Not atomWithStorage because we need chrome.storage.local
  */
-export const providerLocksAtom = atom<{ synthesis: boolean; mapping: boolean }>({
+export const providerLocksAtom = atom<{ synthesis: boolean; mapping: boolean; refiner: boolean }>({
   synthesis: false,
   mapping: false,
+  refiner: false,
 });
 
 
@@ -301,7 +302,7 @@ export const providerContextsAtom = atomWithImmer<Record<string, any>>({});
 // -----------------------------
 export const activeRecomputeStateAtom = atom<{
   aiTurnId: string;
-  stepType: "synthesis" | "mapping" | "batch";
+  stepType: "synthesis" | "mapping" | "batch" | "refiner";
   providerId: string;
 } | null>(null);
 
@@ -338,7 +339,9 @@ export const synthRecomputeSelectionsByRoundAtom = atomWithImmer<
 export const mappingRecomputeSelectionByRoundAtom = atomWithImmer<
   Record<string, string | null>
 >({});
-
+export const refinerRecomputeSelectionByRoundAtom = atomWithImmer<
+  Record<string, string | null>
+>({});
 // Persist "show history" state per provider (aiTurnId-providerId)
 export const providerHistoryExpandedFamily = atomFamily(
   (_key: string) => atom(false),
@@ -386,15 +389,7 @@ export const isFirstTurnAtom = atom((get) => {
 // -----------------------------
 // Prompt Refiner State
 // -----------------------------
-export const refinerDataAtom = atom<{
-  refinedPrompt: string;
-  explanation: string;
-  audit?: string;
-  variants?: string[];
-  originalPrompt?: string;
-} | null>(null);
-export const isRefinerOpenAtom = atom<boolean>(false);
-export const isRefiningAtom = atom<boolean>(false);
+export const iscomposingAtom = atom<boolean>(false);
 export const composerModelAtom = atomWithStorage<string>(
   "htos_composer_model",
   "gemini",

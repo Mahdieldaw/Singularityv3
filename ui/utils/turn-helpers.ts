@@ -29,11 +29,13 @@ export function createOptimisticAiTurn(
   activeProviders: ProviderKey[],
   shouldUseSynthesis: boolean,
   shouldUseMapping: boolean,
+  shouldUseRefiner: boolean,
   synthesisProvider?: string,
   mappingProvider?: string,
+  refinerProvider?: string,
   timestamp?: number,
   explicitUserTurnId?: string,
-  requestedFeatures?: { synthesis: boolean; mapping: boolean },
+  requestedFeatures?: { synthesis: boolean; mapping: boolean; refiner: boolean },
 ): AiTurn {
   const now = timestamp || Date.now();
 
@@ -86,6 +88,17 @@ export function createOptimisticAiTurn(
       },
     ];
   }
+  // --- NEW: Refiner setup ---
+  const refinerResponses: Record<string, ProviderResponse[]> = {};
+  if (shouldUseRefiner && refinerProvider) {
+    refinerResponses[refinerProvider] = [{
+      providerId: refinerProvider as ProviderKey,
+      text: "",
+      status: PRIMARY_STREAMING_PROVIDER_IDS.includes(String(refinerProvider)) ? "streaming" : "pending",
+      createdAt: now,
+      updatedAt: now,
+    }];
+  }
 
   const effectiveUserTurnId = explicitUserTurnId || userTurn.id;
 
@@ -99,14 +112,17 @@ export function createOptimisticAiTurn(
     batchResponses: pendingBatch,
     synthesisResponses,
     mappingResponses,
+    refinerResponses,
     meta: {
       isOptimistic: true,
       expectedProviders: activeProviders, // ✅ STORE expected providers
       synthesizer: synthesisProvider,
       mapper: mappingProvider,
+      refiner: refinerProvider,
       ...(requestedFeatures ? { requestedFeatures } : {}),
       ...(synthesisProvider ? { synthesizer: synthesisProvider } : {}),
       ...(mappingProvider ? { mapper: mappingProvider } : {}),
+      ...(refinerProvider ? { refiner: refinerProvider } : {}),
     },
   };
 }

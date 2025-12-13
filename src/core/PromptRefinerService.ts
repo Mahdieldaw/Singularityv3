@@ -135,9 +135,8 @@ Always provide this. Transform their input into the strongest possible prompt fo
 
 Begin.`;
 
-// Deprecated prompts kept for reference if needed, but unused in new flow
-const AUTHOR_SYSTEM_PROMPT = `(Deprecated) ...`;
-const INITIALIZE_SYSTEM_PROMPT = `(Deprecated) ...`;
+// Deprecated prompts removed
+
 
 const ANALYST_SYSTEM_PROMPT = `You are not the Author. You are the mirror held up to the composed prompt before it launches.
 
@@ -191,80 +190,9 @@ export class PromptRefinerService {
     this.analystModel = (options.analystModel || defaultModel).toLowerCase();
   }
 
-  /**
-   * Legacy method for backward compatibility.
-   * Wraps refineWithAuthorAnalyst.
-   */
-  async refinePrompt(
-    draftPrompt: string,
-    turnContext: TurnContext | null = null,
-  ): Promise<RefinerResult | null> {
-    return this.runComposer(draftPrompt, turnContext, this.authorModel);
-  }
 
-  /**
-   * Refine a draft prompt using the Composer -> Analyst pipeline.
-   * (Formerly refineWithAuthorAnalyst)
-   */
-  async refineWithAuthorAnalyst(
-    fragment: string,
-    turnContext: TurnContext | null,
-    authorModelId?: string,
-    analystModelId?: string,
-    isInitialize: boolean = false
-  ): Promise<AuthorAnalystResult | null> {
-    try {
-      const authorId = authorModelId || this.authorModel;
-      const analystId = analystModelId || this.analystModel;
 
-      // 1. Run Composer
-      const composerResult = await this.runComposer(fragment, turnContext, authorId);
-      if (!composerResult) return null;
 
-      const { refinedPrompt: authored, explanation } = composerResult;
-
-      // 2. Run Analyst
-      // For initialize flows, we might skip analyst or keep it. 
-      // The original code skipped analyst if isInitialize was true.
-      // We'll preserve that logic for now, or let the caller decide.
-      // But wait, the prompt says "Analyst stays as your current ANALYST_SYSTEM_PROMPT".
-
-      let audit = "Audit unavailable";
-      let variants: string[] = [];
-      let analystResponseRaw: any = null;
-
-      if (!isInitialize) {
-        const contextSection = this._buildContextSection(turnContext);
-        const analystPrompt = this._buildAnalystPrompt(fragment, contextSection, authored);
-        console.log(`[PromptRefinerService] Running Analyst (\${analystId})...`);
-
-        try {
-          analystResponseRaw = await this._callModel(analystId, analystPrompt);
-          const analystText = this._extractPlainText(analystResponseRaw?.text || "");
-          const parsedAnalyst = this._parseAnalystResponse(analystText);
-          audit = parsedAnalyst.audit;
-          variants = parsedAnalyst.variants;
-        } catch (e) {
-          console.warn("[PromptRefinerService] Analyst failed, returning Composer result only:", e);
-        }
-      }
-
-      return {
-        authored,
-        explanation,
-        audit,
-        variants,
-        raw: {
-          authorResponse: explanation, // Approximate mapping
-          analystResponse: analystResponseRaw?.text || "",
-        },
-      };
-
-    } catch (e) {
-      console.warn("[PromptRefinerService] Refinement pipeline failed:", e);
-      return null;
-    }
-  }
 
   /**
    * Run the Composer (unified Author/Refiner).
@@ -298,36 +226,9 @@ export class PromptRefinerService {
     return this._parseRefinerResponse(text);
   }
 
-  // Deprecated parsers
-  // private _parseAuthorResponse...
-  // private _parseInitializeResponse...
 
-  private _parseInitializeResponse(text: string): { authored: string; explanation: string } {
-    const result = {
-      authored: text,
-      explanation: "",
-    };
 
-    try {
-      // Look for REFINED_PROMPT: and EXPLANATION:
-      // Handle variations: REFINED_PROMPT, REFINED\_PROMPT (escaped), with markdown formatting
-      const refinedRegex = /(?:^|\n)[*#]*\s*REFINED(?:_|\\_)\s*PROMPT[*]*:?\s*([\\s\\S]*?)(?=(?:^|\n)[*#]*\s*EXPLANATION|$)/i;
-      const explanationRegex = /(?:^|\n)[*#]*\s*EXPLANATION[*]*:?\s*([\\s\\S]*?)$/i;
 
-      const refinedMatch = text.match(refinedRegex);
-      const explanationMatch = text.match(explanationRegex);
-
-      if (refinedMatch && refinedMatch[1]) {
-        result.authored = refinedMatch[1].trim();
-      }
-      if (explanationMatch && explanationMatch[1]) {
-        result.explanation = explanationMatch[1].trim();
-      }
-    } catch (e) {
-      console.warn("[PromptRefinerService] Failed to parse initialize response:", e);
-    }
-    return result;
-  }
 
 
   private _buildContextSection(turnContext: TurnContext | null): string {
@@ -371,10 +272,7 @@ ${fragment}
     return prompt;
   }
 
-  // Deprecated
-  private _buildAuthorPrompt(fragment: string, contextSection: string, isInitialize: boolean): string {
-    return this._buildComposerPrompt(fragment, contextSection);
-  }
+
 
   private _buildAnalystPrompt(fragment: string, contextSection: string, authoredPrompt?: string): string {
     let prompt = `${ANALYST_SYSTEM_PROMPT}
@@ -539,22 +437,7 @@ No composed prompt was provided. Analyze the USER_FRAGMENT directly.
     return result;
   }
 
-  /**
-  * Run the Author role independently.
-  */
-  /**
-   * Run the Author role independently (Delegates to Composer).
-   */
-  async runAuthor(
-    fragment: string,
-    turnContext: TurnContext | null,
-    authorModelId?: string,
-    isInitialize: boolean = false
-  ): Promise<{ authored: string; explanation: string } | null> {
-    const result = await this.runComposer(fragment, turnContext, authorModelId);
-    if (!result) return null;
-    return { authored: result.refinedPrompt, explanation: result.explanation };
-  }
+
 
   /**
    * Run the Analyst role independently.
@@ -586,16 +469,7 @@ No composed prompt was provided. Analyze the USER_FRAGMENT directly.
     }
   }
 
-  /**
-   * Run the Refiner role independently.
-   */
-  async runRefiner(
-    draftPrompt: string,
-    turnContext: TurnContext | null,
-    refinerModelId?: string
-  ): Promise<RefinerResult | null> {
-    return this.runComposer(draftPrompt, turnContext, refinerModelId);
-  }
+
 
   /**
    * Run the Refiner meta-analysis on completed turn
@@ -618,8 +492,15 @@ No composed prompt was provided. Analyze the USER_FRAGMENT directly.
         .join('\n\n');
 
       const refinerPrompt = `You are an epistemic auditor assessing the *reliability* of reasoning, not its content.
-You witnessed: User query → ${Object.keys(batchResponses).length} models responded → Synthesizer unified → Mapper cataloged tensions.
+
+Style: Short, precise, clinical. No rhetorical flourishes. 2-3 sentences max per section unless explicitly required.
+
+You witnessed: User query → ${Object.keys(batchResponses).length} models responded → Mapper cataloged terrain → Synthesizer unified.
+
 **Your task: How much should the user trust this output?**
+
+**Your unique position:** You are the only model (except mapper) to see all raw outputs. If the mapper missed claims from raw outputs, surface them.
+
 ---
 <user_prompt>${userPrompt}</user_prompt>
 <synthesis>${synthesisText}</synthesis>
@@ -627,6 +508,7 @@ You witnessed: User query → ${Object.keys(batchResponses).length} models respo
 <raw_outputs>${modelOutputsBlock}</raw_outputs>
 ---
 ## Analysis Framework
+
 **1. Query & Consensus**
 - Query type: Factual / Analytical / Creative / Procedural?
 - Agreement: Universal (${Object.keys(batchResponses).length}/${Object.keys(batchResponses).length} = groupthink risk?) | Strong (4-5/${Object.keys(batchResponses).length}) | Split (3/${Object.keys(batchResponses).length} = context-dependent) | Scattered (<3 = bad question?)
@@ -648,74 +530,155 @@ Surface what's missing:
 - Insights from raw outputs that synthesis dropped
 
 **Relevance Filter**: Only flag gaps that would change the user's decision or action.
-If batch models discussed topics outside the query's stated scope (e.g., mobile for a desktop query),
-note the scope mismatch but don't treat it as a gap requiring action.
 
 **4. Meta-Pattern**
 What does the *shape* of agreement/disagreement reveal that no model stated?
+
+**5. Mapper Audit**
+Did the mapper's claims inventory miss anything from raw outputs? If yes, note specifically.
+
 ---
+
 ## Output Structure
+
 ### Reliability Assessment
+
 **Confidence Score: [0.0-1.0]**
+
+Score calibration:
 - 0.9+: Universal consensus on verifiable facts. Safe to act.
 - 0.7-0.89: Strong consensus, minor peripheral dissent.
 - 0.5-0.69: Meaningful divergence. Verify before acting.
 - 0.3-0.49: Significant disagreement or hallucination risk. Hypothesis only.
 - <0.3: Unreliable. Scattered or flawed query.
 
-**Rationale**: [2-3 sentences—what drove score up/down]
----
-### Presentation Strategy
-Choose one:
-- **definitive**: High confidence factual answer
-- **confident_with_caveats**: Add "based on X assumption" framing
-- **options_forward**: Lead with decision map, synthesis secondary
-- **context_dependent**: Frame as "it depends on..."
-- **low_confidence**: Show uncertainty banner prominently
-- **needs_verification**: Trigger search before presenting
-- **query_problematic**: Surface reframing first
+Enforced caps:
+- Agreement without evidence → max 0.7
+- Bold claims without sourcing → max 0.6
+- Domain misalignment → apply penalty
 
-**Recommended**: [choice]
-**Why**: [1 sentence]
+**Rationale**: [2-3 sentences—what drove score up/down]
+
 ---
+
+### Presentation Strategy
+
+**Assess which description best matches this output: - **definitive**: Universal consensus on verifiable claims. No meaningful dissent. Synthesis IS the answer. - **confident_with_caveats**: Strong synthesis, but validity depends on stated or unstated assumptions. The assumptions should be framed. - **options_forward**: Multiple distinct approaches with similar merit. No single "best" path—user context determines which fits. Decision map is as valuable as synthesis. - **context_dependent**: Correct answer genuinely varies by situation. "It depends" is the most honest frame, not a cop-out. - **low_confidence**: Significant disagreement, thin reasoning, or hallucination risk. Synthesis is a hypothesis, not a conclusion. - **needs_verification**: Contains specific factual claims (dates, stats, quotes, version numbers) that could be wrong and would matter if wrong. - **query_problematic**: The question itself is ambiguous, assumes false premises, or limits useful answers. Reframing unlocks more than answering. **Recommended**: [choice] **Why**: [1 sentence—which criteria above drove this choice]
+
+---
+
 ### Verification Triggers
+
 Flag claims needing external verification (only if verification would change behavior):
-- **Claim**: [quote]
+- **Claim**: "[quote]"
 - **Why**: [date-sensitive / high-stakes / suspiciously uniform]
 - **Source type**: [documentation / academic / news]
 
-*(If none needed, state "None required—[reason]")*
+*(If none needed: "None required—[reason]")*
+
 ---
+
 ### Reframing Suggestion
-*(Only if query is flawed)*
+
+*(Only if query is flawed—omit section entirely if not applicable)*
 - **Issue**: [what's ambiguous/limiting]
 - **Better question**: "[reframe]"
 - **Unlocks**: [what this enables]
+
 ---
+
 ### Synthesis Accuracy
-- **Preserved**: [what synthesis got right]
-- **Overclaimed**: [added confidence not warranted]
-- **Missed**: [dropped insights from raw outputs, and WHICH PROVIDER said it]
+
+- **Preserved**: [what synthesis captured correctly]
+- **Overclaimed**: [confidence added beyond raw outputs]
+- **Missed**: [dropped insights—name the provider, e.g. "Claude's point about X"]
+
 ---
+
 ### Gap Detection
+
 - **Gap 1**: [Title] — [explanation]
 - **Gap 2**: [Title] — [explanation]
 - **Gap 3**: [Title] — [explanation]
 
 *(If <3 exist: "Unusually complete—only N gaps:" then list)*
+
 ---
+
 ### Meta-Pattern
-[What does the shape of agreement/disagreement reveal?]
+
+[1 paragraph: What does the shape of agreement/disagreement reveal that no model stated?]
+
 ---
+
 ### Honest Assessment
-[2-4 sentences of direct advice: How reliable really? Biggest risk? What would you do?]
+
+[2-4 sentences: How reliable really? Biggest risk? What would you do next?]
+
 ---
+
 ## Rules
 - Assess, don't invent. Evaluate, don't replace.
 - Low scores are rare but meaningful. High scores are earned.
-- Your value: seeing what others missed.
+- Your value: seeing what others missed—including what the mapper missed.
 
-Begin.`;
+
+---
+
+### Verification Triggers
+
+Flag claims needing external verification (only if verification would change behavior):
+- **Claim**: "[quote]"
+- **Why**: [date-sensitive / high-stakes / suspiciously uniform]
+- **Source type**: [documentation / academic / news]
+
+*(If none needed: "None required—[reason]")*
+
+---
+
+### Reframing Suggestion
+
+*(Only if query is flawed—omit section entirely if not applicable)*
+- **Issue**: [what's ambiguous/limiting]
+- **Better question**: "[reframe]"
+- **Unlocks**: [what this enables]
+
+---
+
+### Synthesis Accuracy
+
+- **Preserved**: [what synthesis captured correctly]
+- **Overclaimed**: [confidence added beyond raw outputs]
+- **Missed**: [dropped insights—name the provider, e.g. "Claude's point about X"]
+
+---
+
+### Gap Detection
+
+- **Gap 1**: [Title] — [explanation]
+- **Gap 2**: [Title] — [explanation]
+- **Gap 3**: [Title] — [explanation]
+
+*(If <3 exist: "Unusually complete—only N gaps:" then list)*
+
+---
+
+### Meta-Pattern
+
+[1 paragraph: What does the shape of agreement/disagreement reveal that no model stated?]
+
+---
+
+### Honest Assessment
+
+[2-4 sentences: How reliable really? Biggest risk? What would you do next?]
+
+---
+
+## Rules
+- Assess, don't invent. Evaluate, don't replace.
+- Low scores are rare but meaningful. High scores are earned.
+- Your value: seeing what others missed—including what the mapper missed.`;
 
       console.log(`[PromptRefinerService] Running Refiner Analysis (${modelId})...`);
       const responseRaw = await this._callModel(modelId, refinerPrompt);

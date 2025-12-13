@@ -223,6 +223,7 @@ export function useRoundActions() {
       setUiPhase,
       setCurrentAppStep,
       setActiveRecomputeState,
+      setAlertText,
     ],
   );
 
@@ -393,7 +394,120 @@ export function useRoundActions() {
       setUiPhase,
       setCurrentAppStep,
       setActiveRecomputeState,
+      setAlertText,
     ],
+  );
+
+
+  const runRefinerForAiTurn = useCallback(
+    async (aiTurnId: string, providerIdOverride?: string) => {
+      if (!currentSessionId) return;
+
+      const ai = turnsMap.get(aiTurnId) as AiTurn | undefined;
+      if (!ai || ai.type !== "ai") {
+        console.warn(`[RoundActions] AI turn ${aiTurnId} not found`);
+        return;
+      }
+
+      // Check for sufficient inputs (at least synthesis or mapping or batch)
+      const outputsFromBatch = Object.values(ai.batchResponses || {}).filter(
+        (r: any) => r.status === "completed" && r.text?.trim(),
+      );
+      const hasSynthesis = ai.synthesisResponses && Object.keys(ai.synthesisResponses).length > 0;
+
+      const enoughOutputs = outputsFromBatch.length >= 1 || hasSynthesis;
+      if (!enoughOutputs) {
+        setAlertText("Refiner requires at least one completed batch or synthesis response.");
+        return;
+      }
+
+      // Determine provider
+      let effectiveProviderId = providerIdOverride;
+      if (!effectiveProviderId) {
+        try {
+          const stored = localStorage.getItem("htos_last_refiner_model");
+          if (stored) effectiveProviderId = stored;
+        } catch { }
+      }
+      if (!effectiveProviderId) effectiveProviderId = "gemini"; // Default
+
+      // Initialize optimistic state
+      setTurnsMap((draft: Map<string, TurnMessage>) => {
+        const existing = draft.get(ai.id);
+        if (!existing || existing.type !== "ai") return;
+        const aiTurn = existing as AiTurn;
+
+        const prev = aiTurn.refinerResponses || {};
+        const next: Record<string, ProviderResponse[]> = { ...prev };
+
+        const arr = Array.isArray(next[effectiveProviderId]) ? [...next[effectiveProviderId]] : [];
+        const initialStatus = PRIMARY_STREAMING_PROVIDER_IDS.includes(effectiveProviderId)
+          ? "streaming"
+          : "pending";
+
+        arr.push({
+          providerId: effectiveProviderId as ProviderKey,
+          text: "",
+          status: initialStatus,
+          createdAt: Date.now(),
+        });
+        next[effectiveProviderId] = arr;
+        aiTurn.refinerResponses = next;
+      });
+
+      // Set Loading
+      setActiveAiTurnId(ai.id);
+      setIsLoading(true);
+      setUiPhase("streaming");
+
+      try {
+        setActiveRecomputeState({
+          aiTurnId: ai.id,
+          stepType: "refiner" as any, // Cast to 'any' if types aren't updated yet
+          providerId: effectiveProviderId,
+        });
+
+        // Send Primitive
+        const primitive: PrimitiveWorkflowRequest = {
+          type: "recompute",
+          sessionId: currentSessionId as string,
+          sourceTurnId: ai.id,
+          stepType: "refiner" as any, // Cast if needed
+          targetProvider: effectiveProviderId as ProviderKey,
+        } as any; // Cast entire object if PrimitiveWorkflowRequest is strict
+
+        await api.executeWorkflow(primitive);
+
+        // Persist last refiner used
+        try {
+          localStorage.setItem("htos_last_refiner_model", effectiveProviderId);
+        } catch { }
+
+      } catch (err) {
+        console.error("[RoundActions] Refiner run failed:", err);
+        setAlertText("Refiner request failed. Please try again.");
+
+
+        // Revert optimistic
+        setTurnsMap((draft) => {
+          const turn = draft.get(ai.id) as AiTurn | undefined;
+          if (!turn || turn.type !== "ai" || !turn.refinerResponses) return;
+          const arr = turn.refinerResponses[effectiveProviderId];
+          if (Array.isArray(arr) && arr.length > 0) {
+            const last = arr[arr.length - 1];
+            if (last.status === "streaming" || last.status === "pending") {
+              last.status = "error";
+              last.text = "Request failed";
+            }
+          }
+        });
+        setIsLoading(false);
+        setUiPhase("awaiting_action");
+        setActiveAiTurnId(null);
+        setActiveRecomputeState(null);
+      }
+    },
+    [currentSessionId, turnsMap, setTurnsMap, setActiveAiTurnId, setIsLoading, setUiPhase, setActiveRecomputeState, setAlertText]
   );
 
   // ============================================================================
@@ -416,7 +530,7 @@ export function useRoundActions() {
         },
       );
     },
-    [setSynthSelectionsByRound],
+    [setSynthSelectionsByRound]
   );
 
   /**
@@ -434,12 +548,11 @@ export function useRoundActions() {
   );
 
   return {
-    // ✅ Primary operations (turn-based)
     runSynthesisForAiTurn,
     runMappingForAiTurn,
-
-    // ✅ UI state helpers (still use userTurnId keys for backward compatibility)
+    runRefinerForAiTurn,
     toggleSynthForRound,
     selectMappingForRound,
   };
+
 }

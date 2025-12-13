@@ -4,7 +4,7 @@ import { turnsMapAtom } from "../state/atoms";
 import { AiTurn, ProviderResponse } from "../types";
 import { parseRefinerOutput, RefinerOutput } from "../../shared/parsing-utils";
 
-export function useRefinerOutput(aiTurnId: string | null) {
+export function useRefinerOutput(aiTurnId: string | null, forcedProviderId?: string | null) {
     const turnsMap = useAtomValue(turnsMapAtom);
 
     return useMemo(() => {
@@ -20,12 +20,19 @@ export function useRefinerOutput(aiTurnId: string | null) {
             return { output: null, isLoading: false };
         }
 
-        // Prefer the refiner output associated with the synthesizer if available,
-        // otherwise take the first available refiner output.
-        // NOTE: Currently we only have one refiner (usually same as synthesizer or a strong model).
-        // The backend stores refiner output under "refinerProvider" ID.
+        // Use forced provider if valid, otherwise fallback to first available
+        // Better logic: prioritize the one that was most recently updated? 
+        // For simple recompute, Object.keys logic + forcing is enough.
 
-        const providerId = Object.keys(refinerResponses)[0];
+        let providerId = forcedProviderId;
+        if (!providerId || !refinerResponses[providerId]) {
+            // Fallback: pick the last key (likely most recent?) or first? 
+            // Object.keys order is not strictly guaranteed but usually fine.
+            // Let's try to find one that is "streaming" or "completed".
+            const keys = Object.keys(refinerResponses);
+            providerId = keys[keys.length - 1];
+        }
+
         const responses = refinerResponses[providerId];
         if (!responses || responses.length === 0) return { output: null, isLoading: false };
 
@@ -49,5 +56,5 @@ export function useRefinerOutput(aiTurnId: string | null) {
             providerId,
             rawText: latestResponse.text
         };
-    }, [aiTurnId, turnsMap]); // Re-run when turnsMap changes (which happens on streaming updates)
+    }, [aiTurnId, turnsMap, forcedProviderId]);
 }

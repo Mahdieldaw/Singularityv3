@@ -3,9 +3,10 @@ const STORAGE_KEY = 'htos_provider_locks';
 export interface ProviderLocks {
     synthesis: boolean;
     mapping: boolean;
+    refiner: boolean;
 }
 
-const DEFAULT_LOCKS: ProviderLocks = { synthesis: false, mapping: false };
+const DEFAULT_LOCKS: ProviderLocks = { synthesis: false, mapping: false, refiner: false };
 
 /**
  * Read locks from chrome.storage.local
@@ -24,7 +25,7 @@ export async function getProviderLocks(): Promise<ProviderLocks> {
  * Write locks to chrome.storage.local
  */
 export async function setProviderLock(
-    role: 'synthesis' | 'mapping',
+    role: 'synthesis' | 'mapping' | 'refiner',
     locked: boolean
 ): Promise<void> {
     const current = await getProviderLocks();

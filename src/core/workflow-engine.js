@@ -1289,6 +1289,9 @@ export class WorkflowEngine {
   /**
    * Execute Refiner Step
    */
+  /**
+   * Execute Refiner Step
+   */
   async executeRefinerStep(step, context, stepResults) {
     const {
       refinerProvider,
@@ -1296,37 +1299,82 @@ export class WorkflowEngine {
       originalPrompt,
       synthesisStepIds,
       mappingStepIds,
+      sourceHistorical // Present if recompute
     } = step.payload;
 
-    // 1. Gather Batch Responses from the first source step (the batch step)
-    const batchStepResults = stepResults.get(sourceStepIds?.[0])?.result?.results || {};
-    const batchResponses = {};
-    Object.entries(batchStepResults).forEach(([pid, res]) => {
-      if (res && res.text) {
-        batchResponses[pid] = { text: res.text, providerId: pid };
-      }
-    });
-
-    // 2. Gather Synthesis Text (from first completed synthesis step)
+    let batchResponses = {};
     let synthesisText = "";
-    if (synthesisStepIds && synthesisStepIds.length > 0) {
-      for (const id of synthesisStepIds) {
-        const res = stepResults.get(id);
-        if (res?.status === "completed" && res.result?.text) {
-          synthesisText = res.result.text;
-          break;
+    let mappingText = "";
+
+    // 1. Resolve Inputs (Dynamic: New or Historical)
+    if (sourceHistorical) {
+      // --- RECOMPUTE FLOW ---
+      const { turnId } = sourceHistorical;
+      console.log(`[WorkflowEngine] Refiner recompute: resolving historical inputs from turn ${turnId}`);
+
+      // Helper to fetch textual content from historical outputs
+      const fetchHistoricalText = async (type) => {
+        try {
+          const historicalPayload = { sourceHistorical: { turnId, responseType: type } };
+          const data = await this.resolveSourceData(historicalPayload, context, stepResults);
+          // Return first valid text
+          return data[0]?.text || "";
+        } catch (e) {
+          console.warn(`[WorkflowEngine] Refiner failed to fetch historical ${type}:`, e.message);
+          return "";
+        }
+      };
+
+      // A. Batch Responses
+      try {
+        const batchPayload = { sourceHistorical: { turnId, responseType: 'batch' } };
+        const data = await this.resolveSourceData(batchPayload, context, stepResults);
+        data.forEach(item => {
+          if (item.text) batchResponses[item.providerId] = { text: item.text, providerId: item.providerId };
+        });
+      } catch (e) { console.warn("[WorkflowEngine] Refiner: no batch history found", e); }
+
+      // B. Synthesis Text
+      synthesisText = await fetchHistoricalText('synthesis');
+
+      // C. Mapping Text (striped of topology)
+      const rawMapping = await fetchHistoricalText('mapping');
+      if (rawMapping) {
+        const { text } = extractGraphTopologyAndStrip(rawMapping);
+        mappingText = text;
+      }
+
+    } else {
+      // --- STANDARD FLOW ---
+      // 1. Gather Batch Responses
+      const batchStepResults = stepResults.get(sourceStepIds?.[0])?.result?.results || {};
+      Object.entries(batchStepResults).forEach(([pid, res]) => {
+        if (res && res.text) {
+          batchResponses[pid] = { text: res.text, providerId: pid };
+        }
+      });
+
+      // 2. Gather Synthesis Text
+      if (synthesisStepIds && synthesisStepIds.length > 0) {
+        for (const id of synthesisStepIds) {
+          const res = stepResults.get(id);
+          if (res?.status === "completed" && res.result?.text) {
+            synthesisText = res.result.text;
+            break;
+          }
         }
       }
-    }
 
-    // 3. Gather Mapping Narrative (from first completed mapping step)
-    let mappingText = "";
-    if (mappingStepIds && mappingStepIds.length > 0) {
-      for (const id of mappingStepIds) {
-        const res = stepResults.get(id);
-        if (res?.status === "completed" && res.result?.text) {
-          mappingText = res.result.text;
-          break;
+      // 3. Gather Mapping Narrative
+      if (mappingStepIds && mappingStepIds.length > 0) {
+        for (const id of mappingStepIds) {
+          const res = stepResults.get(id);
+          if (res?.status === "completed" && res.result?.text) {
+            const raw = res.result.text;
+            const { text } = extractGraphTopologyAndStrip(raw);
+            mappingText = text;
+            break;
+          }
         }
       }
     }
@@ -1410,16 +1458,15 @@ export class WorkflowEngine {
     // Inject Council Framing if context exists
     let enhancedPrompt = prompt;
     if (previousContext) {
-      enhancedPrompt = `You are part of the council. Here's the context from our previous discussion:
+      enhancedPrompt = `You are part of the council. Context (backdrop only—do not summarize or re-answer):
 
 ${previousContext}
 
-Now respond to the user's new message: 
+Answer the user's message directly. Use context only to disambiguate.
+
 <user_prompt>
 ${prompt}
-</user_prompt>
-
-Your job is to address what the user is actually asking, informed by but not focused on the previous context.`;
+</user_prompt>`;
     }
 
     // Provider health pre-check + initial progress emit

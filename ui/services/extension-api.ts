@@ -7,7 +7,7 @@ import {
   DELETE_SESSION,
   DELETE_SESSIONS,
   RENAME_SESSION,
-  REFINE_PROMPT,
+
   REFRESH_AUTH_STATUS,
 } from "../../shared/messaging";
 
@@ -284,27 +284,7 @@ class ExtensionAPI {
     });
   }
 
-  refinePrompt(
-    draftPrompt: string,
-    context: any,
-  ): Promise<{ refinedPrompt: string; explanation: string; audit?: string; variants?: string[]; originalPrompt?: string }> {
-    return this.queryBackend<{ refinedPrompt: string; explanation: string; audit?: string; variants?: string[]; originalPrompt?: string }>({
-      type: REFINE_PROMPT,
-      payload: { draftPrompt, context },
-    });
-  }
 
-  runAuthor(
-    fragment: string,
-    context: any,
-    isInitialize: boolean = false,
-    authorModel?: string
-  ): Promise<{ authored: string; explanation: string } | null> {
-    return this.queryBackend<{ authored: string; explanation: string } | null>({
-      type: "RUN_AUTHOR",
-      payload: { fragment, context, isInitialize, authorModel },
-    });
-  }
 
   runAnalyst(
     fragment: string,

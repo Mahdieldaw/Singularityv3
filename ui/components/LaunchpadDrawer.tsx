@@ -9,7 +9,7 @@ import { cn } from "../utils/cn";
 export const LaunchpadDrawer: React.FC = () => {
     const [isOpen, setIsOpen] = useAtom(launchpadOpenAtom);
     const { drafts, updateDraft, deleteDraft, reorderDrafts, clearAll } = useLaunchpadDrafts();
-    const { sendMessage, refinePrompt } = useChat();
+    const { sendMessage, runComposerFlow } = useChat();
     const drawerRef = useRef<HTMLDivElement>(null);
 
     // Close on click outside
@@ -107,12 +107,12 @@ export const LaunchpadDrawer: React.FC = () => {
                                     }}
                                     onSendToComposer={() => {
                                         // Trigger Composer refinement
-                                        refinePrompt(draft.text, "compose");
+                                        runComposerFlow(draft.text, "compose", draft.originalPrompt);
                                         setIsOpen(false); // Close so they see the composer
                                     }}
                                     onSendToAnalyst={() => {
                                         // Trigger Analyst explanation
-                                        refinePrompt(draft.text, "explain");
+                                        runComposerFlow(draft.text, "explain", draft.originalPrompt);
                                         setIsOpen(false); // Close so they see the analyst
                                     }}
                                     onReorder={reorderDrafts}

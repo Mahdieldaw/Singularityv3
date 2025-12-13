@@ -13,6 +13,7 @@ import {
   mappingEnabledAtom,
   mappingProviderAtom,
   synthesisProviderAtom,
+  refinerProviderAtom,
   lastActivityAtAtom,
   workflowProgressAtom,
   providerErrorsAtom,
@@ -82,6 +83,7 @@ export function usePortMessageHandler() {
   const mappingEnabled = useAtomValue(mappingEnabledAtom);
   const mappingProvider = useAtomValue(mappingProviderAtom);
   const synthesisProvider = useAtomValue(synthesisProviderAtom);
+  const refinerProvider = useAtomValue(refinerProviderAtom);
   const setLastActivityAt = useSetAtom(lastActivityAtAtom);
   const setWorkflowProgress = useSetAtom(workflowProgressAtom);
   const setProviderErrors = useSetAtom(providerErrorsAtom);
@@ -108,7 +110,7 @@ export function usePortMessageHandler() {
   const activeAiTurnIdRef = useRef<string | null>(null);
   const activeRecomputeRef = useRef<{
     aiTurnId: string;
-    stepType: "synthesis" | "mapping" | "batch";
+    stepType: "synthesis" | "mapping" | "batch" | "refiner";
     providerId: string;
   } | null>(null);
   // Track whether we've already logged the first PARTIAL_RESULT for a given
@@ -157,7 +159,8 @@ export function usePortMessageHandler() {
             sessionId: msgSessionId,
             providers: msgProviders,
             synthesisProvider: msgSynthesisProvider,
-            mappingProvider: msgMappingProvider
+            mappingProvider: msgMappingProvider,
+            refinerProvider: msgRefinerProvider
           } = message;
 
           // Always adopt the backend sessionId for TURN_CREATED
@@ -175,6 +178,7 @@ export function usePortMessageHandler() {
 
           const effectiveSynthesisProvider = msgSynthesisProvider || synthesisProvider;
           const effectiveMappingProvider = msgMappingProvider || mappingProvider;
+          const effectiveRefinerProvider = msgRefinerProvider || refinerProvider;
 
           // Single atomic update to turnsMap ensures we read the latest user turn
           setTurnsMap((draft: Map<string, TurnMessage>) => {
@@ -205,14 +209,17 @@ export function usePortMessageHandler() {
               ensuredUser,
               activeProviders,
               !!effectiveSynthesisProvider,
+              !!effectiveRefinerProvider,
               !!mappingEnabled && !!effectiveMappingProvider,
               effectiveSynthesisProvider || undefined,
               effectiveMappingProvider || undefined,
+              effectiveRefinerProvider || undefined,
               Date.now(),
               ensuredUser.id,
               {
                 synthesis: !!effectiveSynthesisProvider,
                 mapping: !!mappingEnabled && !!effectiveMappingProvider,
+                refiner: !!effectiveRefinerProvider,
               },
             );
             draft.set(aiTurnId, aiTurn);
@@ -904,6 +911,7 @@ export function usePortMessageHandler() {
       mappingEnabled,
       mappingProvider,
       synthesisProvider,
+      refinerProvider,
       // Auto-open split pane dependencies
       isSplitOpen,
       setActiveSplitPanel,

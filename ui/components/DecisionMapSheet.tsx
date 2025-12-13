@@ -1,6 +1,6 @@
 import React, { useMemo, useCallback, useEffect, useRef, useState } from "react";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
-import { isDecisionMapOpenAtom, turnByIdAtom, mappingProviderAtom, activeSplitPanelAtom, providerAuthStatusAtom } from "../state/atoms";
+import { isDecisionMapOpenAtom, turnByIdAtom, mappingProviderAtom, activeSplitPanelAtom, providerAuthStatusAtom, refinerProviderAtom } from "../state/atoms";
 import { useClipActions } from "../hooks/useClipActions";
 import { motion, AnimatePresence } from "framer-motion";
 import DecisionMapGraph from "./experimental/DecisionMapGraph";
@@ -39,6 +39,9 @@ function extractGraphTopologyFromText(rawText?: string | null) {
 }
 
 
+
+import { useRefinerOutput } from "../hooks/useRefinerOutput";
+import { RefinerEpistemicAudit } from "./RefinerCardsSection";
 
 // ============================================================================
 // OPTIONS PARSING - Handle both emoji-prefixed themes and "Theme:" headers
@@ -559,13 +562,107 @@ const MapperSelector: React.FC<MapperSelectorProps> = ({ aiTurn, activeProviderI
 
                   {isActive && <span>✓</span>}
                   {isUnauthorized && <span>🔒</span>}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
 
-                  {/* Tooltip for error on hover */}
-                  {hasError && (
-                    <div className="absolute left-full ml-2 top-1/2 -translate-y-1/2 hidden group-hover:block z-50 w-48 bg-black/90 text-white text-[10px] p-2 rounded shadow-lg pointer-events-none">
-                      {typeof errorMessage === 'string' ? errorMessage : "Previous generation failed"}
-                    </div>
+// --- NEW COMPONENT: RefinerSelector ---
+interface RefinerSelectorProps {
+  aiTurn: AiTurn;
+  activeProviderId?: string;
+  onSelect: (providerId: string) => void;
+}
+
+const RefinerSelector: React.FC<RefinerSelectorProps> = ({ aiTurn, activeProviderId, onSelect }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const { handleClipClick } = useClipActions();
+  const authStatus = useAtomValue(providerAuthStatusAtom);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    };
+    if (isOpen) document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [isOpen]);
+
+  const activeProvider = activeProviderId ? getProviderById(activeProviderId) : null;
+  const providers = useMemo(() => LLM_PROVIDERS_CONFIG.filter(p => p.id !== 'system'), []);
+
+  const handleProviderSelect = (providerId: string) => {
+    // 1. Update local view state
+    onSelect(providerId);
+    // 2. Trigger recompute/persistence
+    handleClipClick(aiTurn.id, "refiner", providerId);
+    setIsOpen(false);
+  };
+
+  return (
+    <div className="relative" ref={menuRef}>
+      <button
+        type="button"
+        onClick={() => setIsOpen(!isOpen)}
+        className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 transition-all text-sm font-medium text-text-primary"
+      >
+        <span className="text-base">🔒</span>
+        <span className="opacity-70 text-xs uppercase tracking-wide">Auditor</span>
+        <span className="w-px h-3 bg-white/20 mx-1" />
+        <span className={clsx(!activeProvider && "text-text-muted italic")}>
+          {activeProvider?.name || "Select Model"}
+        </span>
+        <svg
+          className={clsx("w-3 h-3 text-text-muted transition-transform", isOpen && "rotate-180")}
+          fill="none" viewBox="0 0 24 24" stroke="currentColor"
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+
+      {isOpen && (
+        <div className="absolute top-full left-0 mt-2 w-64 bg-surface-raised border border-border-subtle rounded-xl shadow-elevated overflow-hidden z-[3600] animate-in fade-in slide-in-from-top-2 duration-200">
+          <div className="p-2 grid gap-1">
+            {providers.map(p => {
+              const pid = String(p.id);
+              const isActive = pid === activeProviderId;
+              const isUnauthorized = authStatus && authStatus[pid] === false;
+              const latestResp = getLatestResponse(aiTurn.refinerResponses?.[pid]);
+              const hasError = latestResp?.status === 'error';
+              const errorMessage = hasError ? (latestResp?.meta?._rawError || "Failed") : null;
+              const isDisabled = isUnauthorized;
+
+              return (
+                <button
+                  key={pid}
+                  onClick={() => !isDisabled && handleProviderSelect(pid)}
+                  className={clsx(
+                    "w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left transition-colors relative group",
+                    isActive ? "bg-brand-500/10 text-brand-500" : "hover:bg-surface-highlight text-text-secondary",
+                    (isDisabled || hasError) && "opacity-60",
+                    isDisabled && "cursor-not-allowed",
                   )}
+                  disabled={isDisabled}
+                  title={errorMessage && typeof errorMessage === 'string' ? errorMessage : undefined}
+                >
+                  <div
+                    className="w-2 h-2 rounded-full shadow-sm"
+                    style={{ backgroundColor: PROVIDER_COLORS[pid] || PROVIDER_COLORS.default }}
+                  />
+                  <div className="flex-1 flex flex-col">
+                    <span className="text-xs font-medium">{p.name}</span>
+                    {hasError && (
+                      <div className="absolute left-full ml-2 top-1/2 -translate-y-1/2 hidden group-hover:block z-50 w-48 bg-black/90 text-white text-[10px] p-2 rounded shadow-lg pointer-events-none">
+                        {typeof errorMessage === 'string' ? errorMessage : "Previous generation failed"}
+                      </div>
+                    )}
                 </button>
               );
             })}
@@ -584,12 +681,14 @@ export const DecisionMapSheet = React.memo(() => {
   const [openState, setOpenState] = useAtom(isDecisionMapOpenAtom);
   const turnGetter = useAtomValue(turnByIdAtom);
   const mappingProvider = useAtomValue(mappingProviderAtom);
+  const setRefinerProvider = useSetAtom(refinerProviderAtom);
   const setActiveSplitPanel = useSetAtom(activeSplitPanelAtom);
 
-  const [activeTab, setActiveTab] = useState<'graph' | 'narrative' | 'options'>('graph');
+  const [activeTab, setActiveTab] = useState<'graph' | 'narrative' | 'options' | 'audit'>('graph');
   const [selectedNode, setSelectedNode] = useState<{ id: string; label: string; supporters: (string | number)[]; theme?: string } | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [dims, setDims] = useState<{ w: number; h: number }>({ w: window.innerWidth, h: 400 });
+  const [activeRefinerPid, setActiveRefinerPid] = useState<string | null>(null);
 
   // Reset to graph tab when sheet opens
   useEffect(() => {
@@ -629,6 +728,23 @@ export const DecisionMapSheet = React.memo(() => {
     const t = tid ? turnGetter(tid) : undefined;
     return t && (t as any).type === 'ai' ? (t as AiTurn) : null;
   }, [openState, turnGetter]);
+
+  // If no refiner PID is active locally, try to find one from the turn data
+  useEffect(() => {
+    if (aiTurn && !activeRefinerPid) {
+      const keys = Object.keys(aiTurn.refinerResponses || {});
+      if (keys.length > 0) setActiveRefinerPid(keys[keys.length - 1]);
+    }
+  }, [aiTurn, activeRefinerPid]);
+
+  const { output: refinerOutput, rawText: refinerRawText, providerId: currentRefinerPid } = useRefinerOutput(aiTurn?.id || null, activeRefinerPid);
+
+  // Sync refiner selection
+  useEffect(() => {
+    if (currentRefinerPid && currentRefinerPid !== activeRefinerPid) {
+      setActiveRefinerPid(currentRefinerPid);
+    }
+  }, [currentRefinerPid]);
 
   const mappingResponses = useMemo(() => {
     const out: Record<string, ProviderResponse[]> = {};
@@ -783,6 +899,7 @@ export const DecisionMapSheet = React.memo(() => {
     { key: 'graph' as const, label: 'Graph', activeClass: 'decision-tab-active-graph' },
     { key: 'narrative' as const, label: 'Narrative', activeClass: 'decision-tab-active-narrative' },
     { key: 'options' as const, label: 'Options', activeClass: 'decision-tab-active-options' },
+    { key: 'audit' as const, label: 'Epistemic Audit', activeClass: 'decision-tab-active-audit' }
   ];
 
   return (
@@ -806,34 +923,48 @@ export const DecisionMapSheet = React.memo(() => {
           {/* Header Row: Mapper Selector (Left) + Tabs (Center) */}
           <div className="flex items-center justify-between px-6 py-4 border-b border-white/10 relative z-20">
 
-            {/* Left: Mapper Selector */}
+            {/* Left: Provider Selector (Mapper or Refiner based on tab) */}
             <div className="w-1/3 flex justify-start">
-              {aiTurn && (
+              {aiTurn && activeTab !== 'audit' && (
                 <MapperSelector
                   aiTurn={aiTurn}
                   activeProviderId={activeMappingPid}
+                />
+              )}
+              {aiTurn && activeTab === 'audit' && (
+                <RefinerSelector
+                  aiTurn={aiTurn}
+                  activeProviderId={activeRefinerPid || undefined}
+                  onSelect={(pid) => {
+                    setRefinerProvider(pid);
+                    setActiveRefinerPid(pid);
+                  }}
                 />
               )}
             </div>
 
             {/* Center: Tabs */}
             <div className="flex items-center justify-center gap-4">
-              {tabConfig.map(({ key, label, activeClass }) => (
-                <button
-                  key={key}
-                  type="button"
-                  className={clsx(
-                    "decision-tab-pill",
-                    activeTab === key && activeClass
-                  )}
-                  onClick={() => {
-                    setActiveTab(key);
-                    if (key !== 'graph') setSelectedNode(null);
-                  }}
-                >
-                  {label}
-                </button>
-              ))}
+              {tabConfig.map(({ key, label, activeClass }) => {
+                // Hide audit tab if no data (optional, but requested to always show)
+                // if (key === 'audit' && !refinerOutput) return null;
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    className={clsx(
+                      "decision-tab-pill",
+                      activeTab === key && activeClass
+                    )}
+                    onClick={() => {
+                      setActiveTab(key);
+                      if (key !== 'graph') setSelectedNode(null);
+                    }}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
             </div>
 
             {/* Right: Spacer/Close (keeps tabs centered) */}
@@ -956,6 +1087,25 @@ export const DecisionMapSheet = React.memo(() => {
                   <OptionsTab themes={parsedThemes} citationSourceOrder={citationSourceOrder} onCitationClick={handleCitationClick} />
                 </motion.div>
               )}
+
+              {activeTab === 'audit' && (
+                <motion.div
+                  key="audit"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="h-full overflow-y-auto relative custom-scrollbar"
+                >
+                  {refinerOutput ? (
+                    <RefinerEpistemicAudit output={refinerOutput!} rawText={refinerRawText} />
+                  ) : (
+                    <div className="flex flex-col items-center justify-center h-full text-text-muted text-sm gap-2 opacity-60">
+                      <span>🔒</span>
+                      <span>No epistemic audit available. Run Refiner to generate.</span>
+                    </div>
+                  )}
+                </motion.div>
+              )}
             </AnimatePresence>
           </div>
         </motion.div>
@@ -963,3 +1113,4 @@ export const DecisionMapSheet = React.memo(() => {
     </AnimatePresence>
   );
 });
+

@@ -6,32 +6,26 @@ import {
   composerModelAtom,
   analystModelAtom,
   isLoadingAtom,
-  isRefiningAtom,
+  iscomposingAtom,
   isContinuationModeAtom,
   activeProviderCountAtom,
   isVisibleModeAtom,
   isReducedMotionAtom,
   chatInputHeightAtom,
   isHistoryPanelOpenAtom,
-  isRefinerOpenAtom,
-  refinerDataAtom,
-  hasRejectedRefinementAtom,
-  activeProviderTargetAtom,
-  activeRecomputeStateAtom,
-  currentSessionIdAtom,
   toastAtom,
-  analystDrawerOpenAtom,
+  activeProviderTargetAtom,
+  currentSessionIdAtom,
+  activeRecomputeStateAtom,
   originalPromptAtom,
-  composerDraftAtom,
-  currentRefinementStateAtom,
-  messageRefinementMetaAtom,
+
+  currentRefinementStateAtom, // used in nudgeVariant
   synthesisProviderAtom,
   workflowProgressAtom,
   isRoundActiveAtom,
 } from "../state/atoms";
 import { useChat } from "../hooks/useChat";
 import api from "../services/extension-api";
-// Legacy inline refiner and analyst drawer are deprecated in favor of Launchpad
 import { LLM_PROVIDERS_CONFIG } from "../constants";
 import { PROVIDER_LIMITS } from "../../shared/provider-limits";
 import { setProviderLock } from "../../shared/provider-locks";
@@ -52,7 +46,7 @@ const ChatInput = ({
 }: ChatInputProps) => {
   // --- CONNECTED STATE LOGIC ---
   const [isLoading] = useAtom(isLoadingAtom as any) as [boolean, any];
-  const [isRefining] = useAtom(isRefiningAtom as any) as [boolean, any];
+  const [iscomposing] = useAtom(iscomposingAtom as any) as [boolean, any];
   const [isContinuationMode] = useAtom(isContinuationModeAtom as any) as [boolean, any];
   const [activeProviderCount] = useAtom(activeProviderCountAtom as any) as [number, any];
   const [isVisibleMode] = useAtom(isVisibleModeAtom as any) as [boolean, any];
@@ -70,42 +64,24 @@ const ChatInput = ({
   const [prompt, setPrompt] = useAtom(chatInputValueAtom);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
-  const [isRefinerOpen, setIsRefinerOpen] = useAtom(isRefinerOpenAtom);
-  const [refinerData, setRefinerData] = useAtom(refinerDataAtom);
-  const [hasRejectedRefinement, setHasRejectedRefinement] = useAtom(hasRejectedRefinementAtom);
   const setToast = useSetAtom(toastAtom);
 
-  const [showAudit, setShowAudit] = useState(false);
-  const [showVariants, setShowVariants] = useState(false);
-  const [showExplanation, setShowExplanation] = useState(false);
-
-  const { sendMessage, abort, refinePrompt } = useChat();
+  const { sendMessage, abort, runComposerFlow } = useChat();
 
   const [activeTarget, setActiveTarget] = useAtom(activeProviderTargetAtom);
   const [currentSessionId] = useAtom(currentSessionIdAtom);
   const setActiveRecomputeState = useSetAtom(activeRecomputeStateAtom);
 
-  // New refinement state
-  const [analystDrawerOpen, setAnalystDrawerOpen] = useAtom(analystDrawerOpenAtom);
+  // New refinement state replaced by Launchpad; keeping minimal local state for original prompt tracking if needed
+  // actually, we might not even need these atoms if useChat handles it.
+  // But let's keep originalPromptAtom for now as it was requested to be preserved for chaining context
   const [originalPrompt, setOriginalPrompt] = useAtom(originalPromptAtom);
-  const [composerDraft, setComposerDraft] = useAtom(composerDraftAtom);
-  const [currentRefinementState, setCurrentRefinementState] = useAtom(currentRefinementStateAtom);
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const setMessageRefinementMeta = useSetAtom(messageRefinementMetaAtom);
 
   // Callbacks
   const handleSend = useCallback((prompt: string) => {
     const mode = isContinuationMode ? "continuation" : "new";
     sendMessage(prompt, mode);
-    if (isRefinerOpen) {
-      setIsRefinerOpen(false);
-      setRefinerData(null);
-      // setChatInputValue(""); // handled in executeSend
-      setShowAudit(false);
-      setShowVariants(false);
-      setShowExplanation(false);
-    }
-  }, [sendMessage, isContinuationMode, isRefinerOpen, setIsRefinerOpen, setRefinerData]);
+  }, [sendMessage, isContinuationMode]);
 
   const onContinuation = useCallback(async (prompt: string) => {
     if (activeTarget && currentSessionId) {
@@ -135,81 +111,26 @@ const ChatInput = ({
       return;
     }
     sendMessage(prompt, "continuation");
-    if (isRefinerOpen) {
-      setIsRefinerOpen(false);
-      setRefinerData(null);
-      setShowAudit(false);
-      setShowVariants(false);
-      setShowExplanation(false);
-    }
-  }, [sendMessage, isRefinerOpen, setIsRefinerOpen, setRefinerData, activeTarget, currentSessionId, setActiveTarget, setActiveRecomputeState, setToast]);
+  }, [sendMessage, activeTarget, currentSessionId, setActiveTarget, setActiveRecomputeState, setToast]);
 
   const onAbort = useCallback(() => { void abort(); }, [abort]);
 
-  const onUndoRefinement = useCallback(() => {
-    if (refinerData?.originalPrompt) {
-      setPrompt(refinerData.originalPrompt);
-    }
-    setIsRefinerOpen(false);
-    setRefinerData(null);
-    setShowAudit(false);
-    setShowVariants(false);
-    setShowExplanation(false);
-    setHasRejectedRefinement(true);
-  }, [refinerData, setIsRefinerOpen, setRefinerData, setHasRejectedRefinement]); // Note: using setPrompt from closure below, need to hoist or use atom setter
-
   const onExplain = useCallback((prompt: string) => {
-    // Route results to Launchpad (handled in useChat). Do not open legacy drawers.
-    void refinePrompt(prompt, "explain").then(() => {
-      if (!originalPrompt) setOriginalPrompt(prompt);
-    });
-  }, [refinePrompt, originalPrompt, setOriginalPrompt]);
+    if (!originalPrompt) setOriginalPrompt(prompt);
+    // Explicitly pass originalPrompt if available (from chaining)
+    void runComposerFlow(prompt, "explain", originalPrompt || undefined);
+  }, [runComposerFlow, originalPrompt, setOriginalPrompt]);
 
   const onCompose = useCallback((prompt: string) => {
     if (!originalPrompt) setOriginalPrompt(prompt);
-    void refinePrompt(prompt, "compose").then(() => {
-      setCurrentRefinementState((prev) => prev === "analyst" ? "both" : "composer");
-    });
-  }, [refinePrompt, originalPrompt, setOriginalPrompt, setCurrentRefinementState]);
+    void runComposerFlow(prompt, "compose", originalPrompt || undefined);
+  }, [runComposerFlow, originalPrompt, setOriginalPrompt]);
 
-  const onUseVariant = useCallback((variant: string) => {
-    setPrompt(variant);
-    setAnalystDrawerOpen(false);
-    setCurrentRefinementState((prev) => prev === "composer" ? "both" : "analyst");
-  }, [setAnalystDrawerOpen, setCurrentRefinementState]); // setPrompt via closure
-
-  const onPerfectThis = useCallback(() => {
-    const p = refinerData?.refinedPrompt || prompt || ""; // prompt via closure
-    setAnalystDrawerOpen(false);
-    onCompose(p);
-  }, [refinerData, prompt, setAnalystDrawerOpen, onCompose]);
-
-  const onRevert = useCallback(() => {
-    if (originalPrompt) {
-      const currentValue = refinerData?.refinedPrompt || "";
-      if (currentValue && currentValue !== originalPrompt) {
-        setComposerDraft(currentValue);
-      }
-      setPrompt(originalPrompt);
-      setCurrentRefinementState(null);
-      setIsRefinerOpen(false);
-      setRefinerData(null);
-    }
-  }, [originalPrompt, refinerData, setComposerDraft, setCurrentRefinementState, setIsRefinerOpen, setRefinerData]); // setPrompt via closure
-
-  const onApplyDraft = useCallback(() => {
-    if (composerDraft) {
-      setPrompt(composerDraft);
-      setComposerDraft(null);
-      setCurrentRefinementState("composer");
-    }
-  }, [composerDraft, setComposerDraft, setCurrentRefinementState]); // setPrompt via closure
-
-  const onCancelTarget = () => setActiveTarget(null);
-  const onToggleAudit = () => setShowAudit(!showAudit);
-  const onToggleVariants = () => setShowVariants(!showVariants);
-  const onToggleExplanation = () => setShowExplanation(!showExplanation);
+  const onToggleAudit = () => { }; // No-op
+  const onToggleVariants = () => { }; // No-op
+  const onToggleExplanation = () => { }; // No-op
   const onHeightChange = setChatInputHeight;
+  const onCancelTarget = () => setActiveTarget(null);
 
   // Clear active target when clicking outside
   useEffect(() => {
@@ -290,8 +211,8 @@ const ChatInput = ({
       textareaRef.current.style.height = `${newHeight}px`;
 
       // Calculate total input area height
-      const bottomBarHeight = (originalPrompt || composerDraft) ? 30 : 0;
-      const refinerHeight = isRefinerOpen ? 40 : 0;
+      const bottomBarHeight = (originalPrompt) ? 30 : 0;
+      const refinerHeight = 0; // Legacy refiner removed
       const targetHeight = activeTarget ? 30 : 0;
       // Add height for nudge chips if visible (approx 28px + margin)
       const nudgeHeight = nudgeVisible ? 32 : 0;
@@ -299,7 +220,7 @@ const ChatInput = ({
       const totalHeight = newHeight + 24 + 2 + refinerHeight + targetHeight + bottomBarHeight + nudgeHeight;
       onHeightChange?.(totalHeight);
     }
-  }, [prompt, onHeightChange, isRefinerOpen, activeTarget, originalPrompt, composerDraft, nudgeVisible]);
+  }, [prompt, onHeightChange, activeTarget, originalPrompt, nudgeVisible]);
 
   // Close menu on click outside
   useEffect(() => {
@@ -321,7 +242,7 @@ const ChatInput = ({
   useEffect(() => {
     // Only show idle nudge when: focused, has text, not loading/frozen/refining
     // Exception: If we have a refinement state (chaining), we allow nudging even if we are technically "refining" in the high-level sense
-    if (isNudgeFrozen || isLoading || !prompt.trim() || isRefinerOpen || !isFocused) {
+    if (isNudgeFrozen || isLoading || !prompt.trim() || !isFocused) {
       if (nudgeType === "idle") setNudgeVisible(false);
       return;
     }
@@ -342,7 +263,7 @@ const ChatInput = ({
     return () => {
       if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
     };
-  }, [prompt, isNudgeFrozen, isLoading, isRefinerOpen, isFocused, currentRefinementState, nudgeType]);
+  }, [prompt, isNudgeFrozen, isLoading, isFocused, nudgeType]);
 
   // Reset idle nudge on typing
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -360,9 +281,7 @@ const ChatInput = ({
       handleSend(trimmed);
     }
 
-    if (!isRefinerOpen && !hasRejectedRefinement) {
-      setPrompt("");
-    }
+    setPrompt("");
     setNudgeVisible(false);
     setIsNudgeFrozen(false);
     setNudgeProgress(0);
@@ -380,7 +299,7 @@ const ChatInput = ({
 
     // Trigger A: On Send (Nudge)
     // Only if not already refining or in a special mode that bypasses this
-    if (!isRefinerOpen && !hasRejectedRefinement && !activeTarget) {
+    if (!activeTarget) {
       setIsNudgeFrozen(true);
       setNudgeType("sending");
       setNudgeVisible(true);
@@ -465,6 +384,7 @@ const ChatInput = ({
   };
 
   // Determine Nudge Variant for Chaining and Text
+  const currentRefinementState = useAtomValue(currentRefinementStateAtom);
   const nudgeVariant = (() => {
     if (currentRefinementState === "composer") return "chain_analyst";
     if (currentRefinementState === "analyst") return "chain_composer";
@@ -483,9 +403,9 @@ const ChatInput = ({
     composerText = "Now perfect this audited version?";
   }
 
-  const buttonText = (isRefinerOpen || hasRejectedRefinement) ? "Launch" : (isContinuationMode ? "Continue" : "Send");
+  const buttonText = (isContinuationMode ? "Continue" : "Send");
   const isDisabled = isLoading || mappingActive || !prompt.trim() || isOverLimit || isNudgeFrozen;
-  const showMappingBtn = canShowMapping && !!prompt.trim() && !isRefinerOpen && !hasRejectedRefinement;
+  const showMappingBtn = canShowMapping && !!prompt.trim();
   const showAbortBtn = !!onAbort && isLoading;
 
   const providerName = activeTarget ? LLM_PROVIDERS_CONFIG.find(p => p.id === activeTarget.providerId)?.name || activeTarget.providerId : "";
@@ -648,14 +568,14 @@ const ChatInput = ({
             onMouseUp={handleMouseUp}
             onMouseLeave={handleMouseLeave}
             disabled={isDisabled}
-            className={`px-3.5 h-[38px] rounded-2xl text-white font-semibold cursor-pointer flex items-center gap-2 min-w-[90px] justify-center ${isDisabled ? 'opacity-50' : 'opacity-100'} ${(isRefinerOpen || hasRejectedRefinement) ? 'bg-gradient-to-br from-brand-500 to-brand-400 shadow-card' : 'bg-gradient-to-r from-brand-500 to-brand-400'} ${isReducedMotion ? '' : 'transition-all duration-200 ease-out'}`}
+            className={`px-3.5 h-[38px] rounded-2xl text-white font-semibold cursor-pointer flex items-center gap-2 min-w-[90px] justify-center ${isDisabled ? 'opacity-50' : 'opacity-100'} bg-gradient-to-r from-brand-500 to-brand-400 ${isReducedMotion ? '' : 'transition-all duration-200 ease-out'}`}
           >
             {isLoading ? (
               <div className="loading-spinner"></div>
             ) : (
               <>
                 <span className="text-base">
-                  {(isRefinerOpen || hasRejectedRefinement) ? "🚀" : (isContinuationMode ? "💬" : "✨")}
+                  {(isContinuationMode ? "💬" : "✨")}
                 </span>
                 <span>{buttonText}</span>
               </>
@@ -717,10 +637,9 @@ const ChatInput = ({
           </button>
         )}
 
-        {/* Legacy refiner/analyst inline UI removed; use Launchpad for review */}
+
       </div>
 
-      {/* Analyst Drawer removed */}
     </div>
   );
 };

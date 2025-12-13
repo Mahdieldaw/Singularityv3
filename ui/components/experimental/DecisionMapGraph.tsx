@@ -327,12 +327,13 @@ const DecisionMapGraph: React.FC<Props> = ({
     };
 
     // Zoom with scroll wheel
-    const handleWheel = (e: React.WheelEvent) => {
+    const handleWheel = useCallback((e: WheelEvent) => {
         e.preventDefault();
+        e.stopPropagation(); // Good practice to stop bubbling
+
         const delta = e.deltaY > 0 ? 0.9 : 1.1;
         const newScale = Math.max(0.5, Math.min(2, transform.scale * delta));
 
-        // Zoom toward mouse position
         const rect = svgRef.current?.getBoundingClientRect();
         if (rect) {
             const mouseX = e.clientX - rect.left;
@@ -343,7 +344,20 @@ const DecisionMapGraph: React.FC<Props> = ({
 
             setTransform({ x: newX, y: newY, scale: newScale });
         }
-    };
+    }, [transform]);
+
+    // 2. Add this useEffect to attach the non-passive listener
+    useEffect(() => {
+        const svg = svgRef.current;
+        if (!svg) return;
+
+        // { passive: false } is the key fix here
+        svg.addEventListener('wheel', handleWheel, { passive: false });
+
+        return () => {
+            svg.removeEventListener('wheel', handleWheel);
+        };
+    }, [handleWheel]);
 
     if (!nodes.length) {
         return (
@@ -384,7 +398,6 @@ const DecisionMapGraph: React.FC<Props> = ({
             onMouseUp={handleMouseUp}
             onMouseLeave={handleMouseUp}
             onMouseDown={handleBackgroundMouseDown}
-            onWheel={handleWheel}
         >
             <defs>
                 {/* Enhanced glow filters */}

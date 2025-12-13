@@ -1,6 +1,6 @@
 import { useCallback } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
-import { turnsMapAtom, alertTextAtom, synthesisProviderAtom, mappingProviderAtom } from "../state/atoms";
+import { turnsMapAtom, alertTextAtom, synthesisProviderAtom, mappingProviderAtom, refinerProviderAtom } from "../state/atoms";
 import { useRoundActions } from "./useRoundActions";
 import type { AiTurn } from "../types";
 import { PRIMARY_STREAMING_PROVIDER_IDS } from "../constants";
@@ -9,14 +9,15 @@ export function useClipActions() {
   const turnsMap = useAtomValue(turnsMapAtom);
   const setSynthesisProvider = useSetAtom(synthesisProviderAtom);
   const setMappingProvider = useSetAtom(mappingProviderAtom);
+  const setRefinerProvider = useSetAtom(refinerProviderAtom);
   const setAlertText = useSetAtom(alertTextAtom);
   const setTurnsMap = useSetAtom(turnsMapAtom);
-  const { runSynthesisForAiTurn, runMappingForAiTurn } = useRoundActions();
+  const { runSynthesisForAiTurn, runMappingForAiTurn, runRefinerForAiTurn } = useRoundActions();
 
   const handleClipClick = useCallback(
     async (
       aiTurnId: string,
-      type: "synthesis" | "mapping",
+      type: "synthesis" | "mapping" | "refiner",
       providerId: string,
     ) => {
       try {
@@ -43,7 +44,11 @@ export function useClipActions() {
         const responsesMap =
           type === "synthesis"
             ? aiTurn.synthesisResponses || {}
-            : aiTurn.mappingResponses || {};
+            : type === "mapping"
+              ? aiTurn.mappingResponses || {}
+              : type === "refiner"
+                ? aiTurn.refinerResponses || {}
+                : {};
         const responseEntry = responsesMap[providerId];
 
         // Check if we have a valid (non-error) existing response
@@ -55,8 +60,11 @@ export function useClipActions() {
         // Update global provider preference (Crown Move / Mapper Select)
         if (type === "synthesis") {
           setSynthesisProvider(providerId);
-        } else {
+        } else if (type === "mapping") {
           setMappingProvider(providerId);
+        } else {
+          // Refiner
+          setRefinerProvider(providerId);
         }
 
         // If the selected provider is not present in the AI turn's batchResponses, add an optimistic
@@ -88,10 +96,12 @@ export function useClipActions() {
 
         if (type === "synthesis") {
           // We rely on runSynthesisForAiTurn to validate if there are enough inputs
-          // (either batch outputs OR mapping OR existing synthesis)
           await runSynthesisForAiTurn(aiTurnId, providerId);
-        } else {
+        } else if (type === "mapping") {
           await runMappingForAiTurn(aiTurnId, providerId);
+        } else {
+          // Refiner Recompute
+          await runRefinerForAiTurn(aiTurnId, providerId);
         }
       } catch (err) {
         console.error("[ClipActions] handleClipClick failed:", err);
@@ -102,8 +112,12 @@ export function useClipActions() {
       turnsMap,
       runSynthesisForAiTurn,
       runMappingForAiTurn,
+      runRefinerForAiTurn,
       setAlertText,
       setTurnsMap,
+      setSynthesisProvider,
+      setMappingProvider,
+      setRefinerProvider
     ],
   );
 
