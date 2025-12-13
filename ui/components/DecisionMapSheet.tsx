@@ -533,34 +533,10 @@ const MapperSelector: React.FC<MapperSelectorProps> = ({ aiTurn, activeProviderI
               const isDimmed = hasError; // Visual dim for error
 
               return (
-                <button
-                  key={pid}
-                  onClick={() => !isDisabled && handleSelect(pid)}
-                  className={clsx(
-                    "w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left transition-colors relative group",
-                    isActive ? "bg-brand-500/10 text-brand-500" : "hover:bg-surface-highlight text-text-secondary",
-                    (isDisabled || isDimmed) && "opacity-60 grayscale",
-                    isDisabled && "cursor-not-allowed",
-                  )}
-                  disabled={isDisabled}
-                  title={errorMessage && typeof errorMessage === 'string' ? errorMessage : undefined}
-                >
-                  {/* Color Orb */}
-                  <div
-                    className="w-2 h-2 rounded-full shadow-sm"
-                    style={{ backgroundColor: PROVIDER_COLORS[pid] || PROVIDER_COLORS.default }}
-                  />
-
-                  <div className="flex-1 flex flex-col">
-                    <span className="text-xs font-medium">{p.name}</span>
-                    {hasError && (
-                      <span className="text-[10px] text-intent-danger truncate max-w-[140px]">
-                        {typeof errorMessage === 'string' ? errorMessage : "Generation failed"}
-                      </span>
-                    )}
-                  </div>
-
-                  {isActive && <span>✓</span>}
+                <button key={pid} onClick={() => { if (!isUnauthorized) { handleClipClick(aiTurn.id, "mapping", pid); setIsOpen(false); } }} disabled={isUnauthorized} className={clsx("w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left transition-colors", pid === activeProviderId ? "bg-brand-500/10 text-brand-500" : "hover:bg-surface-highlight text-text-secondary", isUnauthorized && "opacity-60 cursor-not-allowed")}>
+                  <div className="w-2 h-2 rounded-full shadow-sm" style={{ backgroundColor: PROVIDER_COLORS[pid] || PROVIDER_COLORS.default }} />
+                  <span className="flex-1 text-xs font-medium">{p.name}</span>
+                  {pid === activeProviderId && <span>✓</span>}
                   {isUnauthorized && <span>🔒</span>}
                 </button>
               );
@@ -572,14 +548,8 @@ const MapperSelector: React.FC<MapperSelectorProps> = ({ aiTurn, activeProviderI
   );
 };
 
-// --- NEW COMPONENT: RefinerSelector ---
-interface RefinerSelectorProps {
-  aiTurn: AiTurn;
-  activeProviderId?: string;
-  onSelect: (providerId: string) => void;
-}
-
-const RefinerSelector: React.FC<RefinerSelectorProps> = ({ aiTurn, activeProviderId, onSelect }) => {
+// FIXED: Added missing closing div in RefinerSelector structure
+const RefinerSelector: React.FC<{ aiTurn: AiTurn, activeProviderId?: string, onSelect: (pid: string) => void }> = ({ aiTurn, activeProviderId, onSelect }) => {
   const [isOpen, setIsOpen] = useState(false);
   const { handleClipClick } = useClipActions();
   const authStatus = useAtomValue(providerAuthStatusAtom);
@@ -642,14 +612,14 @@ const RefinerSelector: React.FC<RefinerSelectorProps> = ({ aiTurn, activeProvide
               return (
                 <button
                   key={pid}
-                  onClick={() => !isDisabled && handleProviderSelect(pid)}
+                  onClick={() => { if (!isDisabled) { onSelect(pid); handleClipClick(aiTurn.id, "refiner", pid); setIsOpen(false); } }}
+                  disabled={isDisabled}
                   className={clsx(
                     "w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left transition-colors relative group",
                     isActive ? "bg-brand-500/10 text-brand-500" : "hover:bg-surface-highlight text-text-secondary",
                     (isDisabled || hasError) && "opacity-60",
                     isDisabled && "cursor-not-allowed",
                   )}
-                  disabled={isDisabled}
                   title={errorMessage && typeof errorMessage === 'string' ? errorMessage : undefined}
                 >
                   <div
@@ -658,11 +628,14 @@ const RefinerSelector: React.FC<RefinerSelectorProps> = ({ aiTurn, activeProvide
                   />
                   <div className="flex-1 flex flex-col">
                     <span className="text-xs font-medium">{p.name}</span>
-                    {hasError && (
-                      <div className="absolute left-full ml-2 top-1/2 -translate-y-1/2 hidden group-hover:block z-50 w-48 bg-black/90 text-white text-[10px] p-2 rounded shadow-lg pointer-events-none">
-                        {typeof errorMessage === 'string' ? errorMessage : "Previous generation failed"}
-                      </div>
-                    )}
+                  </div>
+                  {hasError && (
+                    <div className="absolute left-full ml-2 top-1/2 -translate-y-1/2 hidden group-hover:block z-50 w-48 bg-black/90 text-white text-[10px] p-2 rounded shadow-lg pointer-events-none">
+                      {typeof errorMessage === 'string' ? errorMessage : "Previous generation failed"}
+                    </div>
+                  )}
+                  {isActive && <span>✓</span>}
+                  {isUnauthorized && <span>🔒</span>}
                 </button>
               );
             })}
