@@ -126,9 +126,7 @@ const ChatInput = ({
     void runComposerFlow(prompt, "compose", originalPrompt || undefined);
   }, [runComposerFlow, originalPrompt, setOriginalPrompt]);
 
-  const onToggleAudit = () => { }; // No-op
-  const onToggleVariants = () => { }; // No-op
-  const onToggleExplanation = () => { }; // No-op
+
   const onHeightChange = setChatInputHeight;
   const onCancelTarget = () => setActiveTarget(null);
 
@@ -212,12 +210,11 @@ const ChatInput = ({
 
       // Calculate total input area height
       const bottomBarHeight = (originalPrompt) ? 30 : 0;
-      const refinerHeight = 0; // Legacy refiner removed
       const targetHeight = activeTarget ? 30 : 0;
       // Add height for nudge chips if visible (approx 28px + margin)
       const nudgeHeight = nudgeVisible ? 32 : 0;
 
-      const totalHeight = newHeight + 24 + 2 + refinerHeight + targetHeight + bottomBarHeight + nudgeHeight;
+      const totalHeight = newHeight + 24 + 2  + targetHeight + bottomBarHeight + nudgeHeight;
       onHeightChange?.(totalHeight);
     }
   }, [prompt, onHeightChange, activeTarget, originalPrompt, nudgeVisible]);

@@ -20,18 +20,13 @@ import {
   mappingProviderAtom,
 } from "../state/atoms";
 import { useClipActions } from "../hooks/useClipActions";
-import { useEligibility } from "../hooks/useEligibility";
-import ProviderResponseBlockConnected from "./ProviderResponseBlockConnected";
 import { AiTurn, ProviderResponse, AppStep } from "../types";
 import MarkdownDisplay from "./MarkdownDisplay";
 import { LLM_PROVIDERS_CONFIG } from "../constants";
-import ClipsCarousel from "./ClipsCarousel";
-import { ChevronDownIcon, ChevronUpIcon, ListIcon, SettingsIcon } from "./Icons";
+import { ChevronDownIcon, ChevronUpIcon, SettingsIcon } from "./Icons";
 import { CouncilOrbs } from "./CouncilOrbs";
 import { CopyButton } from "./CopyButton";
 import { formatSynthesisForMd, formatTurnForMd } from "../utils/copy-format-utils";
-import { adaptGraphTopology } from "./experimental/graphAdapter";
-import { GraphTopology } from "../types";
 import {
   normalizeResponseArray,
   getLatestResponse,
@@ -238,12 +233,9 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
   const isLive = isLoading && currentAppStep !== "initial";
 
   const [isReducedMotion] = useAtom(isReducedMotionAtom);
-  const [showSourceOutputs, setShowSourceOutputs] = useAtom(showSourceOutputsFamily(aiTurn.id));
   const synthesisProvider = useAtomValue(synthesisProviderAtom);
   const mappingProvider = useAtomValue(mappingProviderAtom);
   const { handleClipClick } = useClipActions();
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const { eligibilityMaps } = useEligibility();
   const [globalActiveRecomputeState] = useAtom(activeRecomputeStateAtom);
   const providerErrors = useAtomValue(providerErrorsAtom);
   const retryableProviders = useAtomValue(retryableProvidersAtom);
@@ -262,7 +254,6 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
     return cfg?.name || pid;
   }, []);
 
-  const onToggleSourceOutputs = useCallback(() => setShowSourceOutputs((prev) => !prev), [setShowSourceOutputs]);
 
   const onClipClick = useCallback(
     (type: "synthesis" | "mapping", pid: string) => {
@@ -451,51 +442,7 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
     content: string;
   } | null>(null);
 
-  // State for next-turn council editor mode
-  const [isEditingNextTurn, setIsEditingNextTurn] = useState(false);
-  const editTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-
-  // Clear timeout on unmount or when editing ends
-  useEffect(() => {
-    return () => {
-      if (editTimeoutRef.current) {
-        clearTimeout(editTimeoutRef.current);
-      }
-    };
-  }, []);
-
-  /* AUTOMATED SCROLL: Only manual edit mode closes it
-  const handleNextTurnArrowClick = useCallback(() => {
-    // Toggle edit mode
-    if (isEditingNextTurn) {
-      setIsEditingNextTurn(false);
-      if (editTimeoutRef.current) clearTimeout(editTimeoutRef.current);
-      return;
-    }
-
-    setIsEditingNextTurn(true);
-    // Auto-close after 8 seconds
-    editTimeoutRef.current = setTimeout(() => {
-      setIsEditingNextTurn(false);
-    }, 8000);
-  }, [isEditingNextTurn]);
-  */
-  // Replacing specific block with new logic + keeping required parts
-  const handleNextTurnArrowClick = useCallback(() => {
-    // Toggle edit mode
-    if (isEditingNextTurn) {
-      setIsEditingNextTurn(false);
-      if (editTimeoutRef.current) clearTimeout(editTimeoutRef.current);
-      return;
-    }
-
-    setIsEditingNextTurn(true);
-    // Auto-close after 8 seconds
-    editTimeoutRef.current = setTimeout(() => {
-      setIsEditingNextTurn(false);
-    }, 8000);
-  }, [isEditingNextTurn]);
-
+  
   // --- SYNTHESIS TABS LOGIC ---
   const synthesisTabs = useMemo(() => {
     if (!aiTurn.synthesisResponses) return [];
@@ -883,8 +830,7 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                 {/* Synthesis Bubble */}
                 <div
                   className={clsx(
-                    "synthesis-bubble bg-surface rounded-3xl border border-border-subtle shadow-sm relative z-10 transition-all duration-300",
-                    isEditingNextTurn && "opacity-60 ring-2 ring-brand-400/50"
+                    "synthesis-bubble bg-surface rounded-3xl border border-border-subtle shadow-sm relative z-10 transition-all duration-300"
                   )}
                   style={{ padding: '28px 40px 88px' }}
                 >
@@ -1189,25 +1135,14 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                     </div>
                   )}
 
-                  {/* Right Arrow Removed */}
                 </div>
 
-              </div>
-            </div>
+          </div>
+          </div>
           </div>
 
-          {/* Hidden Grid (Dev Only) */}
-          {showSourceOutputs && (
-            <div className="batch-filler mt-3">
-              <div className="sources-wrapper">
-                <div className="sources-content">
-                  <ProviderResponseBlockConnected aiTurnId={aiTurn.id} expectedProviders={aiTurn.meta?.expectedProviders} />
-                </div>
-              </div>
-            </div>
-          )}
+          </div>
         </div>
-      </div>
 
       {/* Artifact Overlay Modal */}
       {selectedArtifact && (
