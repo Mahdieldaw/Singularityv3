@@ -1456,11 +1456,11 @@ export class WorkflowEngine {
 
     return {
       providerId: refinerProvider,
-      output, // The raw object
-      text: JSON.stringify(output), // Store specific text representation if needed
+      output: output.parsed, // The parsed object for in-memory use
+      text: output.rawText, // Store the RAW MARKDOWN for persistence
       meta: {
-        confidenceScore: output.confidenceScore,
-        presentationStrategy: output.presentationStrategy,
+        confidenceScore: output.parsed.confidenceScore,
+        presentationStrategy: output.parsed.presentationStrategy,
       },
       status: "completed"
     };

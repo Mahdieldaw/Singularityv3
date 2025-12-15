@@ -18,6 +18,7 @@ import {
   activeRecomputeStateAtom,
   turnStreamingStateFamily,
   mappingProviderAtom,
+  chatInputValueAtom,
 } from "../state/atoms";
 import { useClipActions } from "../hooks/useClipActions";
 import { AiTurn, ProviderResponse, AppStep } from "../types";
@@ -45,6 +46,9 @@ import { useRefinerOutput } from "../hooks/useRefinerOutput";
 import { RefinerSynthesisAccuracy } from "./RefinerCardsSection";
 import { ConfidenceBadge } from "./ConfidenceBadge";
 import { ReframingBanner } from "./ReframingBanner";
+import { HeaderGuidance } from "./HeaderGuidance";
+import { BottomLineCard } from "./BottomLineCard";
+import { getStructuredAssessment, getGapCounts } from "../utils/refiner-helpers";
 
 // --- Helper Functions ---
 function parseMappingResponse(response?: string | null) {
@@ -248,6 +252,18 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
   const isThisTurnActive = activeAiTurnId === aiTurn.id && globalIsLoading;
 
   const { output: refinerOutput } = useRefinerOutput(aiTurn.id);
+  const assessment = useMemo(() => getStructuredAssessment(refinerOutput), [refinerOutput]);
+  const gapCounts = useMemo(() => getGapCounts(refinerOutput), [refinerOutput]);
+
+  const setChatInput = useSetAtom(chatInputValueAtom);
+
+  const handleAskReframed = useCallback((question: string) => {
+    setChatInput(question);
+    const input = document.querySelector('textarea[name="chat-input"]') as HTMLTextAreaElement | null;
+    if (input) {
+      input.focus();
+    }
+  }, [setChatInput]);
 
   const getProviderName = useCallback((pid: string) => {
     const cfg = LLM_PROVIDERS_CONFIG.find(p => String(p.id) === pid);
@@ -442,7 +458,7 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
     content: string;
   } | null>(null);
 
-  
+
   // --- SYNTHESIS TABS LOGIC ---
   const synthesisTabs = useMemo(() => {
     if (!aiTurn.synthesisResponses) return [];
@@ -837,7 +853,10 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                   {/* Use padding top to accommodate banner if present? No, standard padding is fine */}
                   {refinerOutput?.reframingSuggestion && (
                     <div className="mb-6 relative z-30 pointer-events-auto mx-[-12px]">
-                      <ReframingBanner suggestion={refinerOutput.reframingSuggestion} />
+                      <ReframingBanner
+                        suggestion={refinerOutput.reframingSuggestion}
+                        onApply={handleAskReframed}
+                      />
                     </div>
                   )}
 
@@ -1000,6 +1019,17 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
 
                             return (
                               <>
+                                {/* Header Guidance */}
+                                {refinerOutput && typeof refinerOutput.confidenceScore === 'number' && (
+                                  <HeaderGuidance
+                                    confidenceScore={refinerOutput.confidenceScore}
+                                    biggestRisk={assessment?.biggestRisk}
+                                    presentationStrategy={refinerOutput.presentationStrategy}
+                                    strategyRationale={refinerOutput.strategyRationale}
+                                    className="mb-6 mx-[-12px] sm:mx-0"
+                                  />
+                                )}
+
                                 <div className="text-base leading-relaxed text-text-primary">
                                   <MarkdownDisplay
                                     content={String(cleanText || take.text || "")}
@@ -1026,13 +1056,19 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                           })()}
 
                           {refinerOutput && (
-                            <div className="mt-6 pt-6 border-t border-border-subtle">
-                              {typeof refinerOutput.confidenceScore === 'number' && (
-                                <div className="mb-3">
-                                  <ConfidenceBadge score={refinerOutput.confidenceScore} />
-                                </div>
-                              )}
-                              <RefinerSynthesisAccuracy output={refinerOutput} />
+                            <div className="mt-8">
+                              <BottomLineCard
+                                recommendedNextStep={assessment?.recommendedNextStep}
+                                reliabilitySummary={assessment?.reliabilitySummary}
+                                gapCount={gapCounts.total}
+                                foundationalGapCount={gapCounts.foundational}
+                                hasVerificationTriggers={!!refinerOutput.verificationTriggers?.length}
+                                className="mb-4"
+                              />
+
+                              <div className="pt-6 border-t border-border-subtle">
+                                <RefinerSynthesisAccuracy output={refinerOutput} />
+                              </div>
                             </div>
                           )}
                         </div>
@@ -1137,12 +1173,12 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
 
                 </div>
 
-          </div>
-          </div>
+              </div>
+            </div>
           </div>
 
-          </div>
         </div>
+      </div>
 
       {/* Artifact Overlay Modal */}
       {selectedArtifact && (

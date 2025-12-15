@@ -488,7 +488,7 @@ No composed prompt was provided. Analyze the USER_FRAGMENT directly.
     batchResponses: Record<string, { text: string; providerId: string }>,
     refinerModelId?: string,
     mapperOptionTitles?: string[]
-  ): Promise<RefinerOutput | null> {
+  ): Promise<{ rawText: string; parsed: RefinerOutput } | null> {
     try {
       const modelId = refinerModelId || this.authorModel;
 
@@ -649,7 +649,10 @@ When analyzing, consider:
 
       // Parse using shared utility
       const { parseRefinerOutput } = await import('../../shared/parsing-utils.js');
-      return parseRefinerOutput(responseText);
+      return {
+        rawText: responseText,
+        parsed: parseRefinerOutput(responseText)
+      };
     } catch (e) {
       console.warn('[PromptRefinerService] Refiner analysis failed:', e);
       return null;

@@ -50,7 +50,7 @@ import { RefinerEpistemicAudit } from "./RefinerCardsSection";
 interface ParsedOption {
   title: string;
   description: string;
-  citations: number[];
+  citations: (number | string)[];
 }
 
 interface ParsedTheme {
@@ -272,7 +272,7 @@ const SupporterOrbs: React.FC<SupporterOrbsProps> = ({ supporters, citationSourc
 interface OptionsTabProps {
   themes: ParsedTheme[];
   citationSourceOrder?: Record<number, string>;
-  onCitationClick: (num: number) => void;
+  onCitationClick: (num: number | string) => void;
 }
 
 const OptionsTab: React.FC<OptionsTabProps> = ({ themes, citationSourceOrder, onCitationClick }) => {
@@ -769,7 +769,25 @@ export const DecisionMapSheet = React.memo(() => {
     return options;
   }, [latestMapping]);
 
-  const parsedThemes = useMemo(() => parseOptionsIntoThemes(optionsText), [optionsText]);
+  const parsedThemes = useMemo(() => {
+    const themes = parseOptionsIntoThemes(optionsText);
+
+    // Merge in refiner-found unlisted options
+    if (refinerOutput?.mapperAudit?.unlistedOptions?.length) {
+      const refinerOptions = refinerOutput.mapperAudit.unlistedOptions.map(opt => ({
+        title: opt.title,
+        description: opt.description,
+        citations: [opt.sourceProvider]
+      }));
+
+      themes.push({
+        name: "🔍 Found by Epistemic Audit",
+        options: refinerOptions
+      });
+    }
+
+    return themes;
+  }, [optionsText, refinerOutput]);
 
   // Extract citation source order from mapping metadata for correct citation-to-model mapping
   const citationSourceOrder = useMemo(() => {
@@ -789,8 +807,14 @@ export const DecisionMapSheet = React.memo(() => {
     return undefined;
   }, [latestMapping, aiTurn]);
 
-  const handleCitationClick = useCallback((modelNumber: number) => {
+  const handleCitationClick = useCallback((modelNumber: number | string) => {
     try {
+      // If it's a string, it's a direct provider ID from Refiner unlisted options
+      if (typeof modelNumber === 'string') {
+        setActiveSplitPanel({ turnId: aiTurn?.id || '', providerId: modelNumber });
+        return;
+      }
+
       const metaOrder = latestMapping?.meta?.citationSourceOrder || null;
       let providerId: string | undefined;
       if (metaOrder && typeof metaOrder === 'object') {

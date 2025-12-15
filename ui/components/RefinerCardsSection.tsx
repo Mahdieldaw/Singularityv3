@@ -3,6 +3,7 @@ import { RefinerOutput } from "../../shared/parsing-utils";
 import { ConfidenceBadge } from "./ConfidenceBadge";
 import { GapsSectionPanel } from "./GapsSectionPanel";
 import { SynthesisAccuracySection } from "./SynthesisAccuracySection";
+import { MapperAuditSection } from "./MapperAuditSection";
 
 interface RefinerSectionProps {
     output: RefinerOutput;
@@ -53,7 +54,9 @@ export const RefinerEpistemicAudit: React.FC<RefinerAuditProps> = ({ output, raw
         honestAssessment,
         gaps,
         verificationTriggers,
-        synthesisAccuracy
+        synthesisAccuracy,
+        mapperAudit,
+        metaPattern
     } = output;
 
     return (
@@ -78,12 +81,38 @@ export const RefinerEpistemicAudit: React.FC<RefinerAuditProps> = ({ output, raw
                     <div className="text-sm text-white/90 leading-relaxed">{rationale}</div>
                 </div>
             )}
-            {honestAssessment && (
-                <div className="text-sm text-white/90 leading-relaxed border-l-4 border-indigo-500 pl-4 py-2 italic bg-indigo-500/5 rounded-r-lg">
-                    "{honestAssessment}"
-                </div>
-            )}
 
+            {/* Honest Assessment - Handle both string and structured formats */}
+            {honestAssessment && (
+                typeof honestAssessment === 'object' ? (
+                    <div className="bg-indigo-500/10 border border-indigo-500/20 rounded-xl p-5">
+                        <div className="flex items-center gap-2 mb-3">
+                            <span className="w-2 h-2 rounded-full bg-indigo-400" />
+                            <h4 className="text-xs font-bold text-indigo-200 uppercase tracking-wider">
+                                Honest Assessment
+                            </h4>
+                        </div>
+                        <div className="space-y-3 text-sm">
+                            <div>
+                                <span className="text-indigo-300 font-medium">Reliability: </span>
+                                <span className="text-white/90">{honestAssessment.reliabilitySummary}</span>
+                            </div>
+                            <div>
+                                <span className="text-amber-300 font-medium">Biggest Risk: </span>
+                                <span className="text-white/90">{honestAssessment.biggestRisk}</span>
+                            </div>
+                            <div>
+                                <span className="text-green-300 font-medium">Next Step: </span>
+                                <span className="text-white/90">{honestAssessment.recommendedNextStep}</span>
+                            </div>
+                        </div>
+                    </div>
+                ) : (
+                    <div className="text-sm text-white/90 leading-relaxed border-l-4 border-indigo-500 pl-4 py-2 italic bg-indigo-500/5 rounded-r-lg">
+                        "{honestAssessment}"
+                    </div>
+                )
+            )}
             {presentationStrategy && (
                 <div className="bg-sky-500/10 border border-sky-500/20 rounded-xl p-5">
                     <div className="flex items-center gap-2 mb-2">
@@ -109,7 +138,7 @@ export const RefinerEpistemicAudit: React.FC<RefinerAuditProps> = ({ output, raw
                 </div>
             )}
 
-            {/* Verification Triggers */}
+            {/* Verification Triggers - Enhanced */}
             {verificationTriggers && verificationTriggers.length > 0 && (
                 <div className="bg-orange-500/10 border border-orange-500/20 rounded-xl p-5 mt-2">
                     <div className="flex items-center gap-2 mb-4">
@@ -120,23 +149,38 @@ export const RefinerEpistemicAudit: React.FC<RefinerAuditProps> = ({ output, raw
                     </div>
                     <ul className="space-y-4">
                         {verificationTriggers.map((trigger, idx) => (
-                            <li key={idx} className="text-sm text-orange-100/90 pl-2 border-l-2 border-orange-500/30">
-                                <strong className="text-orange-300 block mb-1">"{trigger.claim}"</strong>
-                                <span className="block opacity-90 italic">{trigger.why}</span>
+                            <li key={idx} className="text-sm text-orange-100/90 pl-3 border-l-2 border-orange-500/30">
+                                <strong className="text-orange-300 block mb-1">
+                                    "{trigger.claim}"
+                                </strong>
+                                <span className="block text-orange-100/80 italic mb-2">
+                                    {trigger.why}
+                                </span>
+                                {trigger.sourceType && (
+                                    <span className="text-xs text-orange-400/70">
+                                        Look for: {trigger.sourceType}
+                                    </span>
+                                )}
                             </li>
                         ))}
                     </ul>
                 </div>
             )}
 
-            {output.metaPattern && (
+            {/* Meta Pattern */}
+            {metaPattern && (
                 <div className="bg-fuchsia-500/10 border border-fuchsia-500/20 rounded-xl p-5">
                     <div className="flex items-center gap-2 mb-2">
                         <span className="w-2 h-2 rounded-full bg-fuchsia-400" />
                         <h4 className="text-xs font-bold text-fuchsia-200 uppercase tracking-wider">Meta-Pattern</h4>
                     </div>
-                    <div className="text-sm text-white/90 leading-relaxed">{output.metaPattern}</div>
+                    <div className="text-sm text-white/90 leading-relaxed">{metaPattern}</div>
                 </div>
+            )}
+
+            {/* Mapper Audit */}
+            {mapperAudit && (
+                <MapperAuditSection audit={mapperAudit} className="mt-2" />
             )}
 
             {/* Synthesis Accuracy (Collapsed by default) */}
