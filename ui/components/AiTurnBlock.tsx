@@ -44,7 +44,7 @@ import {
 } from "../state/atoms";
 import { useRefinerOutput } from "../hooks/useRefinerOutput";
 import { RefinerSynthesisAccuracy } from "./refinerui/RefinerCardsSection";
-import { ConfidenceBadge } from "./refinerui/ConfidenceBadge";
+
 import { ReframingBanner } from "./refinerui/ReframingBanner";
 import { HeaderGuidance } from "./refinerui/HeaderGuidance";
 import { BottomLineCard } from "./refinerui/BottomLineCard";

@@ -4,7 +4,7 @@
 // Pure response processing - NO I/O
 // ═══════════════════════════════════════════════════════════════════════════
 
-import { parseRefinerOutput, RefinerOutput } from '../../shared/parsing-utils';
+import { parseRefinerOutput, RefinerOutput, normalizeText } from '../../shared/parsing-utils';
 export type { RefinerOutput };
 
 export interface ComposerResult {
@@ -170,11 +170,7 @@ export class ResponseProcessor {
         if (!text || typeof text !== 'string') return { text, topology: null };
 
         // Normalize markdown escapes (LLMs often escape special chars)
-        let normalized = text
-            .replace(/\\=/g, '=')      // \= → =
-            .replace(/\\_/g, '_')      // \_ → _
-            .replace(/\\\*/g, '*')     // \* → *
-            .replace(/\\-/g, '-');     // \- → -
+        const normalized = normalizeText(text);
 
         const match = normalized.match(/={3,}\s*GRAPH_TOPOLOGY\s*={3,}/i);
         if (!match || typeof match.index !== 'number') return { text, topology: null };
@@ -244,16 +240,8 @@ export class ResponseProcessor {
     extractOptions(text: string): { text: string; options: string | null } {
         if (!text || typeof text !== 'string') return { text, options: null };
 
-        // Normalize markdown escapes AND unicode variants
-        let normalized = text
-            .replace(/\\=/g, '=')      // \= → =
-            .replace(/\\_/g, '_')      // \_ → _
-            .replace(/\\\*/g, '*')     // \* → *
-            .replace(/\\-/g, '-')      // \- → -
-            .replace(/[＝═⁼˭꓿﹦]/g, '=')
-            .replace(/[‗₌]/g, '=')
-            .replace(/\u2550/g, '=')
-            .replace(/\uFF1D/g, '=');
+        // Normalize markdown escapes AND unicode variants using shared utility
+        const normalized = normalizeText(text);
 
         // First, check for GRAPH_TOPOLOGY delimiter and strip it to avoid contaminating options
         // The options section ends before GRAPH_TOPOLOGY if present
