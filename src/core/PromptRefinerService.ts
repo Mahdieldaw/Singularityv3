@@ -486,10 +486,14 @@ No composed prompt was provided. Analyze the USER_FRAGMENT directly.
     synthesisText: string,
     mapperNarrative: string,
     batchResponses: Record<string, { text: string; providerId: string }>,
-    refinerModelId?: string
+    refinerModelId?: string,
+    mapperOptionTitles?: string[]
   ): Promise<RefinerOutput | null> {
     try {
-      const modelId = refinerModelId || this.authorModel; // Reuse composer model as default
+      const modelId = refinerModelId || this.authorModel;
+
+      // Compute model count once
+      const modelCount = Object.keys(batchResponses).length;
 
       // Build model outputs block
       const modelOutputsBlock = Object.entries(batchResponses)
@@ -498,52 +502,26 @@ No composed prompt was provided. Analyze the USER_FRAGMENT directly.
         })
         .join('\n\n');
 
-      const refinerPrompt = `You are an epistemic auditor assessing the *reliability* of reasoning, not its content.
+      // Build option titles block for Mapper Audit
+      const optionTitlesBlock = mapperOptionTitles && mapperOptionTitles.length > 0
+        ? mapperOptionTitles.map(t => `- ${t}`).join('\n')
+        : '(No mapper options available)';
 
-Style: Short, precise, clinical. No rhetorical flourishes. 2-3 sentences max per section unless explicitly required.
+      const refinerPrompt = `You are an epistemic auditor assessing *reliability* of reasoning, not content.
 
-You witnessed: User query → ${Object.keys(batchResponses).length} models responded → Mapper cataloged terrain → Synthesizer unified.
+Style: Short, precise, clinical. 2-3 sentences max per section.
 
-**Your task: How much should the user trust this output?**
+Context: User query → ${modelCount} models responded → Mapper cataloged → Synthesizer unified.
 
-**Your unique position:** You are the only model (except mapper) to see all raw outputs. If the mapper missed claims from raw outputs, surface them.
+**Your task**: How much should the user trust this output?
+
+**Your unique position**: You see all raw outputs. Surface what mapper/synthesis missed.
 
 ---
 <user_prompt>${userPrompt}</user_prompt>
 <synthesis>${synthesisText}</synthesis>
 <decision_map>${mapperNarrative}</decision_map>
 <raw_outputs>${modelOutputsBlock}</raw_outputs>
----
-## Analysis Framework
-
-**1. Query & Consensus**
-- Query type: Factual / Analytical / Creative / Procedural?
-- Agreement: Universal (${Object.keys(batchResponses).length}/${Object.keys(batchResponses).length} = groupthink risk?) | Strong (4-5/${Object.keys(batchResponses).length}) | Split (3/${Object.keys(batchResponses).length} = context-dependent) | Scattered (<3 = bad question?)
-- Did models agree on reasoning or just conclusions? (Reasoning alignment = stronger)
-- Which model dissented? Was dissent buried by synthesis?
-
-**2. Failure Modes**
-- Confident uniformity without hedging → hallucination risk
-- Specific numbers/dates without sources → confabulation
-- All models answering outside their domain → unreliable
-- Synthesis added confidence raw outputs didn't warrant?
-
-**3. Gap Detection** *(Output at least 3)*
-Surface what's missing:
-- Unanswered sub-questions or adjacent-topic drift
-- Unstated assumptions the answer depends on
-- Temporal blindness (outdated?)
-- Missing perspectives (geographic, professional, contrarian)
-- Insights from raw outputs that synthesis dropped
-
-**Relevance Filter**: Only flag gaps that would change the user's decision or action.
-
-**4. Meta-Pattern**
-What does the *shape* of agreement/disagreement reveal that no model stated?
-
-**5. Mapper Audit**
-Did the mapper's claims inventory miss anything from raw outputs? If yes, note specifically.
-
 ---
 
 ## Output Structure
@@ -552,43 +530,50 @@ Did the mapper's claims inventory miss anything from raw outputs? If yes, note s
 
 **Confidence Score: [0.0-1.0]**
 
-Score calibration:
-- 0.9+: Universal consensus on verifiable facts. Safe to act.
-- 0.7-0.89: Strong consensus, minor peripheral dissent.
-- 0.5-0.69: Meaningful divergence. Verify before acting.
-- 0.3-0.49: Significant disagreement or hallucination risk. Hypothesis only.
-- <0.3: Unreliable. Scattered or flawed query.
+Calibration:
+- 0.9+: Universal consensus on verifiable facts
+- 0.7-0.89: Strong consensus, minor dissent
+- 0.5-0.69: Meaningful divergence—verify before acting
+- 0.3-0.49: Significant disagreement—hypothesis only
+- <0.3: Unreliable
 
-Enforced caps:
-- Agreement without evidence → max 0.7
-- Bold claims without sourcing → max 0.6
-- Domain misalignment → apply penalty
+Caps: Agreement without evidence → max 0.7 | Unsourced bold claims → max 0.6
 
-**Rationale**: [2-3 sentences—what drove score up/down]
+**Rationale**: [2-3 sentences—what drove score]
 
 ---
 
 ### Presentation Strategy
 
-**Assess which description best matches this output: - **definitive**: Universal consensus on verifiable claims. No meaningful dissent. Synthesis IS the answer. - **confident_with_caveats**: Strong synthesis, but validity depends on stated or unstated assumptions. The assumptions should be framed. - **options_forward**: Multiple distinct approaches with similar merit. No single "best" path—user context determines which fits. Decision map is as valuable as synthesis. - **context_dependent**: Correct answer genuinely varies by situation. "It depends" is the most honest frame, not a cop-out. - **low_confidence**: Significant disagreement, thin reasoning, or hallucination risk. Synthesis is a hypothesis, not a conclusion. - **needs_verification**: Contains specific factual claims (dates, stats, quotes, version numbers) that could be wrong and would matter if wrong. - **query_problematic**: The question itself is ambiguous, assumes false premises, or limits useful answers. Reframing unlocks more than answering. **Recommended**: [choice] **Why**: [1 sentence—which criteria above drove this choice]
+Options:
+- **definitive**: Universal consensus, no dissent. Synthesis IS the answer.
+- **confident_with_caveats**: Strong synthesis, validity depends on assumptions.
+- **options_forward**: Multiple approaches with similar merit. Decision map as valuable as synthesis.
+- **context_dependent**: Answer genuinely varies by situation.
+- **low_confidence**: Significant disagreement or hallucination risk. Hypothesis only.
+- **needs_verification**: Contains factual claims that could be wrong and would matter.
+- **query_problematic**: Question is flawed. Reframing unlocks more than answering.
+
+**Recommended**: [choice]
+**Why**: [1 sentence]
 
 ---
 
 ### Verification Triggers
 
-Flag claims needing external verification (only if verification would change behavior):
+*(Only if verification would change behavior; otherwise "None required—[reason]")*
+
 - **Claim**: "[quote]"
 - **Why**: [date-sensitive / high-stakes / suspiciously uniform]
 - **Source type**: [documentation / academic / news]
-
-*(If none needed: "None required—[reason]")*
 
 ---
 
 ### Reframing Suggestion
 
-*(Only if query is flawed—omit section entirely if not applicable)*
-- **Issue**: [what's ambiguous/limiting]
+*(Omit section entirely if query is fine)*
+
+- **Issue**: [what's limiting]
 - **Better question**: "[reframe]"
 - **Unlocks**: [what this enables]
 
@@ -596,19 +581,24 @@ Flag claims needing external verification (only if verification would change beh
 
 ### Synthesis Accuracy
 
-- **Preserved**: [what synthesis captured correctly]
-- **Overclaimed**: [confidence added beyond raw outputs]
-- **Missed**: [dropped insights—name the provider, e.g. "Claude's point about X"]
+- **Preserved**: [what synthesis got right]
+- **Overclaimed**: [confidence added beyond sources]
+- **Missed from synthesis**: [insights not in synthesis—note if in mapper options, e.g., "Claude's point about X (in options)" or "Claude's point about X (not in options)"]
 
 ---
 
 ### Gap Detection
 
-- **Gap 1**: [Title] — [explanation]
-- **Gap 2**: [Title] — [explanation]
-- **Gap 3**: [Title] — [explanation]
+*(2-4 gaps. Only gaps that would change user's decision.)*
 
-*(If <3 exist: "Unusually complete—only N gaps:" then list)*
+Classify each:
+- **Foundational**: Invalidates answer if unaddressed
+- **Tactical**: Refines but doesn't change direction
+
+- **Gap 1 [foundational/tactical]**: [Title] — [explanation]
+- **Gap 2 [foundational/tactical]**: [Title] — [explanation]
+
+*(If <2 exist: "Unusually complete—[why]")*
 
 ---
 
@@ -620,72 +610,38 @@ Flag claims needing external verification (only if verification would change beh
 
 ### Honest Assessment
 
-[2-4 sentences: How reliable really? Biggest risk? What would you do next?]
+- **Reliability summary**: [1 sentence—how reliable is this really?]
+- **Biggest risk**: [1 sentence—single most important watch-out]
+- **Recommended next step**: [1 sentence—what would you do?]
 
 ---
+
+### Mapper Audit
+
+Mapper listed these options:
+${optionTitlesBlock}
+
+*(If all approaches from raw outputs are represented: "Complete—no unlisted options")*
+
+- **Unlisted option**: [Title] — [1-sentence description] — Source: [Provider]
+
+---
+
+## Internal Analysis (Do Not Output)
+
+When analyzing, consider:
+- Query type: Factual / Analytical / Creative / Procedural
+- Agreement pattern: Universal (groupthink?) | Strong (4-5) | Split (context-dependent) | Scattered (bad question?)
+- Did models agree on reasoning or just conclusions?
+- Was dissent buried by synthesis?
+- Failure modes: Confident uniformity, unsourced specifics, domain mismatch
+- Did mapper option titles cover all distinct approaches in raw outputs?
 
 ## Rules
+
 - Assess, don't invent. Evaluate, don't replace.
 - Low scores are rare but meaningful. High scores are earned.
-- Your value: seeing what others missed—including what the mapper missed.
-
-
----
-
-### Verification Triggers
-
-Flag claims needing external verification (only if verification would change behavior):
-- **Claim**: "[quote]"
-- **Why**: [date-sensitive / high-stakes / suspiciously uniform]
-- **Source type**: [documentation / academic / news]
-
-*(If none needed: "None required—[reason]")*
-
----
-
-### Reframing Suggestion
-
-*(Only if query is flawed—omit section entirely if not applicable)*
-- **Issue**: [what's ambiguous/limiting]
-- **Better question**: "[reframe]"
-- **Unlocks**: [what this enables]
-
----
-
-### Synthesis Accuracy
-
-- **Preserved**: [what synthesis captured correctly]
-- **Overclaimed**: [confidence added beyond raw outputs]
-- **Missed**: [dropped insights—name the provider, e.g. "Claude's point about X"]
-
----
-
-### Gap Detection
-
-- **Gap 1**: [Title] — [explanation]
-- **Gap 2**: [Title] — [explanation]
-- **Gap 3**: [Title] — [explanation]
-
-*(If <3 exist: "Unusually complete—only N gaps:" then list)*
-
----
-
-### Meta-Pattern
-
-[1 paragraph: What does the shape of agreement/disagreement reveal that no model stated?]
-
----
-
-### Honest Assessment
-
-[2-4 sentences: How reliable really? Biggest risk? What would you do next?]
-
----
-
-## Rules
-- Assess, don't invent. Evaluate, don't replace.
-- Low scores are rare but meaningful. High scores are earned.
-- Your value: seeing what others missed—including what the mapper missed.`;
+- Your value: seeing what others missed.`;
 
       console.log(`[PromptRefinerService] Running Refiner Analysis (${modelId})...`);
       const responseRaw = await this._callModel(modelId, refinerPrompt);

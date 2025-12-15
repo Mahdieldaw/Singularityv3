@@ -251,23 +251,55 @@ export interface RefinerOutput {
     rationale: string;
     presentationStrategy: string;
     strategyRationale: string;
-    gaps: Array<{ title: string; explanation: string }>;
-    honestAssessment: string;
-    metaPattern?: string;
-    synthesisAccuracy?: {
-        preserved: string[];
-        overclaimed: string[];
-        missed: Record<string, string[]>;
-    };
+
     verificationTriggers?: Array<{
         claim: string;
         why: string;
         sourceType: string;
     }>;
+
     reframingSuggestion?: {
         issue: string;
         betterQuestion: string;
         unlocks: string;
+    };
+
+    // Updated: now includes inMapperOptions flag
+    synthesisAccuracy?: {
+        preserved: string[];
+        overclaimed: string[];
+        missed: Record<string, string[]>; // Legacy format
+        missedFromSynthesis?: Array<{
+            insight: string;
+            provider: string;
+            inMapperOptions: boolean;
+        }>;
+    };
+
+    // Updated: now includes category
+    gaps: Array<{
+        title: string;
+        explanation: string;
+        category?: 'foundational' | 'tactical';
+    }>;
+
+    metaPattern?: string;
+
+    // Updated: now structured (string for backward compat)
+    honestAssessment: string | {
+        reliabilitySummary: string;
+        biggestRisk: string;
+        recommendedNextStep: string;
+    };
+
+    // NEW: mapper audit field
+    mapperAudit?: {
+        complete: boolean;
+        unlistedOptions: Array<{
+            title: string;
+            description: string;
+            sourceProvider: string;
+        }>;
     };
 }
 
@@ -294,18 +326,20 @@ export function parseRefinerOutput(text: string): RefinerOutput {
         presentationStrategy: extractPresentationStrategy(normalized),
         strategyRationale: extractSection(normalized, 'presentation strategy', 'why'),
         gaps: extractGaps(normalized),
-        honestAssessment: extractSection(normalized, 'honest assessment'),
+        honestAssessment: extractHonestAssessmentStructured(normalized),
         metaPattern: extractSection(normalized, 'meta-pattern') || undefined,
         synthesisAccuracy: extractSynthesisAccuracy(normalized),
         verificationTriggers: extractVerificationTriggers(normalized),
         reframingSuggestion: extractReframingSuggestion(normalized),
+        mapperAudit: extractMapperAudit(normalized),
     };
 }
+
 
 function tryParseJsonRefinerOutput(text: string): RefinerOutput | null {
     try {
         let jsonText = text.trim();
-        
+
         // Handle code blocks
         const codeBlockMatch = jsonText.match(/```(?:json)?\s*([\s\S]*?)```/i);
         if (codeBlockMatch) {
@@ -331,12 +365,12 @@ function tryParseJsonRefinerOutput(text: string): RefinerOutput | null {
         // Find JSON boundaries
         const firstBrace = jsonText.indexOf('{');
         const lastBrace = jsonText.lastIndexOf('}');
-        
+
         if (firstBrace === -1 || lastBrace === -1) return null;
-        
+
         const candidate = jsonText.substring(firstBrace, lastBrace + 1);
         const parsed = JSON.parse(candidate);
-        
+
         if (parsed && typeof parsed === 'object') {
             return normalizeRefinerObject(parsed);
         }
@@ -431,8 +465,8 @@ function extractSection(text: string, sectionName: string, subsection?: string):
     return headerMatch?.[1]?.trim() || '';
 }
 
-function extractGaps(text: string): Array<{ title: string; explanation: string }> {
-    const gaps: Array<{ title: string; explanation: string }> = [];
+function extractGaps(text: string): Array<{ title: string; explanation: string; category?: 'foundational' | 'tactical' }> {
+    const gaps: Array<{ title: string; explanation: string; category?: 'foundational' | 'tactical' }> = [];
 
     // Find Gap Detection section
     const gapSection = text.match(/gap\s+detection[:\s]*([\s\S]*?)(?=\n#{1,3}|\n\*\*[A-Z]|$)/i);
@@ -440,19 +474,39 @@ function extractGaps(text: string): Array<{ title: string; explanation: string }
 
     const content = gapSection[1];
 
-    // Match: **Gap 1: Title** — explanation or Gap 1: **Title** — explanation
-    const gapPattern = /gap\s+\d+[:\s]*\*?\*?([^*—\n]+)\*?\*?\s*[—-]\s*([^\n]+)/gi;
+    // Check for "Unusually complete" case
+    if (/unusually complete/i.test(content)) {
+        return gaps;
+    }
+
+    // Match: **Gap N [foundational/tactical]**: Title — explanation
+    // or legacy: **Gap 1: Title** — explanation
+    const gapPatternWithCategory = /gap\s+\d+\s*\[(foundational|tactical)\][:\s]*\*?\*?([^*—\n]+)\*?\*?\s*[—-]\s*([^\n]+)/gi;
+    const gapPatternLegacy = /gap\s+\d+[:\s]*\*?\*?([^*—\n\[]+)\*?\*?\s*[—-]\s*([^\n]+)/gi;
 
     let match;
-    while ((match = gapPattern.exec(content)) !== null) {
+    // Try new format first
+    while ((match = gapPatternWithCategory.exec(content)) !== null) {
         gaps.push({
-            title: match[1].trim(),
-            explanation: match[2].trim(),
+            category: match[1].toLowerCase() as 'foundational' | 'tactical',
+            title: match[2].trim(),
+            explanation: match[3].trim(),
         });
+    }
+
+    // If no matches with category, try legacy format
+    if (gaps.length === 0) {
+        while ((match = gapPatternLegacy.exec(content)) !== null) {
+            gaps.push({
+                title: match[1].trim(),
+                explanation: match[2].trim(),
+            });
+        }
     }
 
     return gaps;
 }
+
 
 function parseBulletPoints(text: string): string[] {
     if (!text) return [];
@@ -591,4 +645,63 @@ function extractReframingSuggestion(text: string): RefinerOutput['reframingSugge
         betterQuestion: betterQuestion?.[1]?.trim() || '',
         unlocks: unlocks?.[1]?.trim() || '',
     };
+}
+
+function extractMapperAudit(text: string): RefinerOutput['mapperAudit'] {
+    const section = text.match(/mapper\s+audit[:\s]*([\s\S]*?)(?=\n#{1,3}|\n\*\*[A-Z]|$)/i);
+
+    if (!section) return undefined;
+
+    const content = section[1];
+
+    // Check for "Complete—no unlisted options" case
+    if (/complete.*no unlisted/i.test(content)) {
+        return {
+            complete: true,
+            unlistedOptions: []
+        };
+    }
+
+    // Parse unlisted options
+    // Pattern: **Unlisted option**: [Title] — [description] — Source: [Provider]
+    const optionPattern = /\*\*unlisted\s+option\*\*[:\s]*([^—\n]+)\s*—\s*([^—\n]+)\s*—\s*source[:\s]*([^\n]+)/gi;
+    const unlistedOptions: Array<{ title: string; description: string; sourceProvider: string }> = [];
+
+    let match;
+    while ((match = optionPattern.exec(content)) !== null) {
+        unlistedOptions.push({
+            title: match[1].trim(),
+            description: match[2].trim(),
+            sourceProvider: match[3].trim()
+        });
+    }
+
+    return {
+        complete: unlistedOptions.length === 0,
+        unlistedOptions
+    };
+}
+
+function extractHonestAssessmentStructured(text: string): RefinerOutput['honestAssessment'] {
+    const section = text.match(/honest\s+assessment[:\s]*([\s\S]*?)(?=\n#{1,3}|\n\*\*[A-Z]|$)/i);
+    if (!section) return '';
+
+    const content = section[1];
+
+    // Try to extract structured format
+    const reliabilitySummary = content.match(/\*\*reliability\s+summary\*\*[:\s]*([^\n]+)/i);
+    const biggestRisk = content.match(/\*\*biggest\s+risk\*\*[:\s]*([^\n]+)/i);
+    const recommendedNextStep = content.match(/\*\*recommended\s+next\s+step\*\*[:\s]*([^\n]+)/i);
+
+    // If we found structured format, return object
+    if (reliabilitySummary || biggestRisk || recommendedNextStep) {
+        return {
+            reliabilitySummary: reliabilitySummary?.[1]?.trim() || '',
+            biggestRisk: biggestRisk?.[1]?.trim() || '',
+            recommendedNextStep: recommendedNextStep?.[1]?.trim() || ''
+        };
+    }
+
+    // Otherwise return as string for backward compat
+    return content.trim();
 }

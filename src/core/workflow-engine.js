@@ -203,9 +203,32 @@ function extractOptionsAndStrip(text) {
   return { text: before, options: after };
 }
 
+/**
+ * Parse option titles from raw options text for refiner audit
+ * Matches: **Bold Title**: or - **Title** — 
+ */
+function parseOptionTitles(optionsText) {
+  if (!optionsText) return [];
+  const titles = [];
+  const lines = optionsText.split('\n');
+  for (const line of lines) {
+    // Match: **Bold Title** (with optional colon/dash after)
+    const match = line.match(/\*\*([^*]+)\*\*/);
+    if (match) {
+      const title = match[1].trim();
+      // Avoid duplicates
+      if (title && !titles.includes(title)) {
+        titles.push(title);
+      }
+    }
+  }
+  return titles;
+}
+
 // =============================================================================
 // HELPER FUNCTIONS FOR PROMPT BUILDING
 // =============================================================================
+
 
 function buildSynthesisPrompt(
   originalPrompt,
@@ -1379,7 +1402,36 @@ export class WorkflowEngine {
       }
     }
 
-    // 4. Import & Run Service
+    // 4. Extract mapper option titles from meta (standard flow) or raw text (recompute)
+    let mapperOptionTitles = [];
+    if (!sourceHistorical && mappingStepIds && mappingStepIds.length > 0) {
+      // Standard flow: get from stepResults meta
+      for (const id of mappingStepIds) {
+        const res = stepResults.get(id);
+        if (res?.status === "completed" && res.result?.meta?.allAvailableOptions) {
+          mapperOptionTitles = parseOptionTitles(res.result.meta.allAvailableOptions);
+          break;
+        }
+      }
+    } else if (sourceHistorical) {
+      // Recompute flow: extract options from raw mapping text and parse titles
+      try {
+        const historicalPayload = { sourceHistorical: { turnId: sourceHistorical.turnId, responseType: 'mapping' } };
+        const data = await this.resolveSourceData(historicalPayload, context, stepResults);
+        const rawMapping = data[0]?.text || "";
+        if (rawMapping) {
+          const { options } = extractOptionsAndStrip(rawMapping);
+          if (options) {
+            mapperOptionTitles = parseOptionTitles(options);
+          }
+        }
+      } catch (e) {
+        console.warn("[WorkflowEngine] Refiner recompute: failed to extract mapper options", e);
+      }
+    }
+
+
+    // 5. Import & Run Service
     // Note: promptRefinerService.ts is in same directory
     // We use dynamic import compatible with the environment
     const mod = await import('./PromptRefinerService.ts');
@@ -1393,8 +1445,10 @@ export class WorkflowEngine {
       synthesisText,
       mappingText,
       batchResponses,
-      refinerProvider
+      refinerProvider,
+      mapperOptionTitles
     );
+
 
     if (!output) {
       throw new Error("Refiner analysis returned null (failed or empty)");
