@@ -6,8 +6,33 @@
  */
 
 // ============================================================================
+// TYPES
+// ============================================================================
+
+export interface GraphNode {
+    id: string;
+    label: string;
+    theme: string;
+    supporters: (string | number)[];
+    support_count: number;
+}
+
+export interface GraphEdge {
+    source: string;
+    target: string;
+    reason: string;
+    type: 'conflicts' | 'complements' | 'prerequisite' | string;
+}
+
+export interface GraphTopology {
+    nodes: GraphNode[];
+    edges: GraphEdge[];
+}
+
+// ============================================================================
 // NORMALIZATION
 // ============================================================================
+
 
 /**
  * Normalize markdown escapes and unicode variants
@@ -44,7 +69,7 @@ export function findGraphTopologyPosition(text: string): number {
 /**
  * Extract GRAPH_TOPOLOGY JSON from text and return cleaned text
  */
-export function extractGraphTopologyAndStrip(text: string): { text: string; topology: any | null } {
+export function extractGraphTopologyAndStrip(text: string): { text: string; topology: GraphTopology | null } {
     if (!text || typeof text !== 'string') return { text: text || '', topology: null };
 
     const normalized = normalizeText(text);

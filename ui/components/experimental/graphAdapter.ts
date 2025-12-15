@@ -1,4 +1,4 @@
-import { GraphTopology, GraphNode, GraphEdge } from '../..';
+import { GraphTopology, GraphNode, GraphEdge } from '../../../shared/parsing-utils';
 import { ClaimNode, ClaimEdge } from './DecisionMapGraph';
 
 /**
@@ -29,7 +29,7 @@ export function adaptGraphTopology(topology: GraphTopology | null): {
         target: edge.target,
         reason: edge.reason,
         // Preserve semantic edge types for force-directed layout
-        type: edge.type, // 'conflicts' | 'complements' | 'prerequisite'
+        type: (['conflicts', 'complements', 'prerequisite'].includes(edge.type) ? edge.type : 'complements') as ClaimEdge['type'],
     }));
 
     return { nodes, edges };

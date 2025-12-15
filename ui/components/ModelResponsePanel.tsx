@@ -69,11 +69,19 @@ export const ModelResponsePanel: React.FC<ModelResponsePanelProps> = React.memo(
 
     const { output: refinerOutput } = useRefinerOutput(turnId);
     const missedInsights = useMemo(() => {
-        const missed = refinerOutput?.synthesisAccuracy?.missed || {};
-        const providerSpecific = missed?.[providerId] || [];
-        const global = missed?.global || [];
-        return [...providerSpecific, ...global];
-    }, [refinerOutput, providerId]);
+        const missed = refinerOutput?.synthesisAccuracy?.missed || [];
+        if (!Array.isArray(missed)) return []; // Safety check
+
+        const pName = provider?.name?.toLowerCase() || "";
+        const pId = providerId.toLowerCase();
+
+        return missed
+            .filter(item => {
+                const src = item.source.toLowerCase();
+                return src.includes(pName) || src.includes(pId) || src === 'global' || src === 'unknown';
+            })
+            .map(item => item.insight);
+    }, [refinerOutput, providerId, provider]);
 
     // Branching visual state
     const isBranching = activeRecompute?.providerId === providerId &&

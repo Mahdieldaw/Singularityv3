@@ -777,7 +777,7 @@ export const DecisionMapSheet = React.memo(() => {
       const refinerOptions = refinerOutput.mapperAudit.unlistedOptions.map(opt => ({
         title: opt.title,
         description: opt.description,
-        citations: [opt.sourceProvider]
+        citations: [opt.source]
       }));
 
       themes.push({

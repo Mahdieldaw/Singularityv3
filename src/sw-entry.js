@@ -38,8 +38,7 @@ import { SessionManager } from "./persistence/SessionManager.js";
 import { initializePersistenceLayer } from "./persistence/index.js";
 import { errorHandler } from "./utils/ErrorHandler.js";
 import { persistenceMonitor } from "./core/PersistenceMonitor.js";
-// Prompt refinement service
-import { PromptRefinerService } from "./core/PromptRefinerService.ts";
+
 // ============================================================================
 // AUTH DETECTION SYSTEM
 // ============================================================================
@@ -71,7 +70,7 @@ let persistenceLayer = null;
 let persistenceLayerSingleton = null;
 let sessionManagerSingleton = null;
 const __HTOS_SESSIONS = (self.__HTOS_SESSIONS = self.__HTOS_SESSIONS || {});
-let promptRefinerService = null;
+
 
 // Ensure fetch is correctly bound
 try {

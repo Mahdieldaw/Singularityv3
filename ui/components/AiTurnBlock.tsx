@@ -1066,7 +1066,7 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                                 reliabilitySummary={assessment?.reliabilitySummary}
                                 gapCount={gapCounts.total}
                                 foundationalGapCount={gapCounts.foundational}
-                                hasVerificationTriggers={!!refinerOutput.verificationTriggers?.length}
+                                hasVerificationTriggers={!!refinerOutput.verificationTriggers?.items?.length}
                                 className="mb-4"
                               />
 

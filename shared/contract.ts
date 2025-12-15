@@ -333,14 +333,14 @@ export interface GraphNode {
   id: string;
   label: string;
   theme: string;
-  supporters: number[];
+  supporters: (number | string)[];
   support_count: number;
 }
 
 export interface GraphEdge {
   source: string;
   target: string;
-  type: 'conflicts' | 'complements' | 'prerequisite';
+  type: 'conflicts' | 'complements' | 'prerequisite' | string;
   reason: string;
 }
 
