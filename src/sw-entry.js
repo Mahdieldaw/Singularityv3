@@ -215,10 +215,47 @@ self.providerRegistry = providerRegistry;
 // ============================================================================
 // FAULT-TOLERANT ORCHESTRATOR WRAPPER
 // ============================================================================
+// ============================================================================
+// FAULT-TOLERANT ORCHESTRATOR WRAPPER
+// ============================================================================
 class FaultTolerantOrchestrator {
   constructor() {
     this.activeRequests = new Map();
     this.lifecycleManager = self.lifecycleManager;
+  }
+
+  /**
+   * Execute a single-provider request with Promise-based interface.
+   * Used for Composer/Analyst calls that don't need streaming to UI.
+   */
+  async executeSingle(prompt, providerId, options = {}) {
+    const { timeout = 60000 } = options;
+
+    return new Promise((resolve, reject) => {
+      const timeoutId = setTimeout(() => {
+        reject(new Error(`Request to ${providerId} timed out after ${timeout}ms`));
+      }, timeout);
+
+      this.executeParallelFanout(prompt, [providerId], {
+        ...options,
+        onPartial: options.onPartial || (() => { }),
+        onError: (error) => {
+          clearTimeout(timeoutId);
+          reject(error);
+        },
+        onAllComplete: (results, errors) => {
+          clearTimeout(timeoutId);
+
+          if (errors.has(providerId)) {
+            reject(errors.get(providerId));
+          } else if (results.has(providerId)) {
+            resolve(results.get(providerId));
+          } else {
+            reject(new Error(`No result from ${providerId}`));
+          }
+        },
+      });
+    });
   }
 
   async executeParallelFanout(prompt, providers, options = {}) {
@@ -543,6 +580,9 @@ async function initializeOrchestrator() {
 // ============================================================================
 // GLOBAL SERVICES (single-shot initialization)
 // ============================================================================
+import { PromptService } from "./core/PromptService.ts";
+import { ResponseProcessor } from "./core/ResponseProcessor.ts";
+
 let globalServicesReady = null;
 
 async function initializeGlobalServices() {
@@ -562,7 +602,9 @@ async function initializeGlobalServices() {
     await initializeOrchestrator();
     const compiler = new WorkflowCompiler(sm);
     const contextResolver = new ContextResolver(sm);
-    promptRefinerService = new PromptRefinerService({}); // No hardcoded defaults
+    const promptService = new PromptService();
+    const responseProcessor = new ResponseProcessor();
+
     console.log("[SW] ✅ Global services ready");
     return {
       orchestrator: self.faultTolerantOrchestrator,
@@ -570,8 +612,9 @@ async function initializeGlobalServices() {
       compiler,
       contextResolver,
       persistenceLayer: pl,
-      promptRefinerService,
-      authManager, // Add to services object
+      promptService,        // NEW
+      responseProcessor,    // NEW
+      authManager,
     };
   })();
   return globalServicesReady;
@@ -628,20 +671,36 @@ async function handleUnifiedMessage(message, sender, sendResponse) {
         return true;
       }
 
-
-
       case "RUN_ANALYST": {
         (async () => {
           try {
             const { fragment, context, authoredPrompt, analystModel, originalPrompt } = message.payload;
-            const result = await services.promptRefinerService.runAnalyst(
-              fragment,
-              context,
-              authoredPrompt,
-              analystModel, // Use model from payload
-              originalPrompt
+            const { promptService, responseProcessor, orchestrator } = services;
+
+            // 1. Build prompt
+            const prompt = promptService.buildAnalystPrompt(
+              originalPrompt || fragment,
+              context,           // TurnContext from previous turn
+              authoredPrompt     // Optional: Composer output to analyze
             );
-            sendResponse({ success: true, data: result });
+
+            // 2. Execute via orchestrator
+            const result = await orchestrator.executeSingle(prompt, analystModel, {
+              timeout: 60000,
+            });
+
+            // 3. Process response
+            const content = responseProcessor.extractContent(result.text);
+            const parsed = responseProcessor.parseAnalystResponse(content);
+
+            // 4. Return to UI (goes to Analyst panel)
+            sendResponse({
+              success: true,
+              data: {
+                ...parsed,
+                raw: content,
+              }
+            });
           } catch (e) {
             console.error("[SW] RUN_ANALYST failed:", e);
             sendResponse({ success: false, error: e.message });
@@ -654,13 +713,32 @@ async function handleUnifiedMessage(message, sender, sendResponse) {
         (async () => {
           try {
             const { draftPrompt, context, composerModel, analystCritique } = message.payload;
-            const result = await services.promptRefinerService.runComposer(
+            const { promptService, responseProcessor, orchestrator } = services;
+
+            // 1. Build prompt (using previous turn context)
+            const prompt = promptService.buildComposerPrompt(
               draftPrompt,
-              context,
-              composerModel, // Use model from payload
-              analystCritique
+              context,           // TurnContext from previous completed turn
+              analystCritique    // Optional: if running after Analyst
             );
-            sendResponse({ success: true, data: result });
+
+            // 2. Execute via orchestrator (gets retries, timeouts for free)
+            const result = await orchestrator.executeSingle(prompt, composerModel, {
+              timeout: 60000,
+            });
+
+            // 3. Process response
+            const content = responseProcessor.extractContent(result.text);
+            const parsed = responseProcessor.parseComposerResponse(content);
+
+            // 4. Return to UI (goes to Composer panel, not turn history)
+            sendResponse({
+              success: true,
+              data: {
+                ...parsed,
+                raw: content,  // Keep raw for debugging/display
+              }
+            });
           } catch (e) {
             console.error("[SW] RUN_COMPOSER failed:", e);
             sendResponse({ success: false, error: e.message });

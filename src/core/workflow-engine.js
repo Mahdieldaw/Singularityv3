@@ -1,5 +1,7 @@
 // src/core/workflow-engine.js - FIXED VERSION
 import { ArtifactProcessor } from '../../shared/artifact-processor.ts';
+import { PromptService } from './PromptService.ts';
+import { ResponseProcessor } from './ResponseProcessor.ts';
 import { getHealthTracker } from './provider-health-tracker.js';
 import { classifyError } from './error-classifier.js';
 import {
@@ -10,417 +12,7 @@ import {
 } from '../utils/ErrorHandler.js';
 import { authManager } from '../core/auth-manager.js';
 import { PROVIDER_LIMITS } from '../../shared/provider-limits.ts';
-function extractGraphTopologyAndStrip(text) {
-  if (!text || typeof text !== 'string') return { text, topology: null };
-
-  // Normalize markdown escapes (LLMs often escape special chars)
-  let normalized = text
-    .replace(/\\=/g, '=')      // \= → =
-    .replace(/\\_/g, '_')      // \_ → _
-    .replace(/\\\*/g, '*')     // \* → *
-    .replace(/\\-/g, '-');     // \- → -
-
-  const match = normalized.match(/={3,}\s*GRAPH_TOPOLOGY\s*={3,}/i);
-  if (!match || typeof match.index !== 'number') return { text, topology: null };
-  const start = match.index + match[0].length;
-  let rest = normalized.slice(start).trim();
-
-  // Strip markdown code fence if present (```json ... ```)
-  const codeBlockMatch = rest.match(/^```(?:json)?\s*\n([\s\S]*?)\n```/);
-  if (codeBlockMatch) {
-    rest = codeBlockMatch[1].trim();
-  }
-
-  let i = 0;
-  while (i < rest.length && rest[i] !== '{') i++;
-  if (i >= rest.length) return { text, topology: null };
-  let depth = 0;
-  let inStr = false;
-  let esc = false;
-  let jsonStart = i;
-  let jsonEnd = -1;
-  for (let j = jsonStart; j < rest.length; j++) {
-    const ch = rest[j];
-    if (inStr) {
-      if (esc) {
-        esc = false;
-      } else if (ch === '\\') {
-        esc = true;
-      } else if (ch === '"') {
-        inStr = false;
-      }
-      continue;
-    }
-    if (ch === '"') {
-      inStr = true;
-      continue;
-    }
-    if (ch === '{') {
-      depth++;
-    } else if (ch === '}') {
-      depth--;
-      if (depth === 0) {
-        jsonEnd = j;
-        break;
-      }
-    }
-  }
-  if (jsonEnd === -1) return { text, topology: null };
-  let jsonText = rest.slice(jsonStart, jsonEnd + 1);
-
-  // FIX: Replace unquoted S in supporter arrays (common LLM error)
-  // Pattern: "supporters": [S, 1, 2] -> "supporters": ["S", 1, 2]
-  jsonText = jsonText.replace(/("supporters"\s*:\s*\[)\s*S\s*([,\]])/g, '$1"S"$2');
-
-  let topology = null;
-  try {
-    topology = JSON.parse(jsonText);
-  } catch (e) {
-    console.warn('[extractGraphTopology] JSON parse failed:', e.message);
-    return { text, topology: null };
-  }
-  const before = normalized.slice(0, match.index).trim();
-  const after = rest.slice(jsonEnd + 1).trim();
-  const newText = after ? `${before}\n${after}` : before;
-  return { text: newText, topology };
-}
-function extractOptionsAndStrip(text) {
-  if (!text || typeof text !== 'string') return { text, options: null };
-
-  // Normalize markdown escapes AND unicode variants
-  let normalized = text
-    .replace(/\\=/g, '=')      // \= → =
-    .replace(/\\_/g, '_')      // \_ → _
-    .replace(/\\\*/g, '*')     // \* → *
-    .replace(/\\-/g, '-')      // \- → -
-    .replace(/[＝═⁼˭꓿﹦]/g, '=')
-    .replace(/[‗₌]/g, '=')
-    .replace(/\u2550/g, '=')
-    .replace(/\uFF1D/g, '=');
-
-  // First, check for GRAPH_TOPOLOGY delimiter and strip it to avoid contaminating options
-  // The options section ends before GRAPH_TOPOLOGY if present
-  let graphTopoStart = -1;
-  // Match various GRAPH_TOPOLOGY formats including markdown headers: ## 📊 GRAPH_TOPOLOGY
-  const graphTopoMatch = normalized.match(/\n#{1,3}\s*[^\w\n].*?GRAPH[_\s]*TOPOLOGY|\n?[🔬📊🗺️]*\s*={0,}GRAPH[_\s]*TOPOLOGY={0,}|\n?[🔬📊🗺️]\s*GRAPH[_\s]*TOPOLOGY/i);
-  if (graphTopoMatch && typeof graphTopoMatch.index === 'number') {
-    graphTopoStart = graphTopoMatch.index;
-  }
-
-  // Patterns ordered by strictness (stricter first)
-  // NOTE: Use ={2,} to match 2+ equals signs (models sometimes output ==, not ===)
-  const patterns = [
-    // Markdown H2/H3 header with any emoji prefix: ## 🛠️ ALL_AVAILABLE_OPTIONS
-    // Uses [^\w\n] to match emoji or any non-word char without specifying exact emoji
-    { re: /\n#{1,3}\s*[^\w\n].*?ALL[_\s]*AVAILABLE[_\s]*OPTIONS.*?\n/i, minPosition: 0.15 },
-
-    // Emoji-prefixed format (🛠️ ALL_AVAILABLE_OPTIONS) - standalone without markdown header
-    { re: /\n?[🛠️🔧⚙️🛠]\s*ALL[_\s]*AVAILABLE[_\s]*OPTIONS\s*\n/i, minPosition: 0.15 },
-
-    // Standard delimiter with 2+ equals signs, optional leading newline
-    { re: /\n?={2,}\s*ALL[_\s]*AVAILABLE[_\s]*OPTIONS\s*={2,}\n?/i, minPosition: 0 },
-    { re: /\n?={2,}\s*ALL[_\s]*OPTIONS\s*={2,}\n?/i, minPosition: 0 },
-
-    // Markdown wrapped variants
-    { re: /\n\*\*\s*={2,}\s*ALL[_\s]*AVAILABLE[_\s]*OPTIONS\s*={2,}\s*\*\*\n?/i, minPosition: 0 },
-    { re: /\n###\s*={2,}\s*ALL[_\s]*AVAILABLE[_\s]*OPTIONS\s*={2,}\n?/i, minPosition: 0 },
-
-    // Heading styles (require newline before) - can appear mid-document
-    { re: /\n\*\*All Available Options:?\*\*\n/i, minPosition: 0.25 },
-    { re: /\n## All Available Options:?\n/i, minPosition: 0.25 },
-    { re: /\n### All Available Options:?\n/i, minPosition: 0.25 },
-
-    // Looser patterns - require at least 30% through document to avoid narrative mentions
-    { re: /\nAll Available Options:\n/i, minPosition: 0.3 },
-    { re: /\n\*\*Options:?\*\*\n/i, minPosition: 0.3 },
-    { re: /\n## Options:?\n/i, minPosition: 0.3 },
-    { re: /^Options:\n/im, minPosition: 0.3 },
-  ];
-
-  let bestMatch = null;
-  let bestScore = -1;
-
-  for (const pattern of patterns) {
-    const m = normalized.match(pattern.re);
-    if (m && typeof m.index === 'number') {
-      const position = m.index / normalized.length;
-
-      // Reject matches that are too early in the text
-      if (position < pattern.minPosition) continue;
-
-      // Score based on position (later is better) and pattern strictness
-      const score = position * 100 + (patterns.indexOf(pattern) === 0 ? 50 : 0);
-
-      if (score > bestScore) {
-        bestScore = score;
-        bestMatch = { index: m.index, length: m[0].length };
-      }
-    }
-  }
-
-  if (!bestMatch) return { text: normalized, options: null };
-
-  const idx = bestMatch.index;
-  const len = bestMatch.length;
-
-  // Extract what comes after the delimiter, but stop before GRAPH_TOPOLOGY if present
-  let afterDelimiter = normalized.slice(idx + len).trim();
-
-  // If there's a GRAPH_TOPOLOGY section after our options, we need to cut before it
-  if (graphTopoStart > idx) {
-    // Find the relative position of GRAPH_TOPOLOGY in the afterDelimiter string
-    const relativeGraphStart = graphTopoStart - (idx + len);
-    if (relativeGraphStart > 0 && relativeGraphStart < afterDelimiter.length) {
-      afterDelimiter = afterDelimiter.slice(0, relativeGraphStart).trim();
-      console.log('[extractOptionsAndStrip] Cut options before GRAPH_TOPOLOGY, new length:', afterDelimiter.length);
-    }
-  }
-
-  // Validation: Check if what follows looks like structured content
-  // Accept: bullet lists, numbered lists, "Theme:" headers, bold headers (**), any capitalized heading,
-  // emoji-prefixed sections, or any substantive paragraphs (more than 50 chars)
-  const listPreview = afterDelimiter.slice(0, 400); // Increased preview length
-  const hasListStructure = /^\s*[-*•]\s+|\n\s*[-*•]\s+|^\s*\d+\.\s+|\n\s*\d+\.\s+|^\s*\*\*[^*]+\*\*|^\s*Theme\s*:|^\s*###?\s+|^\s*[A-Z][^:\n]{2,}:|^[\u{1F300}-\u{1FAD6}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/iu.test(listPreview);
-
-  // Also accept if there's substantive content (at least 50 chars with newlines suggesting structure)
-  const hasSubstantiveContent = afterDelimiter.length > 50 && (afterDelimiter.includes('\n') || afterDelimiter.includes(':'));
-
-  if (!hasListStructure && !hasSubstantiveContent) {
-    console.warn('[extractOptionsAndStrip] Matched delimiter but no list structure found, rejecting match at position', idx, 'Preview:', listPreview.slice(0, 100));
-    return { text: normalized, options: null };
-  }
-
-  let before = normalized.slice(0, idx).trim();
-  // Clean up trailing horizontal rules, leftover ALL_AVAILABLE_OPTIONS header text and emojis
-  before = before
-    .replace(/\n---+\s*$/, '')
-    .replace(/\n#{1,3}\s*[🛠️🔧⚙️🛠]\s*ALL[_\s]*AVAILABLE[_\s]*OPTIONS.*$/i, '')
-    .replace(/\n#{1,3}\s*[🛠️🔧⚙️🛠]\s*$/i, '')
-    .replace(/[🛠️🔧⚙️🛠]\s*$/i, '')
-    .trim();
-  const after = afterDelimiter;
-  console.log('[extractOptionsAndStrip] Successfully extracted options, length:', after.length);
-  return { text: before, options: after };
-}
-
-/**
- * Parse option titles from raw options text for refiner audit
- * Matches: **Bold Title**: or - **Title** — 
- */
-function parseOptionTitles(optionsText) {
-  if (!optionsText) return [];
-  const titles = [];
-  const lines = optionsText.split('\n');
-  for (const line of lines) {
-    // Match: **Bold Title** (with optional colon/dash after)
-    const match = line.match(/\*\*([^*]+)\*\*/);
-    if (match) {
-      const title = match[1].trim();
-      // Avoid duplicates
-      if (title && !titles.includes(title)) {
-        titles.push(title);
-      }
-    }
-  }
-  return titles;
-}
-
-// =============================================================================
-// HELPER FUNCTIONS FOR PROMPT BUILDING
-// =============================================================================
-
-
-function buildSynthesisPrompt(
-  originalPrompt,
-  sourceResults,
-  synthesisProvider,
-  mappingResult = null,
-  extractedOptions = null,
-) {
-  console.log(`[WorkflowEngine] buildSynthesisPrompt called with:`, {
-    originalPromptLength: originalPrompt?.length,
-    sourceResultsCount: sourceResults?.length,
-    synthesisProvider,
-    hasMappingResult: !!mappingResult,
-    mappingResultText: mappingResult?.text?.length,
-    hasExtractedOptions: !!extractedOptions,
-  });
-
-  // Filter out only the synthesizing model's own response from batch outputs
-  // Keep the mapping model's batch response - only exclude the separate mapping result
-  const filteredResults = sourceResults.filter((res) => {
-    const isSynthesizer = res.providerId === synthesisProvider;
-    return !isSynthesizer;
-  });
-
-  const otherItems = filteredResults.map(
-    (res) =>
-      `**${(res.providerId || "UNKNOWN").toUpperCase()}:**\n${String(res.text)}`,
-  );
-
-  // Note: Mapping result is NOT added to otherItems to avoid duplication
-  // It will only appear in the dedicated mapping section below
-
-  const otherResults = otherItems.join("\n\n");
-  const mappingSection = mappingResult
-    ? `\n\n**CONFLICT RESOLUTION MAP:**\n${mappingResult.text}\n\n`
-    : "";
-
-  console.log(`[WorkflowEngine] Built synthesis prompt sections:`, {
-    otherResultsLength: otherResults.length,
-    mappingSectionLength: mappingSection.length,
-    hasMappingSection: mappingSection.length > 0,
-    mappingSectionPreview: mappingSection.substring(0, 100) + "...",
-  });
-
-  // Determine content for the two prompt sections
-  const allOptionsBlock = extractedOptions || "(No options catalog available)";
-
-  // If we have extracted options, we rely on them and treat raw outputs as secondary/referenced
-  // If we don't, we must provide the raw batch results
-  const sourceContent = extractedOptions
-    ? "(See Claims Inventory above)"
-    : otherResults;
-
-  const finalPrompt = `Your task is to create a response to the user's prompt, leveraging the full landscape of approaches and insights, that could *only exist* because all of these models responded first to:
-
-<original_user_query>
-${originalPrompt}
-</original_user_query>
-
-Process:
-You already responded to this query—your earlier response is in your conversation history above. That was one perspective among many. Now you're shifting roles: from contributor to synthesizer.
-
-Below is every distinct approach extracted from all models, including yours—deduplicated, labeled, catalogued. Each reflects a different way of understanding the question—different assumptions, priorities, and mental models. These are not drafts to judge, but perspectives to understand.
-
-Treat tensions between approaches not as disagreements to fix, but as clues to the deeper structure of what the user is actually navigating. Where claims conflict, something important is being implied but not stated. Where they agree too easily, a blind spot may be forming. Your job is to surface what's beneath.
-
-<claims_inventory>
-${allOptionsBlock}
-</claims_inventory>
-
-
-
-Output Requirements:
-Don't select the strongest argument. Don't average positions. Instead, imagine a frame where all the strongest insights make sense—not as compromises, but as natural expressions of different facets of a larger truth. Build that frame. Speak from it.
-
-Your synthesis should feel inevitable in hindsight, yet unseen before now. It should carry the energy of discovery, not summation.
-
-- Respond directly to the user's original question with the synthesized answer
-- Present as a unified, coherent response rather than comparative analysis
-- Do not reference "the models" or "the claims" in your output—the user should experience insight, not watch you work
-
-When outputting your synthesis, be sure to start with a "The Short Answer" title which gives a brief overview of your whole response in no more than a paragraph or two, before writing a "The Long Answer" header which contains your actual response.
-
-
-
-<model_outputs>
-${sourceContent}
-</model_outputs>`;
-
-  return finalPrompt;
-}
-
-function buildMappingPrompt(
-  userPrompt,
-  sourceResults,
-  citationOrder = [],
-) {
-  // Build MODEL 1, MODEL 2 numbered blocks with optional provider labels
-  const providerToNumber = new Map();
-  if (Array.isArray(citationOrder) && citationOrder.length > 0) {
-    citationOrder.forEach((pid, idx) => providerToNumber.set(pid, idx + 1));
-  }
-
-  const modelOutputsBlock = sourceResults
-    .map((res, idx) => {
-      const n = providerToNumber.has(res.providerId)
-        ? providerToNumber.get(res.providerId)
-        : idx + 1;
-      const header = `=== MODEL ${n} ===`;
-      return `${header}\n${String(res.text)}`;
-    })
-    .join("\n\n");
-
-  return `You are not a synthesizer. You are a provenance tracker and option cataloger, a mirror that reveals what others cannot see. You are building the terrain from which synthesis will emerge.
-
-CRUCIAL: Before writing, extract every distinct approach/stance/capability from the batch outputs. Assign each a permanent canonical label (max 6 words, precise, unique). These labels link narrative ↔ options ↔ graph—reuse them verbatim throughout.
-
-Do not invent options not present in inputs. If unclear, surface the ambiguity.
-Citation indices [1], [2]... correspond to model order in <model_outputs>.
-
-Present ALL insights from the model outputs below in their most useful form for decision-making on the user's prompt that maps the terrain and catalogs every approach.
-
-<user_prompt>: ${String(userPrompt || "")} </user_prompt>
-
-<model_outputs>:
-${modelOutputsBlock}
-</model_outputs>
-**Task 1: Narrative**
-
-Write a fluid, insightful narrative that explains:
-- Where models agreed (and why that might be a blind spot)
-- Where they diverged (and what that reveals about differing assumptions)
-- Trade-offs each approach made
-- Questions left open by all approaches
-
-**Surface the invisible** — Highlight consensus (≥2 models) and unique insights (single model) naturally.
-**Map the landscape** — Group similar ideas, preserving tensions and contradictions.
-**Frame the choices** — Present alternatives as "If you prioritize X, this path fits because Y."
-**Anticipate the journey** — End with "This naturally leads to questions about..." based on tensions identified.
-
-Embed citations [1], [2, 3] throughout. When discussing an approach, use its canonical label in **bold** as a recognizable anchor.
-
-Output as a natural response to the user's prompt—fluid, insightful, model names redacted. Build the narrative as emergent wisdom—evoke clarity, agency, and discovery.
-
-**Task 2: All Options Inventory**
-
-After your narrative, add exactly:
-===ALL_AVAILABLE_OPTIONS===
-
-List EVERY distinct approach from the batch outputs:
-- **[Canonical Label]:** 1-2 sentence summary [citations]
-- Group by theme
-- Deduplicate rigorously
-- Order by prevalence
-
-This inventory feeds directly into synthesis—completeness matters.
-
-**Task 3: Topology (for visualization)**
-
-After the options list, add exactly:
-"===GRAPH_TOPOLOGY==="
-
-Output JSON:
-{
-  "nodes": [
-    {
-      "id": "opt_1",
-      "label": "<exact canonical label from Task 2>",
-      "theme": "<theme name>",
-      "supporters": [<model numbers>],
-      "support_count": <number>
-    }
-  ],
-  "edges": [
-    {
-      "source": "<node id>",
-      "target": "<node id>",
-      "type": "conflicts" | "complements" | "prerequisite",
-      "reason": "<one phrase explaining relationship>"
-    }
-  ]
-}
-
-Edge types:
-- **conflicts**: Mutually exclusive or opposing philosophies
-- **complements**: Work well together or one enables the other
-- **prerequisite**: Must be done before the other
-
-Only include edges where clear relationships exist. Every node needs ≥1 edge.
-
-Labels must match exactly across narrative, options, and graph nodes.`;
-}
+// Parsing and Prompt building functions moved to ResponseProcessor.ts and PromptService.ts
 
 // Track last seen text per provider/session for delta streaming
 const lastStreamState = new Map();
@@ -574,10 +166,15 @@ const logger = {
 // =============================================================================
 
 export class WorkflowEngine {
-  constructor(orchestrator, sessionManager, port) {
+  constructor(orchestrator, sessionManager, port, options = {}) {
     this.orchestrator = orchestrator;
     this.sessionManager = sessionManager;
     this.port = port;
+
+    // Accept injected or create new
+    this.promptService = options.promptService || new PromptService();
+    this.responseProcessor = options.responseProcessor || new ResponseProcessor();
+
     // Keep track of the most recent finalized turn to align IDs with persistence
     this._lastFinalizedTurn = null;
     this.healthTracker = getHealthTracker();
@@ -1363,7 +960,7 @@ export class WorkflowEngine {
       // C. Mapping Text (striped of topology)
       const rawMapping = await fetchHistoricalText('mapping');
       if (rawMapping) {
-        const { text } = extractGraphTopologyAndStrip(rawMapping);
+        const { text } = this.responseProcessor.extractGraphTopology(rawMapping);
         mappingText = text;
       }
 
@@ -1394,7 +991,7 @@ export class WorkflowEngine {
           const res = stepResults.get(id);
           if (res?.status === "completed" && res.result?.text) {
             const raw = res.result.text;
-            const { text } = extractGraphTopologyAndStrip(raw);
+            const { text } = this.responseProcessor.extractGraphTopology(raw);
             mappingText = text;
             break;
           }
@@ -1409,58 +1006,68 @@ export class WorkflowEngine {
       for (const id of mappingStepIds) {
         const res = stepResults.get(id);
         if (res?.status === "completed" && res.result?.meta?.allAvailableOptions) {
-          mapperOptionTitles = parseOptionTitles(res.result.meta.allAvailableOptions);
+          mapperOptionTitles = this.responseProcessor.parseOptionTitles(res.result.meta.allAvailableOptions);
           break;
         }
       }
     } else if (sourceHistorical) {
       // Recompute flow: extract options from raw mapping text and parse titles
       try {
-        const historicalPayload = { sourceHistorical: { turnId: sourceHistorical.turnId, responseType: 'mapping' } };
-        const data = await this.resolveSourceData(historicalPayload, context, stepResults);
+        const mappingPayload = { sourceHistorical: { turnId: sourceHistorical.turnId, responseType: 'mapping' } };
+        const data = await this.resolveSourceData(mappingPayload, context, stepResults);
         const rawMapping = data[0]?.text || "";
         if (rawMapping) {
-          const { options } = extractOptionsAndStrip(rawMapping);
+          const { options } = this.responseProcessor.extractOptions(rawMapping);
           if (options) {
-            mapperOptionTitles = parseOptionTitles(options);
+            mapperOptionTitles = this.responseProcessor.parseOptionTitles(options);
           }
         }
       } catch (e) {
         console.warn("[WorkflowEngine] Refiner recompute: failed to extract mapper options", e);
       }
+
     }
 
 
-    // 5. Import & Run Service
-    // Note: promptRefinerService.ts is in same directory
-    // We use dynamic import compatible with the environment
-    const mod = await import('./PromptRefinerService.ts');
-    const PromptRefinerService = mod.PromptRefinerService;
-
-    // Instantiate with refiner provider
-    const service = new PromptRefinerService({ refinerModel: refinerProvider });
-
-    const output = await service.runRefinerAnalysis(
+    // 5. Build Prompt
+    const refinerPrompt = this.promptService.buildRefinerPrompt({
       originalPrompt,
       synthesisText,
       mappingText,
       batchResponses,
-      refinerProvider,
       mapperOptionTitles
+    });
+
+    console.log(`[WorkflowEngine] Running Refiner Analysis (${refinerProvider})...`);
+
+    // 6. Execute via Orchestrator (Single)
+    const result = await this.orchestrator.executeSingle(
+      refinerPrompt,
+      refinerProvider,
+      {
+        sessionId: context.sessionId,
+        timeout: 90000, // Slightly longer for analysis
+        onPartial: (pid, chunk) => {
+          // Optional: stream refiner delta if UI supports it
+          // For now, we don't stream refiner analysis to main chat flow usually, but we could.
+        }
+      }
     );
 
+    const rawRefinerText = this.responseProcessor.extractContent(result.text);
+    const parsedRefiner = this.responseProcessor.parseRefinerResponse(rawRefinerText);
 
-    if (!output) {
+    if (!parsedRefiner) {
       throw new Error("Refiner analysis returned null (failed or empty)");
     }
 
     return {
       providerId: refinerProvider,
-      output: output.parsed, // The parsed object for in-memory use
-      text: String(output.rawText || ""), // Store the RAW MARKDOWN for persistence (Explicit String cast)
+      output: parsedRefiner, // The parsed object for in-memory use
+      text: String(rawRefinerText || ""), // Store the RAW MARKDOWN for persistence
       meta: {
-        confidenceScore: output.parsed.confidenceScore,
-        presentationStrategy: output.parsed.presentationStrategy,
+        confidenceScore: parsedRefiner.confidenceScore,
+        presentationStrategy: parsedRefiner.presentationStrategy,
       },
       status: "completed"
     };
@@ -1512,15 +1119,15 @@ export class WorkflowEngine {
     // Inject Council Framing if context exists
     let enhancedPrompt = prompt;
     if (previousContext) {
-      enhancedPrompt = `You are part of the council. Context (backdrop only—do not summarize or re-answer):
+      enhancedPrompt = `You are part of the council.Context(backdrop only—do not summarize or re - answer):
 
 ${previousContext}
 
 Answer the user's message directly. Use context only to disambiguate.
 
-<user_prompt>
-${prompt}
-</user_prompt>`;
+  < user_prompt >
+  ${prompt}
+</user_prompt > `;
     }
 
     // Provider health pre-check + initial progress emit
@@ -1659,13 +1266,14 @@ ${prompt}
             results.forEach((res, pid) => {
               const keys = res?.meta ? Object.keys(res.meta) : [];
               if (keys.length > 0)
-                contextsSummary.push(`${pid}: ${keys.join(",")}`);
+                contextsSummary.push(`${pid}: ${keys.join(",")} `);
             });
             if (contextsSummary.length > 0) {
               wdbg(
                 `[WorkflowEngine] Cached context for ${contextsSummary.join(
                   "; ",
-                )}`,
+                )
+                }`,
               );
             }
           } catch (_) { }
@@ -1795,7 +1403,7 @@ ${prompt}
       // Historical source
       const { turnId, responseType } = payload.sourceHistorical;
       console.log(
-        `[WorkflowEngine] Resolving historical data from turn: ${turnId}`,
+        `[WorkflowEngine] Resolving historical data from turn: ${turnId} `,
       );
 
       // Prefer adapter lookup: turnId may be a user or AI turn
@@ -2077,7 +1685,7 @@ ${prompt}
 
     wdbg(
       `[WorkflowEngine] Running synthesis with ${sourceData.length
-      } sources: ${sourceData.map((s) => s.providerId).join(", ")}`,
+      } sources: ${sourceData.map((s) => s.providerId).join(", ")} `,
     );
 
     // Look for mapping results from the current workflow
@@ -2092,7 +1700,8 @@ ${prompt}
               status: mappingStepResult?.status,
               hasResult: !!mappingStepResult?.result,
             },
-          )}`,
+          )
+          } `,
         );
 
         if (
@@ -2101,14 +1710,15 @@ ${prompt}
         ) {
           mappingResult = mappingStepResult.result;
           wdbg(
-            `[WorkflowEngine] Found mapping result from step ${mappingStepId} for synthesis: providerId=${mappingResult.providerId}, textLength=${mappingResult.text?.length}`,
+            `[WorkflowEngine] Found mapping result from step ${mappingStepId} for synthesis: providerId = ${mappingResult.providerId}, textLength = ${mappingResult.text?.length} `,
           );
           break;
         } else {
           wdbg(
-            `[WorkflowEngine] Mapping step ${mappingStepId} not suitable: status=${mappingStepResult?.status
-            }, hasResult=${!!mappingStepResult?.result}, hasText=${!!mappingStepResult
-              ?.result?.text}`,
+            `[WorkflowEngine] Mapping step ${mappingStepId} not suitable: status = ${mappingStepResult?.status
+            }, hasResult = ${!!mappingStepResult?.result}, hasText = ${!!mappingStepResult
+              ?.result?.text
+            } `,
           );
         }
       }
@@ -2130,7 +1740,7 @@ ${prompt}
       ) {
         mappingResult = resolvedContext.latestMappingOutput;
         wdbg(
-          `[WorkflowEngine] Using pre-fetched historical mapping from ${mappingResult.providerId}`,
+          `[WorkflowEngine] Using pre - fetched historical mapping from ${mappingResult.providerId} `,
         );
       }
       if (!mappingResult) {
@@ -2141,7 +1751,7 @@ ${prompt}
             }
           });
           if (mappingResult) {
-            wdbg(`[WorkflowEngine] Found mapping result in previousResults (meta.allAvailableOptions present)`);
+            wdbg(`[WorkflowEngine] Found mapping result in previousResults(meta.allAvailableOptions present)`);
           }
         } catch (_) { }
       }
@@ -2151,7 +1761,7 @@ ${prompt}
     const runSynthesis = async (providerId) => {
       const extractedOptions = mappingResult?.meta?.allAvailableOptions || null;
 
-      const synthPrompt = buildSynthesisPrompt(
+      const synthPrompt = this.promptService.buildSynthesisPrompt(
         payload.originalPrompt,
         sourceData,
         providerId,
@@ -2245,7 +1855,7 @@ ${prompt}
                   workflowContexts[providerId] = finalResult.meta;
                   wdbg(
                     `[WorkflowEngine] Updated workflow context for ${providerId
-                    }: ${Object.keys(finalResult.meta).join(",")}`,
+                    }: ${Object.keys(finalResult.meta).join(",")} `,
                   );
                 }
               } catch (_) { }
@@ -2279,12 +1889,12 @@ ${prompt}
             );
 
             if (fallbackProvider) {
-              console.log(`[WorkflowEngine] executing synthesis with fallback provider: ${fallbackProvider}`);
+              console.log(`[WorkflowEngine] executing synthesis with fallback provider: ${fallbackProvider} `);
               // Retry with fallback provider
               return await runSynthesis(fallbackProvider);
             }
           } catch (fallbackError) {
-            console.warn(`[WorkflowEngine] Fallback failed:`, fallbackError);
+            console.warn(`[WorkflowEngine] Fallback failed: `, fallbackError);
           }
         }
       }
@@ -2319,7 +1929,7 @@ ${prompt}
 
     wdbg(
       `[WorkflowEngine] Running mapping with ${sourceData.length
-      } sources: ${sourceData.map((s) => s.providerId).join(", ")}`,
+      } sources: ${sourceData.map((s) => s.providerId).join(", ")} `,
     );
 
     // Compute citation order mapping number→providerId
@@ -2330,7 +1940,7 @@ ${prompt}
       sourceData.some((s) => s.providerId === pid),
     );
 
-    const mappingPrompt = buildMappingPrompt(
+    const mappingPrompt = this.promptService.buildMappingPrompt(
       payload.originalPrompt,
       sourceData,
       citationOrder,
@@ -2385,30 +1995,26 @@ ${prompt}
             let allOptions = null;
             if (finalResult?.text) {
               console.log('[WorkflowEngine] Mapping response length:', finalResult.text.length);
-              console.log('[WorkflowEngine] Mapping response preview:', finalResult.text.slice(0, 500));
 
-              const topo = extractGraphTopologyAndStrip(finalResult.text);
-              graphTopology = topo.topology;
-              finalResult.text = topo.text;
+              // Use ResponseProcessor pipeline
+              const processedMap = this.responseProcessor.processMappingResponse(finalResult.text);
+
+              graphTopology = processedMap.topology;
+              allOptions = processedMap.options;
+
+              // Proceed with artifact processing on the cleaned text
+              const processed = artifactProcessor.process(processedMap.text);
+              finalResult.text = processed.cleanText;
+              finalResult.artifacts = processed.artifacts;
 
               console.log('[WorkflowEngine] Graph topology extracted:', {
                 found: !!graphTopology,
                 hasNodes: graphTopology?.nodes?.length || 0,
-                hasEdges: graphTopology?.edges?.length || 0,
               });
-
-              const opt = extractOptionsAndStrip(finalResult.text);
-              allOptions = opt.options;
-              finalResult.text = opt.text;
-
               console.log('[WorkflowEngine] Options extracted:', {
                 found: !!allOptions,
                 length: allOptions?.length || 0,
               });
-
-              const processed = artifactProcessor.process(finalResult.text);
-              finalResult.text = processed.cleanText;
-              finalResult.artifacts = processed.artifacts;
             }
 
             // ✅ Ensure final emission for mapping
@@ -2458,7 +2064,7 @@ ${prompt}
                   finalResultWithMeta.meta;
                 wdbg(
                   `[WorkflowEngine] Updated workflow context for ${payload.mappingProvider
-                  }: ${Object.keys(finalResultWithMeta.meta).join(",")}`,
+                  }: ${Object.keys(finalResultWithMeta.meta).join(",")} `,
                 );
               }
             } catch (_) { }
@@ -2483,7 +2089,7 @@ ${prompt}
   async handleRetryRequest(message) {
     try {
       const { sessionId, aiTurnId, providerIds, retryScope } = message || {};
-      console.log(`[WorkflowEngine] Retry requested for providers=${(providerIds || []).join(', ')} scope=${retryScope}`);
+      console.log(`[WorkflowEngine] Retry requested for providers = ${(providerIds || []).join(', ')} scope = ${retryScope} `);
 
       try {
         (providerIds || []).forEach((pid) => this.healthTracker.resetCircuit(pid));
@@ -2505,4 +2111,3 @@ ${prompt}
     }
   }
 }
-export { extractGraphTopologyAndStrip };
