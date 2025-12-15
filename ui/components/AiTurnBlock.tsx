@@ -1017,6 +1017,10 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                             const cleanText = take.text || '';
                             const artifacts = take.artifacts || [];
 
+                            // DEBUG: Before rendering HeaderGuidance/BottomLineCard
+                            console.log('[AiTurnBlock] refinerOutput:', refinerOutput);
+                            console.log('[AiTurnBlock] assessment:', assessment);
+
                             return (
                               <>
                                 {/* Header Guidance */}

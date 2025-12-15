@@ -43,6 +43,10 @@ interface RefinerAuditProps extends RefinerSectionProps {
 }
 
 export const RefinerEpistemicAudit: React.FC<RefinerAuditProps> = ({ output, rawText, className = "" }) => {
+    // DEBUG: Log what we received
+    console.log('[RefinerEpistemicAudit] output:', output);
+    console.log('[RefinerEpistemicAudit] honestAssessment type:', typeof output?.honestAssessment);
+
     const [showAccuracy, setShowAccuracy] = useState(false);
     const [showRaw, setShowRaw] = useState(false);
 

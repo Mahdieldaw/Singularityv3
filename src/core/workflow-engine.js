@@ -1457,7 +1457,7 @@ export class WorkflowEngine {
     return {
       providerId: refinerProvider,
       output: output.parsed, // The parsed object for in-memory use
-      text: output.rawText, // Store the RAW MARKDOWN for persistence
+      text: String(output.rawText || ""), // Store the RAW MARKDOWN for persistence (Explicit String cast)
       meta: {
         confidenceScore: output.parsed.confidenceScore,
         presentationStrategy: output.parsed.presentationStrategy,

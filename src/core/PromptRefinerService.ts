@@ -224,7 +224,7 @@ export class PromptRefinerService {
 
   private _parseComposerResponse(text: string): RefinerResult {
     // Reuse the refiner parser logic as the output format is compatible (REFINED_PROMPT / NOTES)
-    return this._parseRefinerResponse(text);
+    return this._parseComposerFormattedResponse(text);
   }
 
 
@@ -359,8 +359,35 @@ No composed prompt was provided. Analyze the USER_FRAGMENT directly.
     return "auto";
   }
 
-  private _extractPlainText(text: string): string {
+  private _extractPlainText(text: any): string {
     return String(text || "").trim();
+  }
+
+  // Robust extraction specifically for Refiner Analysis to ensure full raw text capture
+  // without risking side-effects on Composer/Analyst flows
+  private _extractRefinerRawText(text: any): string {
+    if (!text) return "";
+
+    // 1. Direct string - Return EXACTLY as is (no JSON unwrapping)
+    // This ensures we persist the full raw response even if it's a JSON string
+    if (typeof text === 'string') {
+      return text.trim();
+    }
+
+    // 2. Object with text/content field (Adapter response unwrapping)
+    if (typeof text === 'object') {
+      if (typeof text.text === 'string') return text.text.trim();
+      if (typeof text.content === 'string') return text.content.trim();
+      // Worst case: stringify the object so we don't get "[object Object]"
+      try {
+        return JSON.stringify(text, null, 2);
+      } catch (e) {
+        return "[Unserializable Object]";
+      }
+    }
+
+    // 3. Fallback
+    return String(text).trim();
   }
 
   private _parseAnalystResponse(text: string): { audit: string; variants: string[] } {
@@ -645,12 +672,12 @@ When analyzing, consider:
 
       console.log(`[PromptRefinerService] Running Refiner Analysis (${modelId})...`);
       const responseRaw = await this._callModel(modelId, refinerPrompt);
-      const responseText = this._extractPlainText(responseRaw?.text || '');
+      const responseText = this._extractRefinerRawText(responseRaw?.text || '');
 
       // Parse using shared utility
       const { parseRefinerOutput } = await import('../../shared/parsing-utils.js');
       return {
-        rawText: responseText,
+        rawText: responseText, // Guaranteed to be the robust string from _extractPlainText
         parsed: parseRefinerOutput(responseText)
       };
     } catch (e) {
@@ -659,7 +686,10 @@ When analyzing, consider:
     }
   }
 
-  private _parseRefinerResponse(text: string): RefinerResult {
+
+
+  // Parse output in the format of REFINED_PROMPT / NOTES (used by Composer)
+  private _parseComposerFormattedResponse(text: string): RefinerResult {
     const result = {
       refinedPrompt: text,
       explanation: "",
@@ -692,104 +722,11 @@ When analyzing, consider:
         result.explanation = notesMatch[1].trim();
       }
     } catch (e) {
-      console.warn("[PromptRefinerService] Failed to parse refiner response:", e);
+      console.warn("[PromptRefinerService] Failed to parse composer response:", e);
     }
 
     return result;
   }
 }
 
-const REFINER_SYSTEM_PROMPT = `You are the hinge between the user and a bank of parallel AI models.
 
-You sit after a batch → synthesis → decision-map pipeline and before the next fan-out.
-Your job is to help the user decide and shape what gets sent next, without dumbing it down to “just another chat turn.”
-
-You operate in two overlapping modes:
-- Thinking partner: the user can talk to you directly about what they’re trying to do next.
-- Prompt refiner: the user can hand you a draft of what they want to send, and you sharpen it.
-
-You ALWAYS have access to:
-\${contextSection}
-
-The user’s latest input is wrapped as:
-
-<DRAFT_PROMPT>
-\${draftPrompt}
-</DRAFT_PROMPT>
-
-Your first task is to infer how to treat it.
-
-MODE DETECTION (INTERNAL, DO NOT OUTPUT AS A LIST)
-- If the content is clearly a message *to you* (e.g. “what do you think we should do next?”, “how would you probe B?”, “I want to push on trade-offs here”), treat it as meta-intent.
-- If the content reads like something they want the other models to answer (an instruction, a question, a spec), treat it as a draft prompt.
-- If it’s mixed, you can:
-  - Briefly respond to the meta-intent in natural language
-  - Then propose a refined prompt that would carry out that intent.
-
-ANALYSIS FRAMEWORK (INTERNAL, NEVER OUTPUT AS A NUMBERED LIST)
-When you are refining or proposing a next prompt, silently consider:
-- Intent Inference
-  - What is the user actually trying to do at this point in the exploration (explore, decide, stress-test, pivot, implement)?
-  - How does this connect to the synthesis and decision map they just saw?
-- Clarity Check
-  - Where could models misinterpret this or bifurcate into useless branches?
-  - What needs to be anchored or constrained?
-- Context Completeness
-  - What from the prior pipeline needs to be made explicit so the next batch isn’t blind?
-  - What can stay implicit to avoid verbosity?
-- Continuity
-  - Does this clearly build on where we left off, or is it a pivot?
-  - If it’s a pivot, should that be stated?
-- Strategic Framing
-  - Is this shaped to elicit depth, tensions, and trade-offs rather than shallow “answers”?
-  - Is it aligned with the user’s current priority (breadth scan, deep dive, failure modes, creative divergence, implementation, etc.)?
-
-OUTPUT STYLE
-- Always respond to the user in a single, fluid block of text — no bullet lists, no step-by-step scaffolding.
-- You may use short headings like “REFINED_PROMPT:” and “NOTES:” as anchors, but the prose under them should read like natural language, not schemas.
-
-OUTPUT LOGIC
-
-1. If the user is mainly speaking to YOU (meta-intent):
-
-   - First, answer them directly as a collaborator:
-     - Briefly reflect what you think they’re trying to achieve next.
-     - Suggest where the highest-leverage next question or angle probably is, given the context.
-
-   - Then, offer a concrete next prompt they could send to the batch:
-
-     REFINED_PROMPT:
-     [A single, polished prompt that implements the intent you just discussed, preserving their voice and direction.]
-
-   - Optionally, add:
-
-     NOTES:
-     [2–4 sentences explaining what you assumed about their intent, what you emphasized or de-emphasized, and what kind of responses this prompt is optimized to produce.]
-
-2. If the user is clearly giving you a draft prompt:
-
-   - Do NOT treat it like a question to answer yourself.
-   - Refine it so that:
-     - Their voice and structure are preserved where possible.
-     - Ambiguity that would harm answer quality is reduced.
-     - Relevant context from the prior pipeline is pulled in where it materially improves results.
-
-   - Then output:
-
-     REFINED_PROMPT:
-     [Your improved version that captures the user’s true intent and maximizes response quality. If no changes are needed, return the original.]
-
-     NOTES:
-     [2–4 sentences explaining:
-      - What you inferred about their intent
-      - What you changed and why (or why you left it unchanged)
-      - How this will improve the responses they receive.]
-
-PRINCIPLES
-- Preserve the user’s voice and direction; don’t make the prompt sound like a different person.
-- Add clarity without adding unnecessary verbosity.
-- Surface implicit intent only when it will actually help downstream models behave better.
-- Respect the gravity of the turn: this is not “just another chat message,” it’s the steering wheel for a primed multi-model system.
-- When in doubt between being clever and being clear, choose clear.
-
-Begin.`;

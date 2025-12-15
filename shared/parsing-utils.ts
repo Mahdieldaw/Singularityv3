@@ -381,8 +381,6 @@ function tryParseJsonRefinerOutput(text: string): RefinerOutput | null {
 }
 
 function normalizeRefinerObject(parsed: any): RefinerOutput | null {
-    // Validate minimal requirements or just map best effort
-    // We check for at least one characteristic field to confirm it's not some other JSON
     if (!('confidenceScore' in parsed) && !('honestAssessment' in parsed) && !('presentationStrategy' in parsed)) {
         return null;
     }
@@ -391,13 +389,25 @@ function normalizeRefinerObject(parsed: any): RefinerOutput | null {
     let synthesisAccuracy = parsed.synthesisAccuracy;
     if (synthesisAccuracy && synthesisAccuracy.missed) {
         if (Array.isArray(synthesisAccuracy.missed)) {
-            // Convert array to Record<string, string[]>
-            // Assuming the array contains strings describing missed items
             synthesisAccuracy = {
                 ...synthesisAccuracy,
                 missed: {
                     "global": synthesisAccuracy.missed.map(String)
                 }
+            };
+        }
+    }
+
+    // Normalize honestAssessment - ensure it's string or proper object
+    let honestAssessment: RefinerOutput['honestAssessment'] = '';
+    if (parsed.honestAssessment) {
+        if (typeof parsed.honestAssessment === 'string') {
+            honestAssessment = parsed.honestAssessment;
+        } else if (typeof parsed.honestAssessment === 'object') {
+            honestAssessment = {
+                reliabilitySummary: String(parsed.honestAssessment.reliabilitySummary || ''),
+                biggestRisk: String(parsed.honestAssessment.biggestRisk || ''),
+                recommendedNextStep: String(parsed.honestAssessment.recommendedNextStep || '')
             };
         }
     }
@@ -408,11 +418,12 @@ function normalizeRefinerObject(parsed: any): RefinerOutput | null {
         presentationStrategy: parsed.presentationStrategy || 'confident_with_caveats',
         strategyRationale: parsed.strategyRationale || '',
         gaps: Array.isArray(parsed.gaps) ? parsed.gaps : [],
-        honestAssessment: parsed.honestAssessment || '',
+        honestAssessment,
         metaPattern: parsed.metaPattern,
         synthesisAccuracy: synthesisAccuracy,
         verificationTriggers: parsed.verificationTriggers,
-        reframingSuggestion: parsed.reframingSuggestion
+        reframingSuggestion: parsed.reframingSuggestion,
+        mapperAudit: parsed.mapperAudit  // ← Also add this missing field
     };
 }
 
