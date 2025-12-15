@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { RefinerOutput } from "../../shared/parsing-utils";
+import { RefinerOutput } from "../../../shared/parsing-utils";
 import { ConfidenceBadge } from "./ConfidenceBadge";
 import { GapsSectionPanel } from "./GapsSectionPanel";
 import { SynthesisAccuracySection } from "./SynthesisAccuracySection";

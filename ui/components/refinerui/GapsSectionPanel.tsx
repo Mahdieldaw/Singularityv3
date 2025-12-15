@@ -1,5 +1,5 @@
 import React from "react";
-import { RefinerOutput } from "../../shared/parsing-utils";
+import { RefinerOutput } from "../../../shared/parsing-utils";
 
 interface GapsSectionPanelProps {
     gaps: NonNullable<RefinerOutput["gaps"]>;

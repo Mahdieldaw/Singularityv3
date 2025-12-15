@@ -41,7 +41,7 @@ function extractGraphTopologyFromText(rawText?: string | null) {
 
 
 import { useRefinerOutput } from "../hooks/useRefinerOutput";
-import { RefinerEpistemicAudit } from "./RefinerCardsSection";
+import { RefinerEpistemicAudit } from "./refinerui/RefinerCardsSection";
 
 // ============================================================================
 // OPTIONS PARSING - Handle both emoji-prefixed themes and "Theme:" headers

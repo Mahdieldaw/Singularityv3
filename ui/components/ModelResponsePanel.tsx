@@ -18,7 +18,7 @@ import { ChevronDownIcon, ChevronUpIcon } from "./Icons";
 import { CopyButton } from "./CopyButton";
 import { formatProviderResponseForMd } from "../utils/copy-format-utils";
 import { useRefinerOutput } from "../hooks/useRefinerOutput";
-import { BuriedInsightCard } from "./BuriedInsightCard";
+import { BuriedInsightCard } from "./refinerui/BuriedInsightCard";
 import clsx from "clsx";
 
 interface ModelResponsePanelProps {
