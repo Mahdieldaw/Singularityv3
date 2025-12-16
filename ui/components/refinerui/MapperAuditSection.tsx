@@ -6,7 +6,7 @@ interface MapperAuditSectionProps {
         unlistedOptions: Array<{
             title: string;
             description: string;
-            sourceProvider: string;
+            source: string;
         }>;
     };
     className?: string;
@@ -47,9 +47,11 @@ export const MapperAuditSection: React.FC<MapperAuditSectionProps> = ({
                             <h5 className="text-sm font-semibold text-purple-100">
                                 {option.title}
                             </h5>
-                            <span className="text-[10px] text-purple-400/60 uppercase tracking-wide">
-                                via {option.sourceProvider}
-                            </span>
+                            {option.source && (
+                                <span className="text-[10px] text-purple-400/60 uppercase tracking-wide">
+                                    via {option.source}
+                                </span>
+                            )}
                         </div>
                         <p className="text-xs text-purple-200/70 mt-1 leading-relaxed">
                             {option.description}

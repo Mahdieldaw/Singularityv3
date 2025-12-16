@@ -143,7 +143,7 @@ export const RefinerEpistemicAudit: React.FC<RefinerAuditProps> = ({ output, raw
             )}
 
             {/* Verification Triggers - Enhanced */}
-            {verificationTriggers && verificationTriggers.length > 0 && (
+            {verificationTriggers && (verificationTriggers.items?.length || 0) > 0 && (
                 <div className="bg-orange-500/10 border border-orange-500/20 rounded-xl p-5 mt-2">
                     <div className="flex items-center gap-2 mb-4">
                         <span className="w-2 h-2 rounded-full bg-orange-400 shadow-[0_0_8px_rgba(251,146,60,0.6)]" />
@@ -152,7 +152,7 @@ export const RefinerEpistemicAudit: React.FC<RefinerAuditProps> = ({ output, raw
                         </h4>
                     </div>
                     <ul className="space-y-4">
-                        {verificationTriggers.map((trigger, idx) => (
+                        {verificationTriggers.items!.map((trigger, idx) => (
                             <li key={idx} className="text-sm text-orange-100/90 pl-3 border-l-2 border-orange-500/30">
                                 <strong className="text-orange-300 block mb-1">
                                     "{trigger.claim}"

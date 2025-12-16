@@ -18,6 +18,7 @@ import { ChevronDownIcon, ChevronUpIcon } from "./Icons";
 import { CopyButton } from "./CopyButton";
 import { formatProviderResponseForMd } from "../utils/copy-format-utils";
 import { useRefinerOutput } from "../hooks/useRefinerOutput";
+import { TrustSignalsPanel } from "./refinerui/TrustSignalsPanel";
 import { BuriedInsightCard } from "./refinerui/BuriedInsightCard";
 import clsx from "clsx";
 
@@ -68,6 +69,8 @@ export const ModelResponsePanel: React.FC<ModelResponsePanelProps> = React.memo(
     }, [latestResponse, streamingState.activeProviderId, providerId]);
 
     const { output: refinerOutput } = useRefinerOutput(turnId);
+
+    // Compute missedInsights unconditionally to preserve hook order
     const missedInsights = useMemo(() => {
         const missed = refinerOutput?.synthesisAccuracy?.missed || [];
         if (!Array.isArray(missed)) return []; // Safety check
@@ -83,23 +86,14 @@ export const ModelResponsePanel: React.FC<ModelResponsePanelProps> = React.memo(
             .map(item => item.insight);
     }, [refinerOutput, providerId, provider]);
 
-    // Branching visual state
-    const isBranching = activeRecompute?.providerId === providerId &&
-        activeRecompute?.aiTurnId === turnId &&
-        activeRecompute?.stepType === 'batch';
-
-    // Is this provider targeted for branch input?
-    const isTargeted = activeTarget?.providerId === providerId;
-    const hasHistory = historyCount > 1;
-
-    // Branch send handler
+    // Branch send handler (hook before conditional return)
     const handleBranchSend = useCallback(() => {
         if (!branchInput.trim()) return;
         handleBranchContinue(providerId, branchInput);
         setBranchInput('');
     }, [branchInput, handleBranchContinue, providerId]);
 
-    // Handle copy with toast
+    // Handle copy with toast (hook before conditional return)
     const handleCopyText = useCallback(async () => {
         try {
             await navigator.clipboard.writeText(derivedState.text);
@@ -108,6 +102,24 @@ export const ModelResponsePanel: React.FC<ModelResponsePanelProps> = React.memo(
             setToast({ id: Date.now(), message: 'Failed to copy', type: 'error' });
         }
     }, [derivedState.text, setToast]);
+
+    // New: Trust mode via sentinel providerId
+    if (providerId === '__trust__' && refinerOutput) {
+        return (
+            <div className="h-full w-full min-w-0 flex flex-col bg-surface-raised border border-border-subtle rounded-2xl shadow-lg overflow-hidden">
+                <TrustSignalsPanel refiner={refinerOutput} onClose={onClose} />
+            </div>
+        );
+    }
+
+    // Branching visual state
+    const isBranching = activeRecompute?.providerId === providerId &&
+        activeRecompute?.aiTurnId === turnId &&
+        activeRecompute?.stepType === 'batch';
+
+    // Is this provider targeted for branch input?
+    const isTargeted = activeTarget?.providerId === providerId;
+    const hasHistory = historyCount > 1;
 
     // Empty/loading state
     if (!latestResponse && !derivedState.isError) {

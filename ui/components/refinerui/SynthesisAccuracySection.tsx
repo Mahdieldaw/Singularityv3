@@ -1,9 +1,15 @@
 import React from "react";
 
+interface MissedInsightItem {
+    insight: string;
+    source: string;
+    inMapperOptions: boolean;
+}
+
 interface SynthesisAccuracySectionProps {
     preserved: string[];
     overclaimed: string[];
-    missed?: Record<string, string[]>;
+    missed?: MissedInsightItem[];
     className?: string;
 }
 
@@ -15,7 +21,7 @@ export const SynthesisAccuracySection: React.FC<SynthesisAccuracySectionProps> =
 }) => {
     const hasPreserved = preserved && preserved.length > 0;
     const hasOverclaimed = overclaimed && overclaimed.length > 0;
-    const hasMissed = missed && Object.keys(missed).some(k => missed![k].length > 0);
+    const hasMissed = Array.isArray(missed) && missed.length > 0;
 
     return (
         <div className={`flex flex-col gap-4 mt-2 ${className}`}>
@@ -75,21 +81,19 @@ export const SynthesisAccuracySection: React.FC<SynthesisAccuracySectionProps> =
                     </h4>
                 </div>
                 {hasMissed ? (
-                    <div className="space-y-3">
-                        {Object.entries(missed!).map(([pid, points]) => (
-                            <div key={pid} className="pl-1">
-                                <span className="text-[10px] uppercase text-amber-400/60 font-medium mb-1 block tracking-wider">{pid}</span>
-                                <ul className="space-y-1">
-                                    {points.map((p, i) => (
-                                        <li key={i} className="text-xs text-amber-100/70 flex items-start gap-2">
-                                            <span className="mt-1.5 w-1 h-1 rounded-full bg-amber-500/50 shrink-0" />
-                                            <span>{p}</span>
-                                        </li>
-                                    ))}
-                                </ul>
-                            </div>
+                    <ul className="space-y-2 pl-1">
+                        {missed!.map((item, i) => (
+                            <li key={i} className="text-xs text-amber-100/80 flex items-start gap-2">
+                                <span className="mt-1.5 w-1 h-1 rounded-full bg-amber-500/50 shrink-0" />
+                                <span>
+                                    {item.insight}
+                                    {item.source && (
+                                        <span className="text-amber-300/60"> — {item.source}{item.inMapperOptions ? " (in options)" : " (not in options)"}</span>
+                                    )}
+                                </span>
+                            </li>
                         ))}
-                    </div>
+                    </ul>
                 ) : (
                     <div className="text-xs text-amber-100/50">No missed insights</div>
                 )}

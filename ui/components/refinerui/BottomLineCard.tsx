@@ -6,6 +6,7 @@ interface BottomLineCardProps {
     gapCount: number;
     foundationalGapCount: number;
     hasVerificationTriggers: boolean;
+    onOpenTrustPanel?: () => void;
     className?: string;
 }
 
@@ -15,6 +16,7 @@ export const BottomLineCard: React.FC<BottomLineCardProps> = ({
     gapCount,
     foundationalGapCount,
     hasVerificationTriggers,
+    onOpenTrustPanel,
     className = ""
 }) => {
     const tacticalGapCount = gapCount - foundationalGapCount;
@@ -54,6 +56,15 @@ export const BottomLineCard: React.FC<BottomLineCardProps> = ({
                     <span className="text-orange-400/80">
                         · Verification recommended
                     </span>
+                )}
+                {(gapCount > 0 || hasVerificationTriggers) && (
+                    <button
+                        onClick={onOpenTrustPanel}
+                        className="ml-auto text-[11px] px-2 py-1 rounded bg-white/10 hover:bg-white/15 border border-white/10 text-white/80"
+                        title="Open Trust Signals"
+                    >
+                        Open Trust Panel →
+                    </button>
                 )}
             </div>
         </div>

@@ -70,7 +70,7 @@ export function useRefinerOutput(aiTurnId: string | null, forcedProviderId?: str
 
             const current = state || memoResult;
             const hasCore = !!current?.output;
-            const hasRicher = !!current?.output?.synthesisAccuracy || (current?.output?.gaps && current.output.gaps.length > 0) || (current?.output?.verificationTriggers && current.output.verificationTriggers.length > 0) || !!current?.output?.reframingSuggestion;
+            const hasRicher = !!current?.output?.synthesisAccuracy || (current?.output?.gaps && current.output.gaps.length > 0) || ((current?.output?.verificationTriggers?.items?.length || 0) > 0) || !!current?.output?.reframingSuggestion;
 
             if (current?.isLoading || hasRicher) return;
 
@@ -99,7 +99,7 @@ export function useRefinerOutput(aiTurnId: string | null, forcedProviderId?: str
                     }
 
                     if (parsed) {
-                        const richer = !!parsed.synthesisAccuracy || (parsed.gaps && parsed.gaps.length > 0) || (parsed.verificationTriggers && parsed.verificationTriggers.length > 0) || !!parsed.reframingSuggestion;
+                        const richer = !!parsed.synthesisAccuracy || (parsed.gaps && parsed.gaps.length > 0) || ((parsed.verificationTriggers?.items?.length || 0) > 0) || !!parsed.reframingSuggestion;
                         if (!hasCore || richer) {
                             setState({
                                 output: parsed,

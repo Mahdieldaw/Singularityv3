@@ -273,9 +273,10 @@ interface OptionsTabProps {
   themes: ParsedTheme[];
   citationSourceOrder?: Record<number, string>;
   onCitationClick: (num: number | string) => void;
+  mapperAudit?: { complete: boolean; unlistedOptions: Array<{ title: string; description: string; source: string }>; };
 }
 
-const OptionsTab: React.FC<OptionsTabProps> = ({ themes, citationSourceOrder, onCitationClick }) => {
+const OptionsTab: React.FC<OptionsTabProps> = ({ themes, citationSourceOrder, onCitationClick, mapperAudit }) => {
   const [expandedThemes, setExpandedThemes] = useState<Set<number>>(new Set([0])); // First expanded by default
 
   const toggleTheme = (idx: number) => {
@@ -296,6 +297,31 @@ const OptionsTab: React.FC<OptionsTabProps> = ({ themes, citationSourceOrder, on
 
   return (
     <div className="p-4 max-w-3xl mx-auto">
+      {/* Mapper Coverage Badge */}
+      {mapperAudit && (
+        <div className="mb-4 bg-surface rounded-lg border border-border-subtle p-3">
+          {mapperAudit.complete ? (
+            <div className="flex items-center gap-2 text-green-600 text-sm">
+              <span>✓</span>
+              <span>Mapper coverage complete — all approaches represented</span>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <div className="flex items-center gap-2 text-amber-600 text-sm">
+                <span>⚠</span>
+                <span className="font-medium">{mapperAudit.unlistedOptions.length} unlisted options found</span>
+              </div>
+              {mapperAudit.unlistedOptions.length > 0 && (
+                <ul className="text-xs text-text-secondary space-y-1 pl-4">
+                  {mapperAudit.unlistedOptions.map((opt, idx) => (
+                    <li key={idx}><strong>{opt.title}</strong>: {opt.description}{opt.source ? (<span className="text-text-muted"> — {opt.source}</span>) : null}</li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+        </div>
+      )}
       {themes.map((theme, tIdx) => (
         <div key={tIdx} className="options-theme-section">
           <div
@@ -1081,7 +1107,7 @@ export const DecisionMapSheet = React.memo(() => {
                       />
                     </div>
                   )}
-                  <OptionsTab themes={parsedThemes} citationSourceOrder={citationSourceOrder} onCitationClick={handleCitationClick} />
+                  <OptionsTab themes={parsedThemes} citationSourceOrder={citationSourceOrder} onCitationClick={handleCitationClick} mapperAudit={refinerOutput?.mapperAudit} />
                 </motion.div>
               )}
 

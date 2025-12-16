@@ -43,12 +43,12 @@ import {
   workflowProgressAtom
 } from "../state/atoms";
 import { useRefinerOutput } from "../hooks/useRefinerOutput";
-import { RefinerSynthesisAccuracy } from "./refinerui/RefinerCardsSection";
 
 import { ReframingBanner } from "./refinerui/ReframingBanner";
 import { HeaderGuidance } from "./refinerui/HeaderGuidance";
 import { BottomLineCard } from "./refinerui/BottomLineCard";
-import { getStructuredAssessment, getGapCounts } from "../utils/refiner-helpers";
+import { TrustIcon } from "./refinerui/TrustIcon";
+import { getStructuredAssessment, getGapCounts, getVerificationItems, shouldAutoOpenSidePanel } from "../utils/refiner-helpers";
 
 // --- Helper Functions ---
 function parseMappingResponse(response?: string | null) {
@@ -254,6 +254,7 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
   const { output: refinerOutput } = useRefinerOutput(aiTurn.id);
   const assessment = useMemo(() => getStructuredAssessment(refinerOutput), [refinerOutput]);
   const gapCounts = useMemo(() => getGapCounts(refinerOutput), [refinerOutput]);
+  const verificationCount = useMemo(() => (refinerOutput ? getVerificationItems(refinerOutput).length : 0), [refinerOutput]);
 
   const setChatInput = useSetAtom(chatInputValueAtom);
 
@@ -264,6 +265,8 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
       input.focus();
     }
   }, [setChatInput]);
+
+
 
   const getProviderName = useCallback((pid: string) => {
     const cfg = LLM_PROVIDERS_CONFIG.find(p => String(p.id) === pid);
@@ -447,9 +450,24 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
 
   const setToast = useSetAtom(toastAtom);
   const setActiveSplitPanel = useSetAtom(activeSplitPanelAtom);
+  const activeSplitPanel = useAtomValue(activeSplitPanelAtom);
   const setIsDecisionMapOpen = useSetAtom(isDecisionMapOpenAtom);
   const isDecisionMapOpen = useAtomValue(isDecisionMapOpenAtom);
   const [includePromptInCopy, setIncludePromptInCopy] = useAtom(includePromptInCopyAtom);
+
+  // Auto-open trust panel based on refiner output signals (place after setActiveSplitPanel declaration)
+  useEffect(() => {
+    try {
+      if (refinerOutput && shouldAutoOpenSidePanel(refinerOutput)) {
+        // Avoid thrashing if already open to trust for this turn
+        if (!(activeSplitPanel && activeSplitPanel.turnId === aiTurn.id && activeSplitPanel.providerId === '__trust__')) {
+          setActiveSplitPanel({ turnId: aiTurn.id, providerId: '__trust__' });
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }, [refinerOutput, aiTurn.id, activeSplitPanel, setActiveSplitPanel]);
 
   // State for Claude artifact overlay
   const [selectedArtifact, setSelectedArtifact] = useState<{
@@ -1028,8 +1046,8 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                                   <HeaderGuidance
                                     confidenceScore={refinerOutput.confidenceScore}
                                     biggestRisk={assessment?.biggestRisk}
-                                    presentationStrategy={refinerOutput.presentationStrategy}
-                                    strategyRationale={refinerOutput.strategyRationale}
+                                    verificationEnabled={true}
+                                    verificationCount={verificationCount}
                                     className="mb-6 mx-[-12px] sm:mx-0"
                                   />
                                 )}
@@ -1067,12 +1085,11 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                                 gapCount={gapCounts.total}
                                 foundationalGapCount={gapCounts.foundational}
                                 hasVerificationTriggers={!!refinerOutput.verificationTriggers?.items?.length}
+                                onOpenTrustPanel={() => setActiveSplitPanel({ turnId: aiTurn.id, providerId: '__trust__' })}
                                 className="mb-4"
                               />
 
-                              <div className="pt-6 border-t border-border-subtle">
-                                <RefinerSynthesisAccuracy output={refinerOutput} />
-                              </div>
+                              {/* Accuracy details moved to Trust Signals side panel */}
                             </div>
                           )}
                         </div>
@@ -1120,7 +1137,7 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                         : "opacity-0 group-hover/turn:opacity-100 focus-within:opacity-100"
                     )}
                   >
-                    <div className="pointer-events-auto translate-x-5">
+                    <div className="pointer-events-auto translate-x-5 flex items-center gap-2">
                       <CouncilOrbs
                         turnId={aiTurn.id}
                         providers={LLM_PROVIDERS_CONFIG}
@@ -1132,6 +1149,12 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                         isTrayExpanded={isDecisionMapOpen?.turnId === aiTurn.id}
                         variant="historical"
                         workflowProgress={isThisTurnActive ? workflowProgress as any : undefined}
+                      />
+                      {/* Trust Icon */}
+                      <TrustIcon
+                        refiner={refinerOutput || null}
+                        onClick={() => setActiveSplitPanel({ turnId: aiTurn.id, providerId: '__trust__' })}
+                        isActive={activeSplitPanel?.turnId === aiTurn.id && activeSplitPanel?.providerId === '__trust__'}
                       />
                     </div>
 

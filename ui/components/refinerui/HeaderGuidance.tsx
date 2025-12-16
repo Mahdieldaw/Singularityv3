@@ -1,25 +1,22 @@
-import React, { useState } from "react";
+import React from "react";
 import { ConfidenceBadge } from "./ConfidenceBadge";
 
 interface HeaderGuidanceProps {
     confidenceScore: number;
     biggestRisk?: string;
-    reliabilitySummary?: string;
-    presentationStrategy?: string;
-    strategyRationale?: string;
+    verificationEnabled?: boolean;
+    verificationCount?: number;
     className?: string;
 }
 
 export const HeaderGuidance: React.FC<HeaderGuidanceProps> = ({
     confidenceScore,
     biggestRisk,
-    reliabilitySummary,
-    presentationStrategy,
-    strategyRationale,
+    verificationEnabled = true,
+    verificationCount,
     className = ""
 }) => {
-    const [expanded, setExpanded] = useState(false);
-
+    // Note: verification count rendered by parent via refiner helpers when needed
     return (
         <div className={`bg-black/20 border border-white/10 rounded-lg p-3 mb-4 ${className}`}>
             <div className="flex flex-wrap items-center gap-3">
@@ -33,30 +30,13 @@ export const HeaderGuidance: React.FC<HeaderGuidanceProps> = ({
                         <span className="text-sm text-amber-200/80">{biggestRisk}</span>
                     </div>
                 )}
+
+                {verificationEnabled && typeof verificationCount === 'number' && verificationCount > 0 && (
+                    <div className="text-amber-300/80 text-xs">
+                        🔍 {verificationCount} claim{verificationCount !== 1 ? 's' : ''} need verification
+                    </div>
+                )}
             </div>
-
-            {presentationStrategy && (
-                <>
-                    <button
-                        onClick={() => setExpanded(!expanded)}
-                        className="flex items-center gap-1 text-xs text-white/40 hover:text-white/70 mt-2 transition-colors"
-                    >
-                        <span className="text-[10px]">{expanded ? '▼' : '▶'}</span>
-                        Why this format?
-                    </button>
-
-                    {expanded && (
-                        <div className="mt-2 pl-3 border-l border-white/10 animate-in fade-in slide-in-from-top-1 duration-150">
-                            <div className="text-xs text-white/60">
-                                <span className="text-sky-400/80 font-medium">{presentationStrategy}</span>
-                                {strategyRationale && (
-                                    <span className="ml-1">— {strategyRationale}</span>
-                                )}
-                            </div>
-                        </div>
-                    )}
-                </>
-            )}
         </div>
     );
 };
