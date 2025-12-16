@@ -141,12 +141,33 @@ export class ClaudeAdapter {
         }
       }
 
-      // Let error handler deal with other errors
+      // Avoid infinite recursion on retries
+      if (_isRetry) {
+        return {
+          providerId: this.id,
+          ok: false,
+          text: aggregatedText || null,
+          errorCode: (error && (error.code || error.type)) || "unknown",
+          latencyMs: Date.now() - startTime,
+          meta: {
+            error: error?.toString?.() || String(error),
+            details: error?.details,
+          },
+        };
+      }
+
+      // Let error handler deal with other errors with a real retry operation
       try {
-        await errorHandler.handleProviderError(error, this.id, {
-          operation: 'sendPrompt',
-          prompt: req.originalPrompt?.substring(0, 100),
+        const recovery = await errorHandler.handleProviderError(error, this.id, {
+          providerId: this.id,
+          prompt: req.originalPrompt?.substring(0, 200),
+          operation: async () => {
+            // Retry the same request once via the error handler backoff policy
+            return await this.sendPrompt(req, onChunk, signal, true);
+          },
         });
+        // If recovery produced a result, return it
+        if (recovery) return recovery;
       } catch (handledError) {
         // Convert handled error to response format
         return {
@@ -233,11 +254,31 @@ export class ClaudeAdapter {
         }
       }
 
+      // Avoid infinite recursion on retries
+      if (_isRetry) {
+        return {
+          providerId: this.id,
+          ok: false,
+          text: aggregatedText || null,
+          errorCode: (error && (error.code || error.type)) || "unknown",
+          latencyMs: Date.now() - startTime,
+          meta: {
+            error: error?.toString?.() || String(error),
+            details: error?.details,
+            chatId: providerContext?.chatId,
+          },
+        };
+      }
+
       try {
-        await errorHandler.handleProviderError(error, this.id, {
-          operation: 'sendContinuation',
-          prompt: prompt?.substring(0, 100),
+        const recovery = await errorHandler.handleProviderError(error, this.id, {
+          providerId: this.id,
+          prompt: prompt?.substring(0, 200),
+          operation: async () => {
+            return await this.sendContinuation(prompt, providerContext, sessionId, onChunk, signal, true);
+          },
         });
+        if (recovery) return recovery;
       } catch (handledError) {
         return {
           providerId: this.id,

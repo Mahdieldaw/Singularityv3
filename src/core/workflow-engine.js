@@ -416,6 +416,29 @@ export class WorkflowEngine {
               isRecompute: resolvedContext?.type === "recompute",
               sourceTurnId: resolvedContext?.sourceTurnId,
             });
+            // Immediate idempotent persistence to avoid data loss on later failures (non-recompute only)
+            try {
+              if (resolvedContext?.type !== "recompute") {
+                const aiTurnId = context?.canonicalAiTurnId;
+                const providerId = step?.payload?.mappingProvider;
+                if (aiTurnId && providerId) {
+                  this.sessionManager
+                    .upsertProviderResponse(
+                      context.sessionId,
+                      aiTurnId,
+                      providerId,
+                      "mapping",
+                      0,
+                      {
+                        text: result?.text || "",
+                        status: result?.status || "completed",
+                        meta: result?.meta || {},
+                      },
+                    )
+                    .catch(() => {});
+                }
+              }
+            } catch (_) { }
           } catch (error) {
             console.error(
               `[WorkflowEngine] Mapping step ${step.stepId} failed:`,
@@ -465,6 +488,29 @@ export class WorkflowEngine {
             isRecompute: resolvedContext?.type === "recompute",
             sourceTurnId: resolvedContext?.sourceTurnId,
           });
+          // Immediate idempotent persistence to avoid data loss on later failures (non-recompute only)
+          try {
+            if (resolvedContext?.type !== "recompute") {
+              const aiTurnId = context?.canonicalAiTurnId;
+              const providerId = step?.payload?.synthesisProvider;
+              if (aiTurnId && providerId) {
+                this.sessionManager
+                  .upsertProviderResponse(
+                    context.sessionId,
+                    aiTurnId,
+                    providerId,
+                    "synthesis",
+                    0,
+                    {
+                      text: result?.text || "",
+                      status: result?.status || "completed",
+                      meta: result?.meta || {},
+                    },
+                  )
+                  .catch(() => {});
+              }
+            }
+          } catch (_) { }
         } catch (error) {
           console.error(
             `[WorkflowEngine] Synthesis step ${step.stepId} failed:`,
@@ -505,6 +551,29 @@ export class WorkflowEngine {
             isRecompute: resolvedContext?.type === "recompute",
             sourceTurnId: resolvedContext?.sourceTurnId,
           });
+          // Immediate idempotent persistence to avoid data loss on later failures (non-recompute only)
+          try {
+            if (resolvedContext?.type !== "recompute") {
+              const aiTurnId = context?.canonicalAiTurnId;
+              const providerId = step?.payload?.refinerProvider;
+              if (aiTurnId && providerId) {
+                this.sessionManager
+                  .upsertProviderResponse(
+                    context.sessionId,
+                    aiTurnId,
+                    providerId,
+                    "refiner",
+                    0,
+                    {
+                      text: result?.text || "",
+                      status: result?.status || "completed",
+                      meta: result?.meta || {},
+                    },
+                  )
+                  .catch(() => {});
+              }
+            }
+          } catch (_) { }
         } catch (error) {
           console.error(
             `[WorkflowEngine] Refiner step ${step.stepId} failed:`,

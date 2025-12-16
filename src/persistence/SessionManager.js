@@ -18,6 +18,61 @@ export class SessionManager {
   }
 
   /**
+   * Upsert a single provider response by compound key. Used for immediate
+   * persistence on step completion so we don't lose results if later phases fail.
+   * @param {string} sessionId
+   * @param {string} aiTurnId
+   * @param {string} providerId
+   * @param {"batch"|"synthesis"|"mapping"|"refiner"} responseType
+   * @param {number} responseIndex
+   * @param {{ text?: string, status?: string, meta?: any, createdAt?: number }} payload
+   */
+  async upsertProviderResponse(
+    sessionId,
+    aiTurnId,
+    providerId,
+    responseType,
+    responseIndex,
+    payload = {},
+  ) {
+    try {
+      if (!this.adapter) throw new Error("adapter not initialized");
+      const keyTuple = [aiTurnId, providerId, responseType, responseIndex];
+      let existing = [];
+      try {
+        existing = await this.adapter.getByIndex(
+          "provider_responses",
+          "byCompoundKey",
+          keyTuple,
+        );
+      } catch (_) {
+        existing = [];
+      }
+
+      const now = Date.now();
+      const base = {
+        id: existing?.[0]?.id || `pr-${sessionId}-${aiTurnId}-${providerId}-${responseType}-${responseIndex}`,
+        sessionId,
+        aiTurnId,
+        providerId,
+        responseType,
+        responseIndex,
+        text: payload.text || (existing?.[0]?.text || ""),
+        status: payload.status || (existing?.[0]?.status || "streaming"),
+        meta: payload.meta || (existing?.[0]?.meta || {}),
+        createdAt: existing?.[0]?.createdAt || payload.createdAt || now,
+        updatedAt: now,
+      };
+
+      await this.adapter.put("provider_responses", base, base.id);
+      return base;
+    } catch (e) {
+      console.warn("[SessionManager] upsertProviderResponse failed:", e);
+      return null;
+    }
+  }
+
+  /**
    * NEW: Primary persistence entry point (Phase 4)
    * Routes to appropriate primitive-specific handler
    * @param {Object} request - { type, sessionId, userMessage, sourceTurnId?, stepType?, targetProvider? }
@@ -430,7 +485,18 @@ export class SessionManager {
     for (const [providerId, output] of Object.entries(
       result?.synthesisOutputs || {},
     )) {
-      const respId = `pr-${sessionId}-${aiTurnId}-${providerId}-synthesis-0-${now}-${count++}`;
+      // Idempotent upsert on compound key (aiTurnId, providerId, responseType, 0)
+      let existing = [];
+      try {
+        existing = await this.adapter.getByIndex(
+          "provider_responses",
+          "byCompoundKey",
+          [aiTurnId, providerId, "synthesis", 0],
+        );
+      } catch (_) { existing = []; }
+      const existingId = existing?.[0]?.id;
+      const createdAtKeep = existing?.[0]?.createdAt || now;
+      const respId = existingId || `pr-${sessionId}-${aiTurnId}-${providerId}-synthesis-0-${now}-${count++}`;
       await this.adapter.put("provider_responses", {
         id: respId,
         sessionId,
@@ -438,19 +504,30 @@ export class SessionManager {
         providerId,
         responseType: "synthesis",
         responseIndex: 0,
-        text: output?.text || "",
-        status: output?.status || "completed",
-        meta: output?.meta || {},
-        createdAt: now,
+        text: output?.text || existing?.[0]?.text || "",
+        status: output?.status || existing?.[0]?.status || "completed",
+        meta: output?.meta || existing?.[0]?.meta || {},
+        createdAt: createdAtKeep,
         updatedAt: now,
         completedAt: now,
-      });
+      }, respId);
     }
     // Mapping
     for (const [providerId, output] of Object.entries(
       result?.mappingOutputs || {},
     )) {
-      const respId = `pr-${sessionId}-${aiTurnId}-${providerId}-mapping-0-${now}-${count++}`;
+      // Idempotent upsert on compound key (aiTurnId, providerId, responseType, 0)
+      let existing = [];
+      try {
+        existing = await this.adapter.getByIndex(
+          "provider_responses",
+          "byCompoundKey",
+          [aiTurnId, providerId, "mapping", 0],
+        );
+      } catch (_) { existing = []; }
+      const existingId = existing?.[0]?.id;
+      const createdAtKeep = existing?.[0]?.createdAt || now;
+      const respId = existingId || `pr-${sessionId}-${aiTurnId}-${providerId}-mapping-0-${now}-${count++}`;
       await this.adapter.put("provider_responses", {
         id: respId,
         sessionId,
@@ -458,19 +535,30 @@ export class SessionManager {
         providerId,
         responseType: "mapping",
         responseIndex: 0,
-        text: output?.text || "",
-        status: output?.status || "completed",
-        meta: output?.meta || {},
-        createdAt: now,
+        text: output?.text || existing?.[0]?.text || "",
+        status: output?.status || existing?.[0]?.status || "completed",
+        meta: output?.meta || existing?.[0]?.meta || {},
+        createdAt: createdAtKeep,
         updatedAt: now,
         completedAt: now,
-      });
+      }, respId);
     }
     // Refiner
     for (const [providerId, output] of Object.entries(
       result?.refinerOutputs || {},
     )) {
-      const respId = `pr-${sessionId}-${aiTurnId}-${providerId}-refiner-0-${now}-${count++}`;
+      // Idempotent upsert on compound key (aiTurnId, providerId, responseType, 0)
+      let existing = [];
+      try {
+        existing = await this.adapter.getByIndex(
+          "provider_responses",
+          "byCompoundKey",
+          [aiTurnId, providerId, "refiner", 0],
+        );
+      } catch (_) { existing = []; }
+      const existingId = existing?.[0]?.id;
+      const createdAtKeep = existing?.[0]?.createdAt || now;
+      const respId = existingId || `pr-${sessionId}-${aiTurnId}-${providerId}-refiner-0-${now}-${count++}`;
       await this.adapter.put("provider_responses", {
         id: respId,
         sessionId,
@@ -478,13 +566,13 @@ export class SessionManager {
         providerId,
         responseType: "refiner",
         responseIndex: 0,
-        text: output?.text || "",
-        status: output?.status || "completed",
-        meta: output?.meta || {},
-        createdAt: now,
+        text: output?.text || existing?.[0]?.text || "",
+        status: output?.status || existing?.[0]?.status || "completed",
+        meta: output?.meta || existing?.[0]?.meta || {},
+        createdAt: createdAtKeep,
         updatedAt: now,
         completedAt: now,
-      });
+      }, respId);
     }
 
     // NEW: Asynchronously extract and store context summary

@@ -96,7 +96,7 @@ export class ChatGPTAdapter {
   /**
    * Send prompt to ChatGPT. Mirrors Claude/Gemini adapter contract.
    */
-  async sendPrompt(req, onChunk, signal) {
+  async sendPrompt(req, onChunk, signal, _isRetry = false) {
     const startTime = Date.now();
     pad(`[ChatGPT Adapter] sendPrompt started (provider=${this.id})`);
 
@@ -225,11 +225,31 @@ export class ChatGPTAdapter {
         };
       }
 
-      // Use central error handler
+      // Avoid infinite recursion on retries
+      if (_isRetry) {
+        return {
+          providerId: this.id,
+          ok: false,
+          text: aggregated || null,
+          errorCode: (error && (error.code || error.type)) || "unknown",
+          latencyMs: Date.now() - startTime,
+          meta: {
+            error: error?.toString?.() || String(error),
+            details: error?.details,
+          },
+        };
+      }
+
+      // Use central error handler with a real retry operation
       try {
-        await errorHandler.handleProviderError(error, this.id, {
-          operation: 'sendPrompt',
+        const recovery = await errorHandler.handleProviderError(error, this.id, {
+          providerId: this.id,
+          prompt: req.originalPrompt?.substring(0, 200),
+          operation: async () => {
+            return await this.sendPrompt(req, onChunk, signal, true);
+          },
         });
+        if (recovery) return recovery;
       } catch (handledError) {
         return {
           providerId: this.id,
@@ -246,7 +266,7 @@ export class ChatGPTAdapter {
     }
   }
 
-  async sendContinuation(prompt, providerContext, sessionId, onChunk, signal) {
+  async sendContinuation(prompt, providerContext, sessionId, onChunk, signal, _isRetry = false) {
     const meta = providerContext?.meta || providerContext || {};
     const conversationIdIn = meta.conversationId;
     const parentMessageIdIn = meta.parentMessageId || meta.messageId;
@@ -342,10 +362,38 @@ export class ChatGPTAdapter {
         };
       }
 
+      if (_isRetry) {
+        return {
+          providerId: this.id,
+          ok: false,
+          text: aggregated || null,
+          errorCode: (error && (error.code || error.type)) || "unknown",
+          latencyMs: Date.now() - startTime,
+          meta: {
+            error: error?.toString?.() || String(error),
+            details: error?.details,
+            conversationId: conversationIdIn,
+            parentMessageId: parentMessageIdIn,
+          },
+        };
+      }
+
       try {
-        await errorHandler.handleProviderError(error, this.id, {
-          operation: 'sendContinuation',
+        const recovery = await errorHandler.handleProviderError(error, this.id, {
+          providerId: this.id,
+          prompt: prompt?.substring(0, 200),
+          operation: async () => {
+            return await this.sendContinuation(
+              prompt,
+              providerContext,
+              sessionId,
+              onChunk,
+              signal,
+              true,
+            );
+          },
         });
+        if (recovery) return recovery;
       } catch (handledError) {
         return {
           providerId: this.id,

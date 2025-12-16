@@ -40,7 +40,8 @@ import {
   retryableProvidersAtom,
   activeAiTurnIdAtom,
   isLoadingAtom,
-  workflowProgressAtom
+  workflowProgressAtom,
+  hasAutoOpenedPaneAtom
 } from "../state/atoms";
 import { useRefinerOutput } from "../hooks/useRefinerOutput";
 
@@ -451,6 +452,8 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
   const setToast = useSetAtom(toastAtom);
   const setActiveSplitPanel = useSetAtom(activeSplitPanelAtom);
   const activeSplitPanel = useAtomValue(activeSplitPanelAtom);
+  const hasAutoOpenedPane = useAtomValue(hasAutoOpenedPaneAtom);
+  const setHasAutoOpenedPane = useSetAtom(hasAutoOpenedPaneAtom);
   const setIsDecisionMapOpen = useSetAtom(isDecisionMapOpenAtom);
   const isDecisionMapOpen = useAtomValue(isDecisionMapOpenAtom);
   const [includePromptInCopy, setIncludePromptInCopy] = useAtom(includePromptInCopyAtom);
@@ -458,16 +461,21 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
   // Auto-open trust panel based on refiner output signals (place after setActiveSplitPanel declaration)
   useEffect(() => {
     try {
-      if (refinerOutput && shouldAutoOpenSidePanel(refinerOutput)) {
-        // Avoid thrashing if already open to trust for this turn
-        if (!(activeSplitPanel && activeSplitPanel.turnId === aiTurn.id && activeSplitPanel.providerId === '__trust__')) {
-          setActiveSplitPanel({ turnId: aiTurn.id, providerId: '__trust__' });
-        }
-      }
+      if (!refinerOutput) return;
+      // Only while this turn is actively streaming
+      if (!isThisTurnActive) return;
+      if (!shouldAutoOpenSidePanel(refinerOutput)) return;
+      // Only auto-open once per turn to avoid overriding user interactions
+      if (hasAutoOpenedPane === aiTurn.id) return;
+      // Do not override if user has the side panel open on this turn (any provider)
+      if (activeSplitPanel && activeSplitPanel.turnId === aiTurn.id) return;
+      // Open Trust panel
+      setActiveSplitPanel({ turnId: aiTurn.id, providerId: '__trust__' });
+      setHasAutoOpenedPane(aiTurn.id);
     } catch {
       // ignore
     }
-  }, [refinerOutput, aiTurn.id, activeSplitPanel, setActiveSplitPanel]);
+  }, [refinerOutput, isThisTurnActive, aiTurn.id, activeSplitPanel, hasAutoOpenedPane, setActiveSplitPanel, setHasAutoOpenedPane]);
 
   // State for Claude artifact overlay
   const [selectedArtifact, setSelectedArtifact] = useState<{
@@ -856,8 +864,7 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
 
           {/* SHARED LAYOUT CONTAINER */}
           <div className="flex justify-center w-full transition-all duration-300 px-4">
-            <div className="w-full">
-
+          <div className="w-full max-w-7xl">
               {/* LEFT: Synthesis Block with Orbs Inside */}
               <div className="flex-1 flex flex-col relative min-w-0" style={{ maxWidth: '820px', margin: '0 auto' }}>
 

@@ -1,6 +1,7 @@
 // ui/components/refinerui/TrustSignalsPanel.tsx
 
 import React, { useState } from 'react';
+import MarkdownDisplay from "../MarkdownDisplay";
 import type { RefinerOutput } from '../../../shared/parsing-utils';
 import {
   getHonestAssessment,
@@ -17,10 +18,12 @@ import {
 
 interface TrustSignalsPanelProps {
   refiner: RefinerOutput;
+  rawText?: string;
   onClose?: () => void;
+  bottomPadding?: number;
 }
 
-export function TrustSignalsPanel({ refiner, onClose }: TrustSignalsPanelProps) {
+export function TrustSignalsPanel({ refiner, rawText, onClose, bottomPadding }: TrustSignalsPanelProps) {
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set());
 
   const toggleSection = (section: string) => {
@@ -54,7 +57,7 @@ export function TrustSignalsPanel({ refiner, onClose }: TrustSignalsPanelProps) 
       </div>
 
       {/* Scrollable Content */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+      <div className="flex-1 overflow-y-auto p-4 space-y-4" style={{ paddingBottom: (bottomPadding ?? 160) }}>
         {/* Confidence Section */}
         <div className="space-y-2">
           <div className="flex items-center gap-2">
@@ -83,7 +86,9 @@ export function TrustSignalsPanel({ refiner, onClose }: TrustSignalsPanelProps) 
             isExpanded={expandedSections.has('rationale')}
             onToggle={() => toggleSection('rationale')}
           >
-            <p className="text-sm text-text-secondary">{refiner.rationale}</p>
+            <div className="prose prose-sm max-w-none dark:prose-invert text-text-secondary">
+              <MarkdownDisplay content={refiner.rationale} />
+            </div>
           </CollapsibleSection>
         )}
 
@@ -101,15 +106,20 @@ export function TrustSignalsPanel({ refiner, onClose }: TrustSignalsPanelProps) 
               </div>
               <ul className="space-y-2">
                 {verificationItems.map((item, idx) => (
-                  <li key={idx} className="text-sm bg-amber-50 p-2 rounded border border-amber-100 text-amber-900">
-                    <div className="font-medium">"{item.claim}"</div>
+                  <li
+                    key={idx}
+                    className="text-sm bg-amber-500/10 p-3 rounded border border-amber-500/20 text-text-primary"
+                  >
+                    <div className="font-medium prose prose-sm max-w-none">
+                      <MarkdownDisplay content={`"${item.claim}"`} className="text-text-primary" />
+                    </div>
                     {item.why && (
-                      <div className="text-amber-800 text-xs mt-1">
-                        Why: {item.why}
+                      <div className="text-xs mt-1 prose prose-xs max-w-none">
+                        <MarkdownDisplay content={`Why: ${item.why}`} className="text-text-secondary" />
                       </div>
                     )}
                     {item.sourceType && (
-                      <div className="text-amber-700 text-xs mt-1">
+                      <div className="text-xs mt-1 text-text-secondary">
                         Check: {item.sourceType}
                       </div>
                     )}
@@ -248,7 +258,7 @@ export function TrustSignalsPanel({ refiner, onClose }: TrustSignalsPanelProps) 
         )}
 
         {/* Raw Output (Debug) */}
-        {refiner.rawText && (
+        {rawText && (
           <div className="pt-4">
             <CollapsibleSection
               title="View raw output"
@@ -256,8 +266,8 @@ export function TrustSignalsPanel({ refiner, onClose }: TrustSignalsPanelProps) 
               onToggle={() => toggleSection('raw')}
               compact
             >
-              <pre className="text-xs bg-surface border border-border-subtle p-2 rounded overflow-x-auto max-h-64 text-text-secondary">
-                {refiner.rawText}
+              <pre className="text-xs bg-surface border border-border-subtle p-2 rounded overflow-x-auto max-h-64 text-text-secondary whitespace-pre-wrap break-words">
+                {rawText}
               </pre>
             </CollapsibleSection>
           </div>

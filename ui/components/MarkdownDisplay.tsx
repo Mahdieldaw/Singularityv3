@@ -145,10 +145,11 @@ const CodeText = ({ className = '', children, ...props }: any) => {
 interface MarkdownDisplayProps {
   content: string;
   components?: Record<string, React.ElementType>;
+  className?: string;
 }
 
 const MarkdownDisplay: React.FC<MarkdownDisplayProps> = React.memo(
-  ({ content, components = {} }) => {
+  ({ content, components = {}, className }) => {
     // State for lazy-loaded plugins
     const [mathPlugins, setMathPlugins] = useState<{
       remarkPlugins: any[];
@@ -195,7 +196,7 @@ const MarkdownDisplay: React.FC<MarkdownDisplayProps> = React.memo(
     }, [content, isMathLoaded]);
 
     return (
-      <div className="markdown-body text-base leading-relaxed text-text-primary min-w-0 max-w-full">
+      <div className={`markdown-body text-base leading-relaxed ${className || 'text-text-primary'} min-w-0 max-w-full`}>
         <ReactMarkdown
           remarkPlugins={[remarkGfm, ...mathPlugins.remarkPlugins]}
           rehypePlugins={[...mathPlugins.rehypePlugins]}

@@ -64,6 +64,128 @@ export class ConnectionHandler {
   }
 
   /**
+   * Build a stable idempotency key for a client-initiated request so that
+   * retries on reconnect don't fan out duplicate provider requests.
+   */
+  _buildIdempotencyKey(executeRequest) {
+    if (!executeRequest || typeof executeRequest !== "object") return null;
+    const clientUserTurnId =
+      executeRequest.clientUserTurnId ||
+      executeRequest.userTurnId ||
+      executeRequest?.historicalContext?.userTurnId ||
+      null;
+
+    try {
+      if (executeRequest.type === "initialize") {
+        if (!clientUserTurnId) return null;
+        return `idem:init:${clientUserTurnId}`;
+      }
+      if (executeRequest.type === "extend") {
+        if (!clientUserTurnId || !executeRequest.sessionId) return null;
+        return `idem:${executeRequest.sessionId}:${clientUserTurnId}`;
+      }
+      if (executeRequest.type === "recompute") {
+        const { sessionId, sourceTurnId, stepType, targetProvider } = executeRequest;
+        if (!sessionId || !sourceTurnId || !stepType || !targetProvider) return null;
+        return `idem:recompute:${sessionId}:${sourceTurnId}:${stepType}:${targetProvider}`;
+      }
+    } catch (_) { }
+    return null;
+  }
+
+  /**
+   * Emit TURN_FINALIZED constructed directly from persistence for a completed turn.
+   * Used to resume UI after port reconnect when streaming was missed.
+   */
+  async _emitFinalizedFromPersistence(sessionId, aiTurnId) {
+    try {
+      const adapter = this.services?.sessionManager?.adapter;
+      if (!adapter) return;
+
+      const aiTurn = await adapter.get("turns", aiTurnId);
+      if (!aiTurn || (aiTurn.type !== "ai" && aiTurn.role !== "assistant")) return;
+
+      const userTurnId = aiTurn.userTurnId;
+      const userTurn = userTurnId ? await adapter.get("turns", userTurnId) : null;
+
+      const resps = await adapter.getResponsesByTurnId(aiTurnId);
+      const buckets = {
+        batchResponses: {},
+        synthesisResponses: {},
+        mappingResponses: {},
+        refinerResponses: {},
+      };
+      for (const r of resps || []) {
+        if (!r) continue;
+        const entry = {
+          providerId: r.providerId,
+          text: r.text || "",
+          status: r.status || "completed",
+          createdAt: r.createdAt || Date.now(),
+          updatedAt: r.updatedAt || r.createdAt || Date.now(),
+          meta: r.meta || {},
+        };
+        if (r.responseType === "batch") {
+          (buckets.batchResponses[r.providerId] ||= []).push(entry);
+        } else if (r.responseType === "synthesis") {
+          (buckets.synthesisResponses[r.providerId] ||= []).push(entry);
+        } else if (r.responseType === "mapping") {
+          (buckets.mappingResponses[r.providerId] ||= []).push(entry);
+        } else if (r.responseType === "refiner") {
+          (buckets.refinerResponses[r.providerId] ||= []).push(entry);
+        }
+      }
+
+      // Require at least some responses to finalize
+      const hasAny =
+        Object.keys(buckets.batchResponses).length > 0 ||
+        Object.keys(buckets.synthesisResponses).length > 0 ||
+        Object.keys(buckets.mappingResponses).length > 0 ||
+        Object.keys(buckets.refinerResponses).length > 0;
+      if (!hasAny) return;
+
+      this.port?.postMessage({
+        type: "TURN_FINALIZED",
+        sessionId: sessionId,
+        userTurnId: userTurnId,
+        aiTurnId: aiTurnId,
+        turn: {
+          user: userTurn
+            ? {
+                id: userTurn.id,
+                type: "user",
+                text: userTurn.content || "",
+                createdAt: userTurn.createdAt || Date.now(),
+                sessionId,
+              }
+            : {
+                id: userTurnId || "unknown",
+                type: "user",
+                text: "",
+                createdAt: Date.now(),
+                sessionId,
+              },
+          ai: {
+            id: aiTurnId,
+            type: "ai",
+            userTurnId: userTurnId || "unknown",
+            sessionId,
+            threadId: aiTurn.threadId || "default-thread",
+            createdAt: aiTurn.createdAt || Date.now(),
+            batchResponses: buckets.batchResponses,
+            synthesisResponses: buckets.synthesisResponses,
+            mappingResponses: buckets.mappingResponses,
+            refinerResponses: buckets.refinerResponses,
+            meta: aiTurn.meta || {},
+          },
+        },
+      });
+    } catch (e) {
+      console.warn("[ConnectionHandler] Failed to emit TURN_FINALIZED from persistence:", e);
+    }
+  }
+
+  /**
    * Create the message handler function
    * This is separate so we can properly remove it on cleanup
    */
@@ -137,6 +259,60 @@ export class ConnectionHandler {
 
     try {
       this.lifecycleManager?.activateWorkflowMode();
+
+      // ========================================================================
+      // Idempotency Guard: short-circuit duplicate requests
+      // Minimal behavior per invariants:
+      // - If mapping exists for clientUserTurnId → re-emit TURN_CREATED
+      // - If persisted results exist → emit TURN_FINALIZED from persistence
+      // - Do NOT poll inflight or re-fanout providers
+      // ========================================================================
+      const idemKeyEarly = this._buildIdempotencyKey(executeRequest);
+      if (idemKeyEarly && this.services?.sessionManager?.adapter) {
+        try {
+          const existing = await this.services.sessionManager.adapter.get(
+            "metadata",
+            idemKeyEarly,
+          );
+          if (existing && existing.entityId) {
+            const sessionIdForEmit =
+              existing.sessionId || executeRequest.sessionId || "unknown";
+            const histUserTurnId = executeRequest?.historicalContext?.userTurnId;
+            const userTurnIdEarly =
+              executeRequest?.clientUserTurnId ||
+              executeRequest?.userTurnId ||
+              histUserTurnId ||
+              "unknown";
+
+            try {
+              if (executeRequest?.type !== "recompute") {
+                this.port.postMessage({
+                  type: "TURN_CREATED",
+                  sessionId: sessionIdForEmit,
+                  userTurnId: userTurnIdEarly,
+                  aiTurnId: existing.entityId,
+                  providers: executeRequest.providers || [],
+                  synthesisProvider: executeRequest.synthesizer || null,
+                  mappingProvider: executeRequest.mapper || null,
+                });
+              }
+            } catch (_) {}
+
+            // If we already have responses → emit finalized; otherwise return without recompute
+            try {
+              const responses = await this.services.sessionManager.adapter.getResponsesByTurnId(existing.entityId);
+              const hasAny = Array.isArray(responses) && responses.length > 0;
+              if (hasAny) {
+                await this._emitFinalizedFromPersistence(
+                  sessionIdForEmit,
+                  existing.entityId,
+                );
+              }
+            } catch (_) { }
+            return; // ✅ Duplicate handled via rehydrate only
+          }
+        } catch (_) {}
+      }
 
       // ========================================================================
       // PHASE 5: Primitives-only execution path (fail-fast on legacy)
@@ -297,6 +473,19 @@ export class ConnectionHandler {
             createdAt: Date.now(),
             updatedAt: Date.now(),
           });
+          // Also record idempotency mapping so reconnect retries don't duplicate fanout
+          const idemKey = this._buildIdempotencyKey(executeRequest);
+          if (idemKey) {
+            await this.services.sessionManager.adapter.put("metadata", {
+              key: idemKey,
+              sessionId: workflowRequest.context.sessionId,
+              entityId: aiTurnId,
+              type: "request_idempotency",
+              requestType: executeRequest.type,
+              createdAt: Date.now(),
+              updatedAt: Date.now(),
+            });
+          }
         } catch (_) { }
       }
 

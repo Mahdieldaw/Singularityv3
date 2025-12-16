@@ -9,6 +9,7 @@ import {
     turnStreamingStateFamily,
     activeRecomputeStateAtom,
     toastAtom,
+    chatInputHeightAtom,
 } from "../state/atoms";
 import { LLM_PROVIDERS_CONFIG } from "../constants";
 import { useProviderActions } from "../hooks/useProviderActions";
@@ -68,7 +69,8 @@ export const ModelResponsePanel: React.FC<ModelResponsePanelProps> = React.memo(
         return { status, text, hasText, isStreaming, isError, artifacts };
     }, [latestResponse, streamingState.activeProviderId, providerId]);
 
-    const { output: refinerOutput } = useRefinerOutput(turnId);
+    const { output: refinerOutput, rawText: refinerRawText } = useRefinerOutput(turnId);
+    const chatInputHeight = useAtomValue(chatInputHeightAtom);
 
     // Compute missedInsights unconditionally to preserve hook order
     const missedInsights = useMemo(() => {
@@ -107,7 +109,7 @@ export const ModelResponsePanel: React.FC<ModelResponsePanelProps> = React.memo(
     if (providerId === '__trust__' && refinerOutput) {
         return (
             <div className="h-full w-full min-w-0 flex flex-col bg-surface-raised border border-border-subtle rounded-2xl shadow-lg overflow-hidden">
-                <TrustSignalsPanel refiner={refinerOutput} onClose={onClose} />
+                <TrustSignalsPanel refiner={refinerOutput} rawText={refinerRawText || undefined} onClose={onClose} bottomPadding={(chatInputHeight || 80) + 32} />
             </div>
         );
     }
@@ -213,7 +215,7 @@ export const ModelResponsePanel: React.FC<ModelResponsePanelProps> = React.memo(
             </div>
 
             {/* Content */}
-            <div className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden p-4 custom-scrollbar relative z-10">
+            <div className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden p-4 custom-scrollbar relative z-10" style={{ paddingBottom: (chatInputHeight || 80) + 24 }}>
                 {/* Missed Insights Card */}
                 {missedInsights && missedInsights.length > 0 && (
                     <BuriedInsightCard

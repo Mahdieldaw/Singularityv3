@@ -28,7 +28,7 @@ export class QwenAdapter {
     this.controller = controller;
   }
 
-  async sendPrompt(req, onChunk, signal) {
+  async sendPrompt(req, onChunk, signal, _isRetry = false) {
     const startTime = Date.now();
     let aggregatedText = "";
     let responseContext = {};
@@ -91,10 +91,29 @@ export class QwenAdapter {
         };
       }
 
+      if (_isRetry) {
+        return {
+          providerId: this.id,
+          ok: false,
+          text: aggregatedText || null,
+          errorCode: (error && (error.code || error.type)) || "unknown",
+          latencyMs: Date.now() - startTime,
+          meta: {
+            error: error?.toString?.() || String(error),
+            details: error?.details,
+            ...meta,
+          },
+        };
+      }
       try {
-        await errorHandler.handleProviderError(error, this.id, {
-          operation: 'sendPrompt',
+        const recovery = await errorHandler.handleProviderError(error, this.id, {
+          providerId: this.id,
+          prompt: req.originalPrompt?.substring(0, 200),
+          operation: async () => {
+            return await this.sendPrompt(req, onChunk, signal, true);
+          },
         });
+        if (recovery) return recovery;
       } catch (handledError) {
         return {
           providerId: this.id,
@@ -113,7 +132,7 @@ export class QwenAdapter {
     }
   }
 
-  async sendContinuation(prompt, providerContext, sessionId, onChunk, signal) {
+  async sendContinuation(prompt, providerContext, sessionId, onChunk, signal, _isRetry = false) {
     const startTime = Date.now();
     const meta = providerContext?.meta || providerContext || {};
     let aggregatedText = "";
@@ -185,10 +204,37 @@ export class QwenAdapter {
         };
       }
 
+      if (_isRetry) {
+        return {
+          providerId: this.id,
+          ok: false,
+          text: aggregatedText || null,
+          errorCode: (error && (error.code || error.type)) || "unknown",
+          latencyMs: Date.now() - startTime,
+          meta: {
+            error: error?.toString?.() || String(error),
+            details: error?.details,
+            suppressed: error?.suppressed,
+            ...meta,
+          },
+        };
+      }
       try {
-        await errorHandler.handleProviderError(error, this.id, {
-          operation: 'sendContinuation',
+        const recovery = await errorHandler.handleProviderError(error, this.id, {
+          providerId: this.id,
+          prompt: prompt?.substring(0, 200),
+          operation: async () => {
+            return await this.sendContinuation(
+              prompt,
+              providerContext,
+              sessionId,
+              onChunk,
+              signal,
+              true,
+            );
+          },
         });
+        if (recovery) return recovery;
       } catch (handledError) {
         return {
           providerId: this.id,

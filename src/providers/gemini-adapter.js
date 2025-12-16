@@ -43,7 +43,7 @@ export class GeminiAdapter {
     }
   }
 
-  async sendPrompt(req, onChunk, signal) {
+  async sendPrompt(req, onChunk, signal, _isRetry = false) {
     const startTime = Date.now();
     try {
       // Auto-select model based on adapter ID if not specified in request
@@ -136,10 +136,29 @@ export class GeminiAdapter {
         };
       }
 
+      if (_isRetry) {
+        return {
+          providerId: this.id,
+          ok: false,
+          text: null,
+          errorCode: (error && (error.code || error.type)) || "unknown",
+          latencyMs: Date.now() - startTime,
+          meta: {
+            error: error?.toString?.() || String(error),
+            details: error?.details,
+          },
+        };
+      }
+
       try {
-        await errorHandler.handleProviderError(error, this.id, {
-          operation: 'sendPrompt',
+        const recovery = await errorHandler.handleProviderError(error, this.id, {
+          providerId: this.id,
+          prompt: req.originalPrompt?.substring(0, 200),
+          operation: async () => {
+            return await this.sendPrompt(req, onChunk, signal, true);
+          },
         });
+        if (recovery) return recovery;
       } catch (handledError) {
         return {
           providerId: this.id,
@@ -156,7 +175,7 @@ export class GeminiAdapter {
     }
   }
 
-  async sendContinuation(prompt, providerContext, sessionId, onChunk, signal) {
+  async sendContinuation(prompt, providerContext, sessionId, onChunk, signal, _isRetry = false) {
     const startTime = Date.now();
     try {
       const meta = providerContext?.meta || providerContext || {};
@@ -252,10 +271,37 @@ export class GeminiAdapter {
         };
       }
 
+      if (_isRetry) {
+        return {
+          providerId: this.id,
+          ok: false,
+          text: null,
+          errorCode: (error && (error.code || error.type)) || "unknown",
+          latencyMs: Date.now() - startTime,
+          meta: {
+            error: error?.toString?.() || String(error),
+            details: error?.details,
+            cursor: providerContext?.cursor ?? providerContext?.meta?.cursor,
+          },
+        };
+      }
+
       try {
-        await errorHandler.handleProviderError(error, this.id, {
-          operation: 'sendContinuation',
+        const recovery = await errorHandler.handleProviderError(error, this.id, {
+          providerId: this.id,
+          prompt: prompt?.substring(0, 200),
+          operation: async () => {
+            return await this.sendContinuation(
+              prompt,
+              providerContext,
+              sessionId,
+              onChunk,
+              signal,
+              true,
+            );
+          },
         });
+        if (recovery) return recovery;
       } catch (handledError) {
         return {
           providerId: this.id,
