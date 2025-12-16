@@ -235,6 +235,7 @@ export function useChat() {
       synthesisProvider,
       mappingEnabled,
       mappingProvider,
+      refinerProvider,
       thinkOnChatGPT,
       powerUserMode,
       turnIds.length,

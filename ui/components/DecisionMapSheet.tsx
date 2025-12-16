@@ -680,7 +680,7 @@ export const DecisionMapSheet = React.memo(() => {
   const [openState, setOpenState] = useAtom(isDecisionMapOpenAtom);
   const turnGetter = useAtomValue(turnByIdAtom);
   const mappingProvider = useAtomValue(mappingProviderAtom);
-  const setRefinerProvider = useSetAtom(refinerProviderAtom);
+  const refinerProvider = useAtomValue(refinerProviderAtom);
   const setActiveSplitPanel = useSetAtom(activeSplitPanelAtom);
 
   const [activeTab, setActiveTab] = useState<'graph' | 'narrative' | 'options' | 'audit'>('graph');
@@ -731,10 +731,14 @@ export const DecisionMapSheet = React.memo(() => {
   // If no refiner PID is active locally, try to find one from the turn data
   useEffect(() => {
     if (aiTurn && !activeRefinerPid) {
+      if (refinerProvider) {
+        setActiveRefinerPid(refinerProvider);
+        return;
+      }
       const keys = Object.keys(aiTurn.refinerResponses || {});
       if (keys.length > 0) setActiveRefinerPid(keys[keys.length - 1]);
     }
-  }, [aiTurn, activeRefinerPid]);
+  }, [aiTurn, activeRefinerPid, refinerProvider]);
 
   const { output: refinerOutput, rawText: refinerRawText, providerId: currentRefinerPid } = useRefinerOutput(aiTurn?.id || null, activeRefinerPid);
 
@@ -959,7 +963,6 @@ export const DecisionMapSheet = React.memo(() => {
                   aiTurn={aiTurn}
                   activeProviderId={activeRefinerPid || undefined}
                   onSelect={(pid) => {
-                    setRefinerProvider(pid);
                     setActiveRefinerPid(pid);
                   }}
                 />

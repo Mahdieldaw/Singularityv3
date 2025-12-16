@@ -1,6 +1,6 @@
 import { useCallback } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
-import { turnsMapAtom, alertTextAtom, synthesisProviderAtom, mappingProviderAtom, refinerProviderAtom } from "../state/atoms";
+import { turnsMapAtom, alertTextAtom, synthesisProviderAtom, mappingProviderAtom } from "../state/atoms";
 import { useRoundActions } from "./useRoundActions";
 import type { AiTurn } from "../types";
 import { PRIMARY_STREAMING_PROVIDER_IDS } from "../constants";
@@ -9,7 +9,6 @@ export function useClipActions() {
   const turnsMap = useAtomValue(turnsMapAtom);
   const setSynthesisProvider = useSetAtom(synthesisProviderAtom);
   const setMappingProvider = useSetAtom(mappingProviderAtom);
-  const setRefinerProvider = useSetAtom(refinerProviderAtom);
   const setAlertText = useSetAtom(alertTextAtom);
   const setTurnsMap = useSetAtom(turnsMapAtom);
   const { runSynthesisForAiTurn, runMappingForAiTurn, runRefinerForAiTurn } = useRoundActions();
@@ -62,9 +61,6 @@ export function useClipActions() {
           setSynthesisProvider(providerId);
         } else if (type === "mapping") {
           setMappingProvider(providerId);
-        } else {
-          // Refiner
-          setRefinerProvider(providerId);
         }
 
         // If the selected provider is not present in the AI turn's batchResponses, add an optimistic
@@ -116,8 +112,7 @@ export function useClipActions() {
       setAlertText,
       setTurnsMap,
       setSynthesisProvider,
-      setMappingProvider,
-      setRefinerProvider
+      setMappingProvider
     ],
   );
 
