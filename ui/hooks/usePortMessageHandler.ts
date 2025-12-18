@@ -35,6 +35,8 @@ import api from "../services/extension-api";
 import type { TurnMessage, UserTurn, AiTurn, ProviderKey } from "../types";
 import { LLM_PROVIDERS_CONFIG } from "../constants";
 
+const PORT_DEBUG_UI = false;
+
 /**
  * CRITICAL: Step type detection must match backend stepId patterns
  * Backend generates: 'batch-<timestamp>', 'synthesis-<provider>-<timestamp>', 'mapping-<provider>-<timestamp>'
@@ -133,8 +135,11 @@ export function usePortMessageHandler() {
     (message: any) => {
       if (!message || !message.type) return;
 
-      // Reduce noise: do not dump full PARTIAL_RESULT objects repeatedly
-      if (message.type !== "PARTIAL_RESULT") {
+      if (
+        PORT_DEBUG_UI &&
+        message.type !== "PARTIAL_RESULT" &&
+        message.type !== "WORKFLOW_PROGRESS"
+      ) {
         console.log("[Port Handler]", message.type, message);
       }
 
