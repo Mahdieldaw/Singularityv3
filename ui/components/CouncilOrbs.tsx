@@ -376,134 +376,152 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
             )}
 
             {isMenuOpen && (
-                <div className="absolute left-1/2 -translate-x-1/2 bottom-[110%] bg-surface-raised border border-border-subtle rounded-xl shadow-elevated p-3 z-[100] min-w-[640px]">
+                <div className="absolute left-1/2 -translate-x-1/2 bottom-[110%] bg-surface-raised border border-border-subtle rounded-xl shadow-elevated p-3 z-[100] min-w-[500px] w-max max-w-[90vw]">
                     <div className="text-xs text-text-muted mb-2">Council Menu</div>
                     <div className="grid grid-cols-2 gap-4">
+                        {/* Synthesizer Dropdown */}
                         <div>
                             <div className="flex items-center gap-2 mb-2 text-sm"><span>👑</span><span>Synthesizer</span></div>
-                            <div className="flex flex-wrap gap-2">
+                            <select
+                                value={synthesisProvider || ""}
+                                onChange={(e) => {
+                                    const val = e.target.value;
+                                    if (val === "") {
+                                        setSynthesisProvider(null);
+                                        setProviderLock('synthesis', false);
+                                    } else {
+                                        handleSelectSynth(val);
+                                    }
+                                }}
+                                className="w-full bg-chip border border-border-subtle rounded-md px-2 py-1.5 text-xs text-text-primary outline-none focus:border-brand-500 transition-colors"
+                            >
+                                <option value="">None</option>
                                 {allProviders.map(p => {
                                     const pid = String(p.id);
-                                    const selected = String(synthesisProvider || '') === pid;
                                     const isUnauthorized = authStatus && authStatus[pid] === false;
                                     return (
-                                        <button
-                                            key={`s-${pid}`}
-                                            onClick={() => !isUnauthorized && handleSelectSynth(pid)}
-                                            disabled={isUnauthorized}
-                                            className={clsx("px-2 py-2 rounded-md text-xs border flex flex-col items-center gap-1 min-w-[96px]",
-                                                selected ? "bg-brand-500/15 border-brand-500 text-text-primary" : "bg-chip border-border-subtle text-text-secondary",
-                                                isUnauthorized && "opacity-50 cursor-not-allowed"
-                                            )}
-                                            title={isUnauthorized ? `Login required for ${p.name}` : undefined}
-                                        >
-                                            {selected && <span>👑</span>}
-                                            <span>{p.name}</span> {isUnauthorized ? "🔒" : ""}
-                                        </button>
+                                        <option key={`s-${pid}`} value={pid} disabled={isUnauthorized}>
+                                            {p.name} {isUnauthorized ? "(Locked)" : ""}
+                                        </option>
                                     );
                                 })}
-                            </div>
+                            </select>
                         </div>
+
+                        {/* Mapper Dropdown */}
                         <div>
                             <div className="flex items-center gap-2 mb-2 text-sm"><span>🧩</span><span>Mapper</span></div>
-                            <div className="flex flex-wrap gap-2">
+                            <select
+                                value={mapProviderVal || ""}
+                                onChange={(e) => {
+                                    const val = e.target.value;
+                                    if (val === "") {
+                                        setMapProvider(null);
+                                        setProviderLock('mapping', false);
+                                    } else {
+                                        handleSelectMap(val);
+                                    }
+                                }}
+                                className="w-full bg-chip border border-border-subtle rounded-md px-2 py-1.5 text-xs text-text-primary outline-none focus:border-brand-500 transition-colors"
+                            >
+                                <option value="">None</option>
                                 {allProviders.map(p => {
                                     const pid = String(p.id);
-                                    const selected = String(mapProviderVal || '') === pid;
                                     const isUnauthorized = authStatus && authStatus[pid] === false;
                                     return (
-                                        <button
-                                            key={`m-${pid}`}
-                                            onClick={() => !isUnauthorized && handleSelectMap(pid)}
-                                            disabled={isUnauthorized}
-                                            className={clsx("px-2 py-2 rounded-md text-xs border flex flex-col items-center gap-1 min-w-[96px]",
-                                                selected ? "bg-brand-500/15 border-brand-500 text-text-primary" : "bg-chip border-border-subtle text-text-secondary",
-                                                isUnauthorized && "opacity-50 cursor-not-allowed"
-                                            )}
-                                            title={isUnauthorized ? `Login required for ${p.name}` : undefined}
-                                        >
-                                            {selected && <span>🧩</span>}
-                                            <span>{p.name}</span> {isUnauthorized ? "🔒" : ""}
-                                        </button>
+                                        <option key={`m-${pid}`} value={pid} disabled={isUnauthorized}>
+                                            {p.name} {isUnauthorized ? "(Locked)" : ""}
+                                        </option>
                                     );
                                 })}
-                            </div>
+                            </select>
                         </div>
+
+                        {/* Composer Dropdown */}
                         <div>
                             <div className="flex items-center gap-2 mb-2 text-sm"><span>✏️</span><span>Composer</span></div>
-                            <div className="flex flex-wrap gap-2">
+                            <select
+                                value={composerVal || ""}
+                                onChange={(e) => {
+                                    const val = e.target.value;
+                                    if (val === "") {
+                                        setComposer(null);
+                                    } else {
+                                        handleSelectComposer(val);
+                                    }
+                                }}
+                                className="w-full bg-chip border border-border-subtle rounded-md px-2 py-1.5 text-xs text-text-primary outline-none focus:border-brand-500 transition-colors"
+                            >
+                                <option value="">None</option>
                                 {allProviders.map(p => {
                                     const pid = String(p.id);
-                                    const selected = String(composerVal || '') === pid;
                                     const isUnauthorized = authStatus && authStatus[pid] === false;
                                     return (
-                                        <button
-                                            key={`c-${pid}`}
-                                            onClick={() => !isUnauthorized && handleSelectComposer(pid)}
-                                            disabled={isUnauthorized}
-                                            className={clsx("px-2 py-2 rounded-md text-xs border flex flex-col items-center gap-1 min-w-[96px]",
-                                                selected ? "bg-brand-500/15 border-brand-500 text-text-primary" : "bg-chip border-border-subtle text-text-secondary",
-                                                isUnauthorized && "opacity-50 cursor-not-allowed"
-                                            )}
-                                            title={isUnauthorized ? `Login required for ${p.name}` : undefined}
-                                        >
-                                            {selected && <span>✏️</span>}
-                                            <span>{p.name}</span> {isUnauthorized ? "🔒" : ""}
-                                        </button>
+                                        <option key={`c-${pid}`} value={pid} disabled={isUnauthorized}>
+                                            {p.name} {isUnauthorized ? "(Locked)" : ""}
+                                        </option>
                                     );
                                 })}
-                            </div>
+                            </select>
                         </div>
+
+                        {/* Refiner Dropdown */}
                         <div>
                             <div className="flex items-center gap-2 mb-2 text-sm"><span>🔒</span><span>Refiner</span></div>
-                            <div className="flex flex-wrap gap-2">
+                            <select
+                                value={refinerProvider || ""}
+                                onChange={(e) => {
+                                    const val = e.target.value;
+                                    if (val === "") {
+                                        setRefinerProvider(null);
+                                    } else {
+                                        handleSelectRefiner(val);
+                                    }
+                                }}
+                                className="w-full bg-chip border border-border-subtle rounded-md px-2 py-1.5 text-xs text-text-primary outline-none focus:border-brand-500 transition-colors"
+                            >
+                                <option value="">None</option>
                                 {allProviders.map(p => {
                                     const pid = String(p.id);
-                                    const selected = String(refinerProvider || '') === pid;
                                     const isUnauthorized = authStatus && authStatus[pid] === false;
                                     return (
-                                        <button
-                                            key={`r-${pid}`}
-                                            onClick={() => !isUnauthorized && handleSelectRefiner(pid)}
-                                            disabled={isUnauthorized}
-                                            className={clsx("px-2 py-2 rounded-md text-xs border flex flex-col items-center gap-1 min-w-[96px]",
-                                                selected ? "bg-brand-500/15 border-brand-500 text-text-primary" : "bg-chip border-border-subtle text-text-secondary",
-                                                isUnauthorized && "opacity-50 cursor-not-allowed"
-                                            )}
-                                            title={isUnauthorized ? `Login required for ${p.name}` : undefined}
-                                        >
-                                            {selected && <span>🔒</span>}
-                                            <span>{p.name}</span> {isUnauthorized ? "🔒" : ""}
-                                        </button>
+                                        <option key={`r-${pid}`} value={pid} disabled={isUnauthorized}>
+                                            {p.name} {isUnauthorized ? "(Locked)" : ""}
+                                        </option>
                                     );
                                 })}
-                            </div>
+                            </select>
                         </div>
+
+                        {/* Analyst Dropdown */}
                         <div>
                             <div className="flex items-center gap-2 mb-2 text-sm"><span>🧠</span><span>Analyst</span></div>
-                            <div className="flex flex-wrap gap-2">
+                            <select
+                                value={analystVal || ""}
+                                onChange={(e) => {
+                                    const val = e.target.value;
+                                    if (val === "") {
+                                        setAnalyst(null);
+                                    } else {
+                                        handleSelectAnalyst(val);
+                                    }
+                                }}
+                                className="w-full bg-chip border border-border-subtle rounded-md px-2 py-1.5 text-xs text-text-primary outline-none focus:border-brand-500 transition-colors"
+                            >
+                                <option value="">None</option>
                                 {allProviders.map(p => {
                                     const pid = String(p.id);
-                                    const selected = String(analystVal || '') === pid;
                                     const isUnauthorized = authStatus && authStatus[pid] === false;
                                     return (
-                                        <button
-                                            key={`a-${pid}`}
-                                            onClick={() => !isUnauthorized && handleSelectAnalyst(pid)}
-                                            disabled={isUnauthorized}
-                                            className={clsx("px-2 py-2 rounded-md text-xs border flex flex-col items-center gap-1 min-w-[96px]",
-                                                selected ? "bg-brand-500/15 border-brand-500 text-text-primary" : "bg-chip border-border-subtle text-text-secondary",
-                                                isUnauthorized && "opacity-50 cursor-not-allowed"
-                                            )}
-                                            title={isUnauthorized ? `Login required for ${p.name}` : undefined}
-                                        >
-                                            {selected && <span>🧠</span>}
-                                            <span>{p.name}</span> {isUnauthorized ? "🔒" : ""}
-                                        </button>
+                                        <option key={`a-${pid}`} value={pid} disabled={isUnauthorized}>
+                                            {p.name} {isUnauthorized ? "(Locked)" : ""}
+                                        </option>
                                     );
                                 })}
-                            </div>
+                            </select>
                         </div>
+
+                        {/* Witness Section - Full Width */}
                         <div className="col-span-2">
                             <div className="flex items-center gap-2 mb-2 text-sm"><span>👁️</span><span>Witness</span></div>
                             <div className="flex flex-wrap gap-2">
@@ -516,9 +534,9 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
                                             key={`w-${pid}`}
                                             onClick={() => !isUnauthorized && setSelectedModels({ ...(selectedModels || {}), [pid]: !checked })}
                                             disabled={isUnauthorized}
-                                            className={clsx("px-2 py-1 rounded-md text-xs border",
-                                                checked ? "bg-brand-500/15 border-brand-500 text-text-primary" : "bg-chip border-border-subtle text-text-secondary",
-                                                isUnauthorized && "opacity-50 cursor-not-allowed"
+                                            className={clsx("px-2 py-1 rounded-md text-xs border transition-colors",
+                                                checked ? "bg-brand-500/15 border-brand-500 text-text-primary" : "bg-chip border-border-subtle text-text-secondary hover:bg-surface-highlight",
+                                                isUnauthorized && "opacity-50 cursor-not-allowed hover:bg-chip"
                                             )}
                                             title={isUnauthorized ? `Login required for ${p.name}` : undefined}
                                         >
@@ -530,7 +548,7 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
                         </div>
                     </div>
                     <div className="flex justify-end mt-3">
-                        <button onClick={() => setIsMenuOpen(false)} className="px-2 py-1 text-xs rounded-md bg-surface-highlight border border-border-subtle text-text-secondary">Close</button>
+                        <button onClick={() => setIsMenuOpen(false)} className="px-3 py-1.5 text-xs rounded-md bg-surface-highlight hover:bg-surface-raised border border-border-subtle text-text-secondary transition-colors">Close</button>
                     </div>
                 </div>
             )}

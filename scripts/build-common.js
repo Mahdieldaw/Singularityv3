@@ -21,6 +21,7 @@ async function buildAll(isProduction = false, generateMeta = false) {
                 "process.env.NODE_ENV": '"production"',
             },
             minify: true,
+            drop: ["console", "debugger"],
         }),
     };
 

@@ -40,13 +40,25 @@ function analyzeMetafile(metaPath, bundleName) {
     output += `  Bundle Size:  ${formatBytes(outputBytes)}\n`;
     output += `  Compression:  ${((outputBytes / totalInputBytes) * 100).toFixed(1)}%\n\n`;
 
-    output += `Top 30 Largest Modules:\n`;
+    output += `Top 100 Largest Modules:\n`;
     output += `${"─".repeat(80)}\n`;
 
-    inputs.slice(0, 30).forEach((item, idx) => {
+    inputs.slice(0, 100).forEach((item, idx) => {
         const percentage = ((item.bytes / totalInputBytes) * 100).toFixed(1);
         const sizeStr = formatBytes(item.bytes).padEnd(12);
         const pctStr = `${percentage}%`.padEnd(7);
+
+        // Try to get line count
+        let linesStr = "      ";
+        try {
+            if (fs.existsSync(item.path)) {
+                const content = fs.readFileSync(item.path, "utf8");
+                const lines = content.split("\n").length;
+                linesStr = `${lines}L`.padEnd(6);
+            }
+        } catch (e) {
+            // ignore errors
+        }
 
         // Shorten path for readability
         let displayPath = item.path;
@@ -59,7 +71,7 @@ function analyzeMetafile(metaPath, bundleName) {
             displayPath = displayPath.substring(displayPath.indexOf("src/"));
         }
 
-        output += `${(idx + 1).toString().padStart(3)}. ${sizeStr} (${pctStr}) ${displayPath}\n`;
+        output += `${(idx + 1).toString().padStart(3)}. ${sizeStr} ${linesStr} (${pctStr}) ${displayPath}\n`;
     });
 
     // Find packages
@@ -101,13 +113,25 @@ const bundles = [
     { file: "dist/analysis/meta-oi.json", name: "OI BUNDLE" },
 ];
 
+// Check for filter argument
+const filterArg = process.argv.find(arg => !arg.startsWith("--") && !arg.includes("analyze-bundle.js") && !arg.includes("node.exe"));
+const activeBundles = filterArg
+    ? bundles.filter(b => b.name.toLowerCase().includes(filterArg.toLowerCase()))
+    : bundles;
+
+if (filterArg && activeBundles.length === 0) {
+    console.log(`No bundles found matching filter: "${filterArg}"`);
+    console.log("Available bundles:", bundles.map(b => b.name).join(", "));
+    process.exit(0);
+}
+
 let fullReport = "";
 fullReport += `\n${"=".repeat(80)}\n`;
 fullReport += `BUNDLE SIZE ANALYSIS REPORT\n`;
 fullReport += `Generated: ${new Date().toLocaleString()}\n`;
 fullReport += `${"=".repeat(80)}\n`;
 
-bundles.forEach((bundle) => {
+activeBundles.forEach((bundle) => {
     fullReport += analyzeMetafile(bundle.file, bundle.name);
 });
 
