@@ -18,7 +18,7 @@ export const TrustIcon: React.FC<TrustIconProps> = ({ refiner, onClick, isActive
       onClick={onClick}
       className={`
         relative w-8 h-8 rounded-full flex items-center justify-center
-        transition-all duration-200 ml-2
+        transition-all duration-200 ml-4 shrink-0 z-40
         ${isActive ? 'bg-brand-500/15 text-brand-500' : 'bg-surface-raised text-text-secondary hover:bg-surface-highlight'}
       `}
       title="Trust signals — quick audit of this answer"

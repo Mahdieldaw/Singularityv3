@@ -688,14 +688,50 @@ export const DecisionMapSheet = React.memo(() => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [dims, setDims] = useState<{ w: number; h: number }>({ w: window.innerWidth, h: 400 });
   const [activeRefinerPid, setActiveRefinerPid] = useState<string | null>(null);
+  const [sheetHeightRatio, setSheetHeightRatio] = useState(0.5);
+  const resizeRef = useRef<{ active: boolean; startY: number; startRatio: number; moved: boolean }>({
+    active: false,
+    startY: 0,
+    startRatio: 0.5,
+    moved: false,
+  });
 
   // Reset to graph tab when sheet opens
   useEffect(() => {
     if (openState) {
       setActiveTab('graph');
       setSelectedNode(null);
+      setSheetHeightRatio(0.5);
     }
   }, [openState?.turnId]);
+
+  const handleResizePointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const min = 0.25;
+    const max = 0.9;
+    resizeRef.current = { active: true, startY: e.clientY, startRatio: sheetHeightRatio, moved: false };
+
+    const onMove = (ev: PointerEvent) => {
+      if (!resizeRef.current.active) return;
+      const delta = resizeRef.current.startY - ev.clientY;
+      if (Math.abs(delta) > 4) resizeRef.current.moved = true;
+      const next = resizeRef.current.startRatio + delta / Math.max(1, window.innerHeight);
+      const clamped = Math.min(max, Math.max(min, next));
+      setSheetHeightRatio(clamped);
+    };
+
+    const onUp = () => {
+      const moved = resizeRef.current.moved;
+      resizeRef.current.active = false;
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      if (!moved) setOpenState(null);
+    };
+
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  }, [setOpenState, sheetHeightRatio]);
 
   // Measure container dimensions after render and on resize
   useEffect(() => {
@@ -704,8 +740,7 @@ export const DecisionMapSheet = React.memo(() => {
       if (el) {
         setDims({ w: el.clientWidth, h: el.clientHeight });
       } else {
-        // Fallback to window-based calculation
-        setDims({ w: window.innerWidth, h: Math.floor(window.innerHeight * 0.7) - 100 });
+        setDims({ w: window.innerWidth, h: Math.floor(window.innerHeight * sheetHeightRatio) - 100 });
       }
     };
 
@@ -720,7 +755,7 @@ export const DecisionMapSheet = React.memo(() => {
       cancelAnimationFrame(raf);
       clearTimeout(timeout);
     };
-  }, [openState]);
+  }, [openState, sheetHeightRatio]);
 
   const aiTurn: AiTurn | null = useMemo(() => {
     const tid = openState?.turnId;
@@ -929,6 +964,8 @@ export const DecisionMapSheet = React.memo(() => {
     { key: 'audit' as const, label: 'Epistemic Audit', activeClass: 'decision-tab-active-audit' }
   ];
 
+  const sheetHeightPx = Math.max(260, Math.round(window.innerHeight * sheetHeightRatio));
+
   return (
     <AnimatePresence>
       {openState && (
@@ -937,14 +974,16 @@ export const DecisionMapSheet = React.memo(() => {
           animate={{ y: 0 }}
           exit={{ y: "100%" }}
           transition={{ type: "spring", damping: 25, stiffness: 300 }}
-          className="fixed inset-x-0 bottom-0 h-[70vh] decision-sheet-bg border-t border-border-strong shadow-elevated z-[3500] rounded-t-2xl flex flex-col pointer-events-auto"
+          className="fixed inset-x-0 bottom-0 decision-sheet-bg border-t border-border-strong shadow-elevated z-[3500] rounded-t-2xl flex flex-col pointer-events-auto"
+          style={{ height: sheetHeightPx }}
         >
           {/* Drag handle */}
-          <div
-            className="h-8 flex items-center justify-center cursor-grab active:cursor-grabbing border-b border-white/10 hover:bg-white/5 transition-colors rounded-t-2xl relative z-10"
-            onClick={() => setOpenState(null)}
-          >
-            <div className="w-12 h-1.5 bg-white/20 rounded-full" />
+          <div className="h-8 flex items-center justify-center border-b border-white/10 hover:bg-white/5 transition-colors rounded-t-2xl relative z-10">
+            <div className="flex-1 h-full cursor-ns-resize" onPointerDown={handleResizePointerDown} />
+            <button type="button" className="h-full px-6 cursor-pointer flex items-center justify-center" onClick={() => setOpenState(null)}>
+              <div className="w-12 h-1.5 bg-white/20 rounded-full" />
+            </button>
+            <div className="flex-1 h-full cursor-ns-resize" onPointerDown={handleResizePointerDown} />
           </div>
 
           {/* Header Row: Mapper Selector (Left) + Tabs (Center) */}

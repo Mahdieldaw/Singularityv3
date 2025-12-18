@@ -49,7 +49,7 @@ import { ReframingBanner } from "./refinerui/ReframingBanner";
 import { HeaderGuidance } from "./refinerui/HeaderGuidance";
 import { BottomLineCard } from "./refinerui/BottomLineCard";
 import { TrustIcon } from "./refinerui/TrustIcon";
-import { getStructuredAssessment, getGapCounts, getVerificationItems, shouldAutoOpenSidePanel } from "../utils/refiner-helpers";
+import { getStructuredAssessment, getGapCounts, getVerificationItems } from "../utils/refiner-helpers";
 
 // --- Helper Functions ---
 function parseMappingResponse(response?: string | null) {
@@ -452,30 +452,9 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
   const setToast = useSetAtom(toastAtom);
   const setActiveSplitPanel = useSetAtom(activeSplitPanelAtom);
   const activeSplitPanel = useAtomValue(activeSplitPanelAtom);
-  const hasAutoOpenedPane = useAtomValue(hasAutoOpenedPaneAtom);
-  const setHasAutoOpenedPane = useSetAtom(hasAutoOpenedPaneAtom);
   const setIsDecisionMapOpen = useSetAtom(isDecisionMapOpenAtom);
   const isDecisionMapOpen = useAtomValue(isDecisionMapOpenAtom);
   const [includePromptInCopy, setIncludePromptInCopy] = useAtom(includePromptInCopyAtom);
-
-  // Auto-open trust panel based on refiner output signals (place after setActiveSplitPanel declaration)
-  useEffect(() => {
-    try {
-      if (!refinerOutput) return;
-      // Only while this turn is actively streaming
-      if (!isThisTurnActive) return;
-      if (!shouldAutoOpenSidePanel(refinerOutput)) return;
-      // Only auto-open once per turn to avoid overriding user interactions
-      if (hasAutoOpenedPane === aiTurn.id) return;
-      // Do not override if user has the side panel open on this turn (any provider)
-      if (activeSplitPanel && activeSplitPanel.turnId === aiTurn.id) return;
-      // Open Trust panel
-      setActiveSplitPanel({ turnId: aiTurn.id, providerId: '__trust__' });
-      setHasAutoOpenedPane(aiTurn.id);
-    } catch {
-      // ignore
-    }
-  }, [refinerOutput, isThisTurnActive, aiTurn.id, activeSplitPanel, hasAutoOpenedPane, setActiveSplitPanel, setHasAutoOpenedPane]);
 
   // State for Claude artifact overlay
   const [selectedArtifact, setSelectedArtifact] = useState<{
@@ -689,6 +668,8 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
   const getOptions = useCallback((): string | null => {
     if (!activeMappingPid) return null;
     const take = getLatestResponse(mappingResponses[activeMappingPid]);
+    const fromMeta = (take as any)?.meta?.allAvailableOptions || null;
+    if (fromMeta) return String(fromMeta);
     const { options } = getMappingAndOptions(take);
     return options;
   }, [activeMappingPid, mappingResponses, getMappingAndOptions]);

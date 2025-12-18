@@ -9,7 +9,8 @@ import {
   isSplitOpenAtom,
   activeSplitPanelAtom,
   isDecisionMapOpenAtom,
-  splitPaneRatioAtom
+  splitPaneRatioAtom,
+  chatInputHeightAtom
 } from "../state/atoms";
 import { Panel, PanelGroup, PanelResizeHandle, ImperativePanelGroupHandle } from "react-resizable-panels";
 import clsx from "clsx";
@@ -39,6 +40,7 @@ export default function ChatView() {
   const isDecisionMapOpen = useAtomValue(isDecisionMapOpenAtom);
   const setDecisionMapOpen = useSetAtom(isDecisionMapOpenAtom);
   const splitPaneRatio = useAtomValue(splitPaneRatioAtom);
+  const chatInputHeight = useAtomValue(chatInputHeightAtom);
   const panelGroupRef = useRef<ImperativePanelGroupHandle>(null);
 
   // Sync split pane ratio to panel layout (for auto-open/widen)
@@ -207,7 +209,12 @@ export default function ChatView() {
       {showWelcome ? (
         <WelcomeScreen />
       ) : (
-        <PanelGroup ref={panelGroupRef} direction="horizontal" className="flex-1 h-full">
+        <PanelGroup
+          ref={panelGroupRef}
+          direction="horizontal"
+          className="flex-1 h-full"
+          style={{ paddingBottom: (chatInputHeight || 80) + 12 }}
+        >
           {/* LEFT: Main Thread */}
           <Panel defaultSize={60} minSize={35}>
             <Virtuoso
@@ -219,7 +226,7 @@ export default function ChatView() {
               increaseViewportBy={{ top: 300, bottom: 200 }}
               components={{
                 Scroller: ScrollerComponent as unknown as React.ComponentType<any>,
-                Footer: () => <div style={{ height: 160 }} /> // Spacer for absolute input
+                Footer: () => <div style={{ height: 24 }} />
               }}
               itemContent={itemContent}
               computeItemKey={(index, turnId) => turnId || `fallback-${index}`}
@@ -262,7 +269,6 @@ export default function ChatView() {
         className={clsx(
           "absolute left-1/2 -translate-x-1/2 max-w-[min(900px,calc(100%-24px))] z-[50] flex flex-col items-center pointer-events-none transition-opacity duration-300",
           showWelcome ? "bottom-[16px]" : "bottom-0",
-          isDecisionMapOpen && "opacity-0"
         )}
       >
         <ChatInput />

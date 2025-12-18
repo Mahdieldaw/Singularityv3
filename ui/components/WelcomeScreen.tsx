@@ -17,7 +17,7 @@ const WelcomeScreen = ({ onSendPrompt, isLoading }: WelcomeScreenProps) => {
   const providers = useMemo(() => LLM_PROVIDERS_CONFIG.filter(p => p.id !== "system"), []);
 
   return (
-    <div className="flex flex-col items-center justify-center h-full text-center p-10 relative">
+    <div className="flex flex-col items-center justify-center h-full text-center p-10 pb-40 relative">
       {/* Orb Icon */}
       <img
         src={logoIcon}

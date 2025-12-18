@@ -316,7 +316,7 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
                             hoveredOrb={hoveredOrb}
                             variant={variant as any}
                             disabled={authStatus && authStatus[String(activeVoiceObj.id)] === false}
-                            isSelected={true} // Voice is always selected/active
+                            isSelected={variant === "active" ? !!selectedModels[String(activeVoiceObj.id)] : undefined}
                             workflowStage={workflowProgress[String(activeVoiceObj.id)]?.stage}
                             workflowProgress={workflowProgress[String(activeVoiceObj.id)]?.progress}
                         />

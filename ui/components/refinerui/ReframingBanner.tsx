@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { RefinerOutput } from "../../shared/parsing-utils";
+import { RefinerOutput } from "../../../shared/parsing-utils";
 
 interface ReframingBannerProps {
     suggestion: NonNullable<RefinerOutput["reframingSuggestion"]>;

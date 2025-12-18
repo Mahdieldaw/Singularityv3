@@ -444,7 +444,7 @@ const ChatInput = ({
       )}
 
       {/* Main chat input container - wider to match/exceed synthesis bubble width */}
-      <div className="flex gap-2.5 items-center relative w-full max-w-[min(900px,calc(100%-24px))] p-3 bg-surface border border-border-subtle/60 rounded-t-2xl rounded-b-2xl flex-wrap z-[100] shadow-elevated">
+      <div className="flex gap-2 items-center relative w-full max-w-[min(900px,calc(100%-24px))] p-2.5 bg-surface border border-border-subtle/60 rounded-t-2xl rounded-b-2xl flex-wrap z-[100] shadow-elevated">
 
         {/* Targeted Mode Banner */}
         {activeTarget && (
@@ -475,7 +475,7 @@ const ChatInput = ({
                   : "Ask anything... Singularity will orchestrate multiple AI models for you."
             }
             rows={1}
-            className={`w-full min-h-[38px] px-3 py-2 bg-transparent border-none text-text-primary text-base font-inherit resize-none outline-none overflow-y-auto ${isReducedMotion ? '' : 'transition-all duration-200 ease-out'} placeholder:text-text-muted ${isNudgeFrozen ? 'opacity-50 cursor-not-allowed' : ''}`}
+            className={`w-full min-h-[34px] px-3 py-1.5 bg-transparent border-none text-text-primary text-[15px] font-inherit resize-none outline-none overflow-y-auto ${isReducedMotion ? '' : 'transition-all duration-200 ease-out'} placeholder:text-text-muted ${isNudgeFrozen ? 'opacity-50 cursor-not-allowed' : ''}`}
             onKeyDown={(e: React.KeyboardEvent<HTMLTextAreaElement>) => {
               if (e.key === "Enter" && !e.shiftKey && prompt.trim()) {
                 e.preventDefault();
@@ -573,7 +573,7 @@ const ChatInput = ({
             onMouseUp={handleMouseUp}
             onMouseLeave={handleMouseLeave}
             disabled={isDisabled}
-            className={`px-3.5 h-[38px] rounded-2xl text-white font-semibold cursor-pointer flex items-center gap-2 min-w-[90px] justify-center ${isDisabled ? 'opacity-50' : 'opacity-100'} bg-gradient-to-r from-brand-500 to-brand-400 ${isReducedMotion ? '' : 'transition-all duration-200 ease-out'}`}
+            className={`px-3 h-[34px] rounded-2xl text-white font-semibold cursor-pointer flex items-center gap-2 min-w-[84px] justify-center ${isDisabled ? 'opacity-50' : 'opacity-100'} bg-gradient-to-r from-brand-500 to-brand-400 ${isReducedMotion ? '' : 'transition-all duration-200 ease-out'}`}
           >
             {isLoading ? (
               <div className="loading-spinner"></div>
@@ -615,7 +615,7 @@ const ChatInput = ({
             type="button"
             onClick={() => onAbort?.()}
             title="Stop current workflow"
-            className={`px-3 h-[38px] bg-intent-danger/15 border border-intent-danger/45 rounded-2xl text-intent-danger font-semibold cursor-pointer flex items-center gap-2 min-w-[90px] justify-center ${isReducedMotion ? '' : 'transition-all duration-200 ease-out'}`}
+            className={`px-3 h-[34px] bg-intent-danger/15 border border-intent-danger/45 rounded-2xl text-intent-danger font-semibold cursor-pointer flex items-center gap-2 min-w-[84px] justify-center ${isReducedMotion ? '' : 'transition-all duration-200 ease-out'}`}
           >
             <span className="text-base">⏹️</span>
             <span>Stop</span>
@@ -635,7 +635,7 @@ const ChatInput = ({
             }}
             disabled={isLoading || mappingActive}
             title={mappingTooltip || "Mapping with selected models"}
-            className={`px-3 h-[38px] bg-chip-soft border border-border-subtle rounded-2xl text-text-secondary font-semibold cursor-pointer flex items-center gap-2 min-w-[110px] justify-center hover:bg-surface-highlight ${isLoading || mappingActive ? 'opacity-50' : 'opacity-100'} ${isReducedMotion ? '' : 'transition-all duration-200 ease-out'}`}
+            className={`px-3 h-[34px] bg-chip-soft border border-border-subtle rounded-2xl text-text-secondary font-semibold cursor-pointer flex items-center gap-2 min-w-[100px] justify-center hover:bg-surface-highlight ${isLoading || mappingActive ? 'opacity-50' : 'opacity-100'} ${isReducedMotion ? '' : 'transition-all duration-200 ease-out'}`}
           >
             <span className="text-base">🧩</span>
             <span>Mapping</span>
