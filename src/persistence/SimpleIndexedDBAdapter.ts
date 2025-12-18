@@ -148,9 +148,12 @@ export class SimpleIndexedDBAdapter {
         async (tx) => {
           const store = tx.objectStore(resolved);
           return new Promise<SimpleRecord>((resolve, reject) => {
-            const request = key
-              ? store.put(clonedValue, key)
-              : store.put(clonedValue);
+            // If the store has a keyPath defined, IndexedDB requires that we DO NOT provide
+            // an explicit key argument to put(). Passing a key would raise a DataError DOMException.
+            const hasKeyPath = (store as any).keyPath !== null && (store as any).keyPath !== undefined;
+            const request = hasKeyPath
+              ? store.put(clonedValue)
+              : (key ? store.put(clonedValue, key) : store.put(clonedValue));
             request.onsuccess = () => resolve(clonedValue);
             request.onerror = () => reject(request.error);
           });
