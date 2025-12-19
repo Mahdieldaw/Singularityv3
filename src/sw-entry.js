@@ -283,6 +283,44 @@ class FaultTolerantOrchestrator {
     });
   }
 
+  async _prefetchGeminiTokens(providerRegistry, providers, providerMeta) {
+    if (!providerRegistry) return;
+
+    const GEMINI_VARIANT_IDS = ['gemini', 'gemini-pro', 'gemini-exp'];
+    const targets = (providers || []).filter((pid) =>
+      GEMINI_VARIANT_IDS.includes(String(pid).toLowerCase()),
+    );
+
+    if (targets.length < 2) return;
+
+    const concurrencyLimit = Math.min(2, targets.length);
+    const queue = [...targets];
+
+    const worker = async () => {
+      while (queue.length > 0) {
+        const pid = queue.shift();
+        if (!pid) return;
+
+        try {
+          const controller = providerRegistry.getController(pid);
+          if (!controller?.geminiSession?._fetchToken) continue;
+
+          const jitterMs = 50 + Math.floor(Math.random() * 101);
+          await new Promise((resolve) => setTimeout(resolve, jitterMs));
+
+          const token = await controller.geminiSession._fetchToken();
+          if (!providerMeta[pid]) providerMeta[pid] = {};
+          providerMeta[pid]._prefetchedToken = token;
+        } catch (_) {
+        }
+      }
+    };
+
+    await Promise.all(
+      Array.from({ length: concurrencyLimit }, () => worker()),
+    );
+  }
+
   async executeParallelFanout(prompt, providers, options = {}) {
     // ... [Logic identical to original but using this.registry.get('providerRegistry')] ... 
     // Implementing purely to ensure availability
@@ -304,30 +342,7 @@ class FaultTolerantOrchestrator {
 
     const providerRegistry = this.registry.get('providerRegistry');
 
-    // Gemini Prefetch Logic
-    const GEMINI_VARIANT_IDS = ['gemini', 'gemini-pro', 'gemini-exp'];
-    const geminiProviders = providers.filter(pid =>
-      GEMINI_VARIANT_IDS.includes(String(pid).toLowerCase())
-    );
-
-    if (geminiProviders.length >= 2) {
-      console.log(`[Orchestrator] Prefetching ${geminiProviders.length} Gemini tokens`);
-      // ... (Prefetch logic omitted for brevity as it's provider-specific, but assuming it works)
-      // I will implement standard loop without prefetch optimization code block to save space unless critical
-      // Actually, I'll keep the loop but simplified.
-      for (let i = 0; i < geminiProviders.length; i++) {
-        const pid = geminiProviders[i];
-        const controller = providerRegistry?.getController(pid);
-        if (controller?.geminiSession?._fetchToken) {
-          try {
-            const token = await controller.geminiSession._fetchToken();
-            if (!providerMeta[pid]) providerMeta[pid] = {};
-            providerMeta[pid]._prefetchedToken = token;
-            if (i < geminiProviders.length - 1) await new Promise(resolve => setTimeout(resolve, 75));
-          } catch (e) { }
-        }
-      }
-    }
+    await this._prefetchGeminiTokens(providerRegistry, providers, providerMeta);
 
     const providerPromises = providers.map((providerId) => {
       return (async () => {

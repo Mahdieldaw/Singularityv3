@@ -142,25 +142,18 @@ export class PromptService {
         mappingResult?: { text: string } | null,
         extractedOptions?: string | null
     ): string {
-        // Filter out only the synthesizing model's own response from batch outputs
-        const filteredResults = sourceResults.filter((res) => {
-            const isSynthesizer = res.providerId === synthesisProvider;
-            return !isSynthesizer;
-        });
+        const otherResults = (sourceResults || [])
+            .filter((res) => res.providerId !== synthesisProvider)
+            .map(
+                (res) =>
+                    `**${(res.providerId || "UNKNOWN").toUpperCase()}:**\n${(res.text || "").trim()}`,
+            )
+            .join("\n\n");
 
-        const otherItems = filteredResults.map(
-            (res) =>
-                `**${(res.providerId || "UNKNOWN").toUpperCase()}:**\n${String(res.text)}`
-        );
-
-        const otherResults = otherItems.join("\n\n");
-        // Determine content for the two prompt sections
         const allOptionsBlock = extractedOptions || "(No options catalog available)";
-
-        // If we have extracted options, we rely on them and treat raw outputs as secondary/referenced
         const sourceContent = extractedOptions
             ? "(See Claims Inventory above)"
-            : otherResults;
+            : (otherResults || "(No other model outputs available)");
 
         return `Your task is to create a response to the user's prompt, leveraging the full landscape of approaches and insights, that could *only exist* because all of these models responded first to:
 

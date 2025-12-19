@@ -247,6 +247,22 @@ export class ConnectionHandler {
     let executeRequest = message.payload;
     let resolvedContext = null;
 
+    const VALID_TYPES = ["initialize", "extend", "recompute"];
+    if (!executeRequest || !VALID_TYPES.includes(executeRequest.type)) {
+      const errorMsg = `Invalid request type: ${executeRequest?.type}. Must be one of: ${VALID_TYPES.join(", ")}`;
+      console.error(`[ConnectionHandler] ${errorMsg}`);
+
+      try {
+        this.port.postMessage({
+          type: "WORKFLOW_COMPLETE",
+          sessionId: executeRequest?.sessionId || "unknown",
+          error: errorMsg,
+        });
+      } catch (_) { }
+
+      return;
+    }
+
     // Record activity
     try {
       if (

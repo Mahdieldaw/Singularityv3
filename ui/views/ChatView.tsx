@@ -1,4 +1,4 @@
-import React, { useMemo, useEffect, useRef } from "react";
+import React, { useMemo, useEffect, useRef, Suspense } from "react";
 import { Virtuoso, VirtuosoHandle } from "react-virtuoso";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import {
@@ -21,9 +21,13 @@ import WelcomeScreen from "../components/WelcomeScreen";
 import { useScrollPersistence } from "../hooks/useScrollPersistence";
 import { useChat } from "../hooks/useChat";
 import { SplitPaneRightPanel } from "../components/SplitPaneRightPanel";
-import { DecisionMapSheet } from "../components/DecisionMapSheet";
 import { CouncilOrbsVertical } from "../components/CouncilOrbsVertical";
 import { useSmartProviderDefaults } from "../hooks/useSmartProviderDefaults";
+
+// Lazy load DecisionMapSheet (named export adapter)
+const DecisionMapSheet = React.lazy(() => 
+  import("../components/DecisionMapSheet").then(module => ({ default: module.DecisionMapSheet }))
+);
 
 export default function ChatView() {
   const [turnIds] = useAtom(turnIdsAtom as any) as [string[], any];
@@ -263,7 +267,9 @@ export default function ChatView() {
       )}
 
       {/* Decision Map - Fixed Overlay */}
+      <Suspense fallback={null}>
       <DecisionMapSheet />
+      </Suspense>
 
       <div
         className={clsx(

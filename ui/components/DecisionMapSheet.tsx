@@ -19,26 +19,10 @@ import { formatDecisionMapForMd, formatGraphForMd } from "../utils/copy-format-u
 // ============================================================================
 
 import {
-  parseMappingResponse as sharedParseMappingResponse,
+  parseMappingResponse,
   extractGraphTopologyAndStrip,
   cleanOptionsText,
 } from "../../shared/parsing-utils";
-
-// Wrapper to maintain existing API (returns { mapping, options })
-function parseMappingResponse(response?: string | null) {
-  if (!response) return { mapping: "", options: null };
-  const result = sharedParseMappingResponse(response);
-  return { mapping: result.narrative, options: result.options };
-}
-
-// Wrapper to extract just the topology from raw text
-function extractGraphTopologyFromText(rawText?: string | null) {
-  if (!rawText) return null;
-  const { topology } = extractGraphTopologyAndStrip(rawText);
-  return topology;
-}
-
-
 
 import { useRefinerOutput } from "../hooks/useRefinerOutput";
 import { RefinerEpistemicAudit } from "./refinerui/RefinerCardsSection";
@@ -549,12 +533,6 @@ const MapperSelector: React.FC<MapperSelectorProps> = ({ aiTurn, activeProviderI
               const hasError = latestResp?.status === 'error';
               const errorMessage = hasError ? (latestResp?.meta?._rawError || "Failed") : null;
 
-              // Determine if we should disable interaction
-              // We disable if unauthorized, but maybe we allow retry on error? 
-              // User asked to "shortcircuit" if failed for input length.
-              // We'll show it as disabled-ish but maybe clickable if they really want to try? 
-              // User said "failed for input length... grey them out with a tooltip".
-
               const isDisabled = isUnauthorized; // Strict disable for auth
               const isDimmed = hasError; // Visual dim for error
 
@@ -812,15 +790,17 @@ export const DecisionMapSheet = React.memo(() => {
     const fromMeta = latestMapping?.meta?.graphTopology || null;
     if (fromMeta) return fromMeta;
     const rawText = latestMapping?.text || null;
-    return extractGraphTopologyFromText(rawText);
+    // USE SHARED UTILS (Renamed call to match import)
+    return extractGraphTopologyAndStrip(rawText || '').topology;
   }, [latestMapping]);
 
   const adapted = useMemo(() => adaptGraphTopology(graphTopology), [graphTopology]);
 
   const mappingText = useMemo(() => {
     const t = latestMapping?.text || '';
-    const { mapping } = parseMappingResponse(String(t));
-    return mapping;
+    // USE SHARED PARSER
+    const { narrative } = parseMappingResponse(String(t));
+    return narrative;
   }, [latestMapping]);
 
   const optionsText = useMemo(() => {
@@ -830,12 +810,13 @@ export const DecisionMapSheet = React.memo(() => {
       return cleanOptionsText(fromMeta);
     }
     const t = latestMapping?.text || '';
+    // USE SHARED PARSER
     const { options } = parseMappingResponse(String(t));
     return options;
   }, [latestMapping]);
 
   const parsedThemes = useMemo(() => {
-    const themes = parseOptionsIntoThemes(optionsText);
+    const themes = parseOptionsIntoThemes(optionsText || '');
 
     // Merge in refiner-found unlisted options
     if (refinerOutput?.mapperAudit?.unlistedOptions?.length) {
@@ -1178,4 +1159,3 @@ export const DecisionMapSheet = React.memo(() => {
     </AnimatePresence>
   );
 });
-

@@ -696,6 +696,8 @@ export class WorkflowEngine {
         workflowId: request.workflowId,
         error: "A critical error occurred.",
       });
+
+      clearDeltaCache(context?.sessionId);
     }
   }
 
