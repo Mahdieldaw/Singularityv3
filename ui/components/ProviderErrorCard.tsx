@@ -2,7 +2,7 @@
 import React from 'react';
 import type { ProviderError } from '@shared/contract';
 import { ERROR_DISPLAY_TEXT } from '../constants/errorMessages';
-import { PROVIDER_COLORS } from '../constants';
+import { getProviderColor } from '../utils/provider-helpers';
 import clsx from 'clsx';
 
 interface ProviderErrorCardProps {
@@ -21,7 +21,7 @@ export const ProviderErrorCard: React.FC<ProviderErrorCardProps> = ({
   onDismiss,
 }) => {
   const displayInfo = ERROR_DISPLAY_TEXT[(error?.type as keyof typeof ERROR_DISPLAY_TEXT) || 'unknown'] || ERROR_DISPLAY_TEXT.unknown;
-  const providerColor = PROVIDER_COLORS[providerId] || PROVIDER_COLORS.default;
+  const providerColor = getProviderColor(providerId);
 
   return (
     <div

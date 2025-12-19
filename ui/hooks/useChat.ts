@@ -516,7 +516,7 @@ export function useChat() {
           // Compose Mode: Run Composer
           // Note: In new flow, we don't automatically pass critique unless we chain it. 
           // For now, simple run.
-          const result = await api.runComposer(draftPrompt, context, composerModel);
+          const result = await api.runComposer(draftPrompt, context, composerModel ?? undefined);
 
           if (result) {
             const snippet = (result.refinedPrompt || "").slice(0, 60).trim();
@@ -545,7 +545,7 @@ export function useChat() {
             effectiveOriginal, // User Intent
             context,
             candidatePrompt, // The Text to Analyze
-            analystModel,
+            analystModel ?? undefined,
             effectiveOriginal
           );
 

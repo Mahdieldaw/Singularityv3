@@ -1,8 +1,13 @@
-import { getProviderById } from "../providers/providerRegistry";
+import {
+  getProviderConfig,
+  getProviderLogo,
+  getProviderName,
+} from "../utils/provider-helpers";
 
 export const ProviderPill = ({ id }: { id: string }) => {
-  const prov = getProviderById(id);
-  const name = prov?.name || id || "Unknown";
+  const prov = getProviderConfig(id);
+  const name = getProviderName(id);
+  const logoSrc = getProviderLogo(id);
 
   return (
     <span
@@ -11,9 +16,9 @@ export const ProviderPill = ({ id }: { id: string }) => {
                  rounded text-text-secondary font-medium leading-[1.2]
                  flex items-center gap-1"
     >
-      {prov?.logoSrc ? (
+      {logoSrc ? (
         <img
-          src={prov.logoSrc}
+          src={logoSrc}
           alt={name}
           className="w-3 h-3 rounded object-contain"
         />

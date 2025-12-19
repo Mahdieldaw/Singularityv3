@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useAtomValue } from "jotai";
 import { composerModelAtom, analystModelAtom } from "../state/atoms";
-import { LLM_PROVIDERS_CONFIG } from "../constants";
+import { getProviderName } from "../utils/provider-helpers";
 
 interface NudgeChipBarProps {
     type: "sending" | "idle";
@@ -24,8 +24,8 @@ const NudgeChipBar: React.FC<NudgeChipBarProps> = ({
     const composerModelId = useAtomValue(composerModelAtom);
     const analystModelId = useAtomValue(analystModelAtom);
 
-    const composerModelName = LLM_PROVIDERS_CONFIG.find(p => p.id === composerModelId)?.name || composerModelId || "Gemini";
-    const analystModelName = LLM_PROVIDERS_CONFIG.find(p => p.id === analystModelId)?.name || analystModelId || "Gemini";
+    const composerModelName = getProviderName(composerModelId || "gemini");
+    const analystModelName = getProviderName(analystModelId || "gemini");
 
     useEffect(() => {
         if (visible) {

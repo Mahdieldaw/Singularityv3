@@ -271,56 +271,45 @@ export function parseMappingResponse(response: string | null | undefined): {
 // REFINER OUTPUT PARSING
 // ============================================================================
 
+export type SignalType = "divergence" | "overclaim" | "gap" | "blindspot";
+export type SignalPriority = "blocker" | "risk" | "enhancement";
+export type NextStepAction = "proceed" | "verify" | "reframe" | "research";
+
+export interface Signal {
+    type: SignalType;
+    priority: SignalPriority;
+    content: string;
+    source: string;
+    impact: string;
+}
+
 export interface RefinerOutput {
-    confidenceScore: number;
-    rationale: string;
-    presentationStrategy: string;
-    strategyRationale: string;
+    signals: Signal[];
 
-    verificationTriggers?: {
-        required: boolean;
-        reason?: string;
-        items: Array<{ claim: string; why: string; sourceType: string }>;
-    };
-
-    reframingSuggestion?: {
-        issue: string;
-        betterQuestion: string;
-        unlocks: string;
-    };
-
-    synthesisAccuracy?: {
-        preserved: string[];
-        overclaimed: string[];
-        // Updated to structured format while maintaining backward compat where possible
-        missed: Array<{ insight: string; source: string; inMapperOptions: boolean }>;
-    };
-
-    gaps: Array<{
+    unlistedOptions: Array<{
         title: string;
-        explanation: string;
-        category?: 'foundational' | 'tactical';
+        description: string;
+        source: string;
     }>;
 
-    metaPattern?: string;
+    nextStep: {
+        action: NextStepAction;
+        target: string;
+        why: string;
+    } | null;
 
-    honestAssessment: {
-        reliabilitySummary: string;
-        biggestRisk: string;
-        recommendedNextStep: string;
-    } | string;
-
-    mapperAudit?: {
-        complete: boolean;
-        unlistedOptions: Array<{ title: string; description: string; source: string }>;
-    };
+    reframe: {
+        issue: string;
+        suggestion: string;
+        unlocks: string;
+    } | null;
 
     // rawText is essential for UI display
     rawText?: string;
 }
 
 /**
- * Parse Refiner output from markdown text
+ * Parse Refiner output from markdown text or JSON
  */
 export function parseRefinerOutput(text: string): RefinerOutput {
     if (!text || typeof text !== 'string') {
@@ -337,32 +326,24 @@ export function parseRefinerOutput(text: string): RefinerOutput {
 
     // 2. Fallback to Regex extraction with robust patterns
     return {
-        confidenceScore: extractConfidenceScore(normalized),
-        rationale: extractRationale(normalized),
-        presentationStrategy: extractPresentationStrategy(normalized),
-        strategyRationale: extractStrategyRationale(normalized),
-        verificationTriggers: extractVerificationTriggers(normalized),
-        reframingSuggestion: extractReframingSuggestion(normalized),
-        synthesisAccuracy: extractSynthesisAccuracy(normalized),
-        gaps: extractGaps(normalized),
-        metaPattern: extractMetaPattern(normalized),
-        honestAssessment: extractHonestAssessment(normalized),
-        mapperAudit: extractMapperAudit(normalized),
+        signals: extractSignals(normalized),
+        unlistedOptions: extractUnlistedOptions(normalized),
+        nextStep: extractNextStep(normalized),
+        reframe: extractReframe(normalized),
         rawText: text,
     };
 }
 
 function createEmptyRefinerOutput(rawText: string = ''): RefinerOutput {
     return {
-        confidenceScore: 0.5,
-        rationale: 'No refiner output available',
-        presentationStrategy: 'confident_with_caveats',
-        strategyRationale: '',
-        gaps: [],
-        honestAssessment: '',
+        signals: [],
+        unlistedOptions: [],
+        nextStep: null,
+        reframe: null,
         rawText,
     };
 }
+
 
 // ============================================================================
 // JSON PARSING (FALLBACK)
@@ -411,65 +392,59 @@ function tryParseJsonRefinerOutput(text: string): Omit<RefinerOutput, 'rawText'>
 }
 
 function normalizeRefinerObject(parsed: any): Omit<RefinerOutput, 'rawText'> | null {
-    // Validate it looks like a refiner output
-    if (!('confidenceScore' in parsed) && !('honestAssessment' in parsed) && !('presentationStrategy' in parsed)) {
+    // Validate it looks like a refiner output (new structure uses signals)
+    if (!('signals' in parsed) && !('nextStep' in parsed) && !('reframe' in parsed)) {
         return null;
     }
 
-    // Normalize synthesisAccuracy.missed from array to structured format
-    let synthesisAccuracy = parsed.synthesisAccuracy;
-    if (synthesisAccuracy?.missed) {
-        if (Array.isArray(synthesisAccuracy.missed)) {
-            // Check if it's already structured or string
-            synthesisAccuracy = {
-                ...synthesisAccuracy,
-                missed: synthesisAccuracy.missed.map((item: any) => {
-                    if (typeof item === 'string') {
-                        return { insight: item, source: 'unknown', inMapperOptions: false };
-                    }
-                    return item;
-                })
-            };
-        }
+    // Normalize signals array
+    const signals: Signal[] = Array.isArray(parsed.signals)
+        ? parsed.signals.map((s: any) => ({
+            type: s.type || 'gap',
+            priority: s.priority || 'enhancement',
+            content: String(s.content || ''),
+            source: String(s.source || ''),
+            impact: String(s.impact || '')
+        }))
+        : [];
+
+    // Normalize unlistedOptions
+    const unlistedOptions = Array.isArray(parsed.unlistedOptions)
+        ? parsed.unlistedOptions.map((opt: any) => ({
+            title: String(opt.title || ''),
+            description: String(opt.description || ''),
+            source: String(opt.source || '')
+        }))
+        : [];
+
+    // Normalize nextStep
+    let nextStep: RefinerOutput['nextStep'] = null;
+    if (parsed.nextStep && typeof parsed.nextStep === 'object') {
+        nextStep = {
+            action: parsed.nextStep.action || 'proceed',
+            target: String(parsed.nextStep.target || ''),
+            why: String(parsed.nextStep.why || '')
+        };
     }
 
-    // Normalize honestAssessment
-    let honestAssessment: RefinerOutput['honestAssessment'] = '';
-    if (parsed.honestAssessment) {
-        if (typeof parsed.honestAssessment === 'string') {
-            honestAssessment = parsed.honestAssessment;
-        } else if (typeof parsed.honestAssessment === 'object') {
-            honestAssessment = {
-                reliabilitySummary: String(parsed.honestAssessment.reliabilitySummary || ''),
-                biggestRisk: String(parsed.honestAssessment.biggestRisk || ''),
-                recommendedNextStep: String(parsed.honestAssessment.recommendedNextStep || '')
-            };
-        }
-    }
-
-    // Normalize verificationTriggers
-    let verificationTriggers = parsed.verificationTriggers;
-    if (Array.isArray(verificationTriggers)) {
-        verificationTriggers = {
-            required: verificationTriggers.length > 0,
-            items: verificationTriggers
+    // Normalize reframe
+    let reframe: RefinerOutput['reframe'] = null;
+    if (parsed.reframe && typeof parsed.reframe === 'object') {
+        reframe = {
+            issue: String(parsed.reframe.issue || ''),
+            suggestion: String(parsed.reframe.suggestion || ''),
+            unlocks: String(parsed.reframe.unlocks || '')
         };
     }
 
     return {
-        confidenceScore: typeof parsed.confidenceScore === 'number' ? parsed.confidenceScore : 0.5,
-        rationale: parsed.rationale || '',
-        presentationStrategy: parsed.presentationStrategy || 'confident_with_caveats',
-        strategyRationale: parsed.strategyRationale || '',
-        gaps: Array.isArray(parsed.gaps) ? parsed.gaps : [],
-        honestAssessment,
-        metaPattern: parsed.metaPattern,
-        synthesisAccuracy,
-        verificationTriggers,
-        reframingSuggestion: parsed.reframingSuggestion,
-        mapperAudit: parsed.mapperAudit
+        signals,
+        unlistedOptions,
+        nextStep,
+        reframe
     };
 }
+
 
 // ============================================================================
 // CORE HELPERS (Extracted from parsed.ts)
@@ -683,285 +658,208 @@ function extractStrategyRationale(text: string): string {
     return extractLabeledValue(section, 'why') || '';
 }
 
-function extractVerificationTriggers(text: string): RefinerOutput['verificationTriggers'] {
-    const section = extractSection(text, 'Verification Triggers');
-    if (!section) return undefined;
+// ============================================================================
+// DEPRECATED EXTRACT FUNCTIONS REMOVED
+// The following functions were removed as they referenced fields no longer
+// in the new signal-based RefinerOutput structure:
+// - extractVerificationTriggers
+// - extractReframingSuggestion  
+// - extractSynthesisAccuracy
+// - extractGaps
+// - extractMetaPattern
+// - extractHonestAssessment
+// - extractMapperAudit
+// ============================================================================
 
-    // Check for "none required" case
-    if (/none\s+(?:required|needed)|not\s+required|no\s+verification/i.test(section)) {
-        return {
-            required: false,
-            reason: section.replace(/\*\*/g, '').trim(),
-            items: [],
-        };
+// ============================================================================
+// NEW SIGNAL-BASED EXTRACTORS
+// ============================================================================
+
+/**
+ * Extract signals from freeform text.
+ * Looks for patterns like:
+ * - **[BLOCKER]** Type: Content
+ * - ⚠️ Divergence: Content
+ * - Signal sections with type/priority/content
+ */
+function extractSignals(text: string): Signal[] {
+    const signals: Signal[] = [];
+
+    // Try to extract from a "Signals" section
+    const signalsSection = extractSection(text, 'Signals');
+    const textToSearch = signalsSection || text;
+
+    // Pattern 1: **[PRIORITY]** Type: Content — Source — Impact
+    const patternWithBrackets = /\*\*\[(blocker|risk|enhancement)\]\*\*\s*(divergence|overclaim|gap|blindspot)[:\s]+([^—\n]+)(?:[—\-]+\s*source[:\s]*([^—\n]+))?(?:[—\-]+\s*impact[:\s]*([^\n]+))?/gi;
+    let match;
+    while ((match = patternWithBrackets.exec(textToSearch)) !== null) {
+        signals.push({
+            priority: match[1].toLowerCase() as SignalPriority,
+            type: match[2].toLowerCase() as SignalType,
+            content: match[3].trim(),
+            source: (match[4] || '').trim(),
+            impact: (match[5] || '').trim()
+        });
     }
 
-    const items: Array<{ claim: string; why: string; sourceType: string }> = [];
+    // Pattern 2: Emoji-prefixed lines: Content after warning/lightbulb emoji
+    if (signals.length === 0) {
+        // Use unicode ranges for emoji detection instead of literal emojis in regex
+        const lines = textToSearch.split('\n');
+        for (const line of lines) {
+            // Check if line starts with an emoji (warning, lightbulb, or hole)
+            if (/^[\u26A0\u{1F4A1}\u{1F573}]/u.test(line) || /^[⚠💡]/.test(line)) {
+                const content = line.replace(/^[\u26A0\uFE0F\u{1F4A1}\u{1F573}⚠💡🕳️]+\s*/u, '').trim();
+                if (content.length > 5) {
+                    // Infer type from content keywords
+                    let type: SignalType = 'gap';
+                    if (/diverge|disagree|conflict|differ/i.test(line)) type = 'divergence';
+                    if (/overclaim|overstat|exagger/i.test(line)) type = 'overclaim';
+                    if (/blind|miss|omit/i.test(line)) type = 'blindspot';
 
-    // Split by double newline OR by **Claim** headers
-    const blocks = section.split(/\n\s*\n+|(?=\*\*Claim\*\*)/i).filter(b => b.trim());
-
-    for (const block of blocks) {
-        // Extract claim - handle quoted and unquoted
-        let claim = extractLabeledValue(block, 'claim') || '';
-        claim = claim.replace(/^[""]|[""]$/g, ''); // Strip quotes
-
-        const why = extractLabeledValue(block, 'why') || '';
-        const sourceType = extractLabeledValue(block, 'source(?:\\s+type)?') || '';
-
-        if (claim || why) {
-            items.push({ claim, why, sourceType });
+                    signals.push({
+                        priority: 'enhancement',
+                        type,
+                        content,
+                        source: '',
+                        impact: ''
+                    });
+                }
+            }
         }
     }
 
+
+    // Pattern 3: List items with priority markers
+    if (signals.length === 0) {
+        const listPattern = /[-*•]\s*(?:\*\*)?(blocker|risk|enhancement)?(?:\*\*)?\s*[:\-]?\s*([^\n]+)/gi;
+        while ((match = listPattern.exec(textToSearch)) !== null) {
+            const priority = (match[1] || 'enhancement').toLowerCase() as SignalPriority;
+            const content = match[2].trim();
+
+            if (content.length > 10) { // Skip very short items
+                signals.push({
+                    priority,
+                    type: 'gap',
+                    content,
+                    source: '',
+                    impact: ''
+                });
+            }
+        }
+    }
+
+    return signals;
+}
+
+/**
+ * Extract unlisted options from freeform text.
+ */
+function extractUnlistedOptions(text: string): RefinerOutput['unlistedOptions'] {
+    const section = extractSection(text, 'Unlisted Options') ||
+        extractSection(text, 'Additional Options') ||
+        extractSection(text, 'Mapper Audit');
+
+    if (!section) return [];
+
+    const options: RefinerOutput['unlistedOptions'] = [];
+
+    // Pattern: - **Title**: Description (Source)
+    const pattern = /[-*•]\s*\*?\*?([^*:\n]+)\*?\*?[:\s]+([^(\n]+)(?:\(([^)]+)\))?/gi;
+    let match;
+    while ((match = pattern.exec(section)) !== null) {
+        options.push({
+            title: match[1].trim(),
+            description: match[2].trim(),
+            source: (match[3] || '').trim()
+        });
+    }
+
+    return options;
+}
+
+/**
+ * Extract next step recommendation from freeform text.
+ */
+function extractNextStep(text: string): RefinerOutput['nextStep'] {
+    const section = extractSection(text, 'Next Step') ||
+        extractSection(text, 'Recommended Next Step') ||
+        extractSection(text, 'Action');
+
+    if (!section) return null;
+
+    // Try to extract structured format
+    const actionMatch = section.match(/\*?\*?(proceed|verify|reframe|research)\*?\*?[:\s]+(.+)/i);
+
+    if (actionMatch) {
+        const action = actionMatch[1].toLowerCase() as NextStepAction;
+        const rest = actionMatch[2].trim();
+
+        // Try to split into target and why
+        const whyMatch = rest.match(/(.+?)(?:\s*[—\-]+\s*(?:because|why)[:\s]*(.+))?$/i);
+
+        return {
+            action,
+            target: whyMatch?.[1]?.trim() || rest,
+            why: whyMatch?.[2]?.trim() || ''
+        };
+    }
+
+    // Fallback: use first sentence as target
+    const firstSentence = section.split(/[.!?]\s/)[0];
+
+    // Infer action from keywords
+    let action: NextStepAction = 'proceed';
+    if (/verify|check|confirm|validate/i.test(section)) action = 'verify';
+    if (/reframe|rephrase|reconsider/i.test(section)) action = 'reframe';
+    if (/research|investigate|explore|look into/i.test(section)) action = 'research';
+
     return {
-        required: items.length > 0,
-        items,
+        action,
+        target: firstSentence?.trim() || section.slice(0, 100),
+        why: ''
     };
 }
 
-function extractReframingSuggestion(text: string): RefinerOutput['reframingSuggestion'] {
-    const section = extractSection(text, 'Reframing Suggestion');
-    if (!section) return undefined;
+/**
+ * Extract reframe suggestion from freeform text.
+ */
+function extractReframe(text: string): RefinerOutput['reframe'] {
+    const section = extractSection(text, 'Reframe') ||
+        extractSection(text, 'Reframing Suggestion') ||
+        extractSection(text, 'Better Question');
+
+    if (!section) return null;
 
     // Check for skip indicators
     if (/omit|n\/a|not\s+(?:needed|required|applicable)|query\s+(?:is\s+)?(?:fine|good|ok)/i.test(section)
         && section.length < 100) {
-        return undefined;
+        return null;
     }
 
-    const issue = extractLabeledValue(section, 'issue');
-    const betterQuestion = extractLabeledValue(section, 'better question');
-    const unlocks = extractLabeledValue(section, 'unlocks');
+    const issue = extractLabeledValue(section, 'issue') || '';
+    const suggestion = extractLabeledValue(section, 'suggestion') ||
+        extractLabeledValue(section, 'better question') || '';
+    const unlocks = extractLabeledValue(section, 'unlocks') || '';
 
-    if (!betterQuestion) return undefined;
-
-    return {
-        issue: issue || '',
-        betterQuestion: betterQuestion.replace(/^[""]|[""]$/g, ''),
-        unlocks: unlocks || '',
-    };
-}
-
-function extractSynthesisAccuracy(text: string): RefinerOutput['synthesisAccuracy'] {
-    const section = extractSection(text, 'Synthesis Accuracy');
-    if (!section) return undefined;
-
-    // Helper to get subsection content
-    function getSubsectionContent(label: string): string {
-        // Try **Label**: content (until next **Label** or end)
-        const pattern = new RegExp(
-            `\\*\\*${label}\\*\\*[:\\s]*([\\s\\S]*?)(?=\\*\\*(?:Preserved|Overclaimed|Missed)|$)`,
-            'i'
-        );
-        const match = section.match(pattern);
-        return match?.[1]?.trim() || '';
-    }
-
-    const preservedRaw = getSubsectionContent('Preserved');
-    const overclaimedRaw = getSubsectionContent('Overclaimed');
-    // Handle both "Missed" and "Missed from synthesis"
-    const missedRaw = getSubsectionContent('Missed(?:\\s+from\\s+synthesis)?');
-
-    // Parse preserved/overclaimed - can be paragraph or list
-    const preserved = parseListOrParagraph(preservedRaw);
-    const overclaimed = parseListOrParagraph(overclaimedRaw);
-
-    // Parse missed - extract source attribution
-    const missed: Array<{ insight: string; source: string; inMapperOptions: boolean }> = [];
-    const missedItems = parseList(missedRaw);
-
-    for (const item of missedItems) {
-        // Format 1: **Model's** point about X
-        const modelPossessive = item.match(/^\*?\*?([A-Za-z]+(?:\s+[A-Za-z]+)?)'s\*?\*?\s+(.+)$/i);
-        if (modelPossessive) {
-            missed.push({
-                insight: modelPossessive[2].trim(),
-                source: modelPossessive[1].trim(),
-                inMapperOptions: false,
-            });
-            continue;
+    if (!suggestion) {
+        // Try to get the main content as suggestion
+        const mainContent = section.replace(/^\s*\*?\*?issue\*?\*?[:\s]*.*/im, '')
+            .replace(/^\s*\*?\*?unlocks\*?\*?[:\s]*.*/im, '')
+            .trim();
+        if (mainContent) {
+            return {
+                issue,
+                suggestion: mainContent.replace(/^[""]|[""]$/g, ''),
+                unlocks
+            };
         }
-
-        // Format 2: **Title** (Model N, in/not in options): Description
-        const structured = item.match(/^\*?\*?([^*()]+)\*?\*?\s*\(([^)]+)\)[:\s]*(.+)$/);
-        if (structured) {
-            const sourceInfo = structured[2];
-            const inMapperOptions = /in\s+(?:mapper\s+)?options/i.test(sourceInfo) &&
-                !/not\s+in/i.test(sourceInfo);
-            missed.push({
-                insight: structured[1].trim() + ': ' + structured[3].trim(),
-                source: sourceInfo.replace(/,?\s*(not\s+)?in\s+(?:mapper\s+)?options/i, '').trim(),
-                inMapperOptions,
-            });
-            continue;
-        }
-
-        // Fallback: plain text
-        missed.push({
-            insight: item.replace(/^\*\*|\*\*$/g, '').trim(),
-            source: 'unknown',
-            inMapperOptions: false,
-        });
-    }
-
-    if (!preserved.length && !overclaimed.length && !missed.length) {
-        return undefined;
-    }
-
-    return { preserved, overclaimed, missed };
-}
-
-function extractGaps(text: string): RefinerOutput['gaps'] {
-    const section = extractSection(text, 'Gap Detection');
-    if (!section) return [];
-
-    // Check for "no gaps" case
-    if (/unusually\s+complete|no\s+gaps?\s+(?:found|identified|detected)/i.test(section)) {
-        return [];
-    }
-
-    const gaps: Array<{ title: string; explanation: string; category?: 'foundational' | 'tactical' }> = [];
-
-    // Format 1: **Gap N [category]: Title**\nExplanation (multi-line with category)
-    const multiLineWithCategory = /\*\*gap\s+\d+\s*\[(foundational|tactical)\][:\s]*([^*\n]+)\*\*\s*\n+([^\n*]+(?:\n(?!\*\*gap|\n\n|---|##)[^\n*]*)*)/gi;
-
-    let match;
-    while ((match = multiLineWithCategory.exec(section)) !== null) {
-        gaps.push({
-            category: match[1].toLowerCase() as 'foundational' | 'tactical',
-            title: match[2].trim(),
-            explanation: match[3].trim().replace(/\s+/g, ' '),
-        });
-    }
-
-    // Format 2: **Gap N: Title** — Explanation (no category, with em-dash separator)
-    if (gaps.length === 0) {
-        const withEmDash = /\*\*gap\s+\d+[:\s]*([^*—\-]+)\*\*\s*[—\-]+\s*([^\n]+(?:\n(?!\*\*gap|\n\n|---|##)[^\n]*)*)/gi;
-        while ((match = withEmDash.exec(section)) !== null) {
-            gaps.push({
-                title: match[1].trim(),
-                explanation: match[2].trim().replace(/\s+/g, ' '),
-            });
-        }
-    }
-
-    // Format 3: **Gap N [category]: Title** — Explanation (single line with category)
-    if (gaps.length === 0) {
-        const singleLineWithCat = /\*\*?gap\s+\d+\s*\[(foundational|tactical)\][:\s]*([^*—\-\n]+)\*?\*?\s*[—\-]+\s*([^\n]+)/gi;
-        while ((match = singleLineWithCat.exec(section)) !== null) {
-            gaps.push({
-                category: match[1].toLowerCase() as 'foundational' | 'tactical',
-                title: match[2].trim(),
-                explanation: match[3].trim(),
-            });
-        }
-    }
-
-    // Format 4: **Gap N: Title**\nExplanation (multi-line, no category, no em-dash)
-    if (gaps.length === 0) {
-        const multiLineNoCat = /\*\*gap\s+\d+[:\s]*([^*\n]+)\*\*\s*\n+([^\n*]+(?:\n(?!\*\*gap|\n\n|---|##)[^\n*]*)*)/gi;
-        while ((match = multiLineNoCat.exec(section)) !== null) {
-            gaps.push({
-                title: match[1].trim(),
-                explanation: match[2].trim().replace(/\s+/g, ' '),
-            });
-        }
-    }
-
-    // Format 5: Numbered list without "Gap" prefix
-    if (gaps.length === 0) {
-        const numberedList = /\d+[.)]\s*\*?\*?\[?(foundational|tactical)?\]?\s*([^:*\n—\-]+)[:\s]*[—\-]?\s*([^\n]+)/gi;
-        while ((match = numberedList.exec(section)) !== null) {
-            gaps.push({
-                category: match[1]?.toLowerCase() as 'foundational' | 'tactical' | undefined,
-                title: match[2].trim(),
-                explanation: match[3].trim(),
-            });
-        }
-    }
-
-    return gaps;
-}
-
-function extractMetaPattern(text: string): string | undefined {
-    return extractSection(text, 'Meta-Pattern') ||
-        extractSection(text, 'Meta Pattern') ||
-        undefined;
-}
-
-function extractHonestAssessment(text: string): RefinerOutput['honestAssessment'] {
-    const section = extractSection(text, 'Honest Assessment');
-    if (!section) return '';
-
-    // Try to extract structured fields
-    // Handle multiple label variations
-    const biggestRisk = extractLabeledValue(section, 'biggest risk');
-
-    // "What I'd do next" is alternate for "Recommended next step"
-    const nextStep = extractLabeledValue(section, 'recommended next step') ||
-        extractLabeledValue(section, "what I'd do next") ||
-        extractLabeledValue(section, "what i'd do next") ||
-        extractLabeledValue(section, 'next step');
-
-    // Reliability summary might be labeled or might be opening paragraph
-    let reliabilitySummary = extractLabeledValue(section, 'reliability summary');
-
-    if (!reliabilitySummary) {
-        // Try to get opening text before first **Label**:
-        const openingMatch = section.match(/^([^*]+?)(?=\*\*|$)/s);
-        if (openingMatch?.[1]?.trim() && openingMatch[1].trim().length > 20) {
-            reliabilitySummary = openingMatch[1].trim();
-        }
-    }
-
-    // If we got at least one structured field, return object
-    if (reliabilitySummary || biggestRisk || nextStep) {
-        return {
-            reliabilitySummary: reliabilitySummary || '',
-            biggestRisk: biggestRisk || '',
-            recommendedNextStep: nextStep || '',
-        };
-    }
-
-    // Fallback: return entire section as string
-    return section;
-}
-
-function extractMapperAudit(text: string): RefinerOutput['mapperAudit'] {
-    const section = extractSection(text, 'Mapper Audit');
-    if (!section) return undefined;
-
-    // Check for "complete" indicators
-    const isComplete = /\*\*complete\*\*|complete[—\-:]\s*(?:no|all)|all\s+(?:approaches|options)\s+(?:are\s+)?represented/i.test(section);
-
-    const unlistedOptions: Array<{ title: string; description: string; source: string }> = [];
-
-    if (!isComplete) {
-        const patterns = [
-            // **Unlisted option**: Title — Description — Source: Provider
-            /\*\*unlisted\s+option\*\*[:\s]*([^—\-\n]+)[—\-]+\s*([^—\-\n]+)[—\-]+\s*source[:\s]*([^\n]+)/gi,
-            // - Title (Source): Description
-            /[-*•]\s*\*?\*?([^*:(]+)\*?\*?\s*\(([^)]+)\)[:\s]*([^\n]+)/gi,
-            // + "Title" — Description — Source
-            /[+]\s*[""]([^""]+)[""]\s*[—\-]+\s*([^—\-\n]+)[—\-]+\s*([^\n]+)/gi,
-        ];
-
-        for (const pattern of patterns) {
-            let match;
-            while ((match = pattern.exec(section)) !== null) {
-                unlistedOptions.push({
-                    title: match[1].trim(),
-                    description: match[2].trim(),
-                    source: match[3].replace(/^source[:\s]*/i, '').trim(),
-                });
-            }
-            if (unlistedOptions.length > 0) break;
-        }
+        return null;
     }
 
     return {
-        complete: isComplete && unlistedOptions.length === 0,
-        unlistedOptions,
+        issue,
+        suggestion: suggestion.replace(/^[""]|[""]$/g, ''),
+        unlocks
     };
 }

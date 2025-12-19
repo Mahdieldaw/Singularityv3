@@ -1,5 +1,6 @@
 import { AiTurn, GraphTopology, ProviderResponse, UserTurn, TurnMessage, isUserTurn, isAiTurn, HistorySessionSummary, FullSessionPayload } from "../types";
 import { LLM_PROVIDERS_CONFIG } from "../constants";
+import { getProviderName } from "./provider-helpers";
 
 // ============================================================================
 // MARKDOWN FORMATTING UTILITIES
@@ -70,8 +71,9 @@ export function formatTurnForMd(
 
     // 2. Synthesis
     if (synthesisText) {
-        const provider = LLM_PROVIDERS_CONFIG.find(p => String(p.id) === synthesisProviderId);
-        const providerName = provider ? provider.name : (synthesisProviderId || "Unknown");
+        const providerName = synthesisProviderId
+            ? getProviderName(synthesisProviderId)
+            : "Unknown";
         md += formatSynthesisForMd(synthesisText, providerName);
     }
 

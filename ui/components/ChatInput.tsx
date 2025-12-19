@@ -27,6 +27,7 @@ import {
 import { useChat } from "../hooks/useChat";
 import api from "../services/extension-api";
 import { LLM_PROVIDERS_CONFIG } from "../constants";
+import { getProviderName } from "../utils/provider-helpers";
 import { PROVIDER_LIMITS } from "../../shared/provider-limits";
 import { setProviderLock } from "../../shared/provider-locks";
 import { CouncilOrbs } from "./CouncilOrbs";
@@ -171,8 +172,8 @@ const ChatInput = ({
   // Model selection for labels
   const composerModelId = useAtom(composerModelAtom)[0];
   const analystModelId = useAtom(analystModelAtom)[0];
-  const composerModelName = LLM_PROVIDERS_CONFIG.find(p => p.id === composerModelId)?.name || composerModelId || "Gemini";
-  const analystModelName = LLM_PROVIDERS_CONFIG.find(p => p.id === analystModelId)?.name || analystModelId || "Gemini";
+  const composerModelName = getProviderName(composerModelId || "gemini");
+  const analystModelName = getProviderName(analystModelId || "gemini");
 
   // Calculate limits based on selected providers
   useEffect(() => {

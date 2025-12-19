@@ -1,11 +1,20 @@
-import { LLM_PROVIDERS_CONFIG, PROVIDER_COLORS } from "../constants";
-import type { LLMProvider } from "../types";
+import {
+  INITIAL_PROVIDERS,
+  getProviderById as registryGetById,
+} from "../providers/providerRegistry";
+import { PROVIDER_COLORS } from "../constants";
+import type { ProviderConfig } from "../providers/providerRegistry";
 
 /**
  * Get the full configuration object for a provider.
  */
-export function getProviderConfig(providerId: string): LLMProvider | undefined {
-  return LLM_PROVIDERS_CONFIG.find((p) => String(p.id) === providerId);
+export function getProviderConfig(
+  providerId: string,
+): ProviderConfig | undefined {
+  return (
+    registryGetById(providerId) ||
+    INITIAL_PROVIDERS.find((p) => p.id === providerId)
+  );
 }
 
 /**

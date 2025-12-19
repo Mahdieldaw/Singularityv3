@@ -1,5 +1,6 @@
-import React, { useMemo, useState, Suspense, useEffect } from "react";
+import React, { useCallback, useMemo, useState, Suspense, useEffect } from "react";
 import { createPortal } from "react-dom";
+import { Virtuoso } from "react-virtuoso";
 import { useAtomValue, useSetAtom } from "jotai";
 import {
   historySessionsAtom,
@@ -15,6 +16,95 @@ import { formatSessionForMarkdown, sanitizeSessionForExport } from "../utils/cop
 import logoIcon from "../assets/logos/logo-icon.svg";
 import { PlusIcon, TrashIcon, EllipsisHorizontalIcon, ChevronRightIcon } from "./Icons";
 import { HistorySessionSummary } from "../types";
+
+type SessionRowProps = {
+  session: HistorySessionSummary;
+  isActive: boolean;
+  isBatchMode: boolean;
+  isSelected: boolean;
+  isDeleting: boolean;
+  showMenu: boolean;
+  onRowClick: (session: HistorySessionSummary) => void;
+  onToggleSelected: (sessionId: string) => void;
+  onMenuClick: (
+    e: React.MouseEvent<HTMLButtonElement>,
+    sessionId: string,
+  ) => void;
+};
+
+const SessionRow = React.memo(function SessionRow({
+  session,
+  isActive,
+  isBatchMode,
+  isSelected,
+  isDeleting,
+  showMenu,
+  onRowClick,
+  onToggleSelected,
+  onMenuClick,
+}: SessionRowProps) {
+  const sessionId = session.sessionId || session.id;
+
+  return (
+    <div
+      className={`
+                    group relative rounded-lg border transition-all duration-200 cursor-pointer
+                    ${isActive
+          ? "bg-surface-highlight border-primary-500/50 shadow-sm"
+          : "bg-surface-raised border-transparent hover:border-border-subtle"
+        }
+                    ${isDeleting ? "opacity-50 pointer-events-none" : ""}
+                  `}
+      onClick={() => onRowClick(session)}
+    >
+      <div className="p-3">
+        <div className="flex justify-between items-start gap-2">
+          <div className="flex items-center gap-2 flex-1 min-w-0">
+            {isBatchMode && (
+              <input
+                type="checkbox"
+                checked={isSelected}
+                onChange={(e) => {
+                  e.stopPropagation();
+                  onToggleSelected(sessionId);
+                }}
+                className="flex-shrink-0 accent-brand-500"
+              />
+            )}
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 text-xs text-text-muted mb-1">
+                <span>
+                  {new Date(
+                    session.lastActivity || session.startTime,
+                  ).toLocaleDateString()}
+                </span>
+                {session.messageCount > 0 && (
+                  <span className="bg-surface-highlight px-1.5 py-0.5 rounded-full text-[10px]">
+                    {session.messageCount} msg
+                  </span>
+                )}
+              </div>
+              <span className="overflow-wrap-anywhere break-words whitespace-normal text-sm font-medium text-text-primary block leading-tight">
+                {session.title || "Untitled Chat"}
+              </span>
+            </div>
+          </div>
+
+          {showMenu && (
+            <div className="relative ml-1 -mr-1">
+              <button
+                className="p-1 rounded-md hover:bg-surface-base text-text-secondary transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100"
+                onClick={(e) => onMenuClick(e, sessionId)}
+              >
+                <EllipsisHorizontalIcon className="w-5 h-5" />
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+});
 
 const RenameDialog = React.lazy(() => import("./RenameDialog"));
 
@@ -107,21 +197,25 @@ export default function HistoryPanel() {
 
   // Derived State
   const filteredSessions = useMemo(() => {
-    if (!searchTerm) return sessions;
-    const lower = searchTerm.toLowerCase();
-    return sessions.filter((s) => s.title?.toLowerCase().includes(lower));
+    const base = !searchTerm
+      ? sessions
+      : sessions.filter((s) => s.title?.toLowerCase().includes(searchTerm.toLowerCase()));
+
+    return [...base].sort(
+      (a, b) => (b.lastActivity || 0) - (a.lastActivity || 0),
+    );
   }, [sessions, searchTerm]);
 
   // Handlers
-  const handleNewChat = () => {
+  const handleNewChat = useCallback(() => {
     newChat();
     setIsHistoryPanelOpen(false);
-  };
+  }, [newChat, setIsHistoryPanelOpen]);
 
-  const handleSelectSession = (session: HistorySessionSummary) => {
+  const handleSelectSession = useCallback((session: HistorySessionSummary) => {
     selectChat(session);
     setIsHistoryPanelOpen(false);
-  };
+  }, [selectChat, setIsHistoryPanelOpen]);
 
   const handleDeleteChat = async (sessionId: string) => {
     // Track pending deletion
@@ -181,19 +275,56 @@ export default function HistoryPanel() {
     });
   };
 
-  const handleToggleBatchMode = () => {
+  const handleToggleBatchMode = useCallback(() => {
     setIsBatchMode((prev) => !prev);
     setSelectedIds(new Set());
-  };
+  }, []);
 
-  const handleToggleSelected = (sessionId: string) => {
+  const handleToggleSelected = useCallback((sessionId: string) => {
     setSelectedIds((prev) => {
       const next = new Set(prev);
       if (next.has(sessionId)) next.delete(sessionId);
       else next.add(sessionId);
       return next;
     });
-  };
+  }, []);
+
+  const handleSessionRowClick = useCallback(
+    (session: HistorySessionSummary) => {
+      const sessionId = session.sessionId || session.id;
+      const isDeleting = !!deletingIds && deletingIds.has(sessionId);
+      if (isDeleting) return;
+
+      if (isBatchMode) {
+        handleToggleSelected(sessionId);
+      } else {
+        handleSelectSession(session);
+      }
+    },
+    [deletingIds, handleSelectSession, handleToggleSelected, isBatchMode],
+  );
+
+  const handleSessionMenuClick = useCallback(
+    (e: React.MouseEvent<HTMLButtonElement>, sessionId: string) => {
+      e.stopPropagation();
+
+      const rect = e.currentTarget.getBoundingClientRect();
+      const spaceBelow = window.innerHeight - rect.bottom;
+      const menuHeight = 120;
+      const align = spaceBelow < menuHeight ? "top" : "bottom";
+
+      setActiveMenu((prev) => {
+        if (prev && prev.id === sessionId) return null;
+        return {
+          id: sessionId,
+          left: rect.right - 130,
+          top: align === "bottom" ? rect.bottom : rect.top,
+          align,
+        };
+      });
+    },
+    [],
+  );
 
   const handleConfirmBatchDelete = async () => {
     const ids = Array.from(selectedIds);
@@ -557,7 +688,7 @@ export default function HistoryPanel() {
         </div>
 
         {/* List */}
-        <div className="flex-1 overflow-y-auto overflow-x-hidden p-2 space-y-2">
+        <div className="flex-1 min-h-0 p-2">
           {isLoading ? (
             <div className="flex items-center justify-center py-8 text-text-muted text-sm">
               Loading history...
@@ -568,99 +699,38 @@ export default function HistoryPanel() {
               <span>No conversations found</span>
             </div>
           ) : (
-            [...filteredSessions]
-              .sort((a, b) => (b.lastActivity || 0) - (a.lastActivity || 0))
-              .map((session) => {
-                const isActive = currentSessionId === session.sessionId;
-                const isBatchModeParams = session.title?.toLowerCase().includes("batch");
+            <Virtuoso
+              data={filteredSessions}
+              style={{ height: "100%" }}
+              itemContent={(_, session) => {
+                const sessionId = session.sessionId || session.id;
+                const isActive = currentSessionId === sessionId;
+                const isBatchModeParams = session.title
+                  ?.toLowerCase()
+                  .includes("batch");
+                const isDeleting = !!deletingIds && deletingIds.has(sessionId);
+                const isSelected = selectedIds.has(sessionId);
 
                 return (
-                  <div
-                    key={session.id || session.sessionId}
-                    className={`
-                    group relative rounded-lg border transition-all duration-200 cursor-pointer
-                    ${isActive
-                        ? "bg-surface-highlight border-primary-500/50 shadow-sm"
-                        : "bg-surface-raised border-transparent hover:border-border-subtle"
-                      }
-                    ${!!deletingIds && deletingIds.has(session.sessionId) ? "opacity-50 pointer-events-none" : ""}
-                  `}
-                    onClick={() => {
-                      const isDeleting = !!deletingIds && deletingIds.has(session.sessionId);
-                      if (isDeleting) return;
-                      if (isBatchMode) {
-                        handleToggleSelected(session.sessionId);
-                      } else {
-                        handleSelectSession(session);
-                      }
-                    }}
-                  >
-                    <div className="p-3">
-                      <div className="flex justify-between items-start gap-2">
-                        <div className="flex items-center gap-2 flex-1 min-w-0">
-                          {isBatchMode && (
-                            <input
-                              type="checkbox"
-                              checked={selectedIds.has(session.sessionId)}
-                              onChange={(e) => {
-                                e.stopPropagation();
-                                handleToggleSelected(session.sessionId);
-                              }}
-                              className="flex-shrink-0 accent-brand-500"
-                            />
-                          )}
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 text-xs text-text-muted mb-1">
-                              <span>{new Date(session.lastActivity || session.startTime).toLocaleDateString()}</span>
-                              {session.messageCount > 0 && (
-                                <span className="bg-surface-highlight px-1.5 py-0.5 rounded-full text-[10px]">
-                                  {session.messageCount} msg
-                                </span>
-                              )}
-                            </div>
-                            <span className="overflow-wrap-anywhere break-words whitespace-normal text-sm font-medium text-text-primary block leading-tight">
-                              {session.title || "Untitled Chat"}
-                            </span>
-                          </div>
-                        </div>
-
-                        {!isBatchMode && !isBatchModeParams && (
-                          <div className="relative ml-1 -mr-1">
-                            <button
-                              className="p-1 rounded-md hover:bg-surface-base text-text-secondary transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100"
-                              onClick={(e) => {
-                                e.stopPropagation();
-
-                                // Calculate position for main menu
-                                const rect = e.currentTarget.getBoundingClientRect();
-                                const spaceBelow = window.innerHeight - rect.bottom;
-                                const menuHeight = 120; // Approx height of main menu
-
-                                const align = spaceBelow < menuHeight ? 'top' : 'bottom';
-
-                                // Toggle: close if already open for this session
-                                if (activeMenu && activeMenu.id === session.sessionId) {
-                                  setActiveMenu(null);
-                                } else {
-                                  setActiveMenu({
-                                    id: session.sessionId,
-                                    left: rect.right - 130, // Shift left to align
-                                    top: align === 'bottom' ? rect.bottom : (rect.top),
-                                    align
-                                  });
-                                }
-                              }}
-                            >
-                              <EllipsisHorizontalIcon className="w-5 h-5" />
-                            </button>
-                            {/* Main Menu Portal handles the rest */}
-                          </div>
-                        )}
-                      </div>
-                    </div>
+                  <div className="pb-2">
+                    <SessionRow
+                      session={session}
+                      isActive={isActive}
+                      isBatchMode={isBatchMode}
+                      isSelected={isSelected}
+                      isDeleting={isDeleting}
+                      showMenu={!isBatchMode && !isBatchModeParams}
+                      onRowClick={handleSessionRowClick}
+                      onToggleSelected={handleToggleSelected}
+                      onMenuClick={handleSessionMenuClick}
+                    />
                   </div>
                 );
-              })
+              }}
+              computeItemKey={(index, session) =>
+                String(session.sessionId || session.id || `session-${index}`)
+              }
+            />
           )}
         </div>
       </div>

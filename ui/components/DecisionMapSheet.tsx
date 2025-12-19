@@ -818,9 +818,9 @@ export const DecisionMapSheet = React.memo(() => {
   const parsedThemes = useMemo(() => {
     const themes = parseOptionsIntoThemes(optionsText || '');
 
-    // Merge in refiner-found unlisted options
-    if (refinerOutput?.mapperAudit?.unlistedOptions?.length) {
-      const refinerOptions = refinerOutput.mapperAudit.unlistedOptions.map(opt => ({
+    // Merge in refiner-found unlisted options from new signal-based structure
+    if (refinerOutput?.unlistedOptions?.length) {
+      const refinerOptions = refinerOutput.unlistedOptions.map((opt: { title: string; description: string; source: string }) => ({
         title: opt.title,
         description: opt.description,
         citations: [opt.source]
@@ -1130,7 +1130,7 @@ export const DecisionMapSheet = React.memo(() => {
                       />
                     </div>
                   )}
-                  <OptionsTab themes={parsedThemes} citationSourceOrder={citationSourceOrder} onCitationClick={handleCitationClick} mapperAudit={refinerOutput?.mapperAudit} />
+                  <OptionsTab themes={parsedThemes} citationSourceOrder={citationSourceOrder} onCitationClick={handleCitationClick} />
                 </motion.div>
               )}
 

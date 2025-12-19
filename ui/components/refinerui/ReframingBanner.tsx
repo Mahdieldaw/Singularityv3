@@ -1,20 +1,20 @@
-import React, { useState } from "react";
+import React from "react";
 import { RefinerOutput } from "../../../shared/parsing-utils";
 
 interface ReframingBannerProps {
-    suggestion: NonNullable<RefinerOutput["reframingSuggestion"]>;
+    reframe: NonNullable<RefinerOutput["reframe"]>;
     onApply?: (question: string) => void;
     onDismiss?: () => void;
     className?: string;
 }
 
 export const ReframingBanner: React.FC<ReframingBannerProps> = ({
-    suggestion,
+    reframe,
     onApply,
     onDismiss,
     className = ""
 }) => {
-    const { issue, betterQuestion, unlocks } = suggestion;
+    const { issue, suggestion, unlocks } = reframe;
 
     return (
         <div className={`relative overflow-hidden rounded-lg bg-gradient-to-r from-violet-600/20 to-indigo-600/20 border border-violet-500/30 p-4 ${className}`}>
@@ -30,9 +30,11 @@ export const ReframingBanner: React.FC<ReframingBannerProps> = ({
                             </svg>
                             Reframing Opportunity
                         </h3>
-                        <p className="text-xs text-violet-200/70 mt-1">
-                            {issue}
-                        </p>
+                        {issue && (
+                            <p className="text-xs text-violet-200/70 mt-1">
+                                {issue}
+                            </p>
+                        )}
                     </div>
                     {onDismiss && (
                         <button
@@ -48,7 +50,7 @@ export const ReframingBanner: React.FC<ReframingBannerProps> = ({
 
                 <div className="bg-black/30 rounded p-3 border border-white/5">
                     <p className="text-sm font-medium text-white mb-2">
-                        "{betterQuestion}"
+                        "{suggestion}"
                     </p>
                     {unlocks && (
                         <div className="flex items-center gap-2 text-xs text-indigo-300">
@@ -61,7 +63,7 @@ export const ReframingBanner: React.FC<ReframingBannerProps> = ({
                 {onApply && (
                     <div className="flex justify-end">
                         <button
-                            onClick={() => onApply(betterQuestion)}
+                            onClick={() => onApply(suggestion)}
                             className="text-xs bg-violet-600 hover:bg-violet-500 text-white font-medium px-3 py-1.5 rounded transition-colors shadow-lg shadow-violet-900/20"
                         >
                             Use This Question

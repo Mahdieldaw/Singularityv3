@@ -1,70 +1,146 @@
-import type { RefinerOutput } from "../../shared/parsing-utils";
+/**
+ * Refiner Helper Utilities - Updated for signal-based RefinerOutput
+ */
+
+import type { RefinerOutput, Signal, SignalPriority } from "../../shared/parsing-utils";
+import { categorizeSignals, getSignalCounts, hasCriticalSignals } from "./signalUtils";
 
 // =============================================================================
 // TYPE GUARDS & ACCESSORS
 // =============================================================================
 
-export interface StructuredHonestAssessment {
-    reliabilitySummary: string;
-    biggestRisk: string;
-    recommendedNextStep: string;
-}
-
-// Back-compat accessor used in existing code
-export function getStructuredAssessment(
-    output: RefinerOutput | null
-): StructuredHonestAssessment | null {
-    if (!output?.honestAssessment) return null;
-    if (typeof output.honestAssessment === 'object') {
-        return output.honestAssessment as StructuredHonestAssessment;
-    }
-    return null;
+/**
+ * Check if refiner has any signals requiring attention
+ */
+export function hasVerificationNeeded(refiner: RefinerOutput | null): boolean {
+    if (!refiner?.signals) return false;
+    return refiner.signals.some(s => s.priority === 'blocker' || s.type === 'divergence');
 }
 
 /**
- * Safely access honestAssessment fields (handles string fallback)
+ * Get signals that need verification (blockers and risks)
+ */
+export function getVerificationItems(refiner: RefinerOutput | null): Signal[] {
+    if (!refiner?.signals) return [];
+    return refiner.signals.filter(s => s.priority === 'blocker' || s.priority === 'risk');
+}
+
+/**
+ * Check if any signal is a blocker
+ */
+export function hasBlockerSignal(refiner: RefinerOutput | null): boolean {
+    return refiner?.signals?.some(s => s.priority === 'blocker') ?? false;
+}
+
+/**
+ * Get signals by type
+ */
+export function getSignalsByType(refiner: RefinerOutput | null, type: Signal['type']): Signal[] {
+    if (!refiner?.signals) return [];
+    return refiner.signals.filter(s => s.type === type);
+}
+
+/**
+ * Get gap-type signals (including blindspots)
+ */
+export function getGapSignals(refiner: RefinerOutput | null): Signal[] {
+    if (!refiner?.signals) return [];
+    return refiner.signals.filter(s => s.type === 'gap' || s.type === 'blindspot');
+}
+
+/**
+ * Get overclaim signals
+ */
+export function getOverclaimSignals(refiner: RefinerOutput | null): Signal[] {
+    if (!refiner?.signals) return [];
+    return refiner.signals.filter(s => s.type === 'overclaim');
+}
+
+/**
+ * Get divergence signals (model disagreements)
+ */
+export function getDivergenceSignals(refiner: RefinerOutput | null): Signal[] {
+    if (!refiner?.signals) return [];
+    return refiner.signals.filter(s => s.type === 'divergence');
+}
+
+// =============================================================================
+// DEPRECATED - Maintained for backward compat during transition
+// =============================================================================
+
+/**
+ * @deprecated Use getSignalCounts from signalUtils instead
+ */
+export function getGapCounts(output: RefinerOutput | null): {
+    total: number;
+    foundational: number;
+    tactical: number;
+} {
+    const gaps = getGapSignals(output);
+    const blockers = gaps.filter(g => g.priority === 'blocker').length;
+    return {
+        total: gaps.length,
+        foundational: blockers,
+        tactical: gaps.length - blockers,
+    };
+}
+
+/**
+ * @deprecated These fields no longer exist in new structure
  */
 export function getHonestAssessment(refiner: RefinerOutput | null): {
     reliabilitySummary: string;
     biggestRisk: string;
     recommendedNextStep: string;
 } {
-    if (!refiner?.honestAssessment) {
+    if (!refiner) {
         return { reliabilitySummary: "", biggestRisk: "", recommendedNextStep: "" };
     }
-    if (typeof refiner.honestAssessment === 'string') {
-        return {
-            reliabilitySummary: refiner.honestAssessment,
-            biggestRisk: "",
-            recommendedNextStep: "",
-        };
-    }
-    return refiner.honestAssessment as StructuredHonestAssessment;
+
+    // Derive from nextStep and signals
+    const blockers = refiner.signals?.filter(s => s.priority === 'blocker') ?? [];
+    const risks = refiner.signals?.filter(s => s.priority === 'risk') ?? [];
+
+    return {
+        reliabilitySummary: blockers.length > 0
+            ? `${blockers.length} blocker signal${blockers.length > 1 ? 's' : ''} detected`
+            : risks.length > 0
+                ? `${risks.length} risk signal${risks.length > 1 ? 's' : ''} worth reviewing`
+                : 'Output appears reliable',
+        biggestRisk: blockers[0]?.content || risks[0]?.content || '',
+        recommendedNextStep: refiner.nextStep?.target || '',
+    };
 }
 
 /**
- * Check if verification is needed
+ * @deprecated These fields no longer exist in new structure
  */
-export function hasVerificationNeeded(refiner: RefinerOutput | null): boolean {
-    return !!(refiner?.verificationTriggers?.required || (refiner?.verificationTriggers?.items?.length || 0) > 0);
+export function getMissedInsights(refiner: RefinerOutput | null): Array<{ insight: string; source?: string; inMapperOptions?: boolean; }> {
+    const blindspots = getSignalsByType(refiner, 'blindspot');
+    return blindspots.map(s => ({
+        insight: s.content,
+        source: s.source,
+        inMapperOptions: false
+    }));
 }
 
 /**
- * Get verification items (empty array if none)
+ * @deprecated These fields no longer exist in new structure
  */
-export function getVerificationItems(refiner: RefinerOutput | null) {
-    return refiner?.verificationTriggers?.items ?? [];
+export function getOverclaimed(refiner: RefinerOutput | null): string[] {
+    return getOverclaimSignals(refiner).map(s => s.content);
 }
 
 /**
- * Check if any gap is foundational
+ * @deprecated These fields no longer exist in new structure
  */
-export function hasFoundationalGap(refiner: RefinerOutput | null): boolean {
-    return !!refiner?.gaps?.some(g => g.category === 'foundational');
+export function getPreserved(refiner: RefinerOutput | null): string[] {
+    // No direct equivalent in new structure
+    return [];
 }
 
 /**
- * Get gap icon based on category
+ * @deprecated Use getGapIcon from signalUtils instead
  */
 export function getGapIcon(category?: 'foundational' | 'tactical'): string {
     if (category === 'foundational') return '🔴';
@@ -73,48 +149,10 @@ export function getGapIcon(category?: 'foundational' | 'tactical'): string {
 }
 
 /**
- * Get missed insights (empty array if none)
+ * @deprecated Use hasFoundationalGap(refiner) || hasBlockerSignal(refiner)
  */
-export function getMissedInsights(refiner: RefinerOutput | null): Array<{ insight: string; source?: string; inMapperOptions?: boolean; }> {
-    const raw = refiner?.synthesisAccuracy?.missed as any;
-    if (!raw) return [];
-    // Already normalized array of objects
-    if (Array.isArray(raw)) {
-        if (raw.length === 0) return [];
-        if (typeof raw[0] === 'string') {
-            return (raw as string[]).map((insight) => ({ insight, source: 'unknown', inMapperOptions: false }));
-        }
-        return raw as Array<{ insight: string; source?: string; inMapperOptions?: boolean; }>;
-    }
-    // Legacy object map: Record<providerId, string[]>
-    if (typeof raw === 'object') {
-        const out: Array<{ insight: string; source?: string; inMapperOptions?: boolean; }> = [];
-        for (const [source, arr] of Object.entries(raw)) {
-            if (Array.isArray(arr)) {
-                for (const insight of arr) {
-                    if (typeof insight === 'string' && insight.trim()) {
-                        out.push({ insight, source, inMapperOptions: false });
-                    }
-                }
-            }
-        }
-        return out;
-    }
-    return [];
-}
-
-/**
- * Get overclaimed items (empty array if none)
- */
-export function getOverclaimed(refiner: RefinerOutput | null) {
-    return refiner?.synthesisAccuracy?.overclaimed ?? [];
-}
-
-/**
- * Get preserved items (empty array if none)
- */
-export function getPreserved(refiner: RefinerOutput | null) {
-    return refiner?.synthesisAccuracy?.preserved ?? [];
+export function hasFoundationalGap(refiner: RefinerOutput | null): boolean {
+    return hasBlockerSignal(refiner);
 }
 
 // =============================================================================
@@ -128,21 +166,20 @@ export type UIState = 'simple' | 'intermediate' | 'workbench';
  */
 export function determineUIState(refiner: RefinerOutput | null): UIState {
     if (!refiner) return 'intermediate';
-    const { confidenceScore, presentationStrategy, gaps = [] } = refiner;
-    const hasFoundational = gaps.some(g => g.category === 'foundational');
-    const verificationNeeded = hasVerificationNeeded(refiner);
-    if (confidenceScore < 0.6) return 'workbench';
-    if (presentationStrategy === 'low_confidence') return 'workbench';
-    if (presentationStrategy === 'query_problematic') return 'workbench';
-    if (hasFoundational) return 'workbench';
-    if (
-        confidenceScore >= 0.85 &&
-        !verificationNeeded &&
-        gaps.length <= 1 &&
-        presentationStrategy === 'definitive'
-    ) {
+
+    const counts = getSignalCounts(refiner.signals);
+
+    // Workbench: blockers or multiple risks
+    if (counts.blockers > 0) return 'workbench';
+    if (counts.risks > 2) return 'workbench';
+    if (refiner.reframe) return 'workbench';
+
+    // Simple: no risks or enhancements, just proceed
+    if (counts.risks === 0 && counts.enhancements <= 1 &&
+        refiner.nextStep?.action === 'proceed') {
         return 'simple';
     }
+
     return 'intermediate';
 }
 
@@ -150,12 +187,7 @@ export function determineUIState(refiner: RefinerOutput | null): UIState {
  * Determine if trust icon should pulse
  */
 export function shouldPulseTrustIcon(refiner: RefinerOutput | null): boolean {
-    if (!refiner) return false;
-    return (
-        (refiner.confidenceScore ?? 0.5) < 0.7 ||
-        hasFoundationalGap(refiner) ||
-        hasVerificationNeeded(refiner)
-    );
+    return hasCriticalSignals(refiner?.signals);
 }
 
 /**
@@ -163,18 +195,47 @@ export function shouldPulseTrustIcon(refiner: RefinerOutput | null): boolean {
  */
 export function shouldAutoOpenSidePanel(refiner: RefinerOutput | null): boolean {
     if (!refiner) return false;
-    return (
-        (refiner.confidenceScore ?? 0.5) < 0.6 ||
-        hasFoundationalGap(refiner)
-    );
+    return hasBlockerSignal(refiner);
 }
 
 // =============================================================================
-// DISPLAY FORMATTERS
+// DISPLAY FORMATTERS - Updated for new structure
 // =============================================================================
 
 /**
- * Format confidence as percentage string
+ * Format signal count summary
+ */
+export function formatSignalSummary(refiner: RefinerOutput | null): string {
+    if (!refiner?.signals?.length) return 'No signals';
+
+    const counts = getSignalCounts(refiner.signals);
+    const parts: string[] = [];
+
+    if (counts.blockers > 0) parts.push(`${counts.blockers} blocker${counts.blockers > 1 ? 's' : ''}`);
+    if (counts.risks > 0) parts.push(`${counts.risks} risk${counts.risks > 1 ? 's' : ''}`);
+    if (counts.enhancements > 0) parts.push(`${counts.enhancements} enhancement${counts.enhancements > 1 ? 's' : ''}`);
+
+    return parts.join(', ') || 'No signals';
+}
+
+/**
+ * Get priority-based color class
+ */
+export function getPriorityColor(priority: SignalPriority | undefined): string {
+    switch (priority) {
+        case 'blocker': return 'text-intent-danger';
+        case 'risk': return 'text-intent-warning';
+        case 'enhancement': return 'text-brand-400';
+        default: return 'text-text-muted';
+    }
+}
+
+// =============================================================================
+// DEPRECATED CONFIDENCE FORMATTERS - No longer applicable
+// =============================================================================
+
+/**
+ * @deprecated Confidence score no longer exists in new structure
  */
 export function formatConfidence(score: number | undefined): string {
     if (typeof score !== 'number') return '—';
@@ -182,7 +243,7 @@ export function formatConfidence(score: number | undefined): string {
 }
 
 /**
- * Get confidence color class
+ * @deprecated Confidence score no longer exists in new structure
  */
 export function getConfidenceColor(score: number | undefined): string {
     if (typeof score !== 'number') return 'text-gray-500';
@@ -193,7 +254,7 @@ export function getConfidenceColor(score: number | undefined): string {
 }
 
 /**
- * Get confidence bar segments (for visual display)
+ * @deprecated Confidence score no longer exists in new structure
  */
 export function getConfidenceBar(score: number | undefined, totalSegments = 12): { filled: number; empty: number } {
     if (typeof score !== 'number') return { filled: 0, empty: totalSegments };
@@ -202,7 +263,7 @@ export function getConfidenceBar(score: number | undefined, totalSegments = 12):
 }
 
 /**
- * Format presentation strategy for display
+ * @deprecated Presentation strategy no longer exists in new structure
  */
 export function formatStrategy(strategy: string | undefined): string {
     if (!strategy) return '';
@@ -218,23 +279,13 @@ export function formatStrategy(strategy: string | undefined): string {
     return labels[strategy] || strategy;
 }
 
-// =============================================================================
-// COUNTS & SUMMARIES
-// =============================================================================
-
-export function getGapCounts(output: RefinerOutput | null): {
-    total: number;
-    foundational: number;
-    tactical: number;
-} {
-    if (!output?.gaps) {
-        return { total: 0, foundational: 0, tactical: 0 };
-    }
-    const foundational = output.gaps.filter(g => g.category === 'foundational').length;
-    const tactical = output.gaps.filter(g => g.category === 'tactical' || !g.category).length;
-    return {
-        total: output.gaps.length,
-        foundational,
-        tactical,
-    };
+/**
+ * @deprecated
+ */
+export function getStructuredAssessment(output: RefinerOutput | null): {
+    reliabilitySummary: string;
+    biggestRisk: string;
+    recommendedNextStep: string;
+} | null {
+    return getHonestAssessment(output);
 }

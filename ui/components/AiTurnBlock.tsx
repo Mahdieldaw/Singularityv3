@@ -46,10 +46,10 @@ import {
 import { useRefinerOutput } from "../hooks/useRefinerOutput";
 
 import { ReframingBanner } from "./refinerui/ReframingBanner";
-import { HeaderGuidance } from "./refinerui/HeaderGuidance";
-import { BottomLineCard } from "./refinerui/BottomLineCard";
+import { NextStepFooter } from "./refinerui/NextStepFooter";
+import { SignalCard } from "./refinerui/SignalCard";
 import { TrustIcon } from "./refinerui/TrustIcon";
-import { getStructuredAssessment, getGapCounts, getVerificationItems } from "../utils/refiner-helpers";
+import { categorizeSignals, hasCriticalSignals } from "../utils/signalUtils";
 
 // --- Helper Functions ---
 function parseMappingResponse(response?: string | null) {
@@ -253,9 +253,7 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
   const isThisTurnActive = activeAiTurnId === aiTurn.id && globalIsLoading;
 
   const { output: refinerOutput } = useRefinerOutput(aiTurn.id);
-  const assessment = useMemo(() => getStructuredAssessment(refinerOutput), [refinerOutput]);
-  const gapCounts = useMemo(() => getGapCounts(refinerOutput), [refinerOutput]);
-  const verificationCount = useMemo(() => (refinerOutput ? getVerificationItems(refinerOutput).length : 0), [refinerOutput]);
+  const { blockerSignals, riskSignals } = useMemo(() => categorizeSignals(refinerOutput?.signals), [refinerOutput]);
 
   const setChatInput = useSetAtom(chatInputValueAtom);
 
@@ -845,7 +843,7 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
 
           {/* SHARED LAYOUT CONTAINER */}
           <div className="flex justify-center w-full transition-all duration-300 px-4">
-          <div className="w-full max-w-7xl">
+            <div className="w-full max-w-7xl">
               {/* LEFT: Synthesis Block with Orbs Inside */}
               <div className="flex-1 flex flex-col relative min-w-0" style={{ maxWidth: '820px', margin: '0 auto' }}>
 
@@ -857,10 +855,10 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                   style={{ padding: '28px 40px 88px' }}
                 >
                   {/* Use padding top to accommodate banner if present? No, standard padding is fine */}
-                  {refinerOutput?.reframingSuggestion && (
+                  {refinerOutput?.reframe && (
                     <div className="mb-6 relative z-30 pointer-events-auto mx-[-12px]">
                       <ReframingBanner
-                        suggestion={refinerOutput.reframingSuggestion}
+                        reframe={refinerOutput.reframe}
                         onApply={handleAskReframed}
                       />
                     </div>
@@ -1025,15 +1023,13 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
 
                             return (
                               <>
-                                {/* Header Guidance */}
-                                {refinerOutput && typeof refinerOutput.confidenceScore === 'number' && (
-                                  <HeaderGuidance
-                                    confidenceScore={refinerOutput.confidenceScore}
-                                    biggestRisk={assessment?.biggestRisk}
-                                    verificationEnabled={true}
-                                    verificationCount={verificationCount}
-                                    className="mb-6 mx-[-12px] sm:mx-0"
-                                  />
+                                {/* Blocker Signals (if any) */}
+                                {blockerSignals.length > 0 && (
+                                  <div className="mb-6 mx-[-12px] sm:mx-0 space-y-2">
+                                    {blockerSignals.slice(0, 2).map((signal, idx) => (
+                                      <SignalCard key={idx} signal={signal} variant="compact" />
+                                    ))}
+                                  </div>
                                 )}
 
                                 <div className="text-base leading-relaxed text-text-primary">
@@ -1063,15 +1059,7 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
 
                           {refinerOutput && (
                             <div className="mt-8">
-                              <BottomLineCard
-                                recommendedNextStep={assessment?.recommendedNextStep}
-                                reliabilitySummary={assessment?.reliabilitySummary}
-                                gapCount={gapCounts.total}
-                                foundationalGapCount={gapCounts.foundational}
-                                hasVerificationTriggers={!!refinerOutput.verificationTriggers?.items?.length}
-                                onOpenTrustPanel={() => setActiveSplitPanel({ turnId: aiTurn.id, providerId: '__trust__' })}
-                                className="mb-4"
-                              />
+                              <NextStepFooter nextStep={refinerOutput.nextStep} />
 
                               {/* Accuracy details moved to Trust Signals side panel */}
                             </div>

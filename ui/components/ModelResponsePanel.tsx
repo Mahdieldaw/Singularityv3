@@ -73,19 +73,22 @@ export const ModelResponsePanel: React.FC<ModelResponsePanelProps> = React.memo(
     const chatInputHeight = useAtomValue(chatInputHeightAtom);
 
     // Compute missedInsights unconditionally to preserve hook order
+    // Use new signal-based structure - get blindspot signals
     const missedInsights = useMemo(() => {
-        const missed = refinerOutput?.synthesisAccuracy?.missed || [];
-        if (!Array.isArray(missed)) return []; // Safety check
+        const signals = refinerOutput?.signals || [];
+        const blindspots = signals.filter(s => s.type === 'blindspot');
+
+        if (!blindspots.length) return [];
 
         const pName = provider?.name?.toLowerCase() || "";
         const pId = providerId.toLowerCase();
 
-        return missed
-            .filter(item => {
-                const src = item.source.toLowerCase();
-                return src.includes(pName) || src.includes(pId) || src === 'global' || src === 'unknown';
+        return blindspots
+            .filter(signal => {
+                const src = signal.source.toLowerCase();
+                return src.includes(pName) || src.includes(pId) || src === 'global' || src === '' || !src;
             })
-            .map(item => item.insight);
+            .map(signal => signal.content);
     }, [refinerOutput, providerId, provider]);
 
     // Branch send handler (hook before conditional return)
