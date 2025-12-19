@@ -7,9 +7,16 @@
  */
 
 export class WorkflowCompiler {
-  constructor(sessionManager) {
+  constructor(sessionManager, config = {}) {
     // Kept only for dependency injection - NEVER USED
     this.sessionManager = sessionManager;
+
+    // Store defaults in memory from injected config
+    this.defaults = {
+      mapper: config.htos_mapping_provider || "Gemini",
+      synthesizer: config.htos_last_synthesis_model || "claude",
+      refiner: config.htos_last_refiner_model || "claude"
+    };
   }
 
   /**
@@ -366,27 +373,15 @@ export class WorkflowCompiler {
   // ============================================================================
 
   _getDefaultMapper(request) {
-    try {
-      const stored = localStorage.getItem("htos_mapping_provider");
-      if (stored) return stored;
-    } catch { }
-    return request.providers?.[0] || "Gemini";
+    return request.providers?.[0] || this.defaults.mapper;
   }
 
   _getDefaultSynthesizer(request) {
-    try {
-      const stored = localStorage.getItem("htos_last_synthesis_model");
-      if (stored) return stored;
-    } catch { }
-    return request.providers?.[0] || "claude";
+    return request.providers?.[0] || this.defaults.synthesizer;
   }
 
   _getDefaultRefiner(request) {
-    try {
-      const stored = localStorage.getItem("htos_last_refiner_model");
-      if (stored) return stored;
-    } catch { }
-    return request.providers?.[0] || "claude";
+    return request.providers?.[0] || this.defaults.refiner;
   }
 
   _generateWorkflowId(contextType) {

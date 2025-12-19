@@ -214,7 +214,7 @@ const ChatInput = ({
       // Add height for nudge chips if visible (approx 28px + margin)
       const nudgeHeight = nudgeVisible ? 32 : 0;
 
-      const totalHeight = newHeight + 24 + 2  + targetHeight + bottomBarHeight + nudgeHeight;
+      const totalHeight = newHeight + 24 + 2 + targetHeight + bottomBarHeight + nudgeHeight;
       onHeightChange?.(totalHeight);
     }
   }, [prompt, onHeightChange, activeTarget, originalPrompt, nudgeVisible]);
@@ -322,11 +322,11 @@ const ChatInput = ({
         const progress = (currentStep / steps) * 100;
         setNudgeProgress(progress);
 
-          if (currentStep >= steps) {
-            if (nudgeTimerRef.current) clearInterval(nudgeTimerRef.current);
-            executeSend(prompt);
-          }
-        }, INTERVAL);
+        if (currentStep >= steps) {
+          if (nudgeTimerRef.current) clearInterval(nudgeTimerRef.current);
+          executeSend(prompt);
+        }
+      }, INTERVAL);
 
       return;
     }
@@ -424,7 +424,7 @@ const ChatInput = ({
         <div className="relative w-full max-w-[min(900px,calc(100%-24px))] flex justify-center mb-[-8px] z-10 !bg-transparent">
           <CouncilOrbs
             providers={LLM_PROVIDERS_CONFIG}
-            voiceProviderId={synthesisProvider || 'claude'}
+            voiceProviderId={synthesisProvider}
             variant="active"
             workflowProgress={workflowProgress as any}
             onCrownMove={(pid) => {

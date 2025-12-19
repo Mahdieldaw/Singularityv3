@@ -390,13 +390,13 @@ export const isFirstTurnAtom = atom((get) => {
 // Prompt Refiner State
 // -----------------------------
 export const iscomposingAtom = atom<boolean>(false);
-export const composerModelAtom = atomWithStorage<string>(
+export const composerModelAtom = atomWithStorage<string | null>(
   "htos_composer_model",
   "gemini",
   undefined,
   { getOnInit: true }
 );
-export const analystModelAtom = atomWithStorage<string>(
+export const analystModelAtom = atomWithStorage<string | null>(
   "htos_analyst_model",
   "gemini",
   undefined,

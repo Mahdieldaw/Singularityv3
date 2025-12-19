@@ -10,7 +10,7 @@ import clsx from "clsx";
 interface CouncilOrbsProps {
     turnId?: string; // Optional for active mode
     providers: LLMProvider[];
-    voiceProviderId: string; // The active synthesizer (Crown)
+    voiceProviderId: string | null; // The active synthesizer (Crown)
     onOrbClick?: (providerId: string) => void;
     onCrownMove?: (providerId: string) => void;
     onTrayExpand?: () => void;
@@ -703,7 +703,7 @@ const Orb: React.FC<OrbProps> = ({
                     // Active Mode Selection Dimming
                     // Unselected: Distinctly "Off" but visible logos. Low opacity (40%) + Grayscale.
                     // Hover brings it to life (Full Opacity + Color + Bloom).
-                    isActiveVariant && !showAsActive && !isVoice && "opacity-90 brightness-90 scale-100 hover:opacity-100 hover:brightness-100 hover:scale-105 hover:shadow-[0_0_15px_-3px_var(--model-color)] transition-all duration-300",
+                    isActiveVariant && !showAsActive && "opacity-90 brightness-90 scale-100 hover:opacity-100 hover:brightness-100 hover:scale-105 hover:shadow-[0_0_15px_-3px_var(--model-color)] transition-all duration-300",
 
                     // Selected: "On" State. Full Opacity, Color, Glow.
                     // Added brightness boost to combat "dullness".

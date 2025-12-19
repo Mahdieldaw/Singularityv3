@@ -152,19 +152,19 @@ export class ConnectionHandler {
         turn: {
           user: userTurn
             ? {
-                id: userTurn.id,
-                type: "user",
-                text: userTurn.content || "",
-                createdAt: userTurn.createdAt || Date.now(),
-                sessionId,
-              }
+              id: userTurn.id,
+              type: "user",
+              text: userTurn.content || "",
+              createdAt: userTurn.createdAt || Date.now(),
+              sessionId,
+            }
             : {
-                id: userTurnId || "unknown",
-                type: "user",
-                text: "",
-                createdAt: Date.now(),
-                sessionId,
-              },
+              id: userTurnId || "unknown",
+              type: "user",
+              text: "",
+              createdAt: Date.now(),
+              sessionId,
+            },
           ai: {
             id: aiTurnId,
             type: "ai",
@@ -296,7 +296,7 @@ export class ConnectionHandler {
                   mappingProvider: executeRequest.mapper || null,
                 });
               }
-            } catch (_) {}
+            } catch (_) { }
 
             // If we already have responses → emit finalized; otherwise return without recompute
             try {
@@ -311,7 +311,7 @@ export class ConnectionHandler {
             } catch (_) { }
             return; // ✅ Duplicate handled via rehydrate only
           }
-        } catch (_) {}
+        } catch (_) { }
       }
 
       // ========================================================================
@@ -581,7 +581,7 @@ export class ConnectionHandler {
   async _applyPreflightSmartDefaults(executeRequest) {
     // Use centralized AuthManager
     const authStatus = await authManager.getAuthStatus();
-    const availableProviders = self.providerRegistry?.listProviders?.() || [];
+    const availableProviders = this.services.providerRegistry?.listProviders?.() || [];
 
     // Run preflight (handles filtering + fallbacks)
     const result = await runPreflight(
