@@ -2,7 +2,7 @@
  * Refiner Helper Utilities - Updated for signal-based RefinerOutput
  */
 
-import type { RefinerOutput, Signal, SignalPriority } from "../../shared/parsing-utils";
+import type { RefinerOutput, Signal, SignalPriority, NextStepAction } from "../../shared/parsing-utils";
 import { getSignalCounts, hasCriticalSignals } from "./signalUtils";
 
 // =============================================================================
@@ -137,5 +137,50 @@ export function getPriorityColor(priority: SignalPriority | undefined): string {
         case 'enhancement': return 'text-brand-400';
         default: return 'text-text-muted';
     }
+}
+
+// =============================================================================
+// NEXT STEP VISUAL STYLES
+// =============================================================================
+
+interface NextStepStyles {
+    container: string;
+    icon: string;
+    label: string;
+}
+
+export function getNextStepStyles(action: NextStepAction | null | undefined): NextStepStyles {
+	switch (action) {
+		case 'proceed':
+			return {
+				container: 'bg-emerald-500/10 border-emerald-500/60',
+				icon: 'text-emerald-400',
+				label: 'text-emerald-300',
+			};
+		case 'verify':
+			return {
+				container: 'bg-intent-warning/15 border-intent-warning/40',
+				icon: 'text-intent-warning',
+				label: 'text-intent-warning',
+			};
+		case 'reframe':
+			return {
+				container: 'bg-sky-500/10 border-sky-500/50',
+				icon: 'text-sky-400',
+				label: 'text-sky-300',
+			};
+		case 'research':
+			return {
+				container: 'bg-violet-500/15 border-violet-500/40',
+				icon: 'text-violet-400',
+				label: 'text-violet-300',
+			};
+		default:
+			return {
+				container: 'bg-surface-highlight/40 border-border-subtle',
+				icon: 'text-brand-400',
+				label: 'text-text-primary',
+			};
+	}
 }
 

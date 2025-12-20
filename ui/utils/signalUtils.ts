@@ -105,3 +105,21 @@ export function getSignalCounts(signals: Signal[] | undefined): { blockers: numb
         enhancements: enhancementSignals.length
     };
 }
+
+export function getTrustBadge(signals: Signal[] | undefined): { count: number; type: 'blocker' | 'risk' } | null {
+	if (!signals || !Array.isArray(signals) || signals.length === 0) {
+		return null;
+	}
+
+	const { blockerSignals, riskSignals } = categorizeSignals(signals);
+
+	if (blockerSignals.length > 0) {
+		return { count: blockerSignals.length, type: 'blocker' };
+	}
+
+	if (riskSignals.length > 0) {
+		return { count: riskSignals.length, type: 'risk' };
+	}
+
+	return null;
+}

@@ -9,6 +9,7 @@
 
 import React from 'react';
 import { NextStepAction } from '../../../shared/parsing-utils';
+import { getNextStepStyles } from '../../utils/refiner-helpers';
 
 export interface NextStepFooterProps {
     nextStep: {
@@ -55,14 +56,15 @@ export const NextStepFooter: React.FC<NextStepFooterProps> = ({
     const { action, target, why } = nextStep;
     const icon = ACTION_ICONS[action] || '→';
     const label = ACTION_LABELS[action] || action;
+    const styles = getNextStepStyles(action);
 
     return (
-        <div className="bg-surface-highlight/40 border-l-4 border-brand-400 rounded-r-lg p-4 mt-4">
+        <div className={`border-l-4 rounded-r-lg p-4 mt-4 border-brand-400 ${styles.container}`}>
             <div className="flex items-start gap-3">
-                <span className="text-lg flex-shrink-0 text-brand-400">{icon}</span>
+                <span className={`text-lg flex-shrink-0 ${styles.icon}`}>{icon}</span>
                 <div className="flex-1 min-w-0">
                     <div className="text-sm text-text-primary">
-                        <span className="font-bold text-text-primary">{label}:</span>{' '}
+                        <span className={`font-bold ${styles.label}`}>{label}:</span>{' '}
                         <span>{target}</span>
                     </div>
                     {why && (

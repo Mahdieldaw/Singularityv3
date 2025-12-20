@@ -293,10 +293,8 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
                 {/* CENTER: Voice Orb */}
                 <div
                     className={clsx(
-                        "council-voice-zone",
-                        variant !== "divider" && variant !== "active" && "cursor-pointer"
+                        "council-voice-zone"
                     )}
-                    onClick={variant !== "divider" && variant !== "active" ? onTrayExpand : undefined}
                 >
                     {variant !== "active" && <div className="council-glass-ring" />}
 

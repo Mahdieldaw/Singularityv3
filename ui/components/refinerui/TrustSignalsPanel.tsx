@@ -7,7 +7,7 @@ import React, { useState } from 'react';
 import type { RefinerOutput } from '../../../shared/parsing-utils';
 import { SignalCard } from './SignalCard';
 import { categorizeSignals, getSignalCounts } from '../../utils/signalUtils';
-import { formatSignalSummary } from '../../utils/refiner-helpers';
+import { formatSignalSummary, getNextStepStyles } from '../../utils/refiner-helpers';
 
 interface TrustSignalsPanelProps {
   refiner: RefinerOutput;
@@ -74,6 +74,7 @@ export function TrustSignalsPanel({ refiner, rawText, onClose, bottomPadding }: 
   const { blockerSignals, riskSignals, enhancementSignals } = categorizeSignals(refiner.signals);
   const counts = getSignalCounts(refiner.signals);
   const summary = formatSignalSummary(refiner);
+  const nextStepStyles = getNextStepStyles(refiner.nextStep?.action);
 
   return (
     <div className="flex flex-col h-full bg-surface-raised border-l border-border-subtle">
@@ -130,7 +131,7 @@ export function TrustSignalsPanel({ refiner, rawText, onClose, bottomPadding }: 
         {/* Enhancement Signals */}
         {enhancementSignals.length > 0 && (
           <CollapsibleSection
-            title="💡 Enhancements"
+            title="💡 Additional Context"
             count={counts.enhancements}
             isExpanded={expandedSections.has('enhancements')}
             onToggle={() => toggleSection('enhancements')}
@@ -164,10 +165,10 @@ export function TrustSignalsPanel({ refiner, rawText, onClose, bottomPadding }: 
 
         {/* Next Step */}
         {refiner.nextStep && (
-          <div className="p-3 bg-surface-highlight/40 rounded-lg border border-border-subtle">
+          <div className={`p-3 rounded-lg border ${nextStepStyles.container}`}>
             <div className="flex items-center gap-2 mb-2">
-              <span className="text-sm">→</span>
-              <span className="text-xs font-bold text-brand-400 uppercase">Next Step</span>
+              <span className={`text-sm ${nextStepStyles.icon}`}>→</span>
+              <span className={`text-xs font-bold uppercase ${nextStepStyles.label}`}>Next Step</span>
             </div>
             <div className="text-sm text-text-primary">
               <strong>{refiner.nextStep.action}:</strong> {refiner.nextStep.target}
@@ -177,6 +178,31 @@ export function TrustSignalsPanel({ refiner, rawText, onClose, bottomPadding }: 
             )}
           </div>
         )}
+
+        <div className="border border-border-subtle rounded-lg p-3 bg-surface-raised/60">
+          <div className="text-xs font-bold text-text-secondary uppercase mb-2">Refiner's Take</div>
+          <div className="space-y-3 text-sm text-text-primary">
+            <div>{refiner.meta.reliabilitySummary || 'No reliability summary available.'}</div>
+            {refiner.meta.strategicPattern && (
+              <div>
+                <div className="text-xs font-semibold text-text-secondary uppercase mb-1">Strategic Pattern</div>
+                <div>{refiner.meta.strategicPattern}</div>
+              </div>
+            )}
+            {refiner.meta.biggestRisk && (
+              <div>
+                <div className="text-xs font-semibold text-text-secondary uppercase mb-1">Biggest Risk</div>
+                <div>{refiner.meta.biggestRisk}</div>
+              </div>
+            )}
+            {refiner.meta.honestAssessment && (
+              <div>
+                <div className="text-xs font-semibold text-text-secondary uppercase mb-1">Honest Assessment</div>
+                <div>{refiner.meta.honestAssessment}</div>
+              </div>
+            )}
+          </div>
+        </div>
 
         {/* Reframe suggestion */}
         {refiner.reframe && (
