@@ -13,7 +13,7 @@ import { useChat } from "../hooks/useChat";
 import api from "../services/extension-api";
 import { normalizeBackendRoundsToTurns } from "../utils/turn-helpers";
 import { formatSessionForMarkdown, sanitizeSessionForExport } from "../utils/copy-format-utils";
-import logoIcon from "../assets/logos/logo-icon.svg";
+import logoIcon from "../assets/logos/logo-icon.png";
 import { PlusIcon, TrashIcon, EllipsisHorizontalIcon, ChevronRightIcon } from "./Icons";
 import { HistorySessionSummary } from "../types";
 
@@ -137,7 +137,7 @@ export default function HistoryPanel() {
   const submenuRef = React.useRef<HTMLDivElement>(null);
   const menuRef = React.useRef<HTMLDivElement>(null); // For main menu
 
- const handleSubmenuEnter = (sessionId: string, rect: DOMRect) => {
+  const handleSubmenuEnter = (sessionId: string, rect: DOMRect) => {
     if (submenuTimeoutRef.current) {
       clearTimeout(submenuTimeoutRef.current);
       submenuTimeoutRef.current = null;
@@ -153,7 +153,7 @@ export default function HistoryPanel() {
     if (align === 'top') {
       // Shift up by height of submenu
       // +10 fudge factor ensures overlap so mouse doesn't disconnect on transition
-      top = rect.bottom - submenuHeight + 10; 
+      top = rect.bottom - submenuHeight + 10;
     }
 
     setExportSubmenuPos({
@@ -162,7 +162,7 @@ export default function HistoryPanel() {
       left: rect.right,
       align
     });
-};
+  };
 
   const handleSubmenuLeave = () => {
     submenuTimeoutRef.current = setTimeout(() => {

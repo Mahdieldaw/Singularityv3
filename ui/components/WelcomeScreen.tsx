@@ -1,5 +1,5 @@
 import { EXAMPLE_PROMPT } from "../constants";
-import logoIcon from "../assets/logos/logo-icon.svg";
+import logoIcon from "../assets/logos/logo-icon.png";
 import { useProviderStatus } from "../hooks/useProviderStatus";
 import { useSmartProviderDefaults } from "../hooks/useSmartProviderDefaults";
 

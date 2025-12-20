@@ -1,6 +1,6 @@
 import { useAtom, useSetAtom } from "jotai";
 import { isHistoryPanelOpenAtom, isSettingsOpenAtom } from "../state/atoms";
-import logoIcon from "../assets/logos/logo-icon.svg";
+import logoIcon from "../assets/logos/logo-icon.png";
 
 // MenuIcon component (inline for simplicity)
 const MenuIcon = ({ className }: { className?: string }) => (
