@@ -13,9 +13,7 @@ import {
   isDecisionMapOpenAtom,
   synthesisProviderAtom,
   includePromptInCopyAtom,
-  isReducedMotionAtom,
   activeRecomputeStateAtom,
-  turnStreamingStateFamily,
   mappingProviderAtom,
   chatInputValueAtom,
 } from "../state/atoms";
@@ -23,7 +21,7 @@ import { useClipActions } from "../hooks/useClipActions";
 import { AiTurn, ProviderResponse } from "../types";
 import MarkdownDisplay from "./MarkdownDisplay";
 import { LLM_PROVIDERS_CONFIG } from "../constants";
-import { ChevronDownIcon, ChevronUpIcon, SettingsIcon } from "./Icons";
+import { SettingsIcon } from "./Icons";
 import { CouncilOrbs } from "./CouncilOrbs";
 import { CopyButton } from "./CopyButton";
 import { formatSynthesisForMd, formatTurnForMd } from "../utils/copy-format-utils";
@@ -584,7 +582,6 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
  
 
   const requestedSynth = (aiTurn.meta as any)?.requestedFeatures?.synthesis;
-  const requestedMap = (aiTurn.meta as any)?.requestedFeatures?.mapping;
   const wasSynthRequested =
     requestedSynth === undefined ? true : !!requestedSynth;
 
