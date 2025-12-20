@@ -372,7 +372,6 @@ export function usePortMessageHandler() {
             stepId,
             providerId,
             chunk,
-            sessionId: msgSessionId,
           } = message;
           if (!chunk?.text) return;
 
@@ -475,7 +474,6 @@ export function usePortMessageHandler() {
             status,
             result,
             error,
-            sessionId: msgSessionId,
           } = message;
 
           // Clean up once a step completes/fails to avoid memory growth
@@ -886,7 +884,7 @@ export function usePortMessageHandler() {
         }
 
         case "WORKFLOW_COMPLETE": {
-          const { sessionId: msgSessionId } = message;
+          const { } = message;
 
           streamingBufferRef.current?.flushImmediate();
           // Fallback finalization is no longer needed.

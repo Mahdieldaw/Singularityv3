@@ -1,4 +1,4 @@
-import { AiTurn, GraphTopology, ProviderResponse, UserTurn, TurnMessage, isUserTurn, isAiTurn, HistorySessionSummary, FullSessionPayload } from "../types";
+import { AiTurn, GraphTopology, ProviderResponse, UserTurn, TurnMessage, isUserTurn, isAiTurn } from "../types";
 import { LLM_PROVIDERS_CONFIG } from "../constants";
 import { getProviderName } from "./provider-helpers";
 
@@ -19,7 +19,6 @@ export function formatDecisionMapForMd(
 
     if (narrative) {
         // Convert narrative blockquotes or ensure they stand out
-        const lines = narrative.split('\n');
         // If narrative already uses blockquotes, keep them. If not, maybe quote the whole thing?
         // For now, raw narrative is usually fine if it's structured.
         md += `${narrative}\n\n`;
@@ -54,7 +53,7 @@ export function formatProviderResponseForMd(response: ProviderResponse, provider
 }
 
 export function formatTurnForMd(
-    turnid: string,
+    _turnid: string,
     userPrompt: string | null,
     synthesisText: string | null,
     synthesisProviderId: string | undefined,

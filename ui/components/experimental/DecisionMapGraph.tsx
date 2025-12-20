@@ -637,7 +637,6 @@ const DecisionMapGraph: React.FC<Props> = ({
                         const y = node.y || 0;
                         const radius = getNodeRadius(node.support_count);
                         const isHovered = hoveredNode === node.id;
-                        const color = getNodeColor(node.supporters, citationSourceOrder);
 
                         // Show for larger nodes always, others on hover
                         if (!isHovered && node.support_count < 2) return null;

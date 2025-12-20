@@ -3,7 +3,6 @@ import { Virtuoso, VirtuosoHandle } from "react-virtuoso";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import {
   turnIdsAtom,
-  isLoadingAtom,
   showWelcomeAtom,
   currentSessionIdAtom,
   isSplitOpenAtom,
@@ -31,7 +30,6 @@ const DecisionMapSheet = React.lazy(() =>
 
 export default function ChatView() {
   const [turnIds] = useAtom(turnIdsAtom as any) as [string[], any];
-  const [isLoading] = useAtom(isLoadingAtom as any) as [boolean, any];
   const [showWelcome] = useAtom(showWelcomeAtom as any) as [boolean, any];
   const [currentSessionId] = useAtom(currentSessionIdAtom as any) as [
     string | null,
@@ -77,7 +75,7 @@ export default function ChatView() {
   }, [isDecisionMapOpen, isSplitOpen, setDecisionMapOpen, setActiveSplitPanel]);
 
   const itemContent = useMemo(
-    () => (index: number, turnId: string) => {
+    () => (_index: number, turnId: string) => {
       if (!turnId) {
         return (
           <div className="p-2 text-intent-danger">

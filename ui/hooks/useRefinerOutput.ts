@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useAtomValue } from "jotai";
 import { turnsMapAtom } from "../state/atoms";
-import { AiTurn, ProviderResponse } from "../types";
+import { AiTurn } from "../types";
 import { parseRefinerOutput, RefinerOutput } from "../../shared/parsing-utils";
 import { SimpleIndexedDBAdapter } from "../../src/persistence/SimpleIndexedDBAdapter";
 

@@ -3,7 +3,7 @@
  */
 
 import type { RefinerOutput, Signal, SignalPriority } from "../../shared/parsing-utils";
-import { categorizeSignals, getSignalCounts, hasCriticalSignals } from "./signalUtils";
+import { getSignalCounts, hasCriticalSignals } from "./signalUtils";
 
 // =============================================================================
 // TYPE GUARDS & ACCESSORS

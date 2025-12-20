@@ -5,7 +5,6 @@ import { atomWithStorage, atomFamily } from "jotai/utils";
 // Import UI types and constants
 import type {
   TurnMessage,
-  UserTurn,
   AiTurn,
   ProviderResponse,
   UiPhase,
@@ -224,7 +223,7 @@ export const isHistoryPanelOpenAtom = atom<boolean>(false);
 export const isSettingsOpenAtom = atom<boolean>(false);
 export const showWelcomeAtom = atom((get) => get(turnIdsAtom).length === 0);
 export const turnExpandedStateFamily = atomFamily(
-  (turnId: string) => atom(false),
+  (_turnId: string) => atom(false),
   (a, b) => a === b,
 );
 

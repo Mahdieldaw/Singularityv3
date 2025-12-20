@@ -1,5 +1,5 @@
 import React, { useMemo } from "react";
-import { atom, useAtomValue } from "jotai";
+import { useAtomValue } from "jotai";
 import { selectAtom } from "jotai/utils";
 import { turnsMapAtom } from "../state/atoms";
 import UserTurnBlock from "./UserTurnBlock";

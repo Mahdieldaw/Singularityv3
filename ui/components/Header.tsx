@@ -1,4 +1,3 @@
-import React from "react";
 import { useAtom, useSetAtom } from "jotai";
 import { isHistoryPanelOpenAtom, isSettingsOpenAtom } from "../state/atoms";
 import logoIcon from "../assets/logos/logo-icon.svg";

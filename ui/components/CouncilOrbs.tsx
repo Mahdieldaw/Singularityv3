@@ -173,7 +173,7 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
 
     const shouldDimInSplitMode = isSplitOpen && variant === "tray";
 
-    const handleLongPressStart = (pid: string | null) => {
+    const handleLongPressStart = (_pid: string | null) => {
         if (variant === "historical") return; // Disable menu for historical
 
         if (longPressRef.current) clearTimeout(longPressRef.current);

@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import  { useEffect } from 'react';
 import { useAtom } from 'jotai';
 import { toastAtom } from '../state/atoms';
 import clsx from 'clsx';

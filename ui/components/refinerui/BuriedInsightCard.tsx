@@ -9,7 +9,6 @@ interface BuriedInsightCardProps {
 
 export const BuriedInsightCard: React.FC<BuriedInsightCardProps> = ({
     points,
-    providerName,
     className = "",
     onView
 }) => {

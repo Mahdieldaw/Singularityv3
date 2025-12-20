@@ -3,12 +3,11 @@
 // Migrated features from deprecated ProviderCard.tsx and ProviderResponseBlock.tsx
 
 import React, { useState, useCallback, useMemo } from "react";
-import { useAtomValue, useSetAtom } from "jotai";
+import { useAtomValue } from "jotai";
 import {
     providerEffectiveStateFamily,
     turnStreamingStateFamily,
     activeRecomputeStateAtom,
-    toastAtom,
     chatInputHeightAtom,
 } from "../state/atoms";
 import { LLM_PROVIDERS_CONFIG } from "../constants";
@@ -42,7 +41,6 @@ export const ModelResponsePanel: React.FC<ModelResponsePanelProps> = React.memo(
     );
     const streamingState = useAtomValue(turnStreamingStateFamily(turnId));
     const activeRecompute = useAtomValue(activeRecomputeStateAtom);
-    const setToast = useSetAtom(toastAtom);
 
     // Actions hook
     const { handleRetryProvider, handleBranchContinue, handleToggleTarget, activeTarget } =
@@ -98,15 +96,6 @@ export const ModelResponsePanel: React.FC<ModelResponsePanelProps> = React.memo(
         setBranchInput('');
     }, [branchInput, handleBranchContinue, providerId]);
 
-    // Handle copy with toast (hook before conditional return)
-    const handleCopyText = useCallback(async () => {
-        try {
-            await navigator.clipboard.writeText(derivedState.text);
-            setToast({ id: Date.now(), message: 'Copied to clipboard', type: 'info' });
-        } catch {
-            setToast({ id: Date.now(), message: 'Failed to copy', type: 'error' });
-        }
-    }, [derivedState.text, setToast]);
 
     // New: Trust mode via sentinel providerId
     if (providerId === '__trust__' && refinerOutput) {

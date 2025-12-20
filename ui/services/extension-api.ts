@@ -94,7 +94,7 @@ class ExtensionAPI {
   async ensurePort(
     options: { sessionId?: string; force?: boolean } = {},
   ): Promise<chrome.runtime.Port> {
-    const { sessionId, force = false } = options;
+    const { force = false } = options;
     if (
       this.port &&
       !force &&

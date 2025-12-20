@@ -23,7 +23,6 @@ import {
   iscomposingAtom, // Import new atom
   composerModelAtom, // Import new atom
   analystModelAtom,
-  chatInputValueAtom,
   hasRejectedRefinementAtom,
   activeProviderTargetAtom,
   launchpadDraftsAtom, // Import launchpad atom
@@ -59,7 +58,6 @@ export function useChat() {
   const refinerProvider = useAtomValue(refinerProviderAtom);
 
 
-  const chatInputValue = useAtomValue(chatInputValueAtom);
 
   // Writes
   const setTurnsMap = useSetAtom(turnsMapAtom);
@@ -456,7 +454,6 @@ export function useChat() {
   const composerModel = useAtomValue(composerModelAtom);
   const analystModel = useAtomValue(analystModelAtom);
 
-  const setChatInputValue = useSetAtom(chatInputValueAtom);
 
   const runComposerFlow = useCallback(
     async (draftPrompt: string, mode: "compose" | "explain", originalPromptContext?: string) => {

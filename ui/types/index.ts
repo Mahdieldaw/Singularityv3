@@ -13,22 +13,13 @@ import type {
   ProviderKey,
   ProviderResponse as ContractProviderResponse,
   AiTurn as ContractAiTurn,
-  PortMessage,
 } from "../../shared/contract";
 import {
   isUserTurn as isUserTurnContract,
   isAiTurn as isAiTurnContract,
 } from "../../shared/contract";
 
-// Import types from persistence layer (schema types)
-import type {
-  SessionRecord,
-  ThreadRecord,
-  TurnRecord,
-  UserTurnRecord,
-  AiTurnRecord,
-  ProviderResponseRecord,
-} from "../../src/persistence/types";
+
 
 // =============================================================================
 // RE-EXPORTED TYPES FROM SHARED CONTRACT

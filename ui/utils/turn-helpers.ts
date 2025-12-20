@@ -188,7 +188,7 @@ export function applyStreamingUpdates(
 
       const latest = arr.length > 0 ? arr[arr.length - 1] : undefined;
       const isLatestTerminal = latest && (latest.status === "completed" || latest.status === "error");
-      const isNewStream = status === "streaming" || status === "pending";
+      
 
       if (latest && !isLatestTerminal) {
         arr[arr.length - 1] = {
@@ -215,7 +215,7 @@ export function applyStreamingUpdates(
 
       const latest = arr.length > 0 ? arr[arr.length - 1] : undefined;
       const isLatestTerminal = latest && (latest.status === "completed" || latest.status === "error");
-      const isNewStream = status === "streaming" || status === "pending";
+     
 
       if (latest && !isLatestTerminal) {
         arr[arr.length - 1] = {

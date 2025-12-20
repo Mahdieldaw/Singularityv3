@@ -1,4 +1,4 @@
-import { GraphTopology, GraphNode, GraphEdge } from '../../../shared/parsing-utils';
+import { GraphTopology } from '../../../shared/parsing-utils';
 import { ClaimNode, ClaimEdge } from './DecisionMapGraph';
 
 /**

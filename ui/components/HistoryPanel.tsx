@@ -341,7 +341,7 @@ export default function HistoryPanel() {
     );
 
     try {
-      const { removed } = await deleteChats(ids);
+      const {  } = await deleteChats(ids);
       // Revalidate list with backend
       const response = await api.getHistoryList();
       const refreshed = (response?.sessions || []).map((s: any) => ({

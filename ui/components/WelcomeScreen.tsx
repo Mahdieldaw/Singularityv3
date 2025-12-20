@@ -1,4 +1,3 @@
-import React from "react";
 import { EXAMPLE_PROMPT } from "../constants";
 import logoIcon from "../assets/logos/logo-icon.svg";
 import { useProviderStatus } from "../hooks/useProviderStatus";

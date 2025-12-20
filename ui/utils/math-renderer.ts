@@ -15,7 +15,7 @@ export async function loadMathPlugins() {
     const [
         { default: remarkMath },
         { default: rehypeKatex },
-        { default: katex } // Ensure katex is loaded for side effects if needed, though rehype-katex usually handles it
+         // Ensure katex is loaded for side effects if needed, though rehype-katex usually handles it
     ] = await Promise.all([
         import('remark-math'),
         import('rehype-katex'),

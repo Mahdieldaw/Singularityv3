@@ -2,7 +2,7 @@
  * Signal utilities for categorizing and working with Refiner signals.
  */
 
-import { Signal, SignalPriority, RefinerOutput } from '../../shared/parsing-utils';
+import { Signal, SignalPriority } from '../../shared/parsing-utils';
 
 export interface CategorizedSignals {
     blockerSignals: Signal[];
