@@ -91,20 +91,24 @@ export class PortHealthManager {
     const now = Date.now();
     if (now - this.lastActivitySent > this.ACTIVITY_THROTTLE_MS) {
       this.lastActivitySent = now;
-    try {
-      if (
-        chrome &&
-        chrome.runtime &&
-        typeof chrome.runtime.sendMessage === "function"
-      ) {
-        chrome.runtime.sendMessage(
+      try {
+        if (
+          chrome &&
+          chrome.runtime &&
+          typeof chrome.runtime.sendMessage === "function"
+        ) {
+          chrome.runtime.sendMessage(
             { type: "htos.activity", timestamp: now },
-          () => {
-            /* noop */
-          },
-        );
-      }
-      } catch (e) { /* ignore context invalidated */ }
+            () => {
+              try {
+                if (chrome.runtime && chrome.runtime.lastError) {
+                  /* ignore transient delivery errors */
+                }
+              } catch (_) {}
+            },
+          );
+        }
+      } catch (e) {}
     }
 
     if (message.type === "KEEPALIVE_PONG") {
