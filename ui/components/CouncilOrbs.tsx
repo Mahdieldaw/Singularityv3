@@ -37,7 +37,6 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
     voiceProviderId,
     onOrbClick,
     onCrownMove,
-    onTrayExpand,
     isTrayExpanded,
     variant = "tray",
     visibleProviderIds,

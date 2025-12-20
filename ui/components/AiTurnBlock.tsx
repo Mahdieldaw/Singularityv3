@@ -16,6 +16,7 @@ import {
   activeRecomputeStateAtom,
   mappingProviderAtom,
   chatInputValueAtom,
+  trustPanelFocusAtom,
 } from "../state/atoms";
 import { useClipActions } from "../hooks/useClipActions";
 import { AiTurn, ProviderResponse } from "../types";
@@ -43,7 +44,6 @@ import { useRefinerOutput } from "../hooks/useRefinerOutput";
 
 import { ReframingBanner } from "./refinerui/ReframingBanner";
 import { NextStepFooter } from "./refinerui/NextStepFooter";
-import { SignalCard } from "./refinerui/SignalCard";
 import { categorizeSignals } from "../utils/signalUtils";
 
 // --- Helper Functions ---
@@ -180,9 +180,13 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
   const isThisTurnActive = activeAiTurnId === aiTurn.id && globalIsLoading;
 
   const { output: refinerOutput } = useRefinerOutput(aiTurn.id);
-  const { blockerSignals } = useMemo(() => categorizeSignals(refinerOutput?.signals), [refinerOutput]);
+  const { blockerSignals, riskSignals, enhancementSignals } = useMemo(
+    () => categorizeSignals(refinerOutput?.signals),
+    [refinerOutput]
+  );
 
   const setChatInput = useSetAtom(chatInputValueAtom);
+  const setTrustPanelFocus = useSetAtom(trustPanelFocusAtom);
 
   const handleAskReframed = useCallback((question: string) => {
     setChatInput(question);
@@ -378,7 +382,7 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
       const idxB = providerOrder.get(b[0]) ?? Number.POSITIVE_INFINITY;
       if (idxA !== idxB) return idxA - idxB;
       return String(a[0]).localeCompare(String(b[0]));
-    });
+  });
 
     sortedProviders.forEach(([pid, resps]) => {
       const name = getProviderName(pid);
@@ -827,12 +831,19 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                                     <div className="text-xs font-semibold text-intent-danger mb-2">⛔ Cannot proceed without:</div>
                                     <div className="space-y-2">
                                       {blockerSignals.map((signal, idx) => (
-                                        <SignalCard
+                                        <button
                                           key={idx}
-                                          signal={signal}
-                                          variant="compact"
-                                          onClick={() => setActiveSplitPanel({ turnId: aiTurn.id, providerId: '__trust__' })}
-                                        />
+                                          onClick={() => {
+                                            setActiveSplitPanel({ turnId: aiTurn.id, providerId: '__trust__' });
+                                            setTrustPanelFocus({ turnId: aiTurn.id, section: 'blockers' });
+                                          }}
+                                          className="w-full text-left rounded-md px-3 py-2 bg-intent-danger/5 hover:bg-intent-danger/15 border border-intent-danger/30 transition-colors"
+                                        >
+                                          <div className="text-sm text-text-primary">• {signal.content}</div>
+                                          {signal.source && (
+                                            <div className="text-xs text-text-secondary mt-0.5">{signal.source}</div>
+                                          )}
+                                        </button>
                                       ))}
                                     </div>
                                   </div>
@@ -845,24 +856,84 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                                 </div>
 
                                 {refinerOutput && (
-                                  <div className="my-6 flex items-center justify-center gap-4 border-y border-border-subtle/60 py-3">
-                                    <button
-                                      onClick={() => setIsDecisionMapOpen({ turnId: aiTurn.id })}
-                                      className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-surface-raised hover:bg-surface-highlight border border-border-subtle text-xs text-text-secondary"
-                                      title="Open decision map"
-                                    >
-                                      <span className="text-sm">📊</span>
-                                      <span>Map</span>
-                                    </button>
-                                    <button
-                                      onClick={() => setActiveSplitPanel({ turnId: aiTurn.id, providerId: '__trust__' })}
-                                      className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-surface-raised hover:bg-surface-highlight border border-border-subtle text-xs text-text-secondary"
-                                      title="Open trust panel"
-                                    >
-                                      <span className="text-sm">🔍</span>
-                                      <span>Trust</span>
-                                    </button>
-                                  </div>
+                                  (() => {
+                                    const hasAnySignals =
+                                      blockerSignals.length > 0 ||
+                                      riskSignals.length > 0 ||
+                                      enhancementSignals.length > 0;
+
+                                    if (!hasAnySignals) {
+                                      return (
+                                        <div className="my-6 flex items-center justify-center border-y border-border-subtle/60 py-3">
+                                          <button
+                                            onClick={() => setIsDecisionMapOpen({ turnId: aiTurn.id })}
+                                            className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-surface-raised hover:bg-surface-highlight border border-border-subtle text-xs text-text-secondary"
+                                            title="Open decision map"
+                                          >
+                                            <span className="text-sm">📊</span>
+                                            <span>Map</span>
+                                          </button>
+                                        </div>
+                                      );
+                                    }
+
+                                    return (
+                                      <div className="my-6 flex items-center justify-center gap-4 border-y border-border-subtle/60 py-3">
+                                        <button
+                                          onClick={() => setIsDecisionMapOpen({ turnId: aiTurn.id })}
+                                          className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-surface-raised hover:bg-surface-highlight border border-border-subtle text-xs text-text-secondary"
+                                          title="Open decision map"
+                                        >
+                                          <span className="text-sm">📊</span>
+                                          <span>Map</span>
+                                        </button>
+
+                                        <div className="flex items-center gap-2">
+                                          {blockerSignals.length > 0 && (
+                                            <button
+                                              onClick={() => {
+                                                setActiveSplitPanel({ turnId: aiTurn.id, providerId: '__trust__' });
+                                                setTrustPanelFocus({ turnId: aiTurn.id, section: 'blockers' });
+                                              }}
+                                              className="indicator indicator--blocker flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-intent-danger/15 border border-intent-danger/40 text-intent-danger hover:bg-intent-danger/25 transition-colors"
+                                              title="View blocker signals"
+                                            >
+                                              <span>⛔</span>
+                                              <span>{blockerSignals.length}</span>
+                                            </button>
+                                          )}
+
+                                          {riskSignals.length > 0 && (
+                                            <button
+                                              onClick={() => {
+                                                setActiveSplitPanel({ turnId: aiTurn.id, providerId: '__trust__' });
+                                                setTrustPanelFocus({ turnId: aiTurn.id, section: 'risks' });
+                                              }}
+                                              className="indicator indicator--risk flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-intent-warning/15 border border-intent-warning/40 text-intent-warning hover:bg-intent-warning/25 transition-colors"
+                                              title="View risk signals"
+                                            >
+                                              <span>⚠️</span>
+                                              <span>{riskSignals.length}</span>
+                                            </button>
+                                          )}
+
+                                          {enhancementSignals.length > 0 && (
+                                            <button
+                                              onClick={() => {
+                                                setActiveSplitPanel({ turnId: aiTurn.id, providerId: '__trust__' });
+                                                setTrustPanelFocus({ turnId: aiTurn.id, section: 'context' });
+                                              }}
+                                              className="indicator indicator--enhancement flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-brand-500/15 border border-brand-500/40 text-brand-400 hover:bg-brand-500/25 transition-colors"
+                                              title="View additional context signals"
+                                            >
+                                              <span>💡</span>
+                                              <span>{enhancementSignals.length}</span>
+                                            </button>
+                                          )}
+                                        </div>
+                                      </div>
+                                    );
+                                  })()
                                 )}
 
                                 {longAnswer && (

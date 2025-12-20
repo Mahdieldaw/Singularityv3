@@ -1,21 +1,6 @@
-/**
- * SignalCard - Renders a signal with priority-based styling.
- * 
- * Styling by priority:
- * - blocker: Red background/border
- * - risk: Amber background/border
- * - enhancement: Blue background/border
- * 
- * Icon by type:
- * - divergence: ⚠️ "AI models disagreed"
- * - overclaim: ⚠️ "May be overstated"
- * - gap: 💡 "Context dropped"
- * - blindspot: 🕳️ "Not addressed"
- */
-
 import React from 'react';
 import { Signal } from '../../../shared/parsing-utils';
-import { getSignalIcon, getSignalLabel, getSignalPriorityClasses } from '../../utils/signalUtils';
+import { getSignalLabel, getSignalPriorityClasses } from '../../utils/signalUtils';
 
 export interface SignalCardProps {
     signal: Signal;
@@ -29,7 +14,6 @@ export const SignalCard: React.FC<SignalCardProps> = ({
     onClick
 }) => {
     const { background, border, text } = getSignalPriorityClasses(signal.priority);
-    const icon = getSignalIcon(signal.type);
     const label = getSignalLabel(signal.type);
 
     if (variant === 'compact') {
@@ -43,13 +27,19 @@ export const SignalCard: React.FC<SignalCardProps> = ({
                 `}
                 title={signal.content}
             >
-                <span className="flex-shrink-0 text-sm">{icon}</span>
-                <div className="min-w-0">
-                    <div className={`text-xs font-medium ${text} truncate`}>
-                        {label}
-                    </div>
-                    <div className="text-[11px] text-text-secondary line-clamp-2">
+                <div className="min-w-0 flex flex-col gap-1">
+                    <div className="text-xs font-medium text-text-primary truncate">
                         {signal.content}
+                    </div>
+                    <div className="flex items-center gap-2 text-[11px] text-text-muted">
+                        {signal.source && (
+                            <span className="truncate">{signal.source}</span>
+                        )}
+                        {label && (
+                            <span className={`px-1.5 py-0.5 rounded-full bg-surface-highlight whitespace-nowrap ${text}`}>
+                                {label}
+                            </span>
+                        )}
                     </div>
                 </div>
             </button>
@@ -65,34 +55,28 @@ export const SignalCard: React.FC<SignalCardProps> = ({
                 ${background} ${border}
             `}
         >
-            {/* Header */}
-            <div className="flex items-center gap-2">
-                <span className="text-base">{icon}</span>
-                <span className={`text-xs font-semibold uppercase tracking-wide ${text}`}>
-                    {label}
-                </span>
+            <div className="flex items-start justify-between gap-2">
+                <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium text-text-primary leading-relaxed">
+                        {signal.content}
+                    </div>
+                </div>
+                {label && (
+                    <span className={`ml-2 px-2 py-0.5 rounded-full text-[11px] font-medium bg-surface-highlight text-text-muted whitespace-nowrap ${text}`}>
+                        {label}
+                    </span>
+                )}
             </div>
 
-            {/* Content */}
-            <p className="text-sm text-text-primary leading-relaxed">
-                {signal.content}
-            </p>
+            {signal.source && (
+                <div className="text-xs text-text-secondary">
+                    {signal.source}
+                </div>
+            )}
 
-            {/* Meta: Source & Impact */}
-            {(signal.source || signal.impact) && (
-                <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-text-muted mt-1">
-                    {signal.source && (
-                        <span>
-                            <span className="opacity-60">Source:</span>{' '}
-                            <span className="text-text-secondary">{signal.source}</span>
-                        </span>
-                    )}
-                    {signal.impact && (
-                        <span>
-                            <span className="opacity-60">Impact:</span>{' '}
-                            <span className="text-text-secondary">{signal.impact}</span>
-                        </span>
-                    )}
+            {signal.impact && (
+                <div className="text-xs text-text-muted">
+                    {`→ ${signal.impact}`}
                 </div>
             )}
         </div>

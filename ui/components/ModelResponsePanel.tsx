@@ -3,12 +3,13 @@
 // Migrated features from deprecated ProviderCard.tsx and ProviderResponseBlock.tsx
 
 import React, { useState, useCallback, useMemo } from "react";
-import { useAtomValue } from "jotai";
+import { useAtom, useAtomValue } from "jotai";
 import {
     providerEffectiveStateFamily,
     turnStreamingStateFamily,
     activeRecomputeStateAtom,
     chatInputHeightAtom,
+    trustPanelFocusAtom,
 } from "../state/atoms";
 import { LLM_PROVIDERS_CONFIG } from "../constants";
 import { useProviderActions } from "../hooks/useProviderActions";
@@ -68,6 +69,7 @@ export const ModelResponsePanel: React.FC<ModelResponsePanelProps> = React.memo(
     }, [latestResponse, streamingState.activeProviderId, providerId]);
 
     const { output: refinerOutput, rawText: refinerRawText } = useRefinerOutput(turnId);
+    const [trustPanelFocus, setTrustPanelFocus] = useAtom(trustPanelFocusAtom);
     const chatInputHeight = useAtomValue(chatInputHeightAtom);
 
     // Compute missedInsights unconditionally to preserve hook order
@@ -99,9 +101,23 @@ export const ModelResponsePanel: React.FC<ModelResponsePanelProps> = React.memo(
 
     // New: Trust mode via sentinel providerId
     if (providerId === '__trust__' && refinerOutput) {
+        const initialSection = trustPanelFocus && trustPanelFocus.turnId === turnId
+            ? trustPanelFocus.section
+            : null;
+
+        if (trustPanelFocus && trustPanelFocus.turnId === turnId) {
+            setTrustPanelFocus(null);
+        }
+
         return (
             <div className="h-full w-full min-w-0 flex flex-col bg-surface-raised border border-border-subtle rounded-2xl shadow-lg overflow-hidden">
-                <TrustSignalsPanel refiner={refinerOutput} rawText={refinerRawText || undefined} onClose={onClose} bottomPadding={(chatInputHeight || 80) + 32} />
+                <TrustSignalsPanel
+                    refiner={refinerOutput}
+                    rawText={refinerRawText || undefined}
+                    onClose={onClose}
+                    bottomPadding={(chatInputHeight || 80) + 32}
+                    initialSection={initialSection}
+                />
             </div>
         );
     }

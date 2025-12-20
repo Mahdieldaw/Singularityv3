@@ -3,7 +3,7 @@
  * Updated for signal-based RefinerOutput structure.
  */
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import type { RefinerOutput } from '../../../shared/parsing-utils';
 import { SignalCard } from './SignalCard';
 import { categorizeSignals, getSignalCounts } from '../../utils/signalUtils';
@@ -14,6 +14,7 @@ interface TrustSignalsPanelProps {
   rawText?: string;
   onClose?: () => void;
   bottomPadding?: number;
+  initialSection?: 'blockers' | 'risks' | 'context' | null;
 }
 
 interface CollapsibleSectionProps {
@@ -58,7 +59,7 @@ const CollapsibleSection: React.FC<CollapsibleSectionProps> = ({
   </div>
 );
 
-export function TrustSignalsPanel({ refiner, rawText, onClose, bottomPadding }: TrustSignalsPanelProps) {
+export function TrustSignalsPanel({ refiner, rawText, onClose, bottomPadding, initialSection }: TrustSignalsPanelProps) {
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(['blockers', 'risks']));
   const [showRaw, setShowRaw] = useState(false);
 
@@ -75,6 +76,35 @@ export function TrustSignalsPanel({ refiner, rawText, onClose, bottomPadding }: 
   const counts = getSignalCounts(refiner.signals);
   const summary = formatSignalSummary(refiner);
   const nextStepStyles = getNextStepStyles(refiner.nextStep?.action);
+
+  useEffect(() => {
+    if (!initialSection) return;
+
+    const sectionKey =
+      initialSection === 'context' ? 'enhancements' : initialSection === 'blockers' ? 'blockers' : 'risks';
+
+    setExpandedSections(prev => {
+      const next = new Set(prev);
+      next.add(sectionKey);
+      return next;
+    });
+
+    const id =
+      initialSection === 'blockers'
+        ? 'trust-blockers'
+        : initialSection === 'risks'
+        ? 'trust-risks'
+        : 'trust-context';
+
+    const handle = window.setTimeout(() => {
+      const el = document.getElementById(id);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    }, 120);
+
+    return () => window.clearTimeout(handle);
+  }, [initialSection]);
 
   return (
     <div className="flex flex-col h-full bg-surface-raised border-l border-border-subtle">
@@ -100,47 +130,53 @@ export function TrustSignalsPanel({ refiner, rawText, onClose, bottomPadding }: 
 
         {/* Blocker Signals */}
         {blockerSignals.length > 0 && (
-          <CollapsibleSection
-            title="🚫 Blockers"
-            count={counts.blockers}
-            isExpanded={expandedSections.has('blockers')}
-            onToggle={() => toggleSection('blockers')}
-            priorityColor="text-intent-danger"
-          >
-            {blockerSignals.map((signal, idx) => (
-              <SignalCard key={idx} signal={signal} />
-            ))}
-          </CollapsibleSection>
+          <div id="trust-blockers">
+            <CollapsibleSection
+              title="🚫 Blockers"
+              count={counts.blockers}
+              isExpanded={expandedSections.has('blockers')}
+              onToggle={() => toggleSection('blockers')}
+              priorityColor="text-intent-danger"
+            >
+              {blockerSignals.map((signal, idx) => (
+                <SignalCard key={idx} signal={signal} />
+              ))}
+            </CollapsibleSection>
+          </div>
         )}
 
         {/* Risk Signals */}
         {riskSignals.length > 0 && (
-          <CollapsibleSection
-            title="⚠️ Risks"
-            count={counts.risks}
-            isExpanded={expandedSections.has('risks')}
-            onToggle={() => toggleSection('risks')}
-            priorityColor="text-intent-warning"
-          >
-            {riskSignals.map((signal, idx) => (
-              <SignalCard key={idx} signal={signal} />
-            ))}
-          </CollapsibleSection>
+          <div id="trust-risks">
+            <CollapsibleSection
+              title="⚠️ Risks"
+              count={counts.risks}
+              isExpanded={expandedSections.has('risks')}
+              onToggle={() => toggleSection('risks')}
+              priorityColor="text-intent-warning"
+            >
+              {riskSignals.map((signal, idx) => (
+                <SignalCard key={idx} signal={signal} />
+              ))}
+            </CollapsibleSection>
+          </div>
         )}
 
         {/* Enhancement Signals */}
         {enhancementSignals.length > 0 && (
-          <CollapsibleSection
-            title="💡 Additional Context"
-            count={counts.enhancements}
-            isExpanded={expandedSections.has('enhancements')}
-            onToggle={() => toggleSection('enhancements')}
-            priorityColor="text-brand-400"
-          >
-            {enhancementSignals.map((signal, idx) => (
-              <SignalCard key={idx} signal={signal} />
-            ))}
-          </CollapsibleSection>
+          <div id="trust-context">
+            <CollapsibleSection
+              title="💡 Additional Context"
+              count={counts.enhancements}
+              isExpanded={expandedSections.has('enhancements')}
+              onToggle={() => toggleSection('enhancements')}
+              priorityColor="text-brand-400"
+            >
+              {enhancementSignals.map((signal, idx) => (
+                <SignalCard key={idx} signal={signal} />
+              ))}
+            </CollapsibleSection>
+          </div>
         )}
 
         {/* Unlisted Options */}
