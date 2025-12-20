@@ -190,7 +190,7 @@ export async function batchWrite<T>(
 
     // Execute all writes
     const promises = records.map((record, index) => {
-      return new Promise<void>((resolve, reject) => {
+      return new Promise<void>((resolve) => {
         const request = store.put(record);
 
         request.onsuccess = () => resolve();
@@ -232,7 +232,7 @@ export async function batchDelete(
 
     // Execute all deletes
     const promises = keys.map((key, index) => {
-      return new Promise<void>((resolve, reject) => {
+      return new Promise<void>((resolve) => {
         const request = store.delete(key as IDBValidKey);
 
         request.onsuccess = () => resolve();

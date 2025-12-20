@@ -12,7 +12,7 @@ export {
   UserAgentController,
   ArkoseController,
 } from "../HTOS/NetRulesManager.js";
-export { SWBootstrap as ServiceWorkerBootstrap } from "../HTOS/ServiceWorkerBootstrap.js";
+
 
 // Core exports
 export { LifecycleManager } from "./lifecycle-manager.js";

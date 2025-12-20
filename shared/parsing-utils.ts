@@ -304,6 +304,13 @@ export interface RefinerOutput {
         unlocks: string;
     } | null;
 
+    meta: {
+        reliabilitySummary: string;
+        biggestRisk: string;
+        strategicPattern: string | null;
+        honestAssessment: string;
+    };
+
     // rawText is essential for UI display
     rawText?: string;
 }
@@ -330,6 +337,7 @@ export function parseRefinerOutput(text: string): RefinerOutput {
         unlistedOptions: extractUnlistedOptions(normalized),
         nextStep: extractNextStep(normalized),
         reframe: extractReframe(normalized),
+        meta: extractMeta(normalized),
         rawText: text,
     };
 }
@@ -340,7 +348,17 @@ function createEmptyRefinerOutput(rawText: string = ''): RefinerOutput {
         unlistedOptions: [],
         nextStep: null,
         reframe: null,
+        meta: createEmptyRefinerMeta(),
         rawText,
+    };
+}
+
+function createEmptyRefinerMeta(): RefinerOutput['meta'] {
+    return {
+        reliabilitySummary: '',
+        biggestRisk: '',
+        strategicPattern: null,
+        honestAssessment: '',
     };
 }
 
@@ -437,11 +455,28 @@ function normalizeRefinerObject(parsed: any): Omit<RefinerOutput, 'rawText'> | n
         };
     }
 
+    const metaObj = parsed.meta && typeof parsed.meta === 'object' ? parsed.meta : null;
+    const strategicPatternRaw = metaObj ? metaObj.strategicPattern : null;
+    const strategicPatternValue = strategicPatternRaw === null || strategicPatternRaw === undefined
+        ? null
+        : String(strategicPatternRaw).trim();
+    const strategicPattern = strategicPatternValue && !/^null|n\/?a|none$/i.test(strategicPatternValue)
+        ? strategicPatternValue
+        : null;
+
+    const meta: RefinerOutput['meta'] = {
+        reliabilitySummary: metaObj ? String(metaObj.reliabilitySummary || '') : '',
+        biggestRisk: metaObj ? String(metaObj.biggestRisk || '') : '',
+        strategicPattern,
+        honestAssessment: metaObj ? String(metaObj.honestAssessment || '') : '',
+    };
+
     return {
         signals,
         unlistedOptions,
         nextStep,
-        reframe
+        reframe,
+        meta,
     };
 }
 
@@ -589,87 +624,12 @@ function parseListOrParagraph(text: string): string[] {
     return [text.trim()];
 }
 
-// ============================================================================
-// FIELD EXTRACTORS
-// ============================================================================
 
-function extractConfidenceScore(text: string): number {
-    const patterns = [
-        /confidence\s+score[:\s]*\*?\*?[\[\(]?(\d+\.?\d*)/i,
-        /\*\*(\d+\.?\d*)\*\*\s*confidence/i,
-        /score[:\s]*(\d+\.?\d*)/i,
-    ];
 
-    for (const pattern of patterns) {
-        const match = text.match(pattern);
-        if (match?.[1]) {
-            const score = parseFloat(match[1]);
-            if (!isNaN(score)) {
-                return score > 1 ? score / 100 : Math.max(0, Math.min(1, score));
-            }
-        }
-    }
 
-    return 0.5;
-}
 
-function extractRationale(text: string): string {
-    // Try within Reliability Assessment section first
-    const section = extractSection(text, 'Reliability Assessment');
-    if (section) {
-        const rationale = extractLabeledValue(section, 'rationale');
-        if (rationale) return rationale;
-    }
 
-    // Try standalone
-    return extractSection(text, 'Rationale') || '';
-}
 
-function extractPresentationStrategy(text: string): string {
-    const section = extractSection(text, 'Presentation Strategy');
-    if (!section) return 'confident_with_caveats';
-
-    // Handle: **Recommended**: **value** OR **Recommended**: value
-    const patterns = [
-        /\*\*recommended\*\*[:\s]*\*{0,2}([a-z_]+)\*{0,2}/i,
-        /recommended[:\s]+\*{0,2}([a-z_]+)\*{0,2}/i,
-    ];
-
-    const validStrategies = [
-        'definitive', 'confident_with_caveats', 'options_forward',
-        'context_dependent', 'low_confidence', 'needs_verification',
-        'query_problematic'
-    ];
-
-    for (const pattern of patterns) {
-        const match = section.match(pattern);
-        if (match?.[1]) {
-            const value = match[1].toLowerCase();
-            if (validStrategies.includes(value)) return value;
-        }
-    }
-
-    return 'confident_with_caveats';
-}
-
-function extractStrategyRationale(text: string): string {
-    const section = extractSection(text, 'Presentation Strategy');
-    if (!section) return '';
-    return extractLabeledValue(section, 'why') || '';
-}
-
-// ============================================================================
-// DEPRECATED EXTRACT FUNCTIONS REMOVED
-// The following functions were removed as they referenced fields no longer
-// in the new signal-based RefinerOutput structure:
-// - extractVerificationTriggers
-// - extractReframingSuggestion  
-// - extractSynthesisAccuracy
-// - extractGaps
-// - extractMetaPattern
-// - extractHonestAssessment
-// - extractMapperAudit
-// ============================================================================
 
 // ============================================================================
 // NEW SIGNAL-BASED EXTRACTORS
@@ -862,4 +822,72 @@ function extractReframe(text: string): RefinerOutput['reframe'] {
         suggestion: suggestion.replace(/^[""]|[""]$/g, ''),
         unlocks
     };
+}
+
+function extractMeta(text: string): RefinerOutput['meta'] {
+    const metaSection = extractSection(text, "Refiner's Take") ||
+        extractSection(text, 'Refiners Take') ||
+        extractSection(text, 'Meta') ||
+        extractSection(text, 'Refiner Take') ||
+        text;
+
+    const stopLabels = [
+        'Reliability Summary',
+        'Biggest Risk',
+        'Strategic Pattern',
+        'Honest Assessment',
+    ];
+
+    const reliabilitySummary = extractLabeledBlock(metaSection, 'Reliability Summary', stopLabels) ||
+        extractLabeledValue(metaSection, 'Reliability Summary') ||
+        '';
+
+    const biggestRisk = extractLabeledBlock(metaSection, 'Biggest Risk', stopLabels) ||
+        extractLabeledValue(metaSection, 'Biggest Risk') ||
+        '';
+
+    const strategicPatternRaw = extractLabeledBlock(metaSection, 'Strategic Pattern', stopLabels) ||
+        extractLabeledValue(metaSection, 'Strategic Pattern') ||
+        '';
+
+    const strategicPatternTrimmed = strategicPatternRaw.trim();
+    const strategicPattern = strategicPatternTrimmed && !/^null|n\/?a|none$/i.test(strategicPatternTrimmed)
+        ? strategicPatternTrimmed
+        : null;
+
+    const honestAssessment = extractLabeledBlock(metaSection, 'Honest Assessment', stopLabels) ||
+        extractLabeledValue(metaSection, 'Honest Assessment') ||
+        '';
+
+    return {
+        reliabilitySummary: reliabilitySummary.trim(),
+        biggestRisk: biggestRisk.trim(),
+        strategicPattern,
+        honestAssessment: honestAssessment.trim(),
+    };
+}
+
+function extractLabeledBlock(text: string, label: string, stopLabels: string[]): string {
+    if (!text?.trim()) return '';
+    const escapedLabel = label.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+    const escapedStops = stopLabels
+        .filter((s) => s.toLowerCase() !== label.toLowerCase())
+        .map((s) => s.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&'))
+        .join('|');
+
+    const stopGroup = escapedStops ? `(?:${escapedStops})` : '(?!)';
+
+    const pattern = new RegExp(
+        `(?:^|\\n)\\s*(?:[-*•]\\s*)?\\*{0,2}${escapedLabel}\\*{0,2}\\s*:?\\s*` +
+        `([\\s\\S]*?)` +
+        `(?=\\n\\s*(?:[-*•]\\s*)?\\*{0,2}${stopGroup}\\*{0,2}\\s*:?|\\n#{1,3}\\s|\\n---\\s*\\n|$)`,
+        'i'
+    );
+
+    const match = text.match(pattern);
+    if (!match?.[1]) return '';
+
+    return match[1]
+        .replace(/^\s*[:\-—]+\s*/g, '')
+        .trim();
 }

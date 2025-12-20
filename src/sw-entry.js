@@ -17,7 +17,7 @@ import {
 } from "./core/vendor-exports.js";
 import { WorkflowCompiler } from "./core/workflow-compiler.js";
 import { ContextResolver } from "./core/context-resolver.js";
-import { SWBootstrap } from "./HTOS/ServiceWorkerBootstrap.js";
+
 import { ClaudeAdapter } from "./providers/claude-adapter.js";
 import { GeminiAdapter } from "./providers/gemini-adapter.js";
 import { ChatGPTAdapter } from "./providers/chatgpt-adapter.js";

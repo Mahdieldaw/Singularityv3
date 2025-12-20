@@ -227,7 +227,7 @@ export const DraftCard: React.FC<DraftCardProps> = ({
                                 ...sections.filter(s => s.id === primaryId),
                                 ...sections.filter(s => s.id !== primaryId)
                             ] : sections;
-                            return ordered.map((sec, idx) => (
+                            return ordered.map((sec) => (
                                 <div key={sec.id} className="rounded-lg border border-border-subtle/60 bg-surface">
                                     <button
                                         className="w-full flex items-center justify-between px-3 py-2 text-left"

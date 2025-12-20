@@ -52,11 +52,7 @@ function parseOptionsIntoThemes(optionsText: string | null): ParsedTheme[] {
   // Patterns for theme headers:
   // 1. Emoji-prefixed: "📐 Architecture & Pipeline" or "💻 Visualization..."
   // 2. "Theme:" prefix: "Theme: Defining the Interactive Role"
-  const themePatterns = [
-    /^([^\w\s][\u{1F300}-\u{1FAD6}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]?)\s*(.+?)$/u, // Emoji start
-    /^Theme:\s*(.+)$/i, // "Theme:" prefix
-    /^#+\s*(.+)$/, // Markdown headers
-  ];
+
 
   // Pattern for option items (bold title followed by colon)
   const optionPattern = /^\s*[-*•]?\s*\*?\*?([^:*]+)\*?\*?:\s*(.*)$/;
@@ -334,7 +330,7 @@ const OptionsTab: React.FC<OptionsTabProps> = ({ themes, citationSourceOrder, on
                       <SupporterOrbs
                         supporters={opt.citations}
                         citationSourceOrder={citationSourceOrder}
-                        onOrbClick={(pid) => onCitationClick(opt.citations[0])}
+                        onOrbClick={() => onCitationClick(opt.citations[0])}
                         size="small"
                       />
                     </div>
@@ -559,14 +555,6 @@ const RefinerSelector: React.FC<{ aiTurn: AiTurn, activeProviderId?: string, onS
 
   const activeProvider = activeProviderId ? getProviderConfig(activeProviderId) : null;
   const providers = useMemo(() => LLM_PROVIDERS_CONFIG.filter(p => p.id !== 'system'), []);
-
-  const handleProviderSelect = (providerId: string) => {
-    // 1. Update local view state
-    onSelect(providerId);
-    // 2. Trigger recompute/persistence
-    handleClipClick(aiTurn.id, "refiner", providerId);
-    setIsOpen(false);
-  };
 
   return (
     <div className="relative" ref={menuRef}>
@@ -903,7 +891,7 @@ export const DecisionMapSheet = React.memo(() => {
         );
       }
       return (
-        <a href={href} {...props} target="_blank" rel="noopener noreferrer">
+        <a href={href} {...props} target="_blank" rel="noopener noreferrer" className="text-brand-400 hover:text-brand-300 underline decoration-brand-400/30 hover:decoration-brand-400 transition-colors">
           {children}
         </a>
       );

@@ -3,16 +3,12 @@ import { useAtom, useSetAtom, useAtomValue } from "jotai";
 import {
   chatInputValueAtom,
   selectedModelsAtom,
-  composerModelAtom,
-  analystModelAtom,
   isLoadingAtom,
-  iscomposingAtom,
   isContinuationModeAtom,
   activeProviderCountAtom,
   isVisibleModeAtom,
   isReducedMotionAtom,
   chatInputHeightAtom,
-  isHistoryPanelOpenAtom,
   toastAtom,
   activeProviderTargetAtom,
   currentSessionIdAtom,
@@ -47,15 +43,14 @@ const ChatInput = ({
 }: ChatInputProps) => {
   // --- CONNECTED STATE LOGIC ---
   const [isLoading] = useAtom(isLoadingAtom as any) as [boolean, any];
-  const [iscomposing] = useAtom(iscomposingAtom as any) as [boolean, any];
+
   const [isContinuationMode] = useAtom(isContinuationModeAtom as any) as [boolean, any];
   const [activeProviderCount] = useAtom(activeProviderCountAtom as any) as [number, any];
   const [isVisibleMode] = useAtom(isVisibleModeAtom as any) as [boolean, any];
   const [isReducedMotion] = useAtom(isReducedMotionAtom as any) as [boolean, any];
   const [, setChatInputHeight] = useAtom(chatInputHeightAtom);
-  const [isHistoryOpen] = useAtom(isHistoryPanelOpenAtom); // Used for styling/layout context if needed?
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const isHistoryPanelOpen = !!isHistoryOpen; // Kept for prop parity if needed locally
+
+
 
   // Streaming UX: hide config orbs during active round
   const isRoundActive = useAtomValue(isRoundActiveAtom);
@@ -169,11 +164,9 @@ const ChatInput = ({
   const [isNudgeFrozen, setIsNudgeFrozen] = useState(false);
   const [isFocused, setIsFocused] = useState(false); // Track textarea focus
 
-  // Model selection for labels
-  const composerModelId = useAtom(composerModelAtom)[0];
-  const analystModelId = useAtom(analystModelAtom)[0];
-  const composerModelName = getProviderName(composerModelId || "gemini");
-  const analystModelName = getProviderName(analystModelId || "gemini");
+
+
+
 
   // Calculate limits based on selected providers
   useEffect(() => {

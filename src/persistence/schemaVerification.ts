@@ -21,9 +21,7 @@ export async function verifySchemaAndRepair(autoRepair: boolean): Promise<{
     return { repaired: false, health };
   }
 
-  const hasMissingStores = (health.issues || []).some((issue) =>
-    issue.includes("Missing object store"),
-  );
+
   const versionMismatch = health.currentVersion !== health.expectedVersion;
   if (!autoRepair) {
     const msg = `SchemaError: ${versionMismatch ? "schema_version mismatch" : "missing stores"}; issues=${health.issues?.join("; ")}`;

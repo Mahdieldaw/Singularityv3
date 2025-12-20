@@ -204,9 +204,21 @@ const MarkdownDisplay: React.FC<MarkdownDisplayProps> = React.memo(
             // Separate Block vs Inline logic explicitly
             pre: PreBlock,
             code: CodeText,
+ a: ({ href, children, ...props }: any) => (
+      <a 
+        href={href} 
+        {...props} 
+        target="_blank" 
+        rel="noopener noreferrer"
+        className="text-brand-400 hover:text-brand-300 underline decoration-brand-400/30 hover:decoration-brand-400 transition-colors"
+      >
+        {children}
+      </a>
+    ),
+    // ---------------------------
 
-            // Crash Fix: Map paragraphs to divs (or spans in lists)
-            p: ({ children }) => {
+    // Crash Fix: Map paragraphs to divs (or spans in lists)
+    p: ({ children }) => {
               const inList = React.useContext(ListContext);
               if (inList) {
                 // Force inline rendering for list items to prevent vertical stacking

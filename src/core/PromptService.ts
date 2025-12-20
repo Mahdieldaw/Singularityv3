@@ -139,7 +139,6 @@ export class PromptService {
         originalPrompt: string,
         sourceResults: Array<{ providerId: string; text: string }>,
         synthesisProvider: string,
-        mappingResult?: { text: string } | null,
         extractedOptions?: string | null
     ): string {
         const otherResults = (sourceResults || [])

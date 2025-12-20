@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef, useEffect, useCallback } from "react";
+import React, { useState, useMemo, useRef, useEffect } from "react";
 import { useAtom, useAtomValue } from "jotai";
 import { providerEffectiveStateFamily, isSplitOpenAtom, synthesisProviderAtom, mappingProviderAtom, composerModelAtom, analystModelAtom, providerAuthStatusAtom, selectedModelsAtom, refinerProviderAtom } from "../state/atoms";
 import { LLMProvider } from "../types";
@@ -47,7 +47,7 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
     const [hoveredOrb, setHoveredOrb] = useState<string | null>(null);
     const [isCrownMode, setIsCrownMode] = useState(false);
     const [isMenuOpen, setIsMenuOpen] = useState(false);
-    const [menuTarget, setMenuTarget] = useState<string | null>(null);
+
     const longPressRef = useRef<any>(null);
     const isSplitOpen = useAtomValue(isSplitOpenAtom);
     const authStatus = useAtomValue(providerAuthStatusAtom);
@@ -79,10 +79,10 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
 
         if (isEditMode) {
             setIsMenuOpen(true);
-            setMenuTarget(voiceProviderId);
+
         } else {
             setIsMenuOpen(false);
-            setMenuTarget(null);
+
         }
     }, [isEditMode, voiceProviderId, variant]);
 
@@ -178,7 +178,7 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
 
         if (longPressRef.current) clearTimeout(longPressRef.current);
         longPressRef.current = setTimeout(() => {
-            setMenuTarget(pid || voiceProviderId);
+
             setIsMenuOpen(true);
         }, 500);
     };

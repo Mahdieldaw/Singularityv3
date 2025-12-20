@@ -14,7 +14,6 @@ import {
   synthesisProviderAtom,
   includePromptInCopyAtom,
   isReducedMotionAtom,
-  showSourceOutputsFamily,
   activeRecomputeStateAtom,
   turnStreamingStateFamily,
   mappingProviderAtom,
@@ -122,6 +121,41 @@ function parseMappingResponse(response?: string | null) {
   }
 
   return { mapping: normalized, options: null };
+}
+
+function splitSynthesisAnswer(text: string): { shortAnswer: string; longAnswer: string | null } {
+  const input = String(text || '').replace(/\r\n/g, '\n');
+  if (!input.trim()) return { shortAnswer: '', longAnswer: null };
+
+  const patterns: RegExp[] = [
+    /(?:^|\n)\s*#{1,6}\s*the\s+long\s+answer\s*:?\s*(?:\n|$)/i,
+    /(?:^|\n)\s*#{1,6}\s*long\s+answer\s*:?\s*(?:\n|$)/i,
+    /(?:^|\n)\s*\*\*\s*the\s+long\s+answer\s*\*\*\s*:?\s*(?:\n|$)/i,
+    /(?:^|\n)\s*\*\*\s*long\s+answer\s*\*\*\s*:?\s*(?:\n|$)/i,
+    /(?:^|\n)\s*the\s+long\s+answer\s*:?\s*(?:\n|$)/i,
+    /(?:^|\n)\s*long\s+answer\s*:?\s*(?:\n|$)/i,
+  ];
+
+  let best: { index: number; length: number } | null = null;
+  for (const re of patterns) {
+    const match = input.match(re);
+    if (match && typeof match.index === 'number') {
+      const idx = match.index;
+      if (!best || idx < best.index) {
+        best = { index: idx, length: match[0].length };
+      }
+    }
+  }
+
+  if (!best) return { shortAnswer: input.trim(), longAnswer: null };
+
+  const shortAnswer = input.slice(0, best.index).trim();
+  const longAnswer = input.slice(best.index + best.length).trim();
+
+  return {
+    shortAnswer,
+    longAnswer: longAnswer ? longAnswer : null,
+  };
 }
 
 
@@ -1034,24 +1068,62 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                           {(() => {
                             const cleanText = take.text || '';
                             const artifacts = take.artifacts || [];
+                            const { shortAnswer, longAnswer } = splitSynthesisAnswer(cleanText);
 
                             return (
                               <>
-                                {/* Blocker Signals (if any) */}
                                 {blockerSignals.length > 0 && (
-                                  <div className="mb-6 mx-[-12px] sm:mx-0 space-y-2">
-                                    {blockerSignals.slice(0, 2).map((signal, idx) => (
-                                      <SignalCard key={idx} signal={signal} variant="compact" />
-                                    ))}
+                                  <div className="mb-6 mx-[-12px] sm:mx-0 rounded-lg bg-intent-danger/10 border border-intent-danger/20 border-l-4 border-intent-danger p-4">
+                                    <div className="text-xs font-semibold text-intent-danger mb-2">⛔ Cannot proceed without:</div>
+                                    <div className="space-y-2">
+                                      {blockerSignals.map((signal, idx) => (
+                                        <SignalCard
+                                          key={idx}
+                                          signal={signal}
+                                          variant="compact"
+                                          onClick={() => setActiveSplitPanel({ turnId: aiTurn.id, providerId: '__trust__' })}
+                                        />
+                                      ))}
+                                    </div>
                                   </div>
                                 )}
 
                                 <div className="text-base leading-relaxed text-text-primary">
                                   <MarkdownDisplay
-                                    content={String(cleanText || take.text || "")}
+                                    content={String(shortAnswer || cleanText || take.text || "")}
                                     components={markdownComponents}
                                   />
                                 </div>
+
+                                {refinerOutput && (
+                                  <div className="my-6 flex items-center justify-center gap-4 border-y border-border-subtle/60 py-3">
+                                    <button
+                                      onClick={() => setIsDecisionMapOpen({ turnId: aiTurn.id })}
+                                      className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-surface-raised hover:bg-surface-highlight border border-border-subtle text-xs text-text-secondary"
+                                      title="Open decision map"
+                                    >
+                                      <span className="text-sm">📊</span>
+                                      <span>Map</span>
+                                    </button>
+                                    <button
+                                      onClick={() => setActiveSplitPanel({ turnId: aiTurn.id, providerId: '__trust__' })}
+                                      className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-surface-raised hover:bg-surface-highlight border border-border-subtle text-xs text-text-secondary"
+                                      title="Open trust panel"
+                                    >
+                                      <span className="text-sm">🔍</span>
+                                      <span>Trust</span>
+                                    </button>
+                                  </div>
+                                )}
+
+                                {longAnswer && (
+                                  <div className="text-base leading-relaxed text-text-primary">
+                                    <MarkdownDisplay
+                                      content={String(longAnswer)}
+                                      components={markdownComponents}
+                                    />
+                                  </div>
+                                )}
 
                                 {/* Artifact badges */}
                                 {artifacts.length > 0 && (
@@ -1123,7 +1195,7 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                         : "opacity-0 group-hover/turn:opacity-100 focus-within:opacity-100"
                     )}
                   >
-                    <div className="pointer-events-auto translate-x-5 flex items-center gap-2">
+                    <div className="pointer-events-auto flex items-center gap-2">
                       <CouncilOrbs
                         turnId={aiTurn.id}
                         providers={LLM_PROVIDERS_CONFIG}
@@ -1135,12 +1207,6 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                         isTrayExpanded={isDecisionMapOpen?.turnId === aiTurn.id}
                         variant="historical"
                         workflowProgress={isThisTurnActive ? workflowProgress as any : undefined}
-                      />
-                      {/* Trust Icon */}
-                      <TrustIcon
-                        refiner={refinerOutput || null}
-                        onClick={() => setActiveSplitPanel({ turnId: aiTurn.id, providerId: '__trust__' })}
-                        isActive={activeSplitPanel?.turnId === aiTurn.id && activeSplitPanel?.providerId === '__trust__'}
                       />
                     </div>
 
