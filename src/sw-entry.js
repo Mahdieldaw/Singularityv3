@@ -874,9 +874,8 @@ async function handleUnifiedMessage(message, sender, sendResponse) {
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request?.$bus) return false;
-   // 1. Explicitly handle keepalive - return false to close channel immediately
-  if (request?.type === "htos.keepalive") {
-    return false; 
+  if (request?.type === "htos.keepalive" || request?.type === "htos.activity") {
+    return false;
   }
   if (request?.type === "GET_HEALTH_STATUS") {
     // Return health
