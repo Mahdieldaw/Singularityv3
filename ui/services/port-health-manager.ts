@@ -10,6 +10,10 @@ export class PortHealthManager {
   private readonly RECONNECT_DELAY = 2000; // base delay
   private readonly RECONNECT_JITTER_MS = 500; // random jitter
 
+  // Throttle constants
+  private readonly ACTIVITY_THROTTLE_MS = 5000; // Only send activity ping every 5s max
+  private lastActivitySent = 0;
+
   private reconnectAttempts = 0;
   private isConnected = false;
   private lastPongTimestamp = 0;
@@ -83,6 +87,10 @@ export class PortHealthManager {
     this.lastPongTimestamp = Date.now();
 
     // Notify SW of activity so lifecycle manager can record activity (best-effort)
+    // FIX: THROTLED to prevent flooding SW with thousands of messages during streaming
+    const now = Date.now();
+    if (now - this.lastActivitySent > this.ACTIVITY_THROTTLE_MS) {
+      this.lastActivitySent = now;
     try {
       if (
         chrome &&
@@ -90,13 +98,14 @@ export class PortHealthManager {
         typeof chrome.runtime.sendMessage === "function"
       ) {
         chrome.runtime.sendMessage(
-          { type: "htos.activity", timestamp: Date.now() },
+            { type: "htos.activity", timestamp: now },
           () => {
             /* noop */
           },
         );
       }
-    } catch (e) {}
+      } catch (e) { /* ignore context invalidated */ }
+    }
 
     if (message.type === "KEEPALIVE_PONG") {
       if (!this.isConnected) {
