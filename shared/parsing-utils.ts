@@ -268,48 +268,44 @@ export function parseMappingResponse(response: string | null | undefined): {
 }
 
 // ============================================================================
-// REFINER OUTPUT PARSING
+// REFINER OUTPUT PARSING (NEW STRUCTURE)
 // ============================================================================
 
-export type SignalType = "divergence" | "overclaim" | "gap" | "blindspot";
-export type SignalPriority = "blocker" | "risk" | "enhancement";
-export type NextStepAction = "proceed" | "verify" | "reframe" | "research";
+export type LeapAction = "proceed" | "verify" | "reframe" | "research";
 
-export interface Signal {
-    type: SignalType;
-    priority: SignalPriority;
-    content: string;
+export interface Gem {
+    insight: string;
     source: string;
     impact: string;
 }
 
+export interface Outlier {
+    position: string;
+    source: string;
+    why: string;
+}
+
+export interface Attribution {
+    claim: string;
+    source: string;
+}
+
+export interface Leap {
+    action: LeapAction;
+    target: string;
+    why: string;
+}
+
 export interface RefinerOutput {
-    signals: Signal[];
+    synthesisPlus: string | null;  // Enhanced answer with inline [ModelName] attributions
 
-    unlistedOptions: Array<{
-        title: string;
-        description: string;
-        source: string;
-    }>;
+    gem: Gem | null;
 
-    nextStep: {
-        action: NextStepAction;
-        target: string;
-        why: string;
-    } | null;
+    outlier: Outlier | null;
 
-    reframe: {
-        issue: string;
-        suggestion: string;
-        unlocks: string;
-    } | null;
+    attributions: Attribution[];
 
-    meta: {
-        reliabilitySummary: string;
-        biggestRisk: string;
-        strategicPattern: string | null;
-        honestAssessment: string;
-    };
+    leap: Leap;
 
     // rawText is essential for UI display
     rawText?: string;
@@ -333,38 +329,29 @@ export function parseRefinerOutput(text: string): RefinerOutput {
 
     // 2. Fallback to Regex extraction with robust patterns
     return {
-        signals: extractSignals(normalized),
-        unlistedOptions: extractUnlistedOptions(normalized),
-        nextStep: extractNextStep(normalized),
-        reframe: extractReframe(normalized),
-        meta: extractMeta(normalized),
+        synthesisPlus: extractSynthesisPlus(normalized),
+        gem: extractGem(normalized),
+        outlier: extractOutlier(normalized),
+        attributions: extractAttributions(normalized),
+        leap: extractLeap(normalized),
         rawText: text,
     };
 }
 
 function createEmptyRefinerOutput(rawText: string = ''): RefinerOutput {
     return {
-        signals: [],
-        unlistedOptions: [],
-        nextStep: null,
-        reframe: null,
-        meta: createEmptyRefinerMeta(),
+        synthesisPlus: null,
+        gem: null,
+        outlier: null,
+        attributions: [],
+        leap: { action: 'proceed', target: '', why: '' },
         rawText,
-    };
-}
-
-function createEmptyRefinerMeta(): RefinerOutput['meta'] {
-    return {
-        reliabilitySummary: '',
-        biggestRisk: '',
-        strategicPattern: null,
-        honestAssessment: '',
     };
 }
 
 
 // ============================================================================
-// JSON PARSING (FALLBACK)
+// JSON PARSING
 // ============================================================================
 
 function tryParseJsonRefinerOutput(text: string): Omit<RefinerOutput, 'rawText'> | null {
@@ -410,101 +397,73 @@ function tryParseJsonRefinerOutput(text: string): Omit<RefinerOutput, 'rawText'>
 }
 
 function normalizeRefinerObject(parsed: any): Omit<RefinerOutput, 'rawText'> | null {
-    // Validate it looks like a refiner output (new structure uses signals)
-    if (!('signals' in parsed) && !('nextStep' in parsed) && !('reframe' in parsed)) {
+    // Validate it looks like a refiner output (new structure)
+    if (!('synthesisPlus' in parsed) && !('gem' in parsed) && !('leap' in parsed)) {
         return null;
     }
 
-    // Normalize signals array
-    const signals: Signal[] = Array.isArray(parsed.signals)
-        ? parsed.signals.map((s: any) => ({
-            type: s.type || 'gap',
-            priority: s.priority || 'enhancement',
-            content: String(s.content || ''),
-            source: String(s.source || ''),
-            impact: String(s.impact || '')
-        }))
-        : [];
+    // Normalize synthesisPlus
+    const synthesisPlus = parsed.synthesisPlus ? String(parsed.synthesisPlus) : null;
 
-    // Normalize unlistedOptions
-    const unlistedOptions = Array.isArray(parsed.unlistedOptions)
-        ? parsed.unlistedOptions.map((opt: any) => ({
-            title: String(opt.title || ''),
-            description: String(opt.description || ''),
-            source: String(opt.source || '')
-        }))
-        : [];
-
-    // Normalize nextStep
-    let nextStep: RefinerOutput['nextStep'] = null;
-    if (parsed.nextStep && typeof parsed.nextStep === 'object') {
-        nextStep = {
-            action: parsed.nextStep.action || 'proceed',
-            target: String(parsed.nextStep.target || ''),
-            why: String(parsed.nextStep.why || '')
+    // Normalize gem
+    let gem: Gem | null = null;
+    if (parsed.gem && typeof parsed.gem === 'object') {
+        gem = {
+            insight: String(parsed.gem.insight || ''),
+            source: String(parsed.gem.source || ''),
+            impact: String(parsed.gem.impact || '')
         };
     }
 
-    // Normalize reframe
-    let reframe: RefinerOutput['reframe'] = null;
-    if (parsed.reframe && typeof parsed.reframe === 'object') {
-        reframe = {
-            issue: String(parsed.reframe.issue || ''),
-            suggestion: String(parsed.reframe.suggestion || ''),
-            unlocks: String(parsed.reframe.unlocks || '')
+    // Normalize outlier
+    let outlier: Outlier | null = null;
+    if (parsed.outlier && typeof parsed.outlier === 'object') {
+        outlier = {
+            position: String(parsed.outlier.position || ''),
+            source: String(parsed.outlier.source || ''),
+            why: String(parsed.outlier.why || '')
         };
     }
 
-    const metaObj = parsed.meta && typeof parsed.meta === 'object' ? parsed.meta : null;
-    const strategicPatternRaw = metaObj ? metaObj.strategicPattern : null;
-    const strategicPatternValue = strategicPatternRaw === null || strategicPatternRaw === undefined
-        ? null
-        : String(strategicPatternRaw).trim();
-    const strategicPattern = strategicPatternValue && !/^null|n\/?a|none$/i.test(strategicPatternValue)
-        ? strategicPatternValue
-        : null;
+    // Normalize attributions
+    const attributions: Attribution[] = Array.isArray(parsed.attributions)
+        ? parsed.attributions.map((a: any) => ({
+            claim: String(a.claim || ''),
+            source: String(a.source || '')
+        }))
+        : [];
 
-    const meta: RefinerOutput['meta'] = {
-        reliabilitySummary: metaObj ? String(metaObj.reliabilitySummary || '') : '',
-        biggestRisk: metaObj ? String(metaObj.biggestRisk || '') : '',
-        strategicPattern,
-        honestAssessment: metaObj ? String(metaObj.honestAssessment || '') : '',
+    // Normalize leap
+    const leap: Leap = {
+        action: (['proceed', 'verify', 'reframe', 'research'].includes(parsed.leap?.action)
+            ? parsed.leap.action
+            : 'proceed') as LeapAction,
+        target: String(parsed.leap?.target || ''),
+        why: String(parsed.leap?.why || '')
     };
 
     return {
-        signals,
-        unlistedOptions,
-        nextStep,
-        reframe,
-        meta,
+        synthesisPlus,
+        gem,
+        outlier,
+        attributions,
+        leap,
     };
 }
 
 
 // ============================================================================
-// CORE HELPERS (Extracted from parsed.ts)
+// CORE HELPERS
 // ============================================================================
 
 /**
  * Extract a named section from markdown text.
  * Handles: ## Header, ### Header, **Header**:, Header:, etc.
  */
-function extractSection(text: string, sectionName: string, subsection?: string): string {
+function extractSection(text: string, sectionName: string): string {
     if (!text || !sectionName) return '';
 
     const escapedName = sectionName.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
-
-    if (subsection) {
-        // Extract subsection from within parent section
-        const parentSection = extractSection(text, sectionName);
-        if (!parentSection) return '';
-
-        const escapedSub = subsection.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
-        // Look for **Subsection**: or similar within the parent text
-        const pattern = new RegExp(`\\*{0,2}\\s*${escapedSub}\\s*\\*{0,2}\\s*:?\\s*([\\s\\S]*?)(?=\\n\\*\\*|\\n#{1,3}|\\n---|$)`, 'i');
-        const match = parentSection.match(pattern);
-        return match?.[1]?.trim() || '';
-    }
 
     // Patterns from strictest to loosest for main section
     const patterns = [
@@ -565,127 +524,108 @@ function extractLabeledValue(text: string, label: string): string | null {
 
 
 // ============================================================================
-// NEW SIGNAL-BASED EXTRACTORS
+// NEW EXTRACTORS
 // ============================================================================
 
 /**
- * Extract signals from freeform text.
- * Looks for patterns like:
- * - **[BLOCKER]** Type: Content
- * - ⚠️ Divergence: Content
- * - Signal sections with type/priority/content
+ * Extract synthesisPlus content from text
  */
-function extractSignals(text: string): Signal[] {
-    const signals: Signal[] = [];
+function extractSynthesisPlus(text: string): string | null {
+    const section = extractSection(text, 'Synthesis+') ||
+        extractSection(text, 'SynthesisPlus') ||
+        extractSection(text, 'Enhanced Synthesis') ||
+        extractSection(text, 'Enhanced Answer');
 
-    // Try to extract from a "Signals" section
-    const signalsSection = extractSection(text, 'Signals');
-    const textToSearch = signalsSection || text;
-
-    // Pattern 1: **[PRIORITY]** Type: Content — Source — Impact
-    const patternWithBrackets = /\*\*\[(blocker|risk|enhancement)\]\*\*\s*(divergence|overclaim|gap|blindspot)[:\s]+([^—\n]+)(?:[—\-]+\s*source[:\s]*([^—\n]+))?(?:[—\-]+\s*impact[:\s]*([^\n]+))?/gi;
-    let match;
-    while ((match = patternWithBrackets.exec(textToSearch)) !== null) {
-        signals.push({
-            priority: match[1].toLowerCase() as SignalPriority,
-            type: match[2].toLowerCase() as SignalType,
-            content: match[3].trim(),
-            source: (match[4] || '').trim(),
-            impact: (match[5] || '').trim()
-        });
-    }
-
-    // Pattern 2: Emoji-prefixed lines: Content after warning/lightbulb emoji
-    if (signals.length === 0) {
-        // Use unicode ranges for emoji detection instead of literal emojis in regex
-        const lines = textToSearch.split('\n');
-        for (const line of lines) {
-            // Check if line starts with an emoji (warning, lightbulb, or hole)
-            if (/^[\u26A0\u{1F4A1}\u{1F573}]/u.test(line) || /^[⚠💡]/.test(line)) {
-                const content = line.replace(/^[\u26A0\uFE0F\u{1F4A1}\u{1F573}⚠💡🕳️]+\s*/u, '').trim();
-                if (content.length > 5) {
-                    // Infer type from content keywords
-                    let type: SignalType = 'gap';
-                    if (/diverge|disagree|conflict|differ/i.test(line)) type = 'divergence';
-                    if (/overclaim|overstat|exagger/i.test(line)) type = 'overclaim';
-                    if (/blind|miss|omit/i.test(line)) type = 'blindspot';
-
-                    signals.push({
-                        priority: 'enhancement',
-                        type,
-                        content,
-                        source: '',
-                        impact: ''
-                    });
-                }
-            }
-        }
-    }
-
-
-    // Pattern 3: List items with priority markers
-    if (signals.length === 0) {
-        const listPattern = /[-*•]\s*(?:\*\*)?(blocker|risk|enhancement)?(?:\*\*)?\s*[:\-]?\s*([^\n]+)/gi;
-        while ((match = listPattern.exec(textToSearch)) !== null) {
-            const priority = (match[1] || 'enhancement').toLowerCase() as SignalPriority;
-            const content = match[2].trim();
-
-            if (content.length > 10) { // Skip very short items
-                signals.push({
-                    priority,
-                    type: 'gap',
-                    content,
-                    source: '',
-                    impact: ''
-                });
-            }
-        }
-    }
-
-    return signals;
+    return section || null;
 }
 
 /**
- * Extract unlisted options from freeform text.
+ * Extract gem insight from text
  */
-function extractUnlistedOptions(text: string): RefinerOutput['unlistedOptions'] {
-    const section = extractSection(text, 'Unlisted Options') ||
-        extractSection(text, 'Additional Options') ||
-        extractSection(text, 'Mapper Audit');
+function extractGem(text: string): Gem | null {
+    const section = extractSection(text, 'Gem') ||
+        extractSection(text, 'Key Insight') ||
+        extractSection(text, 'Hidden Gem');
+
+    if (!section) return null;
+
+    const insight = extractLabeledValue(section, 'insight') ||
+        extractLabeledValue(section, 'finding') ||
+        section.split('\n')[0]?.trim() || '';
+    const source = extractLabeledValue(section, 'source') || '';
+    const impact = extractLabeledValue(section, 'impact') || '';
+
+    if (!insight) return null;
+
+    return { insight, source, impact };
+}
+
+/**
+ * Extract outlier position from text
+ */
+function extractOutlier(text: string): Outlier | null {
+    const section = extractSection(text, 'Outlier') ||
+        extractSection(text, 'Dissenting View') ||
+        extractSection(text, 'Contrary Position');
+
+    if (!section) return null;
+
+    const position = extractLabeledValue(section, 'position') ||
+        extractLabeledValue(section, 'view') ||
+        section.split('\n')[0]?.trim() || '';
+    const source = extractLabeledValue(section, 'source') || '';
+    const why = extractLabeledValue(section, 'why') ||
+        extractLabeledValue(section, 'reason') || '';
+
+    if (!position) return null;
+
+    return { position, source, why };
+}
+
+/**
+ * Extract attributions from text
+ */
+function extractAttributions(text: string): Attribution[] {
+    const section = extractSection(text, 'Attributions') ||
+        extractSection(text, 'Sources') ||
+        extractSection(text, 'Claims');
 
     if (!section) return [];
 
-    const options: RefinerOutput['unlistedOptions'] = [];
+    const attributions: Attribution[] = [];
 
-    // Pattern: - **Title**: Description (Source)
-    const pattern = /[-*•]\s*\*?\*?([^*:\n]+)\*?\*?[:\s]+([^(\n]+)(?:\(([^)]+)\))?/gi;
+    // Pattern: - Claim text (Source) or - **Claim**: Source
+    const pattern = /[-*•]\s*(?:\*\*)?([^*:\n(]+)(?:\*\*)?[:\s]*(?:\(([^)]+)\)|([^\n]+))?/gi;
     let match;
     while ((match = pattern.exec(section)) !== null) {
-        options.push({
-            title: match[1].trim(),
-            description: match[2].trim(),
-            source: (match[3] || '').trim()
-        });
+        const claim = match[1].trim();
+        const source = (match[2] || match[3] || '').trim();
+        if (claim) {
+            attributions.push({ claim, source });
+        }
     }
 
-    return options;
+    return attributions;
 }
 
 /**
- * Extract next step recommendation from freeform text.
+ * Extract leap (next step) from text
  */
-function extractNextStep(text: string): RefinerOutput['nextStep'] {
-    const section = extractSection(text, 'Next Step') ||
-        extractSection(text, 'Recommended Next Step') ||
+function extractLeap(text: string): Leap {
+    const section = extractSection(text, 'Leap') ||
+        extractSection(text, 'Next Step') ||
+        extractSection(text, 'Recommended Action') ||
         extractSection(text, 'Action');
 
-    if (!section) return null;
+    const defaultLeap: Leap = { action: 'proceed', target: '', why: '' };
+
+    if (!section) return defaultLeap;
 
     // Try to extract structured format
     const actionMatch = section.match(/\*?\*?(proceed|verify|reframe|research)\*?\*?[:\s]+(.+)/i);
 
     if (actionMatch) {
-        const action = actionMatch[1].toLowerCase() as NextStepAction;
+        const action = actionMatch[1].toLowerCase() as LeapAction;
         const rest = actionMatch[2].trim();
 
         // Try to split into target and why
@@ -698,129 +638,28 @@ function extractNextStep(text: string): RefinerOutput['nextStep'] {
         };
     }
 
-    // Fallback: use first sentence as target
-    const firstSentence = section.split(/[.!?]\s/)[0];
+    // Try labeled values
+    const actionValue = extractLabeledValue(section, 'action');
+    const action: LeapAction = (['proceed', 'verify', 'reframe', 'research'].includes(actionValue?.toLowerCase() || '')
+        ? actionValue!.toLowerCase()
+        : 'proceed') as LeapAction;
+    const target = extractLabeledValue(section, 'target') || '';
+    const why = extractLabeledValue(section, 'why') || extractLabeledValue(section, 'reason') || '';
 
-    // Infer action from keywords
-    let action: NextStepAction = 'proceed';
-    if (/verify|check|confirm|validate/i.test(section)) action = 'verify';
-    if (/reframe|rephrase|reconsider/i.test(section)) action = 'reframe';
-    if (/research|investigate|explore|look into/i.test(section)) action = 'research';
+    if (target) {
+        return { action, target, why };
+    }
+
+    // Fallback: use first sentence as target, infer action from keywords
+    const firstSentence = section.split(/[.!?]\s/)[0];
+    let inferredAction: LeapAction = 'proceed';
+    if (/verify|check|confirm|validate/i.test(section)) inferredAction = 'verify';
+    if (/reframe|rephrase|reconsider/i.test(section)) inferredAction = 'reframe';
+    if (/research|investigate|explore|look into/i.test(section)) inferredAction = 'research';
 
     return {
-        action,
+        action: inferredAction,
         target: firstSentence?.trim() || section.slice(0, 100),
         why: ''
     };
-}
-
-/**
- * Extract reframe suggestion from freeform text.
- */
-function extractReframe(text: string): RefinerOutput['reframe'] {
-    const section = extractSection(text, 'Reframe') ||
-        extractSection(text, 'Reframing Suggestion') ||
-        extractSection(text, 'Better Question');
-
-    if (!section) return null;
-
-    // Check for skip indicators
-    if (/omit|n\/a|not\s+(?:needed|required|applicable)|query\s+(?:is\s+)?(?:fine|good|ok)/i.test(section)
-        && section.length < 100) {
-        return null;
-    }
-
-    const issue = extractLabeledValue(section, 'issue') || '';
-    const suggestion = extractLabeledValue(section, 'suggestion') ||
-        extractLabeledValue(section, 'better question') || '';
-    const unlocks = extractLabeledValue(section, 'unlocks') || '';
-
-    if (!suggestion) {
-        // Try to get the main content as suggestion
-        const mainContent = section.replace(/^\s*\*?\*?issue\*?\*?[:\s]*.*/im, '')
-            .replace(/^\s*\*?\*?unlocks\*?\*?[:\s]*.*/im, '')
-            .trim();
-        if (mainContent) {
-            return {
-                issue,
-                suggestion: mainContent.replace(/^[""]|[""]$/g, ''),
-                unlocks
-            };
-        }
-        return null;
-    }
-
-    return {
-        issue,
-        suggestion: suggestion.replace(/^[""]|[""]$/g, ''),
-        unlocks
-    };
-}
-
-function extractMeta(text: string): RefinerOutput['meta'] {
-    const metaSection = extractSection(text, "Refiner's Take") ||
-        extractSection(text, 'Refiners Take') ||
-        extractSection(text, 'Meta') ||
-        extractSection(text, 'Refiner Take') ||
-        text;
-
-    const stopLabels = [
-        'Reliability Summary',
-        'Biggest Risk',
-        'Strategic Pattern',
-        'Honest Assessment',
-    ];
-
-    const reliabilitySummary = extractLabeledBlock(metaSection, 'Reliability Summary', stopLabels) ||
-        extractLabeledValue(metaSection, 'Reliability Summary') ||
-        '';
-
-    const biggestRisk = extractLabeledBlock(metaSection, 'Biggest Risk', stopLabels) ||
-        extractLabeledValue(metaSection, 'Biggest Risk') ||
-        '';
-
-    const strategicPatternRaw = extractLabeledBlock(metaSection, 'Strategic Pattern', stopLabels) ||
-        extractLabeledValue(metaSection, 'Strategic Pattern') ||
-        '';
-
-    const strategicPatternTrimmed = strategicPatternRaw.trim();
-    const strategicPattern = strategicPatternTrimmed && !/^null|n\/?a|none$/i.test(strategicPatternTrimmed)
-        ? strategicPatternTrimmed
-        : null;
-
-    const honestAssessment = extractLabeledBlock(metaSection, 'Honest Assessment', stopLabels) ||
-        extractLabeledValue(metaSection, 'Honest Assessment') ||
-        '';
-
-    return {
-        reliabilitySummary: reliabilitySummary.trim(),
-        biggestRisk: biggestRisk.trim(),
-        strategicPattern,
-        honestAssessment: honestAssessment.trim(),
-    };
-}
-
-function extractLabeledBlock(text: string, label: string, stopLabels: string[]): string {
-    if (!text?.trim()) return '';
-    const escapedLabel = label.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
-    const escapedStops = stopLabels
-        .filter((s) => s.toLowerCase() !== label.toLowerCase())
-        .map((s) => s.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&'))
-        .join('|');
-
-    const stopGroup = escapedStops ? `(?:${escapedStops})` : '(?!)';
-
-    const pattern = new RegExp(
-        `(?:^|\\n)\\s*(?:[-*•]\\s*)?\\*{0,2}${escapedLabel}\\*{0,2}\\s*:?\\s*` +
-        `([\\s\\S]*?)` +
-        `(?=\\n\\s*(?:[-*•]\\s*)?\\*{0,2}${stopGroup}\\*{0,2}\\s*:?|\\n#{1,3}\\s|\\n---\\s*\\n|$)`,
-        'i'
-    );
-
-    const match = text.match(pattern);
-    if (!match?.[1]) return '';
-
-    return match[1]
-        .replace(/^\s*[:\-—]+\s*/g, '')
-        .trim();
 }

@@ -23,14 +23,8 @@ export function useRefinerOutput(aiTurnId: string | null, forcedProviderId?: str
         }
 
         // Use forced provider if valid, otherwise fallback to first available
-        // Better logic: prioritize the one that was most recently updated? 
-        // For simple recompute, Object.keys logic + forcing is enough.
-
         let providerId = forcedProviderId;
         if (!providerId || !refinerResponses[providerId]) {
-            // Fallback: pick the last key (likely most recent?) or first? 
-            // Object.keys order is not strictly guaranteed but usually fine.
-            // Let's try to find one that is "streaming" or "completed".
             const keys = Object.keys(refinerResponses);
             providerId = keys[keys.length - 1];
         }
@@ -44,7 +38,6 @@ export function useRefinerOutput(aiTurnId: string | null, forcedProviderId?: str
         const isLoading = latestResponse.status === "streaming" || latestResponse.status === "pending";
 
         // Parse output
-        // The raw text contains the markdown structure
         let parsed: RefinerOutput | null = null;
         try {
             parsed = parseRefinerOutput(latestResponse.text);
@@ -70,11 +63,10 @@ export function useRefinerOutput(aiTurnId: string | null, forcedProviderId?: str
 
             const current = state || memoResult;
             const hasCore = !!current?.output;
-            // Check for richer data using new signal-based structure
-            const hasRicher = !!current?.output?.signals?.length ||
-                !!current?.output?.unlistedOptions?.length ||
-                !!current?.output?.nextStep ||
-                !!current?.output?.reframe;
+            // Check for richer data using new structure
+            const hasRicher = !!current?.output?.synthesisPlus ||
+                !!current?.output?.gem ||
+                !!current?.output?.leap?.target;
 
             if (current?.isLoading || hasRicher) return;
 
@@ -103,11 +95,10 @@ export function useRefinerOutput(aiTurnId: string | null, forcedProviderId?: str
                     }
 
                     if (parsed) {
-                        // Check for richer data using new signal-based structure
-                        const richer = !!parsed.signals?.length ||
-                            !!parsed.unlistedOptions?.length ||
-                            !!parsed.nextStep ||
-                            !!parsed.reframe;
+                        // Check for richer data using new structure
+                        const richer = !!parsed.synthesisPlus ||
+                            !!parsed.gem ||
+                            !!parsed.leap?.target;
                         if (!hasCore || richer) {
                             setState({
                                 output: parsed,
@@ -127,3 +118,4 @@ export function useRefinerOutput(aiTurnId: string | null, forcedProviderId?: str
 
     return state || memoResult;
 }
+

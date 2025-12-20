@@ -42,9 +42,8 @@ import {
 } from "../state/atoms";
 import { useRefinerOutput } from "../hooks/useRefinerOutput";
 
-import { ReframingBanner } from "./refinerui/ReframingBanner";
-import { NextStepFooter } from "./refinerui/NextStepFooter";
-import { categorizeSignals } from "../utils/signalUtils";
+import { RefinerDot } from "./refinerui/RefinerDot";
+import type { LeapAction } from "../../shared/parsing-utils";
 
 // --- Helper Functions ---
 function parseMappingResponse(response?: string | null) {
@@ -180,21 +179,9 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
   const isThisTurnActive = activeAiTurnId === aiTurn.id && globalIsLoading;
 
   const { output: refinerOutput } = useRefinerOutput(aiTurn.id);
-  const { blockerSignals, riskSignals, enhancementSignals } = useMemo(
-    () => categorizeSignals(refinerOutput?.signals),
-    [refinerOutput]
-  );
 
   const setChatInput = useSetAtom(chatInputValueAtom);
   const setTrustPanelFocus = useSetAtom(trustPanelFocusAtom);
-
-  const handleAskReframed = useCallback((question: string) => {
-    setChatInput(question);
-    const input = document.querySelector('textarea[name="chat-input"]') as HTMLTextAreaElement | null;
-    if (input) {
-      input.focus();
-    }
-  }, [setChatInput]);
 
 
 
@@ -382,7 +369,7 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
       const idxB = providerOrder.get(b[0]) ?? Number.POSITIVE_INFINITY;
       if (idxA !== idxB) return idxA - idxB;
       return String(a[0]).localeCompare(String(b[0]));
-  });
+    });
 
     sortedProviders.forEach(([pid, resps]) => {
       const name = getProviderName(pid);
@@ -583,7 +570,7 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
 
 
   const hasMapping = !!(activeMappingPid && displayedMappingTake?.text);
- 
+
 
   const requestedSynth = (aiTurn.meta as any)?.requestedFeatures?.synthesis;
   const wasSynthRequested =
@@ -656,15 +643,7 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                   )}
                   style={{ padding: '28px 40px 88px' }}
                 >
-                  {/* Use padding top to accommodate banner if present? No, standard padding is fine */}
-                  {refinerOutput?.reframe && (
-                    <div className="mb-6 relative z-30 pointer-events-auto mx-[-12px]">
-                      <ReframingBanner
-                        reframe={refinerOutput.reframe}
-                        onApply={handleAskReframed}
-                      />
-                    </div>
-                  )}
+                  {/* Refiner Dot - positioned top right of synthesis */}
 
                   {/* OVERLAY: Floating Controls (Fade in on Group Hover) */}
                   <div className="absolute inset-0 pointer-events-none z-20">
@@ -826,115 +805,30 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
 
                             return (
                               <>
-                                {blockerSignals.length > 0 && (
-                                  <div className="mb-6 mx-[-12px] sm:mx-0 rounded-lg bg-intent-danger/10 border border-intent-danger/20 border-l-4 border-intent-danger p-4">
-                                    <div className="text-xs font-semibold text-intent-danger mb-2">⛔ Cannot proceed without:</div>
-                                    <div className="space-y-2">
-                                      {blockerSignals.map((signal, idx) => (
-                                        <button
-                                          key={idx}
-                                          onClick={() => {
-                                            setActiveSplitPanel({ turnId: aiTurn.id, providerId: '__trust__' });
-                                            setTrustPanelFocus({ turnId: aiTurn.id, section: 'blockers' });
-                                          }}
-                                          className="w-full text-left rounded-md px-3 py-2 bg-intent-danger/5 hover:bg-intent-danger/15 border border-intent-danger/30 transition-colors"
-                                        >
-                                          <div className="text-sm text-text-primary">• {signal.content}</div>
-                                          {signal.source && (
-                                            <div className="text-xs text-text-secondary mt-0.5">{signal.source}</div>
-                                          )}
-                                        </button>
-                                      ))}
-                                    </div>
-                                  </div>
-                                )}
-
                                 <div className="text-base leading-relaxed text-text-primary">
                                   <MarkdownDisplay
                                     content={String(shortAnswer || cleanText || take.text || "")}
                                   />
                                 </div>
 
-                                {refinerOutput && (
-                                  (() => {
-                                    const hasAnySignals =
-                                      blockerSignals.length > 0 ||
-                                      riskSignals.length > 0 ||
-                                      enhancementSignals.length > 0;
+                                {/* Decision Map Button + Refiner Dot */}
+                                <div className="my-6 flex items-center justify-center gap-3 border-y border-border-subtle/60 py-3">
+                                  <button
+                                    onClick={() => setIsDecisionMapOpen({ turnId: aiTurn.id })}
+                                    className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-surface-raised hover:bg-surface-highlight border border-border-subtle text-xs text-text-secondary"
+                                    title="Open decision map"
+                                  >
+                                    <span className="text-sm">📊</span>
+                                    <span>Map</span>
+                                  </button>
 
-                                    if (!hasAnySignals) {
-                                      return (
-                                        <div className="my-6 flex items-center justify-center border-y border-border-subtle/60 py-3">
-                                          <button
-                                            onClick={() => setIsDecisionMapOpen({ turnId: aiTurn.id })}
-                                            className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-surface-raised hover:bg-surface-highlight border border-border-subtle text-xs text-text-secondary"
-                                            title="Open decision map"
-                                          >
-                                            <span className="text-sm">📊</span>
-                                            <span>Map</span>
-                                          </button>
-                                        </div>
-                                      );
-                                    }
-
-                                    return (
-                                      <div className="my-6 flex items-center justify-center gap-4 border-y border-border-subtle/60 py-3">
-                                        <button
-                                          onClick={() => setIsDecisionMapOpen({ turnId: aiTurn.id })}
-                                          className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-surface-raised hover:bg-surface-highlight border border-border-subtle text-xs text-text-secondary"
-                                          title="Open decision map"
-                                        >
-                                          <span className="text-sm">📊</span>
-                                          <span>Map</span>
-                                        </button>
-
-                                        <div className="flex items-center gap-2">
-                                          {blockerSignals.length > 0 && (
-                                            <button
-                                              onClick={() => {
-                                                setActiveSplitPanel({ turnId: aiTurn.id, providerId: '__trust__' });
-                                                setTrustPanelFocus({ turnId: aiTurn.id, section: 'blockers' });
-                                              }}
-                                              className="indicator indicator--blocker flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-intent-danger/15 border border-intent-danger/40 text-intent-danger hover:bg-intent-danger/25 transition-colors"
-                                              title="View blocker signals"
-                                            >
-                                              <span>⛔</span>
-                                              <span>{blockerSignals.length}</span>
-                                            </button>
-                                          )}
-
-                                          {riskSignals.length > 0 && (
-                                            <button
-                                              onClick={() => {
-                                                setActiveSplitPanel({ turnId: aiTurn.id, providerId: '__trust__' });
-                                                setTrustPanelFocus({ turnId: aiTurn.id, section: 'risks' });
-                                              }}
-                                              className="indicator indicator--risk flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-intent-warning/15 border border-intent-warning/40 text-intent-warning hover:bg-intent-warning/25 transition-colors"
-                                              title="View risk signals"
-                                            >
-                                              <span>⚠️</span>
-                                              <span>{riskSignals.length}</span>
-                                            </button>
-                                          )}
-
-                                          {enhancementSignals.length > 0 && (
-                                            <button
-                                              onClick={() => {
-                                                setActiveSplitPanel({ turnId: aiTurn.id, providerId: '__trust__' });
-                                                setTrustPanelFocus({ turnId: aiTurn.id, section: 'context' });
-                                              }}
-                                              className="indicator indicator--enhancement flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-brand-500/15 border border-brand-500/40 text-brand-400 hover:bg-brand-500/25 transition-colors"
-                                              title="View additional context signals"
-                                            >
-                                              <span>💡</span>
-                                              <span>{enhancementSignals.length}</span>
-                                            </button>
-                                          )}
-                                        </div>
-                                      </div>
-                                    );
-                                  })()
-                                )}
+                                  {refinerOutput && (
+                                    <RefinerDot
+                                      refiner={refinerOutput}
+                                      onClick={() => setActiveSplitPanel({ turnId: aiTurn.id, providerId: '__trust__' })}
+                                    />
+                                  )}
+                                </div>
 
                                 {longAnswer && (
                                   <div className="text-base leading-relaxed text-text-primary">
@@ -962,11 +856,18 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                             );
                           })()}
 
-                          {refinerOutput && (
-                            <div className="mt-8">
-                              <NextStepFooter nextStep={refinerOutput.nextStep} />
-
-                              {/* Accuracy details moved to Trust Signals side panel */}
+                          {/* Inline Leap - Replaces NextStepFooter */}
+                          {refinerOutput?.leap?.target && (
+                            <div className="mt-6 pt-4 border-t border-border-subtle/40">
+                              <div className="text-sm text-text-secondary">
+                                <span className="font-semibold text-text-primary">Next step: </span>
+                                <span className="capitalize">{refinerOutput.leap.action}</span>
+                                <span> — </span>
+                                <span>{refinerOutput.leap.target}</span>
+                                {refinerOutput.leap.why && (
+                                  <span className="text-text-muted"> {refinerOutput.leap.why}</span>
+                                )}
+                              </div>
                             </div>
                           )}
                         </div>

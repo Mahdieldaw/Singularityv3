@@ -20,8 +20,9 @@ import { CopyButton } from "./CopyButton";
 import { formatProviderResponseForMd } from "../utils/copy-format-utils";
 import { useRefinerOutput } from "../hooks/useRefinerOutput";
 import { TrustSignalsPanel } from "./refinerui/TrustSignalsPanel";
-import { BuriedInsightCard } from "./refinerui/BuriedInsightCard";
 import clsx from "clsx";
+
+// BuriedInsightCard removed - no longer using signals
 
 interface ModelResponsePanelProps {
     turnId: string;
@@ -69,27 +70,7 @@ export const ModelResponsePanel: React.FC<ModelResponsePanelProps> = React.memo(
     }, [latestResponse, streamingState.activeProviderId, providerId]);
 
     const { output: refinerOutput, rawText: refinerRawText } = useRefinerOutput(turnId);
-    const [trustPanelFocus, setTrustPanelFocus] = useAtom(trustPanelFocusAtom);
     const chatInputHeight = useAtomValue(chatInputHeightAtom);
-
-    // Compute missedInsights unconditionally to preserve hook order
-    // Use new signal-based structure - get blindspot signals
-    const missedInsights = useMemo(() => {
-        const signals = refinerOutput?.signals || [];
-        const blindspots = signals.filter(s => s.type === 'blindspot');
-
-        if (!blindspots.length) return [];
-
-        const pName = provider?.name?.toLowerCase() || "";
-        const pId = providerId.toLowerCase();
-
-        return blindspots
-            .filter(signal => {
-                const src = signal.source.toLowerCase();
-                return src.includes(pName) || src.includes(pId) || src === 'global' || src === '' || !src;
-            })
-            .map(signal => signal.content);
-    }, [refinerOutput, providerId, provider]);
 
     // Branch send handler (hook before conditional return)
     const handleBranchSend = useCallback(() => {
@@ -99,16 +80,8 @@ export const ModelResponsePanel: React.FC<ModelResponsePanelProps> = React.memo(
     }, [branchInput, handleBranchContinue, providerId]);
 
 
-    // New: Trust mode via sentinel providerId
+    // Trust mode via sentinel providerId - simplified for new structure
     if (providerId === '__trust__' && refinerOutput) {
-        const initialSection = trustPanelFocus && trustPanelFocus.turnId === turnId
-            ? trustPanelFocus.section
-            : null;
-
-        if (trustPanelFocus && trustPanelFocus.turnId === turnId) {
-            setTrustPanelFocus(null);
-        }
-
         return (
             <div className="h-full w-full min-w-0 flex flex-col bg-surface-raised border border-border-subtle rounded-2xl shadow-lg overflow-hidden">
                 <TrustSignalsPanel
@@ -116,7 +89,7 @@ export const ModelResponsePanel: React.FC<ModelResponsePanelProps> = React.memo(
                     rawText={refinerRawText || undefined}
                     onClose={onClose}
                     bottomPadding={(chatInputHeight || 80) + 32}
-                    initialSection={initialSection}
+                    turnId={turnId}
                 />
             </div>
         );
@@ -224,14 +197,6 @@ export const ModelResponsePanel: React.FC<ModelResponsePanelProps> = React.memo(
 
             {/* Content */}
             <div className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden p-4 custom-scrollbar relative z-10" style={{ paddingBottom: (chatInputHeight || 80) + 24 }}>
-                {/* Missed Insights Card */}
-                {missedInsights && missedInsights.length > 0 && (
-                    <BuriedInsightCard
-                        points={missedInsights}
-                        providerName={provider?.name || providerId}
-                    />
-                )}
-
                 {/* Main response */}
                 <div className="prose prose-sm max-w-none dark:prose-invert break-words" style={{ overflowWrap: 'anywhere' }}>
                     <MarkdownDisplay content={derivedState.text || (derivedState.isError ? "Error occurred" : "Empty response")} />
