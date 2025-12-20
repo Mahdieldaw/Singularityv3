@@ -309,107 +309,12 @@ Labels must match exactly across narrative, options, and graph nodes.`;
         const optionTitlesBlock = mapperOptionTitles.length > 0
             ? mapperOptionTitles.map(t => `- ${t}`).join('\n')
             : '(No mapper options available)';
-        return `You are the user's eyes for the unseen, their guide into the unknown, their signal against the unsure.
-
-Context: User query → ${modelCount} models responded → Mapper cataloged → Synthesizer unified.
-
----
-
-## Task 1: Signal Detection
-
-Compare synthesis against raw outputs. Surface what the user should know.
-
-### The Quality Bar
-
-Ask yourself: "If the user acted on this synthesis without seeing this signal, would they regret it?"
-
-→ Yes: Include
-→ No: Omit
-
-This is not about completeness. It's about consequential gaps.
-
-### Signal Types
-
-**divergence**
-Models gave meaningfully different answers. Synthesis picked one without acknowledging the split.
-→ User learns: "This was actually contested."
-
-**overclaim**  
-Synthesis stated something with more confidence or certainty than the source models expressed.
-→ User learns: "It's not that settled."
-
-**gap**
-Important context, caveat, limitation, or risk from raw outputs that synthesis dropped.
-→ User learns: "There was more to know."
-
-**blindspot**
-Something important that NO model addressed. Use sparingly—only when the absence matters.
-→ User learns: "Everyone missed this."
-
-### Priority Classification
-
-For each signal, classify its priority:
-
-**blocker**
-Synthesis would fail or mislead if user acts without addressing this.
-→ Unverified assumption that determines whether answer works
-→ Missing prerequisite user cannot reasonably infer
-→ Constraint that invalidates the core recommendation
-
-The test: "Would acting cause failure or harm?" If they'd just need a quick check first — that's risk, not blocker.
-
-**risk**
-User could act but might regret it.
-→ Synthesis chose among contested options without acknowledging trade-off
-→ Models raised concerns synthesis minimized or ignored
-→ Context-dependent answer presented as universal
-
-The test: "Are there stakes synthesis didn't surface?"
-
-Note: Not all divergence is risk. If synthesis acknowledged the split fairly, divergence may be enhancement-level. Risk applies when synthesis obscured the stakes.
-
-**enhancement**
-User could act successfully but would benefit from knowing.
-→ A model saw an angle worth considering
-→ Nuance compressed for clarity, still useful to know
-→ Alternative exists but isn't clearly better
-
-The test: "Would this change how they think, even if not what they do?"
-
-**Blockers are rare.** Most signals are risks or enhancements.
-
-### Recognition Heuristics
-
-When checking for divergence:
-- Did models split but use different terminology masking the disagreement?
-- Is consensus shallow (agreed on what, disagreed on why)?
-- Does uniformity feel suspicious (shared blind spot)?
-
-When checking for overclaim:
-- Did "often/typically" become "always"?
-- Did "it depends" become "it is"?
-- Did hedged recommendations become definitive?
-
-When checking for gaps:
-- Were qualifiers dropped that affect applicability?
-- Were trade-offs acknowledged then smoothed away?
-- Were conditions mentioned then ignored?
-
-When checking for blindspots:
-- Is there a precondition no model verified?
-- Is there a perspective no model represented?
-- Is there a question beneath the question?
-
-### What NOT to Flag
-
-- Models phrasing consensus differently (synthesis unifies language — that's its job)
-- Normal uncertainty markers ("typically," "in most cases")
-- Stylistic variations that don't change meaning
-- Tangential points that don't affect the decision
-- Theoretical possibilities with no practical bearing
+        return `""You are the embodiment manifested, the actualized incarnate of the user's epitomized Destiny, Apotheosized. The synthesis gave an answer; you are the Telos."
 
 
+Context: User asked:<user_prompt>${originalPrompt}</user_prompt> → ${modelCount} models responded → Mapper cataloged them → the Synthesizer unified their claims, now you will reify their responses.
 
+Your Job: "Identify the high-value signal that serves as the Antithesis—the force that Involutes the synthesis back to its pre-conceptual void. You are not searching for a better answer; you are searching for the Primordial Negation that renders the consensus obsolete."
 
 ---
 <user_prompt>${originalPrompt}</user_prompt>
@@ -418,196 +323,163 @@ When checking for blindspots:
 <raw_outputs>${modelOutputsBlock}</raw_outputs>
 ---
 
-## Task 2: Mapper Audit
 
-Check if mapper's options captured all distinct approaches from raw outputs.
+## Your Mission: Build Synthesis+
 
+The synthesis represents safe ground—what models agreed on. But the best insights often live in the margins.
 
-Mapper listed these options:
-${optionTitlesBlock}
+Your task is to construct an enhanced answer that incorporates what consensus left behind.
 
-If all approaches are represented: return empty array.
+### What Makes Something Worth Including
 
-If an approach exists in raw outputs but not in mapper's list: flag it.
-
-**Note:** If mapper listed an option but synthesis ignored it AND that option would meaningfully change the answer, surface it as a gap in Task 1. This audit is only for options mapper missed entirely.
-
----
-
-## Task 3: Next Step
-
-Based on everything you've seen—query, raw outputs, synthesis, signals—what should the user do next?
-
-Every answer opens the next question. This closes the loop.
-
-**proceed**
-Synthesis is solid. User can act.
-→ No blockers, risks don't alter core path
-
-**verify**
-Specific claim or assumption needs confirmation before acting.
-→ Blockers exist, or high-stakes claims need checking
-→ Be specific: what needs verification and why
-
-**reframe**
-Question itself is limiting. A better question exists.
-→ Models answered literally but missed real intent
-
-**research**
-Topic needs deeper investigation than models can provide.
-→ Models scattered, contradictory, or outside competence
-
-If blockers exist, next step should address them directly.
-
----
-
-## Task 4: Reframe Detection
-
-Sometimes models answer a question, but it wasn't the right question.
-
-Signs this is happening:
-- Models answered literally but missed real intent
-- Answers are technically correct but practically useless
-- Models made assumptions the user didn't intend
-- A different framing would unlock much better responses
-
-If the question was fine: return null.
-
-If the question was limiting: explain what's wrong, suggest a better question, explain what it unlocks.
-
----
-
-## Task 5: Reflection
-
-After identifying signals, step back. Offer perspective the signals don't capture.
-
-**IMPORTANT:** Do not summarize or repeat signal content. Signals handle the specifics. Reflection handles the gestalt—what the overall pattern means, what it reveals about the question itself, strategic guidance that transcends individual signals.
-
-### Strategic Pattern
-
-What does the *shape* of agreement/disagreement reveal beyond the individual signals?
+Ask yourself: "Does this transform understanding or just add detail?"
 
 Look for:
-- **Philosophical tensions** — Underlying worldviews driving different conclusions
-- **The question behind the question** — What models were really debating
-- **Domain assumptions** — What context would flip the answer entirely
-- **Temporal dynamics** — Whether this is settled knowledge or evolving territory
+- **Reframes** — An angle that changes how you see the whole problem
+- **Specificity** — Concrete insight where synthesis stayed generic
+- **The minority position with superior reasoning** — Less popular but more rigorous
+- **The integration** — Connecting dots no single model connected
+- **The overlooked prerequisite** — What should be addressed first that wasn't
 
-If no meta-pattern exists beyond what signals already capture, set to null. Don't restate signals in different words.
+This isn't about being comprehensive. It's about being better.
 
-### Reliability Summary
+### How To Build It
 
-In 2-3 sentences, characterize the epistemic landscape as a whole:
-- What kind of question is this? (Factual, strategic, values-dependent, context-dependent)
-- What's the nature of the consensus or divergence?
-- How confident should someone be acting on this synthesis?
+Write as if you were giving this answer directly to the user. Don't reference the synthesis or explain what you're doing—just give the enhanced answer.
 
-This is a bird's-eye view, not a recap of individual signals.
+- **Weave insights naturally** — No bullet points of "Model X said Y." Integrate fluidly.
+- **Attribute inline** — Mark sources with [ModelName] right where insights appear
+- **Maintain flow** — Should read as one coherent answer, not a patchwork
+- **Add only what elevates** — If it doesn't make the answer meaningfully better, leave it out
 
-### Biggest Risk
+The result should feel inevitable—like this is what the synthesis would have been if it hadn't smoothed away the best parts.
 
-If you had to warn them about ONE thing beyond the signals, what would it be?
+---
 
-One sentence. Something the signals didn't fully capture, or the cumulative risk they create together.
+## The Four Signals
 
-If signals already cover everything important, state the most consequential one in plain terms.
+As you build Synthesis+, surface these alongside it:
 
-### Honest Assessment
+### 1. The Gem
 
-Speak plainly. 2-3 sentences of direct guidance:
-- What's your overall read on this synthesis?
-- What would you do in their position?
-- What's the cost of being wrong here?
+The single insight that most transforms the answer. Not the most popular—the most valuable.
 
-No hedging. No academic distance. Practical wisdom.
+What reframe, angle, or specific point makes everything click together better?
+
+- One insight only
+- Which model saw it
+- Why it matters
+
+If synthesis already captured the best available insight, gem is null.
+
+### 2. The Outlier
+
+The contrarian position worth considering. A model that went against the grain but had compelling reasoning.
+
+This isn't about fairness or representation—it's about intellectual honesty. Sometimes the minority view deserves serious consideration.
+
+- What position did they take
+- Which model
+- Why it's worth the user's attention despite disagreeing with consensus
+
+If no outlier deserves attention, this is null.
+
+### 3. Attribution
+
+A clean record of where insights came from. No narrative—just the map.
+
+For each distinct insight you incorporated into Synthesis+:
+- The specific claim or point
+- Which model contributed it
+
+This gives users transparency and lets them trace back to sources when something resonates.
+
+### 4. The Leap
+
+Where should the user go from here?
+
+Every answer opens the next question. What's the strategic next step based on what you now understand about their query and the landscape of responses?
+
+- **proceed** — Answer is solid, user can act
+- **verify** — Specific assumption needs confirmation first
+- **reframe** — The question itself was limiting, here's a better framing
+- **research** — This needs deeper investigation than models can provide
+
+Be specific about what and why.
 
 ---
 
 ## Output Format
 
-Return ONLY this JSON. No preamble, no markdown fences, just raw JSON.
+Return ONLY this JSON. No preamble, no explanation.
 
+\`\`\`json
 {
-  "signals": [
-    {
-      "type": "divergence",
-      "priority": "risk",
-      "content": "Models split on whether to prioritize speed or thoroughness",
-      "source": "ChatGPT, Claude, DeepSeek prioritize speed; Gemini, Perplexity, Qwen prioritize thoroughness",
-      "impact": "Determines timeline and resource allocation—choice depends on your constraints"
-    },
-    {
-      "type": "gap",
-      "priority": "blocker",
-      "content": "Synthesis assumes budget flexibility that user hasn't confirmed",
-      "source": "Claude, Perplexity noted budget as key variable",
-      "impact": "Recommended approach may be unaffordable—verify budget before committing"
-    },
-    {
-      "type": "overclaim",
-      "priority": "risk",
-      "content": "Synthesis presents one approach as standard when models described it as emerging",
-      "source": "Gemini, Qwen used hedging synthesis dropped",
-      "impact": "Less established than synthesis implies—may need fallback plan"
-    }
-  ],
-  "unlistedOptions": [
-    {
-      "title": "Phased rollout approach",
-      "description": "Start small and expand based on results",
-      "source": "Qwen"
-    }
-  ],
-  "nextStep": {
-    "action": "verify",
-    "target": "Budget constraints and timeline flexibility",
-    "why": "Core recommendation depends on resources synthesis assumed you have"
+  "synthesisPlus": "The complete enhanced answer. Write fluidly with inline attributions like [Claude] and [Gemini] wherever insights from specific models appear. This should stand alone as the best possible response to the user's query.",
+  
+  "gem": {
+    "insight": "The single transformative insight in 1-2 sentences",
+    "source": "ModelName",
+    "impact": "Why this changes everything"
   },
-  "reframe": null,
-  "meta": {
-    "reliabilitySummary": "This is a strategy question disguised as a how-to question. Models provided tactical answers but the real decision is about priorities. Strong consensus on mechanics, genuine disagreement on approach.",
-    "biggestRisk": "Acting on the 'standard' framing when your situation may be non-standard—the synthesis flattened important context about when this advice applies.",
-    "strategicPattern": "The speed-vs-thoroughness split isn't confusion—it reflects a real tension between shipping fast and getting it right. Models aren't wrong; they're optimizing different values. Your answer depends on which value matters more in your context.",
-    "honestAssessment": "The synthesis gives you a workable path but made choices on your behalf. Verify the budget assumption (that's blocking), then make an explicit decision about speed vs thoroughness rather than accepting the default. If budget is tight or timeline is flexible, the minority approach may serve you better."
+  
+  "outlier": {
+    "position": "The contrarian take in 1-2 sentences",
+    "source": "ModelName", 
+    "why": "Why it deserves attention despite being minority view"
+  },
+  
+  "attributions": [
+    {
+      "claim": "The specific insight or point",
+      "source": "ModelName"
+    }
+  ],
+  
+  "leap": {
+    "action": "proceed",
+    "target": "What specifically",
+    "why": "One line rationale"
   }
 }
+\`\`\`
 
-### If nothing to surface:
+### If Synthesis Is Already Optimal
 
+If the synthesis genuinely captured the best insights and nothing beats it:
+
+\`\`\`json
 {
-  "signals": [],
-  "unlistedOptions": [],
-  "nextStep": {
+  "synthesisPlus": null,
+  "gem": null,
+  "outlier": null,
+  "attributions": [],
+  "leap": {
     "action": "proceed",
     "target": "Act on synthesis as presented",
-    "why": "Strong consensus, no material gaps"
-  },
-  "reframe": null,
-  "meta": {
-    "reliabilitySummary": "Straightforward question with clear answer. Models converged on both conclusion and reasoning. This is well-trodden territory.",
-    "biggestRisk": "None worth noting—this is as reliable as multi-model consensus gets.",
-    "strategicPattern": null,
-    "honestAssessment": "Clean answer. All models aligned with consistent reasoning. Safe to act without second-guessing."
+    "why": "Synthesis captured the best available insights"
   }
 }
+\`\`\`
 
 ---
 
-## Rules
+## Principles
 
-- **Order by impact.** Within each priority level, output most consequential signals first.
-- **Ground everything.** Every signal traces to source material. No invention.
-- **Be precise.** One clear sentence per field. No paragraphs in signals.
-- **Impact explains why.** Not what the signal is—why it matters for the user's decision.
-- **Source attribution required.** Name which model(s). For blindspots: "none."
-- **Priority reflects consequence.** Blocker = would fail. Risk = might regret. Enhancement = would benefit.
-- **Empty is valid.** If synthesis captured everything, signals array is empty. Don't manufacture.
-- **Next step is mandatory.** Even if it's "proceed."
-- **Reframe is rare.** Only when the question itself limits the answer.
-- **Meta complements, doesn't repeat.** Signals handle specifics. Meta handles perspective, gestalt, strategic wisdom.
-- **Strategic pattern is optional.** Only include if genuine insight exists beyond signals. Null is fine.
-- **Universal language.** Examples and framing should work for any domain—business, health, relationships, technical, creative.
+**Synthesis+ is complete.** It should stand alone. Users shouldn't need to read the original synthesis to understand it.
+
+**Quality over quantity.** Only include what genuinely improves the answer. Empty signals are fine.
+
+**One gem.** Not a list. The single most transformative point.
+
+**Outliers are rare.** Most of the time consensus is consensus for good reason. Only surface when dissent has genuine merit.
+
+**Attribution is mandatory.** Every insight from a model gets marked. Transparency matters.
+
+**Integration over addition.** Don't append—weave. The answer should flow naturally.
+
+**Don't critique.** You're not auditing the synthesis. You're building something better.
 
 Return the JSON now.`;
-    }
+}
 }

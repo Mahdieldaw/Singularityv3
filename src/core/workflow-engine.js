@@ -1831,12 +1831,20 @@ Answer the user's message directly. Use context only to disambiguate.
     // Helper to execute synthesis with a specific provider
     const runSynthesis = async (providerId) => {
       const extractedOptions = mappingResult?.meta?.allAvailableOptions || null;
-
+// 🔍 DIAGNOSTIC LOGGING
+console.log('[DEBUG] Synthesis options check:', {
+  hasMappingResult: !!mappingResult,
+  hasMetaOptions: !!mappingResult?.meta?.allAvailableOptions,
+  optionsLength: extractedOptions?.length || 0,
+  optionsPreview: extractedOptions?.substring(0, 200),
+  isRecompute: resolvedContext?.type === 'recompute',
+  sourceTurnId: resolvedContext?.sourceTurnId,
+  metaKeys: Object.keys(mappingResult?.meta || {})
+});
       const synthPrompt = this.promptService.buildSynthesisPrompt(
         payload.originalPrompt,
         sourceData,
         providerId,
-        mappingResult,
         extractedOptions
       );
 
