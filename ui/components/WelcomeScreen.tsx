@@ -1,7 +1,6 @@
-import React, { useMemo } from "react";
+import React from "react";
 import { EXAMPLE_PROMPT } from "../constants";
 import logoIcon from "../assets/logos/logo-icon.svg";
-import { LLM_PROVIDERS_CONFIG } from "../constants";
 import { useProviderStatus } from "../hooks/useProviderStatus";
 import { useSmartProviderDefaults } from "../hooks/useSmartProviderDefaults";
 
@@ -13,8 +12,6 @@ interface WelcomeScreenProps {
 const WelcomeScreen = ({ onSendPrompt, isLoading }: WelcomeScreenProps) => {
   useProviderStatus();
   useSmartProviderDefaults();
-
-  const providers = useMemo(() => LLM_PROVIDERS_CONFIG.filter(p => p.id !== "system"), []);
 
   return (
     <div className="flex flex-col items-center justify-center h-full text-center p-10 pb-40 relative">

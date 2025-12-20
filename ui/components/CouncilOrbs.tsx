@@ -2,8 +2,8 @@ import React, { useState, useMemo, useRef, useEffect, useCallback } from "react"
 import { useAtom, useAtomValue } from "jotai";
 import { providerEffectiveStateFamily, isSplitOpenAtom, synthesisProviderAtom, mappingProviderAtom, composerModelAtom, analystModelAtom, providerAuthStatusAtom, selectedModelsAtom, refinerProviderAtom } from "../state/atoms";
 import { LLMProvider } from "../types";
-import { PROVIDER_COLORS, PROVIDER_ACCENT_COLORS, WORKFLOW_STAGE_COLORS } from "../constants";
-import { getProviderById } from "../providers/providerRegistry";
+import { PROVIDER_ACCENT_COLORS, WORKFLOW_STAGE_COLORS } from "../constants";
+import { getProviderColor, getProviderLogo } from "../utils/provider-helpers";
 import { setProviderLock } from "@shared/provider-locks";
 import clsx from "clsx";
 
@@ -601,11 +601,10 @@ const Orb: React.FC<OrbProps> = ({
     const isHovered = hoveredOrb === pid;
 
     // Get colors and logo
-    const primaryColor = PROVIDER_COLORS[pid] || PROVIDER_COLORS['default'];
+    const primaryColor = getProviderColor(pid);
     const accentColor = PROVIDER_ACCENT_COLORS[pid] || PROVIDER_ACCENT_COLORS['default'];
     const stageColor = WORKFLOW_STAGE_COLORS[workflowStage] || WORKFLOW_STAGE_COLORS.idle;
-    const providerConfig = getProviderById(pid);
-    const logoSrc = providerConfig?.logoSrc || '';
+    const logoSrc = getProviderLogo(pid) || '';
 
     // Active variant styling logic
     const isActiveVariant = variant === "active";

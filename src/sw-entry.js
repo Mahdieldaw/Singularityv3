@@ -857,7 +857,14 @@ async function handleUnifiedMessage(message, sender, sendResponse) {
         sendResponse({ success: true, status });
         return true;
       }
-        return false;
+   // --- ADD THIS HERE ---
+      default: {
+        // This catches "htos.keepalive" or any typos so the channel closes properly
+        console.warn("[SW] Unknown message type ignored:", message.type);
+        sendResponse({ success: false, error: "Unknown message type" });
+        return true;
+      }
+      // ---------------------
     }
   } catch (e) {
     sendResponse({ success: false, error: e.message });
@@ -867,6 +874,10 @@ async function handleUnifiedMessage(message, sender, sendResponse) {
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request?.$bus) return false;
+   // 1. Explicitly handle keepalive - return false to close channel immediately
+  if (request?.type === "htos.keepalive") {
+    return false; 
+  }
   if (request?.type === "GET_HEALTH_STATUS") {
     // Return health
     const health = { serviceWorker: "active", registry: { ...services.services.keys() } };
@@ -874,7 +885,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
   if (request?.type) {
-    handleUnifiedMessage(request, sender, sendResponse);
+  // 2. Ensure handleUnifiedMessage calls sendResponse even if type is unknown
+    handleUnifiedMessage(request, sender, sendResponse)
+      .catch(err => {
+        try {
+          sendResponse({ success: false, error: err.message });
+        } catch(e) { /* ignore channel closed */ }
+      });
     return true;
   }
   return false;

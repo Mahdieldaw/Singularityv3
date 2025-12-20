@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as d3 from 'd3-force';
-import { PROVIDER_COLORS } from '../../constants';
+import { getProviderColor } from '../../utils/provider-helpers';
 
 export interface ClaimNode extends d3.SimulationNodeDatum {
     id: string;
@@ -61,7 +61,7 @@ function getNodeColor(supporters: (string | number)[], citationSourceOrder?: Rec
 
     const colors = supporters.map(s => {
         const pid = getProviderIdFromSupporter(s, citationSourceOrder);
-        return PROVIDER_COLORS[pid] || PROVIDER_COLORS['default'] || '#64748b';
+        return getProviderColor(pid);
     });
 
     if (colors.length === 1) {

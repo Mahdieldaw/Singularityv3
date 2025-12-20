@@ -193,7 +193,7 @@ const ChatInput = ({
       if (limitConfig.maxInputChars < minMax) {
         minMax = limitConfig.maxInputChars;
         minWarn = limitConfig.warnThreshold;
-        provider = LLM_PROVIDERS_CONFIG.find(p => p.id === pid)?.name || pid;
+        provider = getProviderName(pid);
       }
     });
 
@@ -414,7 +414,7 @@ const ChatInput = ({
   const showMappingBtn = canShowMapping && !!prompt.trim();
   const showAbortBtn = !!onAbort && isLoading;
 
-  const providerName = activeTarget ? LLM_PROVIDERS_CONFIG.find(p => p.id === activeTarget.providerId)?.name || activeTarget.providerId : "";
+  const providerName = activeTarget ? getProviderName(activeTarget.providerId) : "";
   const workflowProgress = useAtomValue(workflowProgressAtom);
 
   return (

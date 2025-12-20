@@ -50,6 +50,7 @@ import { NextStepFooter } from "./refinerui/NextStepFooter";
 import { SignalCard } from "./refinerui/SignalCard";
 import { TrustIcon } from "./refinerui/TrustIcon";
 import { categorizeSignals, hasCriticalSignals } from "../utils/signalUtils";
+import { getProviderName } from "../utils/provider-helpers";
 
 // --- Helper Functions ---
 function parseMappingResponse(response?: string | null) {
@@ -476,20 +477,23 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
     }
 
     const tabs: SynthTab[] = [];
+    const providerOrder = new Map(
+      LLM_PROVIDERS_CONFIG.map((p, idx) => [String(p.id), idx] as const)
+    );
     const providersWithResponses = Object.entries(aiTurn.synthesisResponses)
       .filter(([_, resps]) => Array.isArray(resps) && resps.length > 0);
 
     // Sort providers by predetermined order or alphabetical
     // This ensures tabs are stable
     const sortedProviders = providersWithResponses.sort((a, b) => {
-      const idxA = LLM_PROVIDERS_CONFIG.findIndex(p => String(p.id) === a[0]);
-      const idxB = LLM_PROVIDERS_CONFIG.findIndex(p => String(p.id) === b[0]);
-      return idxA - idxB;
+      const idxA = providerOrder.get(a[0]) ?? Number.POSITIVE_INFINITY;
+      const idxB = providerOrder.get(b[0]) ?? Number.POSITIVE_INFINITY;
+      if (idxA !== idxB) return idxA - idxB;
+      return String(a[0]).localeCompare(String(b[0]));
     });
 
     sortedProviders.forEach(([pid, resps]) => {
-      const providerConfig = LLM_PROVIDERS_CONFIG.find(p => String(p.id) === pid);
-      const name = providerConfig?.name || pid;
+      const name = getProviderName(pid);
 
       const respsArray = Array.isArray(resps) ? resps : [resps];
       // Filter out empty responses unless they are streaming/error
@@ -553,8 +557,13 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
 
   const synthesisResponses = useMemo(() => {
     if (!aiTurn.synthesisResponses) aiTurn.synthesisResponses = {};
-    const out: Record<string, ProviderResponse[]> = {};
-    LLM_PROVIDERS_CONFIG.forEach((p) => (out[String(p.id)] = []));
+    const out = LLM_PROVIDERS_CONFIG.reduce<Record<string, ProviderResponse[]>>(
+      (acc, p) => {
+        acc[String(p.id)] = [];
+        return acc;
+      },
+      {}
+    );
     Object.entries(aiTurn.synthesisResponses).forEach(([pid, resp]) => {
       out[pid] = normalizeResponseArray(resp);
     });
@@ -563,8 +572,13 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
 
   const mappingResponses = useMemo(() => {
     const map = aiTurn.mappingResponses || {};
-    const out: Record<string, ProviderResponse[]> = {};
-    LLM_PROVIDERS_CONFIG.forEach((p) => (out[String(p.id)] = []));
+    const out = LLM_PROVIDERS_CONFIG.reduce<Record<string, ProviderResponse[]>>(
+      (acc, p) => {
+        acc[String(p.id)] = [];
+        return acc;
+      },
+      {}
+    );
     Object.entries(map).forEach(([pid, resp]) => {
       out[pid] = normalizeResponseArray(resp);
     });

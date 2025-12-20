@@ -266,74 +266,7 @@ const MarkdownDisplay: React.FC<MarkdownDisplayProps> = React.memo(
                 {children}
               </td>
             ),
-            // Handle raw HTML from our math pre-processor
-            // We need to trust the HTML we generated ourselves via rehype-katex
-            // Note: ReactMarkdown by default escapes HTML. We need to enable rehype-raw if we want to render HTML,
-            // OR we can use a custom component for specific tags if our processor output them.
-            // However, since we are pre-processing to string, ReactMarkdown will see HTML tags as text and escape them unless we use rehype-raw.
-            // WAIT: The plan was "Pre-process content through remark-math → rehype-katex".
-            // If we do that, we get HTML string. Passing HTML string to ReactMarkdown requires `rehype-raw` to render.
-            // ALTERNATIVE: Don't pre-process to string. Use the plugins in ReactMarkdown conditionally?
-            // ReactMarkdown doesn't support async plugins easily.
-            // So pre-processing to HTML string is the right way, BUT we need to tell ReactMarkdown to render that HTML.
-            // Actually, if we pre-process, we might be converting the WHOLE markdown to HTML.
-            // If `renderMathInMarkdown` converts ONLY math to HTML and leaves the rest as markdown...
-            // remark-math + rehype-katex usually converts the whole tree.
-            // Let's look at `math-renderer.ts`. It uses `unified().use(remarkParse)...`.
-            // This pipeline parses Markdown -> transforms Math -> Stringifies to HTML.
-            // So `processedContent` will be FULL HTML.
-            // If `processedContent` is HTML, we shouldn't pass it to `ReactMarkdown` as `children`.
-            // We should render it directly or use a HTML renderer.
-            // BUT `ReactMarkdown` is useful for other components (CodeBlock etc).
-            // If we convert everything to HTML in `math-renderer`, we lose our custom `PreBlock` components unless we replicate them in rehype.
-
-            // CORRECTION: The user request says "The Pipeline Shift: Your build script runs the full recommended sequence... The user's browser only receives the pre-calculated... HTML".
-            // But for DYNAMIC content, we are doing lazy loading.
-
-            // If we use `rehype-katex`, it outputs HTML AST.
-            // If we want to keep using `ReactMarkdown` for the rest of the rendering (code blocks, etc), we have a conflict.
-            // `ReactMarkdown` takes Markdown string.
-            // If we pre-process math to HTML, we have a mix of Markdown and HTML.
-            // ReactMarkdown can handle mixed HTML if `rehype-raw` is used.
-
-            // Let's adjust `MarkdownDisplay` to use `rehype-raw` if we are passing mixed content, 
-            // OR better:
-            // If we use `remark-math` and `rehype-katex` INSIDE `ReactMarkdown` plugins list, we can lazy load them?
-            // No, React props are synchronous.
-
-            // So the "Pre-process" strategy in `math-renderer.ts` returns a string.
-            // If that string is full HTML, we should just render it.
-            // But then we lose `PreBlock` logic which is React-based.
-
-            // HYBRID APPROACH:
-            // We only want to process the MATH parts to HTML, leaving the rest as Markdown?
-            // That's hard with standard processors.
-
-            // Let's look at `math-renderer.ts` again.
-            // It uses `remark-parse` -> `remark-math` -> `remark-rehype` -> `rehype-katex` -> `rehype-stringify`.
-            // This converts the ENTIRE document to HTML.
-
-            // If we want to preserve React components for CodeBlocks, we need to use `react-markdown`'s plugin system, 
-            // but we can't lazy-load plugins easily because `ReactMarkdown` expects plugins array to be stable/sync?
-            // Actually, we CAN pass the plugins array. If it changes, it re-renders.
-            // So we can state-manage the plugins!
-
-            // PLAN REVISION for MarkdownDisplay:
-            // Instead of pre-processing text to HTML, we lazy-load the PLUGINS.
-            // 1. Detect math.
-            // 2. If math, load `remark-math` and `rehype-katex`.
-            // 3. Set them in state.
-            // 4. Pass them to `ReactMarkdown`.
-
-            // This preserves all other ReactMarkdown functionality (CodeBlocks, etc).
-            // And it satisfies the "Lazy load" requirement.
-            // And it satisfies "Build time" principle (we are not bundling them, we import them).
-
-            // Let's update `math-renderer.ts` to export the PLUGINS instead of a render function?
-            // Or just import them dynamically in `MarkdownDisplay`.
-
-            // Wait, `math-renderer.ts` was supposed to encapsulate the loading.
-            // Let's change `math-renderer.ts` to export a function that returns the plugins.
+            
 
             ...components,
           }}

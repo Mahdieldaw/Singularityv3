@@ -6,9 +6,9 @@ import { motion, AnimatePresence } from "framer-motion";
 import DecisionMapGraph from "./experimental/DecisionMapGraph";
 import { adaptGraphTopology } from "./experimental/graphAdapter";
 import MarkdownDisplay from "./MarkdownDisplay";
-import { LLM_PROVIDERS_CONFIG, PROVIDER_COLORS } from "../constants";
+import { LLM_PROVIDERS_CONFIG } from "../constants";
 import { getLatestResponse, normalizeResponseArray } from "../utils/turn-helpers";
-import { getProviderById } from "../providers/providerRegistry";
+import { getProviderColor, getProviderConfig } from "../utils/provider-helpers";
 import type { AiTurn, ProviderResponse } from "../types";
 import clsx from "clsx";
 import { CopyButton } from "./CopyButton";
@@ -193,19 +193,19 @@ const SupporterOrbs: React.FC<SupporterOrbsProps> = ({ supporters, citationSourc
     if (s === 'S' || s === 's') {
       // For synthesizer, return the synthesis provider from metadata or use gemini as fallback
       const synthProviderId = citationSourceOrder?.['S'] || 'gemini';
-      return getProviderById(synthProviderId) || null;
+      return getProviderConfig(synthProviderId) || null;
     }
     // If it's a number and we have citationSourceOrder, use it
     if ((typeof s === 'number' || !isNaN(Number(s))) && citationSourceOrder) {
       const num = Number(s);
       const providerId = citationSourceOrder[num];
       if (providerId) {
-        return getProviderById(providerId) || null;
+        return getProviderConfig(providerId) || null;
       }
     }
     // If it's a string, try direct lookup by provider ID
     if (typeof s === 'string' && isNaN(Number(s))) {
-      return getProviderById(s) || null;
+      return getProviderConfig(s) || null;
     }
     // Fallback: no mapping available
     return null;
@@ -223,7 +223,7 @@ const SupporterOrbs: React.FC<SupporterOrbsProps> = ({ supporters, citationSourc
     <div className="flex gap-2 flex-wrap">
       {supporters.map((s, idx) => {
         const provider = getProviderFromSupporter(s);
-        const color = provider ? PROVIDER_COLORS[provider.id] || PROVIDER_COLORS['default'] : '#64748b';
+        const color = getProviderColor(provider?.id || 'default');
         const name = provider?.name || `Model ${s}`;
         const initials = getInitials(name);
 
@@ -374,7 +374,7 @@ const DetailView: React.FC<DetailViewProps> = ({ node, narrativeExcerpt, citatio
       providerId = first;
     }
 
-    return providerId ? (PROVIDER_COLORS[providerId] || '#8b5cf6') : '#8b5cf6';
+    return getProviderColor(providerId || 'default');
   };
 
   const nodeColor = getNodeColor();
@@ -487,15 +487,10 @@ const MapperSelector: React.FC<MapperSelectorProps> = ({ aiTurn, activeProviderI
     };
   }, [isOpen]);
 
-  const activeProvider = activeProviderId ? getProviderById(activeProviderId) : null;
+  const activeProvider = activeProviderId ? getProviderConfig(activeProviderId) : null;
 
   // Filter out system provider
   const providers = useMemo(() => LLM_PROVIDERS_CONFIG.filter(p => p.id !== 'system'), []);
-
-  const handleSelect = (providerId: string) => {
-    handleClipClick(aiTurn.id, "mapping", providerId);
-    setIsOpen(false);
-  };
 
   return (
     <div className="relative" ref={menuRef}>
@@ -525,20 +520,13 @@ const MapperSelector: React.FC<MapperSelectorProps> = ({ aiTurn, activeProviderI
           <div className="p-2 grid gap-1">
             {providers.map(p => {
               const pid = String(p.id);
-              const isActive = pid === activeProviderId;
               const isUnauthorized = authStatus && authStatus[pid] === false;
 
-              // Check for previous error (e.g. input length)
-              const latestResp = getLatestResponse(aiTurn.mappingResponses?.[pid]);
-              const hasError = latestResp?.status === 'error';
-              const errorMessage = hasError ? (latestResp?.meta?._rawError || "Failed") : null;
-
-              const isDisabled = isUnauthorized; // Strict disable for auth
-              const isDimmed = hasError; // Visual dim for error
+              const isDisabled = isUnauthorized;
 
               return (
-                <button key={pid} onClick={() => { if (!isUnauthorized) { handleClipClick(aiTurn.id, "mapping", pid); setIsOpen(false); } }} disabled={isUnauthorized} className={clsx("w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left transition-colors", pid === activeProviderId ? "bg-brand-500/10 text-brand-500" : "hover:bg-surface-highlight text-text-secondary", isUnauthorized && "opacity-60 cursor-not-allowed")}>
-                  <div className="w-2 h-2 rounded-full shadow-sm" style={{ backgroundColor: PROVIDER_COLORS[pid] || PROVIDER_COLORS.default }} />
+                <button key={pid} onClick={() => { if (!isDisabled) { handleClipClick(aiTurn.id, "mapping", pid); setIsOpen(false); } }} disabled={isDisabled} className={clsx("w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left transition-colors", pid === activeProviderId ? "bg-brand-500/10 text-brand-500" : "hover:bg-surface-highlight text-text-secondary", isDisabled && "opacity-60 cursor-not-allowed")}>
+                  <div className="w-2 h-2 rounded-full shadow-sm" style={{ backgroundColor: getProviderColor(pid) }} />
                   <span className="flex-1 text-xs font-medium">{p.name}</span>
                   {pid === activeProviderId && <span>✓</span>}
                   {isUnauthorized && <span>🔒</span>}
@@ -569,7 +557,7 @@ const RefinerSelector: React.FC<{ aiTurn: AiTurn, activeProviderId?: string, onS
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [isOpen]);
 
-  const activeProvider = activeProviderId ? getProviderById(activeProviderId) : null;
+  const activeProvider = activeProviderId ? getProviderConfig(activeProviderId) : null;
   const providers = useMemo(() => LLM_PROVIDERS_CONFIG.filter(p => p.id !== 'system'), []);
 
   const handleProviderSelect = (providerId: string) => {
@@ -628,7 +616,7 @@ const RefinerSelector: React.FC<{ aiTurn: AiTurn, activeProviderId?: string, onS
                 >
                   <div
                     className="w-2 h-2 rounded-full shadow-sm"
-                    style={{ backgroundColor: PROVIDER_COLORS[pid] || PROVIDER_COLORS.default }}
+                    style={{ backgroundColor: getProviderColor(pid) }}
                   />
                   <div className="flex-1 flex flex-col">
                     <span className="text-xs font-medium">{p.name}</span>
