@@ -202,14 +202,3 @@ export const RefinerEpistemicAudit: React.FC<RefinerAuditProps> = ({ output, raw
     );
 };
 
-/**
- * @deprecated Use RefinerSynthesisAccuracy or RefinerEpistemicAudit instead
- */
-export const RefinerCardsSection: React.FC<RefinerSectionProps> = (props) => {
-    return (
-        <>
-            <RefinerSynthesisAccuracy {...props} />
-            <RefinerEpistemicAudit {...props} />
-        </>
-    );
-};
