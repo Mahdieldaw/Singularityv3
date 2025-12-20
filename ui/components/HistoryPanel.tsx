@@ -137,7 +137,7 @@ export default function HistoryPanel() {
   const submenuRef = React.useRef<HTMLDivElement>(null);
   const menuRef = React.useRef<HTMLDivElement>(null); // For main menu
 
-  const handleSubmenuEnter = (sessionId: string, rect: DOMRect) => {
+ const handleSubmenuEnter = (sessionId: string, rect: DOMRect) => {
     if (submenuTimeoutRef.current) {
       clearTimeout(submenuTimeoutRef.current);
       submenuTimeoutRef.current = null;
@@ -148,25 +148,21 @@ export default function HistoryPanel() {
     const submenuHeight = 150;
     const align = spaceBelow < submenuHeight ? 'top' : 'bottom';
 
-    // If aligning top, we position it so its bottom aligns with the trigger's bottom (or slightly above)
-    // Actually simpler: 
-    // If 'bottom', top = rect.top
-    // If 'top', top = rect.bottom - submenuHeight (approx) OR we let CSS handle bottom positioning?
-    // Let's pass the strictly calculated top coordinate.
-
+    // Calculate top position
     let top = rect.top;
     if (align === 'top') {
       // Shift up by height of submenu
-      top = rect.bottom - submenuHeight + 10; // +10 fudge factor to keep overlap
+      // +10 fudge factor ensures overlap so mouse doesn't disconnect on transition
+      top = rect.bottom - submenuHeight + 10; 
     }
 
     setExportSubmenuPos({
       sessionId,
-      top: align === 'bottom' ? rect.top : (rect.bottom - submenuHeight), // simplified attempt, will refine with portal style
+      top, // <--- CHANGE THIS: Use the variable you calculated above
       left: rect.right,
       align
     });
-  };
+};
 
   const handleSubmenuLeave = () => {
     submenuTimeoutRef.current = setTimeout(() => {
@@ -341,7 +337,7 @@ export default function HistoryPanel() {
     );
 
     try {
-      const {  } = await deleteChats(ids);
+      await deleteChats(ids);
       // Revalidate list with backend
       const response = await api.getHistoryList();
       const refreshed = (response?.sessions || []).map((s: any) => ({

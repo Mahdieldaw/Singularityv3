@@ -20,7 +20,7 @@ import {
   chatInputValueAtom,
 } from "../state/atoms";
 import { useClipActions } from "../hooks/useClipActions";
-import { AiTurn, ProviderResponse, AppStep } from "../types";
+import { AiTurn, ProviderResponse } from "../types";
 import MarkdownDisplay from "./MarkdownDisplay";
 import { LLM_PROVIDERS_CONFIG } from "../constants";
 import { ChevronDownIcon, ChevronUpIcon, SettingsIcon } from "./Icons";
@@ -40,16 +40,13 @@ import {
   activeAiTurnIdAtom,
   isLoadingAtom,
   workflowProgressAtom,
-  hasAutoOpenedPaneAtom
 } from "../state/atoms";
 import { useRefinerOutput } from "../hooks/useRefinerOutput";
 
 import { ReframingBanner } from "./refinerui/ReframingBanner";
 import { NextStepFooter } from "./refinerui/NextStepFooter";
 import { SignalCard } from "./refinerui/SignalCard";
-import { TrustIcon } from "./refinerui/TrustIcon";
-import { categorizeSignals, hasCriticalSignals } from "../utils/signalUtils";
-import { getProviderName } from "../utils/provider-helpers";
+import { categorizeSignals } from "../utils/signalUtils";
 
 // --- Helper Functions ---
 function parseMappingResponse(response?: string | null) {
@@ -164,115 +161,12 @@ interface AiTurnBlockProps {
   aiTurn: AiTurn;
 }
 
-interface ProviderSelectorProps {
-  providers: typeof LLM_PROVIDERS_CONFIG;
-  responsesMap: Record<string, ProviderResponse[]>;
-  activeProviderId?: string;
-  onSelect: (providerId: string) => void;
-  type: "synthesis" | "mapping";
-}
-
-const ProviderSelector: React.FC<ProviderSelectorProps> = ({
-  providers,
-  responsesMap,
-  activeProviderId,
-  onSelect,
-  type,
-}) => {
-  const [isOpen, setIsOpen] = useState(false);
-  const activeProvider = providers.find((p) => String(p.id) === activeProviderId);
-
-  // Filter out the active provider from the strip
-  const otherProviders = providers.filter((p) => String(p.id) !== activeProviderId);
-
-  return (
-    <div className="relative inline-flex items-center">
-      {/* Backdrop to close on outside click */}
-      {isOpen && (
-        <div
-          className="fixed inset-0 z-40"
-          onClick={(e) => {
-            e.stopPropagation();
-            setIsOpen(false);
-          }}
-        />
-      )}
-
-      {/* Trigger Button - Shows Active Model */}
-      <button
-        type="button"
-        onClick={(e) => {
-          e.stopPropagation();
-          setIsOpen(!isOpen);
-        }}
-        className={`flex items-center gap-1.5 px-2.5 py-1 bg-surface-raised hover:bg-surface-highlight border border-border-subtle text-xs font-medium text-text-secondary transition-all ${isOpen
-          ? "rounded-l-full border-r-0"
-          : "rounded-full shadow-sm"
-          }`}
-      >
-        {isOpen ? (
-          <ChevronUpIcon className="w-3 h-3" />
-        ) : (
-          <ChevronDownIcon className="w-3 h-3" />
-        )}
-        <span>{activeProvider?.name || "Select Model"}</span>
-      </button>
-
-      {/* Horizontal Strip - Other Models + Arrow at End */}
-      {isOpen && (
-        <div className="relative z-50 inline-flex items-center gap-1 bg-surface-raised border border-border-subtle border-l-0 rounded-r-full pl-2 pr-2 py-1 shadow-lg animate-in slide-in-from-left-2 duration-200">
-          {otherProviders.map((p) => {
-            const pid = String(p.id);
-            const responses = responsesMap[pid] || [];
-            const latest = getLatestResponse(responses);
-            const isStreaming = latest?.status === "streaming";
-            const hasError = latest?.status === "error";
-
-            return (
-              <button
-                key={pid}
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onSelect(pid);
-                  setIsOpen(false);
-                }}
-                className="px-2.5 py-0.5 rounded-full text-xs flex items-center gap-1.5 transition-all whitespace-nowrap text-text-secondary hover:bg-surface-highlight"
-              >
-                <span>{p.name}</span>
-                {isStreaming && <span className="w-1.5 h-1.5 rounded-full bg-intent-warning animate-pulse" />}
-                {hasError && <span className="w-1.5 h-1.5 rounded-full bg-intent-danger" />}
-              </button>
-            );
-          })}
-          {/* Close at the end - up chevron */}
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              setIsOpen(false);
-            }}
-            className="opacity-70 ml-1 cursor-pointer hover:opacity-100 transition-opacity p-1"
-            aria-label="Collapse"
-            title="Collapse"
-          >
-            <ChevronUpIcon className="w-3 h-3" />
-          </button>
-        </div>
-      )}
-    </div>
-  );
-};
 
 const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
   aiTurn,
 }) => {
   // --- CONNECTED STATE LOGIC ---
-  const streamingState = useAtomValue(turnStreamingStateFamily(aiTurn.id));
-  const { isLoading, appStep: currentAppStep } = streamingState;
-  const isLive = isLoading && currentAppStep !== "initial";
 
-  const [isReducedMotion] = useAtom(isReducedMotionAtom);
   const synthesisProvider = useAtomValue(synthesisProviderAtom);
   const mappingProvider = useAtomValue(mappingProviderAtom);
   const { handleClipClick } = useClipActions();
@@ -288,7 +182,7 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
   const isThisTurnActive = activeAiTurnId === aiTurn.id && globalIsLoading;
 
   const { output: refinerOutput } = useRefinerOutput(aiTurn.id);
-  const { blockerSignals, riskSignals } = useMemo(() => categorizeSignals(refinerOutput?.signals), [refinerOutput]);
+  const { blockerSignals } = useMemo(() => categorizeSignals(refinerOutput?.signals), [refinerOutput]);
 
   const setChatInput = useSetAtom(chatInputValueAtom);
 
@@ -343,43 +237,6 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
     return undefined;
   })();
 
-  // Derive mapStatus for Decision Map indicator (per-turn, no new atoms)
-  const mapStatus: "idle" | "streaming" | "ready" | "error" = (() => {
-    if (!activeMappingClipProviderId) return "idle";
-
-    const mappingResponsesForProvider = aiTurn.mappingResponses?.[activeMappingClipProviderId];
-    if (!mappingResponsesForProvider || mappingResponsesForProvider.length === 0) {
-      return "idle";
-    }
-
-    // Get latest mapping response for active provider
-    const latestMapping = Array.isArray(mappingResponsesForProvider)
-      ? mappingResponsesForProvider[mappingResponsesForProvider.length - 1]
-      : mappingResponsesForProvider;
-
-    // Check if this turn's mapping is being recomputed
-    const isMappingTarget =
-      activeRecomputeState?.aiTurnId === aiTurn.id &&
-      activeRecomputeState?.stepType === "mapping" &&
-      activeRecomputeState?.providerId === activeMappingClipProviderId;
-
-    // Determine status
-    if (latestMapping.status === "error") return "error";
-
-    if (
-      latestMapping.status === "streaming" ||
-      latestMapping.status === "pending" ||
-      isMappingTarget
-    ) {
-      return "streaming";
-    }
-
-    if (latestMapping.status === "completed" && latestMapping.text) {
-      return "ready";
-    }
-
-    return "idle";
-  })();
 
   // Extract graph topology from mapping response metadata (if available)
   const graphTopology = useMemo(() => {
@@ -484,7 +341,6 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
 
   const setToast = useSetAtom(toastAtom);
   const setActiveSplitPanel = useSetAtom(activeSplitPanelAtom);
-  const activeSplitPanel = useAtomValue(activeSplitPanelAtom);
   const setIsDecisionMapOpen = useSetAtom(isDecisionMapOpenAtom);
   const isDecisionMapOpen = useAtomValue(isDecisionMapOpenAtom);
   const [includePromptInCopy, setIncludePromptInCopy] = useAtom(includePromptInCopyAtom);
@@ -632,7 +488,6 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
     return sources;
   }, [aiTurn.batchResponses]);
 
-  const hasSources = Object.keys(allSources).length > 0;
   const providerIds = useMemo(
     () => LLM_PROVIDERS_CONFIG.map((p) => String(p.id)),
     []
@@ -696,12 +551,6 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
     activeRecomputeState.stepType === "synthesis" &&
     (!activeSynthPid || activeRecomputeState.providerId === activeSynthPid)
   );
-  const isMappingTarget = !!(
-    activeRecomputeState &&
-    activeRecomputeState.aiTurnId === aiTurn.id &&
-    activeRecomputeState.stepType === "mapping" &&
-    (!activeMappingPid || activeRecomputeState.providerId === activeMappingPid)
-  );
 
   const getMappingAndOptions = useCallback(
     (take: ProviderResponse | undefined) => {
@@ -732,109 +581,13 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
 
 
   const hasMapping = !!(activeMappingPid && displayedMappingTake?.text);
-  const hasSynthesis = !!(
-    activeSynthPid &&
-    getLatestResponse(synthesisResponses[activeSynthPid])?.text
-  );
+ 
 
   const requestedSynth = (aiTurn.meta as any)?.requestedFeatures?.synthesis;
   const requestedMap = (aiTurn.meta as any)?.requestedFeatures?.mapping;
   const wasSynthRequested =
     requestedSynth === undefined ? true : !!requestedSynth;
-  const wasMapRequested = requestedMap === undefined ? true : !!requestedMap;
 
-  // --- 1. DEFINITION: Citation Click Logic (First) ---
-  const handleCitationClick = useCallback(
-    (modelNumber: number) => {
-      try {
-        const take = activeMappingPid
-          ? getLatestResponse(mappingResponses[activeMappingPid])
-          : undefined;
-        const metaOrder = (take as any)?.meta?.citationSourceOrder || null;
-        let providerId: string | undefined;
-        if (metaOrder && typeof metaOrder === "object") {
-          providerId = metaOrder[modelNumber];
-        }
-        if (!providerId) {
-          const activeOrdered = LLM_PROVIDERS_CONFIG.map((p) =>
-            String(p.id)
-          ).filter((pid) => !!(aiTurn.batchResponses || {})[pid]);
-          providerId = activeOrdered[modelNumber - 1];
-        }
-        if (!providerId) return;
-
-        // NEW: Open slide-in panel instead of scrolling
-        setActiveSplitPanel({ turnId: aiTurn.id, providerId });
-
-      } catch (e) {
-        console.warn("[AiTurnBlock] Citation click failed", e);
-      }
-    },
-    [
-      activeMappingPid,
-      mappingResponses,
-      aiTurn.id,
-      aiTurn.batchResponses,
-      setActiveSplitPanel
-    ]
-  );
-
-  // --- 2. DEFINITION: Custom Markdown Components (Depends on 1) ---
-  const markdownComponents = useMemo(
-    () => ({
-      a: ({ href, children, ...props }: any) => {
-        // Check for our specific hash pattern
-        if (href && href.startsWith("#cite-")) {
-          const idStr = href.replace("#cite-", "");
-          const num = parseInt(idStr, 10);
-
-          return (
-            <button
-              type="button"
-              className="inline-flex items-center gap-1 px-1.5 mx-0.5 bg-chip-active border border-border-brand rounded-pill text-text-primary text-sm font-bold leading-snug cursor-pointer no-underline"
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                handleCitationClick(num);
-              }}
-              title={`View Source ${idStr}`}
-            >
-              {children}
-            </button>
-          );
-        }
-
-        // Normal links behave normally
-        return (
-          <a href={href} {...props} target="_blank" rel="noopener noreferrer">
-            {children}
-          </a>
-        );
-      },
-    }),
-    [handleCitationClick]
-  );
-
-  // --- 3. DEFINITION: Transformation Logic (Uses Hash Strategy) ---
-  const transformCitations = useCallback((text: string) => {
-    if (!text) return "";
-    let t = text;
-
-    // A. [[CITE:N]] -> [↗N](#cite-N)
-    t = t.replace(/\[\[CITE:(\d+)\]\]/g, "[↗$1](#cite-$1)");
-
-    // B. [1], [1, 2] -> [↗1](#cite-1) [↗2](#cite-2)
-    // FIX: Added closing parenthesis to lookahead: (?!\()
-    t = t.replace(/\[(\d+(?:\s*,\s*\d+)*)\](?!\()/g, (_m, grp) => {
-      const nums = String(grp)
-        .split(/\s*,\s*/)
-        .map((n) => n.trim())
-        .filter(Boolean);
-      return " " + nums.map((n) => `[↗${n}](#cite-${n})`).join(" ") + " ";
-    });
-
-    return t;
-  }, []);
 
   const userPrompt: string | null =
     (aiTurn as any)?.userPrompt ??
@@ -1091,7 +844,6 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                                 <div className="text-base leading-relaxed text-text-primary">
                                   <MarkdownDisplay
                                     content={String(shortAnswer || cleanText || take.text || "")}
-                                    components={markdownComponents}
                                   />
                                 </div>
 
@@ -1120,7 +872,6 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                                   <div className="text-base leading-relaxed text-text-primary">
                                     <MarkdownDisplay
                                       content={String(longAnswer)}
-                                      components={markdownComponents}
                                     />
                                   </div>
                                 )}
