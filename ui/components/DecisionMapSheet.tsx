@@ -1,6 +1,6 @@
 import React, { useMemo, useCallback, useEffect, useRef, useState } from "react";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
-import { isDecisionMapOpenAtom, turnByIdAtom, mappingProviderAtom, activeSplitPanelAtom, providerAuthStatusAtom, refinerProviderAtom } from "../state/atoms";
+import { isDecisionMapOpenAtom, turnByIdAtom, mappingProviderAtom, activeSplitPanelAtom, providerAuthStatusAtom, refinerProviderAtom, antagonistProviderAtom } from "../state/atoms";
 import { useClipActions } from "../hooks/useClipActions";
 import { motion, AnimatePresence } from "framer-motion";
 import DecisionMapGraph from "./experimental/DecisionMapGraph";
@@ -25,6 +25,7 @@ import {
 } from "../../shared/parsing-utils";
 
 import { useRefinerOutput } from "../hooks/useRefinerOutput";
+import { useAntagonistOutput } from "../hooks/useAntagonistOutput";
 import { RefinerEpistemicAudit } from "./refinerui/RefinerCardsSection";
 
 // ============================================================================
@@ -635,6 +636,7 @@ export const DecisionMapSheet = React.memo(() => {
   const turnGetter = useAtomValue(turnByIdAtom);
   const mappingProvider = useAtomValue(mappingProviderAtom);
   const refinerProvider = useAtomValue(refinerProviderAtom);
+  const antagonistProvider = useAtomValue(antagonistProviderAtom); // Added
   const setActiveSplitPanel = useSetAtom(activeSplitPanelAtom);
 
   const [activeTab, setActiveTab] = useState<'graph' | 'narrative' | 'options' | 'audit'>('graph');
@@ -642,6 +644,7 @@ export const DecisionMapSheet = React.memo(() => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [dims, setDims] = useState<{ w: number; h: number }>({ w: window.innerWidth, h: 400 });
   const [activeRefinerPid, setActiveRefinerPid] = useState<string | null>(null);
+  const [activeAntagonistPid, setActiveAntagonistPid] = useState<string | null>(antagonistProvider); // Initialized with antagonistProvider
   const [sheetHeightRatio, setSheetHeightRatio] = useState(0.5);
   const resizeRef = useRef<{ active: boolean; startY: number; startRatio: number; moved: boolean }>({
     active: false,
@@ -730,6 +733,7 @@ export const DecisionMapSheet = React.memo(() => {
   }, [aiTurn, activeRefinerPid, refinerProvider]);
 
   const { output: refinerOutput, rawText: refinerRawText, providerId: currentRefinerPid } = useRefinerOutput(aiTurn?.id || null, activeRefinerPid);
+  const { output: antagonistOutput } = useAntagonistOutput(aiTurn?.id || null, activeAntagonistPid);
 
   // Sync refiner selection
   useEffect(() => {
@@ -794,8 +798,20 @@ export const DecisionMapSheet = React.memo(() => {
   const parsedThemes = useMemo(() => {
     const themes = parseOptionsIntoThemes(optionsText || '');
 
-    // Merge in refiner-found unlisted options from new signal-based structure
-    if (refinerOutput?.unlistedOptions?.length) {
+    // Merge in antagonist-found unlisted options from Antagonist Audit
+    if (antagonistOutput?.the_audit?.missed?.length) {
+      const missedOptions = antagonistOutput.the_audit.missed.map((item) => ({
+        title: item.approach,
+        description: `Source: ${item.source}`,
+        citations: [item.source]
+      }));
+
+      themes.push({
+        name: "🔍 Found by Context Audit",
+        options: missedOptions
+      });
+    } else if (refinerOutput?.unlistedOptions?.length) {
+      // Fallback to refiner (legacy) if antagonist not providing
       const refinerOptions = refinerOutput.unlistedOptions.map((opt: { title: string; description: string; source: string }) => ({
         title: opt.title,
         description: opt.description,
@@ -809,7 +825,7 @@ export const DecisionMapSheet = React.memo(() => {
     }
 
     return themes;
-  }, [optionsText, refinerOutput]);
+  }, [optionsText, refinerOutput, antagonistOutput]);
 
   // Extract citation source order from mapping metadata for correct citation-to-model mapping
   const citationSourceOrder = useMemo(() => {

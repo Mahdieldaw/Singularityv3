@@ -7,7 +7,7 @@ export type ProviderKey =
   | "gemini-pro"
   | "chatgpt"
   | "qwen";
-export type WorkflowStepType = "prompt" | "synthesis" | "mapping" | "refiner";
+export type WorkflowStepType = "prompt" | "synthesis" | "mapping" | "refiner" | "antagonist";
 export type SynthesisStrategy = "continuation" | "fresh";
 
 // ============================================================================
@@ -66,7 +66,7 @@ export interface RecomputeRequest {
   type: "recompute";
   sessionId: string;
   sourceTurnId: string;
-  stepType: "synthesis" | "mapping" | "batch" | "refiner";
+  stepType: "synthesis" | "mapping" | "batch" | "refiner" | "antagonist";
   targetProvider: ProviderKey;
   userMessage?: string;
   useThinking?: boolean;
@@ -121,10 +121,23 @@ export interface RefinerStepPayload {
   originalPrompt: string;
 }
 
+export interface AntagonistStepPayload {
+  antagonistProvider: ProviderKey;
+  sourceStepIds?: string[];
+  synthesisStepIds?: string[];
+  mappingStepIds?: string[];
+  refinerStepIds?: string[];
+  sourceHistorical?: {
+    turnId: string;
+    responseType: string;
+  };
+  originalPrompt: string;
+}
+
 export interface WorkflowStep {
   stepId: string;
   type: WorkflowStepType;
-  payload: PromptStepPayload | SynthesisStepPayload | MappingStepPayload | RefinerStepPayload;
+  payload: PromptStepPayload | SynthesisStepPayload | MappingStepPayload | RefinerStepPayload | AntagonistStepPayload;
 }
 
 export interface WorkflowContext {
@@ -390,6 +403,7 @@ export interface AiTurn {
   synthesisResponses: Record<string, ProviderResponse[]>;
   mappingResponses: Record<string, ProviderResponse[]>;
   refinerResponses?: Record<string, ProviderResponse[]>;
+  antagonistResponses?: Record<string, ProviderResponse[]>;
   meta?: {
     branchPointTurnId?: string;
     replacesId?: string;

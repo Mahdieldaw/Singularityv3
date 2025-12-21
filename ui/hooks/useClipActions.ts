@@ -1,6 +1,6 @@
 import { useCallback } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
-import { turnsMapAtom, alertTextAtom, synthesisProviderAtom, mappingProviderAtom } from "../state/atoms";
+import { turnsMapAtom, alertTextAtom, synthesisProviderAtom, mappingProviderAtom, refinerProviderAtom, antagonistProviderAtom } from "../state/atoms";
 import { useRoundActions } from "./useRoundActions";
 import type { AiTurn } from "../types";
 import { PRIMARY_STREAMING_PROVIDER_IDS } from "../constants";
@@ -9,14 +9,16 @@ export function useClipActions() {
   const turnsMap = useAtomValue(turnsMapAtom);
   const setSynthesisProvider = useSetAtom(synthesisProviderAtom);
   const setMappingProvider = useSetAtom(mappingProviderAtom);
+  const setRefinerProvider = useSetAtom(refinerProviderAtom);
+  const setAntagonistProvider = useSetAtom(antagonistProviderAtom);
   const setAlertText = useSetAtom(alertTextAtom);
   const setTurnsMap = useSetAtom(turnsMapAtom);
-  const { runSynthesisForAiTurn, runMappingForAiTurn, runRefinerForAiTurn } = useRoundActions();
+  const { runSynthesisForAiTurn, runMappingForAiTurn, runRefinerForAiTurn, runAntagonistForAiTurn } = useRoundActions();
 
   const handleClipClick = useCallback(
     async (
       aiTurnId: string,
-      type: "synthesis" | "mapping" | "refiner",
+      type: "synthesis" | "mapping" | "refiner" | "antagonist",
       providerId: string,
     ) => {
       try {
@@ -47,7 +49,9 @@ export function useClipActions() {
               ? aiTurn.mappingResponses || {}
               : type === "refiner"
                 ? aiTurn.refinerResponses || {}
-                : {};
+                : type === "antagonist"
+                  ? aiTurn.antagonistResponses || {}
+                  : {};
         const responseEntry = responsesMap[providerId];
 
         // Check if we have a valid (non-error) existing response
@@ -61,6 +65,10 @@ export function useClipActions() {
           setSynthesisProvider(providerId);
         } else if (type === "mapping") {
           setMappingProvider(providerId);
+        } else if (type === "refiner") {
+          setRefinerProvider(providerId);
+        } else if (type === "antagonist") {
+          setAntagonistProvider(providerId);
         }
 
         // If the selected provider is not present in the AI turn's batchResponses, add an optimistic
@@ -95,9 +103,11 @@ export function useClipActions() {
           await runSynthesisForAiTurn(aiTurnId, providerId);
         } else if (type === "mapping") {
           await runMappingForAiTurn(aiTurnId, providerId);
-        } else {
+        } else if (type === "refiner") {
           // Refiner Recompute
           await runRefinerForAiTurn(aiTurnId, providerId);
+        } else if (type === "antagonist") {
+          await runAntagonistForAiTurn(aiTurnId, providerId);
         }
       } catch (err) {
         console.error("[ClipActions] handleClipClick failed:", err);
@@ -112,7 +122,11 @@ export function useClipActions() {
       setAlertText,
       setTurnsMap,
       setSynthesisProvider,
-      setMappingProvider
+      setSynthesisProvider,
+      setMappingProvider,
+      setRefinerProvider,
+      setAntagonistProvider,
+      runAntagonistForAiTurn,
     ],
   );
 

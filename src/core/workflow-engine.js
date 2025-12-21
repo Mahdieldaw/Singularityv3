@@ -435,7 +435,7 @@ export class WorkflowEngine {
                         meta: result?.meta || {},
                       },
                     )
-                    .catch(() => {});
+                    .catch(() => { });
                 }
               }
             } catch (_) { }
@@ -507,7 +507,7 @@ export class WorkflowEngine {
                       meta: result?.meta || {},
                     },
                   )
-                  .catch(() => {});
+                  .catch(() => { });
               }
             }
           } catch (_) { }
@@ -570,13 +570,76 @@ export class WorkflowEngine {
                       meta: result?.meta || {},
                     },
                   )
-                  .catch(() => {});
+                  .catch(() => { });
               }
             }
           } catch (_) { }
         } catch (error) {
           console.error(
             `[WorkflowEngine] Refiner step ${step.stepId} failed:`,
+            error,
+          );
+          stepResults.set(step.stepId, {
+            status: "failed",
+            error: error.message,
+          });
+          this.port.postMessage({
+            type: "WORKFLOW_STEP_UPDATE",
+            sessionId: context.sessionId,
+            stepId: step.stepId,
+            status: "failed",
+            error: error.message,
+            isRecompute: resolvedContext?.type === "recompute",
+            sourceTurnId: resolvedContext?.sourceTurnId,
+          });
+        }
+      }
+
+      // 5. Antagonist Step (Sequential, after refiner)
+      const antagonistSteps = steps.filter((step) => step.type === "antagonist");
+      for (const step of antagonistSteps) {
+        try {
+          const result = await this.executeAntagonistStep(
+            step,
+            context,
+            stepResults,
+          );
+          stepResults.set(step.stepId, { status: "completed", result });
+          this.port.postMessage({
+            type: "WORKFLOW_STEP_UPDATE",
+            sessionId: context.sessionId,
+            stepId: step.stepId,
+            status: "completed",
+            result,
+            isRecompute: resolvedContext?.type === "recompute",
+            sourceTurnId: resolvedContext?.sourceTurnId,
+          });
+          // Immediate idempotent persistence to avoid data loss on later failures (non-recompute only)
+          try {
+            if (resolvedContext?.type !== "recompute") {
+              const aiTurnId = context?.canonicalAiTurnId;
+              const providerId = step?.payload?.antagonistProvider;
+              if (aiTurnId && providerId) {
+                this.sessionManager
+                  .upsertProviderResponse(
+                    context.sessionId,
+                    aiTurnId,
+                    providerId,
+                    "antagonist",
+                    0,
+                    {
+                      text: result?.text || "",
+                      status: result?.status || "completed",
+                      meta: result?.meta || {},
+                    },
+                  )
+                  .catch(() => { });
+              }
+            }
+          } catch (_) { }
+        } catch (error) {
+          console.error(
+            `[WorkflowEngine] Antagonist step ${step.stepId} failed:`,
             error,
           );
           stepResults.set(step.stepId, {
@@ -604,6 +667,7 @@ export class WorkflowEngine {
           synthesisOutputs: {},
           mappingOutputs: {},
           refinerOutputs: {},
+          antagonistOutputs: {},
         };
         const stepById = new Map((steps || []).map((s) => [s.stepId, s]));
         stepResults.forEach((stepResult, stepId) => {
@@ -624,6 +688,10 @@ export class WorkflowEngine {
             const providerId = step.payload?.refinerProvider;
             if (providerId)
               result.refinerOutputs[providerId] = stepResult.result;
+          } else if (step.type === "antagonist") {
+            const providerId = step.payload?.antagonistProvider;
+            if (providerId)
+              result.antagonistOutputs[providerId] = stepResult.result;
           }
         });
 
@@ -740,6 +808,7 @@ export class WorkflowEngine {
       const synthesisResponses = {};
       const mappingResponses = {};
       const refinerResponses = {};
+      const antagonistResponses = {};
       let primarySynthesizer = null;
       let primaryMapper = null;
 
@@ -809,7 +878,22 @@ export class WorkflowEngine {
               status: result?.status || "completed",
               createdAt: timestamp,
               updatedAt: timestamp,
-              meta: result?.meta || {}, // The full Refiner output object might be here or in text
+              meta: result?.meta || {},
+            });
+            break;
+          }
+          case "antagonist": {
+            const providerId = result?.providerId;
+            if (!providerId) return;
+            if (!antagonistResponses[providerId])
+              antagonistResponses[providerId] = [];
+            antagonistResponses[providerId].push({
+              providerId,
+              text: result?.text || "",
+              status: result?.status || "completed",
+              createdAt: timestamp,
+              updatedAt: timestamp,
+              meta: result?.meta || {},
             });
             break;
           }
@@ -820,7 +904,8 @@ export class WorkflowEngine {
         Object.keys(batchResponses).length > 0 ||
         Object.keys(synthesisResponses).length > 0 ||
         Object.keys(mappingResponses).length > 0 ||
-        Object.keys(refinerResponses).length > 0;
+        Object.keys(refinerResponses).length > 0 ||
+        Object.keys(antagonistResponses).length > 0;
 
       if (!hasData) {
         console.log("[WorkflowEngine] No AI responses to finalize");
@@ -838,6 +923,7 @@ export class WorkflowEngine {
         synthesisResponses,
         mappingResponses,
         refinerResponses,
+        antagonistResponses,
         meta: {
           synthesizer: primarySynthesizer,
           mapper: primaryMapper,
@@ -1140,6 +1226,192 @@ export class WorkflowEngine {
         confidenceScore: parsedRefiner.confidenceScore,
         presentationStrategy: parsedRefiner.presentationStrategy,
       },
+      status: "completed"
+    };
+  }
+
+  /**
+   * Execute Antagonist Step
+   */
+  async executeAntagonistStep(step, context, stepResults) {
+    const {
+      antagonistProvider,
+      sourceStepIds,
+      originalPrompt,
+      synthesisStepIds,
+      mappingStepIds,
+      refinerStepIds,
+      sourceHistorical // Present if recompute
+    } = step.payload;
+
+    let batchResponses = {};
+    let synthesisText = "";
+    let mappingText = "";
+    let refinerOutput = null;
+
+    // 1. Resolve Inputs (Dynamic: New or Historical)
+    if (sourceHistorical) {
+      // --- RECOMPUTE FLOW ---
+      const { turnId } = sourceHistorical;
+      console.log(`[WorkflowEngine] Antagonist recompute: resolving historical inputs from turn ${turnId}`);
+
+      // Helper to fetch textual content from historical outputs
+      const fetchHistoricalText = async (type) => {
+        try {
+          const historicalPayload = { sourceHistorical: { turnId, responseType: type } };
+          const data = await this.resolveSourceData(historicalPayload, context, stepResults);
+          return data[0]?.text || "";
+        } catch (e) {
+          console.warn(`[WorkflowEngine] Antagonist failed to fetch historical ${type}:`, e.message);
+          return "";
+        }
+      };
+
+      // A. Batch Responses
+      try {
+        const batchPayload = { sourceHistorical: { turnId, responseType: 'batch' } };
+        const data = await this.resolveSourceData(batchPayload, context, stepResults);
+        data.forEach(item => {
+          if (item.text) batchResponses[item.providerId] = { text: item.text, providerId: item.providerId };
+        });
+      } catch (e) { console.warn("[WorkflowEngine] Antagonist: no batch history found", e); }
+
+      // B. Synthesis Text
+      synthesisText = await fetchHistoricalText('synthesis');
+
+      // C. Mapping Text (striped of topology)
+      const rawMapping = await fetchHistoricalText('mapping');
+      if (rawMapping) {
+        const { text } = this.responseProcessor.extractGraphTopology(rawMapping);
+        mappingText = text;
+      }
+
+      // D. Refiner Output
+      const rawRefiner = await fetchHistoricalText('refiner');
+      if (rawRefiner) {
+        refinerOutput = this.responseProcessor.parseRefinerResponse(rawRefiner);
+      }
+
+    } else {
+      // --- STANDARD FLOW ---
+      // 1. Gather Batch Responses
+      const batchStepResults = stepResults.get(sourceStepIds?.[0])?.result?.results || {};
+      Object.entries(batchStepResults).forEach(([pid, res]) => {
+        if (res && res.text) {
+          batchResponses[pid] = { text: res.text, providerId: pid };
+        }
+      });
+
+      // 2. Gather Synthesis Text
+      if (synthesisStepIds && synthesisStepIds.length > 0) {
+        for (const id of synthesisStepIds) {
+          const res = stepResults.get(id);
+          if (res?.status === "completed" && res.result?.text) {
+            synthesisText = res.result.text;
+            break;
+          }
+        }
+      }
+
+      // 3. Gather Mapping Narrative
+      if (mappingStepIds && mappingStepIds.length > 0) {
+        for (const id of mappingStepIds) {
+          const res = stepResults.get(id);
+          if (res?.status === "completed" && res.result?.text) {
+            const raw = res.result.text;
+            const { text } = this.responseProcessor.extractGraphTopology(raw);
+            mappingText = text;
+            break;
+          }
+        }
+      }
+
+      // 4. Gather Refiner Output
+      if (refinerStepIds && refinerStepIds.length > 0) {
+        for (const id of refinerStepIds) {
+          const res = stepResults.get(id);
+          if (res?.status === "completed" && res.result?.output) {
+            refinerOutput = res.result.output;
+            break;
+          } else if (res?.status === "completed" && res.result?.text) {
+            refinerOutput = this.responseProcessor.parseRefinerResponse(res.result.text);
+            break;
+          }
+        }
+      }
+    }
+
+    // 5. Extract mapper option titles
+    let mapperOptionTitles = [];
+    if (!sourceHistorical && mappingStepIds && mappingStepIds.length > 0) {
+      for (const id of mappingStepIds) {
+        const res = stepResults.get(id);
+        if (res?.status === "completed" && res.result?.meta?.allAvailableOptions) {
+          mapperOptionTitles = this.responseProcessor.parseOptionTitles(res.result.meta.allAvailableOptions);
+          break;
+        }
+      }
+    } else if (sourceHistorical) {
+      try {
+        const mappingPayload = { sourceHistorical: { turnId: sourceHistorical.turnId, responseType: 'mapping' } };
+        const data = await this.resolveSourceData(mappingPayload, context, stepResults);
+        const rawMapping = data[0]?.text || "";
+        if (rawMapping) {
+          const { options } = this.responseProcessor.extractOptions(rawMapping);
+          if (options) {
+            mapperOptionTitles = this.responseProcessor.parseOptionTitles(options);
+          }
+        }
+      } catch (e) {
+        console.warn("[WorkflowEngine] Antagonist recompute: failed to extract mapper options", e);
+      }
+    }
+
+    // 6. Build model outputs block
+    const modelCount = Object.keys(batchResponses).length;
+    const modelOutputsBlock = Object.entries(batchResponses)
+      .map(([providerId, response], idx) => {
+        return `<model_${idx + 1} provider="${providerId}">\n${response.text}\n</model_${idx + 1}>`;
+      })
+      .join('\n\n');
+
+    // Build option titles block
+    const optionTitlesBlock = mapperOptionTitles.length > 0
+      ? mapperOptionTitles.map(t => `- ${t}`).join('\n')
+      : '(No mapper options available)';
+
+    // 7. Build Prompt
+    const antagonistPrompt = this.promptService.buildAntagonistPrompt(
+      originalPrompt,
+      synthesisText,
+      mappingText,
+      optionTitlesBlock,
+      modelOutputsBlock,
+      refinerOutput,
+      modelCount
+    );
+
+    console.log(`[WorkflowEngine] Running Antagonist Analysis (${antagonistProvider})...`);
+
+    // 8. Execute via Orchestrator (Single)
+    const result = await this.orchestrator.executeSingle(
+      antagonistPrompt,
+      antagonistProvider,
+      {
+        sessionId: context.sessionId,
+        timeout: 90000,
+        onPartial: (pid, chunk) => {
+          // Optional: stream antagonist delta if UI supports it
+        }
+      }
+    );
+
+    const rawAntagonistText = this.responseProcessor.extractContent(result.text);
+
+    return {
+      providerId: antagonistProvider,
+      text: String(rawAntagonistText || ""), // Store raw for persistence
+      meta: {},
       status: "completed"
     };
   }
@@ -1831,16 +2103,16 @@ Answer the user's message directly. Use context only to disambiguate.
     // Helper to execute synthesis with a specific provider
     const runSynthesis = async (providerId) => {
       const extractedOptions = mappingResult?.meta?.allAvailableOptions || null;
-// 🔍 DIAGNOSTIC LOGGING
-console.log('[DEBUG] Synthesis options check:', {
-  hasMappingResult: !!mappingResult,
-  hasMetaOptions: !!mappingResult?.meta?.allAvailableOptions,
-  optionsLength: extractedOptions?.length || 0,
-  optionsPreview: extractedOptions?.substring(0, 200),
-  isRecompute: resolvedContext?.type === 'recompute',
-  sourceTurnId: resolvedContext?.sourceTurnId,
-  metaKeys: Object.keys(mappingResult?.meta || {})
-});
+      // 🔍 DIAGNOSTIC LOGGING
+      console.log('[DEBUG] Synthesis options check:', {
+        hasMappingResult: !!mappingResult,
+        hasMetaOptions: !!mappingResult?.meta?.allAvailableOptions,
+        optionsLength: extractedOptions?.length || 0,
+        optionsPreview: extractedOptions?.substring(0, 200),
+        isRecompute: resolvedContext?.type === 'recompute',
+        sourceTurnId: resolvedContext?.sourceTurnId,
+        metaKeys: Object.keys(mappingResult?.meta || {})
+      });
       const synthPrompt = this.promptService.buildSynthesisPrompt(
         payload.originalPrompt,
         sourceData,

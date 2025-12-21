@@ -23,7 +23,7 @@ export class SessionManager {
    * @param {string} sessionId
    * @param {string} aiTurnId
    * @param {string} providerId
-   * @param {"batch"|"synthesis"|"mapping"|"refiner"} responseType
+   * @param {"batch"|"synthesis"|"mapping"|"refiner"|"antagonist"} responseType
    * @param {number} responseIndex
    * @param {{ text?: string, status?: string, meta?: any, createdAt?: number }} payload
    */
@@ -174,6 +174,7 @@ export class SessionManager {
       synthesisResponseCount: this.countResponses(result.synthesisOutputs),
       mappingResponseCount: this.countResponses(result.mappingOutputs),
       refinerResponseCount: this.countResponses(result.refinerOutputs),
+      antagonistResponseCount: this.countResponses(result.antagonistOutputs),
       lastContextSummary: null, // Initial turn has no previous context
       meta: await this._attachRunIdMeta(aiTurnId),
     };
@@ -278,6 +279,7 @@ export class SessionManager {
       synthesisResponseCount: this.countResponses(result.synthesisOutputs),
       mappingResponseCount: this.countResponses(result.mappingOutputs),
       refinerResponseCount: this.countResponses(result.refinerOutputs),
+      antagonistResponseCount: this.countResponses(result.antagonistOutputs),
       meta: await this._attachRunIdMeta(aiTurnId),
     };
     await this.adapter.put("turns", aiTurnRecord);
@@ -334,6 +336,8 @@ export class SessionManager {
       output = result?.mappingOutputs?.[targetProvider];
     else if (stepType === "refiner")
       output = result?.refinerOutputs?.[targetProvider];
+    else if (stepType === "antagonist")
+      output = result?.antagonistOutputs?.[targetProvider];
 
     if (!output) {
       console.warn(
@@ -398,6 +402,9 @@ export class SessionManager {
         else if (stepType === "refiner")
           freshTurn.refinerResponseCount =
             (freshTurn.refinerResponseCount || 0) + 1;
+        else if (stepType === "antagonist")
+          freshTurn.antagonistResponseCount =
+            (freshTurn.antagonistResponseCount || 0) + 1;
 
         // Update snapshot context ONLY for batch retries
         if (stepType === "batch") {
@@ -434,6 +441,14 @@ export class SessionManager {
         },
       );
       Object.entries(result?.mappingOutputs || {}).forEach(([pid, output]) => {
+        if (output?.meta && Object.keys(output.meta).length > 0)
+          contexts[pid] = output.meta;
+      });
+      Object.entries(result?.refinerOutputs || {}).forEach(([pid, output]) => {
+        if (output?.meta && Object.keys(output.meta).length > 0)
+          contexts[pid] = output.meta;
+      });
+      Object.entries(result?.antagonistOutputs || {}).forEach(([pid, output]) => {
         if (output?.meta && Object.keys(output.meta).length > 0)
           contexts[pid] = output.meta;
       });
@@ -565,6 +580,37 @@ export class SessionManager {
         aiTurnId,
         providerId,
         responseType: "refiner",
+        responseIndex: 0,
+        text: output?.text || existing?.[0]?.text || "",
+        status: output?.status || existing?.[0]?.status || "completed",
+        meta: output?.meta || existing?.[0]?.meta || {},
+        createdAt: createdAtKeep,
+        updatedAt: now,
+        completedAt: now,
+      }, respId);
+    }
+    // Antagonist
+    for (const [providerId, output] of Object.entries(
+      result?.antagonistOutputs || {},
+    )) {
+      // Idempotent upsert on compound key (aiTurnId, providerId, responseType, 0)
+      let existing = [];
+      try {
+        existing = await this.adapter.getByIndex(
+          "provider_responses",
+          "byCompoundKey",
+          [aiTurnId, providerId, "antagonist", 0],
+        );
+      } catch (_) { existing = []; }
+      const existingId = existing?.[0]?.id;
+      const createdAtKeep = existing?.[0]?.createdAt || now;
+      const respId = existingId || `pr-${sessionId}-${aiTurnId}-${providerId}-antagonist-0-${now}-${count++}`;
+      await this.adapter.put("provider_responses", {
+        id: respId,
+        sessionId,
+        aiTurnId,
+        providerId,
+        responseType: "antagonist",
         responseIndex: 0,
         text: output?.text || existing?.[0]?.text || "",
         status: output?.status || existing?.[0]?.status || "completed",

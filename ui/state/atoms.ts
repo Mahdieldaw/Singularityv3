@@ -254,15 +254,20 @@ export const refinerProviderAtom = atomWithStorage<string | null>(
   "htos_refiner_provider",
   null,
 );
+export const antagonistProviderAtom = atomWithStorage<string | null>(
+  "htos_antagonist_provider",
+  null,
+);
 
 /**
  * Provider locks - stored in chrome.storage.local for backend access
  * UI writes, backend reads. Not atomWithStorage because we need chrome.storage.local
  */
-export const providerLocksAtom = atom<{ synthesis: boolean; mapping: boolean; refiner: boolean }>({
+export const providerLocksAtom = atom<{ synthesis: boolean; mapping: boolean; refiner: boolean; antagonist: boolean }>({
   synthesis: false,
   mapping: false,
   refiner: false,
+  antagonist: false,
 });
 
 
@@ -298,7 +303,7 @@ export const providerContextsAtom = atomWithImmer<Record<string, any>>({});
 // -----------------------------
 export const activeRecomputeStateAtom = atom<{
   aiTurnId: string;
-  stepType: "synthesis" | "mapping" | "batch" | "refiner";
+  stepType: "synthesis" | "mapping" | "batch" | "refiner" | "antagonist";
   providerId: string;
 } | null>(null);
 
@@ -336,6 +341,9 @@ export const mappingRecomputeSelectionByRoundAtom = atomWithImmer<
   Record<string, string | null>
 >({});
 export const refinerRecomputeSelectionByRoundAtom = atomWithImmer<
+  Record<string, string | null>
+>({});
+export const antagonistRecomputeSelectionByRoundAtom = atomWithImmer<
   Record<string, string | null>
 >({});
 // Persist "show history" state per provider (aiTurnId-providerId)

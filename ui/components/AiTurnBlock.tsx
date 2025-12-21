@@ -39,10 +39,13 @@ import {
   activeAiTurnIdAtom,
   isLoadingAtom,
   workflowProgressAtom,
+  antagonistProviderAtom,
+  refinerProviderAtom,
 } from "../state/atoms";
 import { useRefinerOutput } from "../hooks/useRefinerOutput";
 
 import { RefinerDot } from "./refinerui/RefinerDot";
+import { AntagonistCard } from "./antagonist/AntagonistCard";
 
 // --- Helper Functions ---
 function parseMappingResponse(response?: string | null) {
@@ -184,9 +187,8 @@ const GemFlash: React.FC<GemFlashProps> = ({ insight }) => {
 
   return (
     <div
-      className={`mt-2 text-center text-[13px] text-text-secondary max-w-md mx-auto px-4 transition-opacity duration-300 ${
-        visible ? "opacity-100" : "opacity-0"
-      }`}
+      className={`mt-2 text-center text-[13px] text-text-secondary max-w-md mx-auto px-4 transition-opacity duration-300 ${visible ? "opacity-100" : "opacity-0"
+        }`}
     >
       {text}
     </div>
@@ -212,6 +214,9 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
   const { retryProviders } = useRetryProvider();
 
   // Streaming UX: determine if this is the active running turn
+  const activeRefinerPid = useAtomValue(refinerProviderAtom);
+  const activeAntagonistPid = useAtomValue(antagonistProviderAtom);
+  const activeRecompute = useAtomValue(activeRecomputeStateAtom);
   const activeAiTurnId = useAtomValue(activeAiTurnIdAtom);
   const globalIsLoading = useAtomValue(isLoadingAtom);
   const workflowProgress = useAtomValue(workflowProgressAtom);
@@ -233,7 +238,7 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
 
 
   const onClipClick = useCallback(
-    (type: "synthesis" | "mapping", pid: string) => {
+    (type: "synthesis" | "mapping" | "antagonist", pid: string) => {
       void handleClipClick(aiTurn.id, type, pid);
     },
     [handleClipClick, aiTurn.id]
@@ -998,6 +1003,15 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                       </div>
                     );
                   })()}
+
+                  {/* Antagonist Card */}
+                  <AntagonistCard
+                    aiTurn={aiTurn}
+                    activeProviderId={activeAntagonistPid || undefined}
+                    onProviderSelect={(pid) => onClipClick("antagonist", pid)}
+                  />
+
+                  {/* Provider Errors (if any) */}
 
                   {/* Provider Errors (if any) */}
                   {Object.entries(providerErrors || {}).length > 0 && (

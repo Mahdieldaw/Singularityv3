@@ -15,7 +15,8 @@ export class WorkflowCompiler {
     this.defaults = {
       mapper: config.htos_mapping_provider || "Gemini",
       synthesizer: config.htos_last_synthesis_model || "claude",
-      refiner: config.htos_last_refiner_model || "claude"
+      refiner: config.htos_last_refiner_model || "claude",
+      antagonist: config.htos_last_antagonist_model || "claude"
     };
   }
 
@@ -126,6 +127,24 @@ export class WorkflowCompiler {
         mappingStepId: lastMappingStep?.stepId,
       });
       steps.push(refinerStep);
+    }
+
+    // Antagonist step (if requested and dependencies exist)
+    if (this._needsAntagonistStep(request, resolvedContext)) {
+      const lastSynthesisStep =
+        steps.filter((s) => s.type === "synthesis").slice(-1)[0] || null;
+      const lastMappingStep =
+        steps.filter((s) => s.type === "mapping").slice(-1)[0] || null;
+      const lastRefinerStep =
+        steps.filter((s) => s.type === "refiner").slice(-1)[0] || null;
+
+      const antagonistStep = this._createAntagonistStep(request, resolvedContext, {
+        batchStepId,
+        synthesisStepId: lastSynthesisStep?.stepId,
+        mappingStepId: lastMappingStep?.stepId,
+        refinerStepId: lastRefinerStep?.stepId,
+      });
+      steps.push(antagonistStep);
     }
 
     const workflowContext = this._buildWorkflowContext(
@@ -296,6 +315,45 @@ export class WorkflowCompiler {
     };
   }
 
+  _createAntagonistStep(request, context, linkIds = {}) {
+    const antagonistProvider =
+      context.type === "recompute"
+        ? context.targetProvider
+        : request.antagonist || this._getDefaultAntagonist(request);
+
+    const stepId = `antagonist-${antagonistProvider}-${Date.now()}`;
+
+    if (context.type === "recompute") {
+      return {
+        stepId,
+        type: "antagonist",
+        payload: {
+          antagonistProvider,
+          sourceHistorical: {
+            turnId: context.sourceTurnId,
+            responseType: "batch",
+          },
+          originalPrompt: context.sourceUserMessage,
+        },
+      };
+    }
+
+    return {
+      stepId,
+      type: "antagonist",
+      payload: {
+        antagonistProvider,
+        sourceStepIds: linkIds.batchStepId ? [linkIds.batchStepId] : undefined,
+        synthesisStepIds: linkIds.synthesisStepId
+          ? [linkIds.synthesisStepId]
+          : undefined,
+        mappingStepIds: linkIds.mappingStepId ? [linkIds.mappingStepId] : undefined,
+        refinerStepIds: linkIds.refinerStepId ? [linkIds.refinerStepId] : undefined,
+        originalPrompt: request.userMessage,
+      },
+    };
+  }
+
   // ============================================================================
   // DECISION LOGIC (Pure)
   // ============================================================================
@@ -324,6 +382,17 @@ export class WorkflowCompiler {
     return (
       !!request.includeSynthesis &&
       !!request.includeRefiner
+    );
+  }
+
+  _needsAntagonistStep(request, context) {
+    if (context.type === "recompute") {
+      return context.stepType === "antagonist";
+    }
+    // Antagonist requires refiner to be present
+    return (
+      !!request.includeRefiner &&
+      !!request.includeAntagonist
     );
   }
 
@@ -382,6 +451,10 @@ export class WorkflowCompiler {
 
   _getDefaultRefiner(request) {
     return request.providers?.[0] || this.defaults.refiner;
+  }
+
+  _getDefaultAntagonist(request) {
+    return request.providers?.[0] || this.defaults.antagonist;
   }
 
   _generateWorkflowId(contextType) {

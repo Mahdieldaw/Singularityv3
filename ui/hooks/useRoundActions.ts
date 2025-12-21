@@ -510,6 +510,113 @@ export function useRoundActions() {
     [currentSessionId, turnsMap, setTurnsMap, setActiveAiTurnId, setIsLoading, setUiPhase, setActiveRecomputeState, setAlertText]
   );
 
+  const runAntagonistForAiTurn = useCallback(
+    async (aiTurnId: string, providerIdOverride?: string) => {
+      if (!currentSessionId) return;
+
+      const ai = turnsMap.get(aiTurnId) as AiTurn | undefined;
+      if (!ai || ai.type !== "ai") {
+        console.warn(`[RoundActions] AI turn ${aiTurnId} not found`);
+        return;
+      }
+
+      // Check inputs (Antagonist needs full context, similar to Refiner)
+      const outputsFromBatch = Object.values(ai.batchResponses || {}).filter(
+        (r: any) => r.status === "completed" && r.text?.trim(),
+      );
+      const hasSynthesis = ai.synthesisResponses && Object.keys(ai.synthesisResponses).length > 0;
+
+      const enoughOutputs = outputsFromBatch.length >= 1 || hasSynthesis;
+      if (!enoughOutputs) {
+        setAlertText("Antagonist requires completed responses to analyze context.");
+        return;
+      }
+
+      // Determine provider
+      let effectiveProviderId = providerIdOverride;
+      if (!effectiveProviderId) {
+        try {
+          const stored = localStorage.getItem("htos_last_antagonist_model");
+          if (stored) effectiveProviderId = stored;
+        } catch { }
+      }
+      if (!effectiveProviderId) effectiveProviderId = "gemini"; // Default
+
+      // Initialize optimistic state
+      setTurnsMap((draft: Map<string, TurnMessage>) => {
+        const existing = draft.get(ai.id);
+        if (!existing || existing.type !== "ai") return;
+        const aiTurn = existing as AiTurn;
+
+        const prev = aiTurn.antagonistResponses || {};
+        const next: Record<string, ProviderResponse[]> = { ...prev };
+
+        const arr = Array.isArray(next[effectiveProviderId]) ? [...next[effectiveProviderId]] : [];
+        const initialStatus = PRIMARY_STREAMING_PROVIDER_IDS.includes(effectiveProviderId)
+          ? "streaming"
+          : "pending";
+
+        arr.push({
+          providerId: effectiveProviderId as ProviderKey,
+          text: "",
+          status: initialStatus,
+          createdAt: Date.now(),
+        });
+        next[effectiveProviderId] = arr;
+        aiTurn.antagonistResponses = next;
+      });
+
+      // Set Loading
+      setActiveAiTurnId(ai.id);
+      setIsLoading(true);
+      setUiPhase("streaming");
+
+      try {
+        setActiveRecomputeState({
+          aiTurnId: ai.id,
+          stepType: "antagonist" as any,
+          providerId: effectiveProviderId,
+        });
+
+        const primitive: PrimitiveWorkflowRequest = {
+          type: "recompute",
+          sessionId: currentSessionId as string,
+          sourceTurnId: ai.id,
+          stepType: "antagonist" as any,
+          targetProvider: effectiveProviderId as ProviderKey,
+        } as any;
+
+        await api.executeWorkflow(primitive);
+
+        try {
+          localStorage.setItem("htos_last_antagonist_model", effectiveProviderId);
+        } catch { }
+
+      } catch (err) {
+        console.error("[RoundActions] Antagonist run failed:", err);
+        setAlertText("Antagonist request failed. Please try again.");
+
+        setTurnsMap((draft) => {
+          const turn = draft.get(ai.id) as AiTurn | undefined;
+          if (!turn || turn.type !== "ai" || !turn.antagonistResponses) return;
+          const arr = turn.antagonistResponses[effectiveProviderId];
+          if (Array.isArray(arr) && arr.length > 0) {
+            const last = arr[arr.length - 1];
+            if (last.status === "streaming" || last.status === "pending") {
+              last.status = "error";
+              last.text = "Request failed";
+            }
+          }
+        });
+        setIsLoading(false);
+        setUiPhase("awaiting_action");
+        setActiveAiTurnId(null);
+        setActiveRecomputeState(null);
+      }
+    },
+    [currentSessionId, turnsMap, setTurnsMap, setActiveAiTurnId, setIsLoading, setUiPhase, setActiveRecomputeState, setAlertText]
+  );
+
   // ============================================================================
   // UI STATE HELPERS (For controlling per-turn settings)
   // ============================================================================
@@ -551,6 +658,7 @@ export function useRoundActions() {
     runSynthesisForAiTurn,
     runMappingForAiTurn,
     runRefinerForAiTurn,
+    runAntagonistForAiTurn,
     toggleSynthForRound,
     selectMappingForRound,
   };

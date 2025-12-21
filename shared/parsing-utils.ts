@@ -732,3 +732,188 @@ function extractLeap(text: string): Leap {
         analysis: target,
     };
 }
+
+// ============================================================================
+// ANTAGONIST OUTPUT PARSING
+// ============================================================================
+
+export interface AntagonistDimension {
+    variable: string;
+    options: string;
+    why: string;
+}
+
+export interface ParsedBracket {
+    variable: string;
+    options: string[];
+    startIndex: number;
+    endIndex: number;
+    fullMatch: string;
+}
+
+export interface AntagonistOutput {
+    the_prompt: {
+        text: string | null;
+        dimensions: AntagonistDimension[];
+        grounding: string | null;
+        payoff: string | null;
+    };
+    the_audit: {
+        missed: Array<{ approach: string; source: string }>;
+    };
+    rawText?: string;
+}
+
+/**
+ * Create empty antagonist output
+ */
+export function createEmptyAntagonistOutput(rawText: string = ''): AntagonistOutput {
+    return {
+        the_prompt: {
+            text: null,
+            dimensions: [],
+            grounding: null,
+            payoff: null,
+        },
+        the_audit: {
+            missed: [],
+        },
+        rawText,
+    };
+}
+
+/**
+ * Parse Antagonist output from raw text (JSON or markdown)
+ */
+export function parseAntagonistOutput(raw: string): AntagonistOutput | null {
+    if (!raw || typeof raw !== 'string') {
+        return null;
+    }
+
+    try {
+        // Try direct JSON parse
+        const parsed = JSON.parse(raw);
+        return validateAntagonistOutput(parsed, raw);
+    } catch {
+        // Try extracting JSON from markdown code blocks
+        const jsonMatch = raw.match(/```json?\s*([\s\S]*?)```/);
+        if (jsonMatch) {
+            try {
+                const parsed = JSON.parse(jsonMatch[1]);
+                return validateAntagonistOutput(parsed, raw);
+            } catch {
+                // Fall through to brace extraction
+            }
+        }
+
+        // Try finding JSON object boundaries
+        const firstBrace = raw.indexOf('{');
+        const lastBrace = raw.lastIndexOf('}');
+        if (firstBrace !== -1 && lastBrace > firstBrace) {
+            try {
+                const candidate = raw.substring(firstBrace, lastBrace + 1);
+                const parsed = JSON.parse(candidate);
+                return validateAntagonistOutput(parsed, raw);
+            } catch {
+                // Failed to parse
+            }
+        }
+
+        return null;
+    }
+}
+
+/**
+ * Validate and normalize antagonist output structure
+ */
+function validateAntagonistOutput(obj: any, rawText: string): AntagonistOutput | null {
+    // Check required structure exists
+    if (!obj || typeof obj !== 'object') return null;
+    if (!obj.the_prompt || !obj.the_audit) return null;
+
+    // Normalize null states (when decision is already obvious)
+    if (obj.the_prompt.text === null) {
+        return {
+            the_prompt: {
+                text: null,
+                dimensions: [],
+                grounding: null,
+                payoff: null,
+            },
+            the_audit: {
+                missed: Array.isArray(obj.the_audit.missed) ? obj.the_audit.missed : [],
+            },
+            rawText,
+        };
+    }
+
+    // Validate dimensions array
+    const dimensions: AntagonistDimension[] = Array.isArray(obj.the_prompt.dimensions)
+        ? obj.the_prompt.dimensions.map((d: any) => ({
+            variable: String(d.variable || ''),
+            options: String(d.options || ''),
+            why: String(d.why || ''),
+        }))
+        : [];
+
+    // Validate missed array
+    const missed: Array<{ approach: string; source: string }> = Array.isArray(obj.the_audit.missed)
+        ? obj.the_audit.missed.map((m: any) => ({
+            approach: String(m.approach || ''),
+            source: String(m.source || ''),
+        }))
+        : [];
+
+    return {
+        the_prompt: {
+            text: obj.the_prompt.text != null ? String(obj.the_prompt.text) : null,
+            dimensions,
+            grounding: obj.the_prompt.grounding != null ? String(obj.the_prompt.grounding) : null,
+            payoff: obj.the_prompt.payoff != null ? String(obj.the_prompt.payoff) : null,
+        },
+        the_audit: {
+            missed,
+        },
+        rawText,
+    };
+}
+
+/**
+ * Parse bracketed variables from antagonist prompt text
+ * Format: [variable: option1 / option2 / option3]
+ */
+export function parseBrackets(text: string): ParsedBracket[] {
+    if (!text) return [];
+
+    const regex = /\[([^:]+):\s*([^\]]+)\]/g;
+    const brackets: ParsedBracket[] = [];
+    let match;
+
+    while ((match = regex.exec(text)) !== null) {
+        brackets.push({
+            variable: match[1].trim(),
+            options: match[2].split('/').map(o => o.trim()),
+            startIndex: match.index,
+            endIndex: match.index + match[0].length,
+            fullMatch: match[0],
+        });
+    }
+
+    return brackets;
+}
+
+/**
+ * Build final prompt by filling in user selections
+ */
+export function buildFinalPrompt(text: string, selections: Record<string, string>): string {
+    let result = text;
+
+    Object.entries(selections).forEach(([variable, value]) => {
+        // Replace [variable: option1 / option2] with just the selected value
+        const regex = new RegExp(`\\[${variable.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:[^\\]]+\\]`, 'gi');
+        result = result.replace(regex, value);
+    });
+
+    return result;
+}
+

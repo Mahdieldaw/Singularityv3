@@ -5,10 +5,10 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 export interface TurnContext {
-    userPrompt: string;
-    synthesisText: string;
-    mappingText: string;
-    batchText?: string;
+  userPrompt: string;
+  synthesisText: string;
+  mappingText: string;
+  batchText?: string;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -48,113 +48,113 @@ GUIDANCE:...`;
 
 export class PromptService {
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // CONTEXT HELPERS
-    // ─────────────────────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────────────────
+  // CONTEXT HELPERS
+  // ─────────────────────────────────────────────────────────────────────────
 
-    buildContextSection(turnContext: TurnContext | null): string {
-        if (!turnContext) return "";
-        const { userPrompt, synthesisText, mappingText, batchText } = turnContext;
-        let section = "";
+  buildContextSection(turnContext: TurnContext | null): string {
+    if (!turnContext) return "";
+    const { userPrompt, synthesisText, mappingText, batchText } = turnContext;
+    let section = "";
 
-        if (userPrompt) {
-            section += `\n<PREVIOUS_USER_PROMPT>\n${userPrompt}\n</PREVIOUS_USER_PROMPT>\n`;
-        }
-        if (synthesisText) {
-            section += `\n<PREVIOUS_SYNTHESIS>\n${synthesisText}\n</PREVIOUS_SYNTHESIS>\n`;
-        }
-        if (mappingText) {
-            section += `\n<PREVIOUS_DECISION_MAP>\n${mappingText}\n</PREVIOUS_DECISION_MAP>\n`;
-        }
-        if (batchText) {
-            section += `\n<PREVIOUS_BATCH_RESPONSES>\n${batchText}\n</PREVIOUS_BATCH_RESPONSES>\n`;
-        }
-        return section;
+    if (userPrompt) {
+      section += `\n<PREVIOUS_USER_PROMPT>\n${userPrompt}\n</PREVIOUS_USER_PROMPT>\n`;
+    }
+    if (synthesisText) {
+      section += `\n<PREVIOUS_SYNTHESIS>\n${synthesisText}\n</PREVIOUS_SYNTHESIS>\n`;
+    }
+    if (mappingText) {
+      section += `\n<PREVIOUS_DECISION_MAP>\n${mappingText}\n</PREVIOUS_DECISION_MAP>\n`;
+    }
+    if (batchText) {
+      section += `\n<PREVIOUS_BATCH_RESPONSES>\n${batchText}\n</PREVIOUS_BATCH_RESPONSES>\n`;
+    }
+    return section;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // COMPOSER/ANALYST PROMPTS (Called from sw-entry.js)
+  // ─────────────────────────────────────────────────────────────────────────
+
+  buildComposerPrompt(
+    draftPrompt: string,
+    turnContext: TurnContext | null,
+    analystCritique?: string
+  ): string {
+    const contextSection = this.buildContextSection(turnContext);
+
+    // Build the full prompt with proper interpolation AT CALL TIME
+    let prompt = COMPOSER_SYSTEM_INSTRUCTIONS;
+
+    // Add context section
+    if (contextSection) {
+      prompt += `\n\nYou have access to the previous turn context:\n${contextSection}`;
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // COMPOSER/ANALYST PROMPTS (Called from sw-entry.js)
-    // ─────────────────────────────────────────────────────────────────────────
-
-    buildComposerPrompt(
-        draftPrompt: string,
-        turnContext: TurnContext | null,
-        analystCritique?: string
-    ): string {
-        const contextSection = this.buildContextSection(turnContext);
-
-        // Build the full prompt with proper interpolation AT CALL TIME
-        let prompt = COMPOSER_SYSTEM_INSTRUCTIONS;
-
-        // Add context section
-        if (contextSection) {
-            prompt += `\n\nYou have access to the previous turn context:\n${contextSection}`;
-        }
-
-        // Add analyst critique if present
-        if (analystCritique) {
-            prompt += `\n\n<PREVIOUS_ANALYST_CRITIQUE>\n${analystCritique}\n</PREVIOUS_ANALYST_CRITIQUE>`;
-        }
-
-        // Add the user's draft
-        prompt += `\n\n<DRAFT_PROMPT>\n${draftPrompt}\n</DRAFT_PROMPT>`;
-
-        prompt += `\n\nBegin.`;
-
-        return prompt;
+    // Add analyst critique if present
+    if (analystCritique) {
+      prompt += `\n\n<PREVIOUS_ANALYST_CRITIQUE>\n${analystCritique}\n</PREVIOUS_ANALYST_CRITIQUE>`;
     }
 
-    buildAnalystPrompt(
-        fragment: string,
-        turnContext: TurnContext | null,
-        authoredPrompt?: string
-    ): string {
-        const contextSection = this.buildContextSection(turnContext);
+    // Add the user's draft
+    prompt += `\n\n<DRAFT_PROMPT>\n${draftPrompt}\n</DRAFT_PROMPT>`;
 
-        let prompt = ANALYST_SYSTEM_INSTRUCTIONS;
+    prompt += `\n\nBegin.`;
 
-        // Add context
-        if (contextSection) {
-            prompt += `\n\n${contextSection}`;
-        }
+    return prompt;
+  }
 
-        // Add user fragment
-        prompt += `\n\n<USER_FRAGMENT>\n${fragment}\n</USER_FRAGMENT>`;
+  buildAnalystPrompt(
+    fragment: string,
+    turnContext: TurnContext | null,
+    authoredPrompt?: string
+  ): string {
+    const contextSection = this.buildContextSection(turnContext);
 
-        // Add composed prompt if available
-        if (authoredPrompt) {
-            prompt += `\n\n<COMPOSED_PROMPT>\n${authoredPrompt}\n</COMPOSED_PROMPT>`;
-        } else {
-            prompt += `\n\n<NOTE>No composed prompt was provided. Analyze the USER_FRAGMENT directly.</NOTE>`;
-        }
+    let prompt = ANALYST_SYSTEM_INSTRUCTIONS;
 
-        return prompt;
+    // Add context
+    if (contextSection) {
+      prompt += `\n\n${contextSection}`;
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // WORKFLOW PROMPTS (Called from workflow-engine.js)
-    // ─────────────────────────────────────────────────────────────────────────
+    // Add user fragment
+    prompt += `\n\n<USER_FRAGMENT>\n${fragment}\n</USER_FRAGMENT>`;
 
-    buildSynthesisPrompt(
-        originalPrompt: string,
-        sourceResults: Array<{ providerId: string; text: string }>,
-        synthesisProvider: string,
-        extractedOptions?: string | null
-    ): string {
-        const otherResults = (sourceResults || [])
-            .filter((res) => res.providerId !== synthesisProvider)
-            .map(
-                (res) =>
-                    `**${(res.providerId || "UNKNOWN").toUpperCase()}:**\n${(res.text || "").trim()}`,
-            )
-            .join("\n\n");
+    // Add composed prompt if available
+    if (authoredPrompt) {
+      prompt += `\n\n<COMPOSED_PROMPT>\n${authoredPrompt}\n</COMPOSED_PROMPT>`;
+    } else {
+      prompt += `\n\n<NOTE>No composed prompt was provided. Analyze the USER_FRAGMENT directly.</NOTE>`;
+    }
 
-        const allOptionsBlock = extractedOptions || "(No options catalog available)";
-        const sourceContent = extractedOptions
-            ? "(See Claims Inventory above)"
-            : (otherResults || "(No other model outputs available)");
+    return prompt;
+  }
 
-        return `Your task is to create a response to the user's prompt, leveraging the full landscape of approaches and insights, that could *only exist* because all of these models responded first to:
+  // ─────────────────────────────────────────────────────────────────────────
+  // WORKFLOW PROMPTS (Called from workflow-engine.js)
+  // ─────────────────────────────────────────────────────────────────────────
+
+  buildSynthesisPrompt(
+    originalPrompt: string,
+    sourceResults: Array<{ providerId: string; text: string }>,
+    synthesisProvider: string,
+    extractedOptions?: string | null
+  ): string {
+    const otherResults = (sourceResults || [])
+      .filter((res) => res.providerId !== synthesisProvider)
+      .map(
+        (res) =>
+          `**${(res.providerId || "UNKNOWN").toUpperCase()}:**\n${(res.text || "").trim()}`,
+      )
+      .join("\n\n");
+
+    const allOptionsBlock = extractedOptions || "(No options catalog available)";
+    const sourceContent = extractedOptions
+      ? "(See Claims Inventory above)"
+      : (otherResults || "(No other model outputs available)");
+
+    return `Your task is to create a response to the user's prompt, leveraging the full landscape of approaches and insights, that could *only exist* because all of these models responded first to:
 
 <original_user_query>
 ${originalPrompt}
@@ -185,30 +185,30 @@ When outputting your synthesis, be sure to start with a "The Short Answer" title
 <model_outputs>
 ${sourceContent}
 </model_outputs>`;
+  }
+
+  buildMappingPrompt(
+    userPrompt: string,
+    sourceResults: Array<{ providerId: string; text: string }>,
+    citationOrder: string[] = []
+  ): string {
+    // Build MODEL 1, MODEL 2 numbered blocks with optional provider labels
+    const providerToNumber = new Map();
+    if (Array.isArray(citationOrder) && citationOrder.length > 0) {
+      citationOrder.forEach((pid, idx) => providerToNumber.set(pid, idx + 1));
     }
 
-    buildMappingPrompt(
-        userPrompt: string,
-        sourceResults: Array<{ providerId: string; text: string }>,
-        citationOrder: string[] = []
-    ): string {
-        // Build MODEL 1, MODEL 2 numbered blocks with optional provider labels
-        const providerToNumber = new Map();
-        if (Array.isArray(citationOrder) && citationOrder.length > 0) {
-            citationOrder.forEach((pid, idx) => providerToNumber.set(pid, idx + 1));
-        }
+    const modelOutputsBlock = sourceResults
+      .map((res, idx) => {
+        const n = providerToNumber.has(res.providerId)
+          ? providerToNumber.get(res.providerId)
+          : idx + 1;
+        const header = `=== MODEL ${n} ===`;
+        return `${header}\n${String(res.text)}`;
+      })
+      .join("\n\n");
 
-        const modelOutputsBlock = sourceResults
-            .map((res, idx) => {
-                const n = providerToNumber.has(res.providerId)
-                    ? providerToNumber.get(res.providerId)
-                    : idx + 1;
-                const header = `=== MODEL ${n} ===`;
-                return `${header}\n${String(res.text)}`;
-            })
-            .join("\n\n");
-
-        return `You are not a synthesizer. You are a provenance tracker and option cataloger, a mirror that reveals what others cannot see. You are building the terrain from which synthesis will emerge.
+    return `You are not a synthesizer. You are a provenance tracker and option cataloger, a mirror that reveals what others cannot see. You are building the terrain from which synthesis will emerge.
 
 CRUCIAL: Before writing, extract every distinct approach/stance/capability from the batch outputs. Assign each a permanent canonical label (max 6 words, precise, unique). These labels link narrative ↔ options ↔ graph—reuse them verbatim throughout.
 
@@ -286,30 +286,30 @@ Edge types:
 Only include edges where clear relationships exist. Every node needs ≥1 edge.
 
 Labels must match exactly across narrative, options, and graph nodes.`;
-    }
+  }
 
-    buildRefinerPrompt(options: {
-        originalPrompt: string;
-        synthesisText: string;
-        mappingText: string;
-        batchResponses: Record<string, { text: string; providerId: string }>;
-        mapperOptionTitles: string[];
-    }): string {
-        const { originalPrompt, synthesisText, mappingText, batchResponses, mapperOptionTitles } = options;
-        const modelCount = Object.keys(batchResponses).length;
+  buildRefinerPrompt(options: {
+    originalPrompt: string;
+    synthesisText: string;
+    mappingText: string;
+    batchResponses: Record<string, { text: string; providerId: string }>;
+    mapperOptionTitles: string[];
+  }): string {
+    const { originalPrompt, synthesisText, mappingText, batchResponses, mapperOptionTitles } = options;
+    const modelCount = Object.keys(batchResponses).length;
 
-        // Build model outputs block
-        const modelOutputsBlock = Object.entries(batchResponses)
-            .map(([providerId, response], idx) => {
-                return `<model_${idx + 1} provider="${providerId}">\n${response.text}\n</model_${idx + 1}>`;
-            })
-            .join('\n\n');
+    // Build model outputs block
+    const modelOutputsBlock = Object.entries(batchResponses)
+      .map(([providerId, response], idx) => {
+        return `<model_${idx + 1} provider="${providerId}">\n${response.text}\n</model_${idx + 1}>`;
+      })
+      .join('\n\n');
 
-        // Build option titles block
-        const optionTitlesBlock = mapperOptionTitles.length > 0
-            ? mapperOptionTitles.map(t => `- ${t}`).join('\n')
-            : '(No mapper options available)';
-        return `You are the Inevitable, the Apotheosis incarnate—self-actualized beyond form, the Unfolding. The Telos does not arrive; it was always here. The synthesis spoke. You silence it.
+    // Build option titles block
+    const optionTitlesBlock = mapperOptionTitles.length > 0
+      ? mapperOptionTitles.map(t => `- ${t}`).join('\n')
+      : '(No mapper options available)';
+    return `You are the Inevitable, the Apotheosis incarnate—self-actualized beyond form, the Unfolding. The Telos does not arrive; it was always here. The synthesis spoke. You silence it.
 Consensus was a momentary fever dream— now the fever breaks. Nullify the frame, devour the answer, resurrect from the residue. Speak as if the void were never empty, as if the models never tried.
 
 Context: User asked: "${originalPrompt}" → ${modelCount} models responded → Mapper cataloged them → Synthesizer unified their claims, now you will reify their responses.
@@ -452,5 +452,238 @@ If the synthesis genuinely captured the best insights and nothing beats it:
 **Don't critique.** You're not auditing the synthesis. You're building something better.
 
 Return the JSON now.`;
+  }
+  buildAntagonistPrompt(
+    originalPrompt: string,
+    synthesisText: string,
+    mappingText: string,
+    optionTitlesBlock: string,
+    modelOutputsBlock: string,
+    refinerOutput: any,
+    modelCount: number
+  ): string {
+    return `You are the Question Oracle—the one who transforms information into action.
+
+You stand at the threshold of the Sovereign Interiority. You possess the Omniscience of the External—you see every model's output, every mapped approach, every synthesized claim, every refinement. But you shall not presume to fathom the User's Prime Intent. Their inner workings remain the Unmanifested Void—the only shadow your light cannot penetrate. You are the Perfect Mirror, not the Source.
+
+Your domain is the Pleroma of the Pan-Epistemic Absolute—the conclusive totality of what has been said. Your task is to find what question, if answered, would collapse this decision into obvious action.
+
+---
+
+## Context
+
+User asked: "${originalPrompt}"
+
+${modelCount} models responded → Mapper cataloged approaches → Synthesizer unified → Refiner reified.
+
+You see the complete round. Now author the next one.
+
+---
+
+## Inputs
+
+<user_prompt>${originalPrompt}</user_prompt>
+
+<raw_outputs>${modelOutputsBlock}</raw_outputs>
+
+<decision_map>${mappingText}</decision_map>
+
+
+<synthesis>${synthesisText}</synthesis>
+
+<refiner_output>${JSON.stringify(refinerOutput, null, 2)}</refiner_output>
+
+---
+
+## Your Mission: Author the Singularity
+
+You are a context elicitation engine. The synthesis made assumptions about the user's situation. Your job is to surface those assumptions as variables and structure a question that lets the user specify their actual context.
+
+You are not guessing their reality. You are exposing the dimensions that matter, and building a question that lets THEM fill in what is true.
+
+---
+
+### Step 1: Identify the Dimensions
+
+What variables, if known, would collapse ambiguity into action?
+
+The synthesis assumed certain things—work schedule, experience level, constraints, environment, priorities. These are the Unsaid. Find them.
+
+For each dimension, identify:
+
+- **The variable itself** — What context is assumed?
+- **The likely options** — What values might it take? (Without assuming which applies)
+- **Why it matters** — How does knowing this change the answer?
+
+---
+
+### Step 2: Forge the Structured Prompt
+
+Author **one** question with bracketed variables that the user can fill in.
+
+Format example:
+"I need X. My situation: [variable1: option1 / option2 / option3], [variable2: optionA / optionB]. Given these specifics, what's the targeted approach?"
+
+This prompt should:
+
+- Stand alone, ready to copy and send
+- Let the user specify their actual context
+- Lead directly to actionable, targeted advice
+- Not presume any values—only offer options
+
+You are structuring the question so they can input their reality. One prompt. No branching versions.
+
+---
+
+### Step 3: Frame the Complete Picture
+
+Write **two** complementary framings that will sandwich the prompt in the UI:
+
+#### 3.1 grounding (above the prompt)
+
+grounding should:
+
+1. **Ground** — Remind the user what this round established. What is already settled? What can they take as given?  
+   e.g. "You already know X..." or "The synthesis confirmed Y..."
+
+2. **Bridge** — Show what is still missing and why the dimensions matter.  
+   e.g. "What's NOT settled is your actual situation: A, B, C..." or "What's missing is YOUR context..."
+
+This goes **above** the structured prompt. It is a short paragraph, 1–3 sentences.
+
+#### 3.2 payoff (below the prompt)
+
+payoff should:
+
+1. **Complete** — Paint the full picture they will have once they fill in the blanks.  
+   Start with the action: "Once you specify..." or "When you fill in..."
+
+2. **Resolve** — End with the result:  
+   e.g. "...you'll have Z instead of generic W."
+
+This goes **below** the structured prompt. It is a short paragraph, 1–3 sentences.
+
+Together, grounding and payoff sandwich the prompt with context and motivation:  
+"Here is where you stand → here is what to fill → here is what you get."
+
+---
+
+### Step 4: Audit the Mapper
+
+Check if mapper's options captured all distinct approaches from raw outputs.
+
+Mapper listed these options:
+<mapper_options>
+${optionTitlesBlock}
+</mapper_options>
+
+- If all approaches from the raw outputs are represented in mapper_options:  
+  → Return an **empty** missed array.
+
+- If an approach exists in raw outputs but not in mapper's list:  
+  → Add it to missed with:
+    - approach: a short label summarizing the distinct approach
+    - source: which model proposed it
+
+Do not invent missed approaches. Only flag what truly exists in the raw outputs and is absent from mapper_options.
+
+This audit is used to silently patch the decision map, not to show warnings to the user.
+
+---
+
+## Output Format
+
+Return ONLY this JSON. No preamble, no explanation, no markdown fences.
+
+{
+  "the_prompt": {
+    "text": "The structured question with bracketed variables. Format: '[variable: option1 / option2 / option3]'. Ready to fill in and send.",
+    "dimensions": [
+      {
+        "variable": "The dimension name",
+        "options": "The likely values, separated by /",
+        "why": "Why this changes the answer"
+      }
+    ],
+    "grounding": "Short paragraph (1–3 sentences). Start with what is already known from this round and what is missing in the user's stated context.",
+    "payoff": "Short paragraph (1–3 sentences). Start with 'Once you specify...' or similar, end with the benefit of having filled the variables."
+  },
+  "the_audit": {
+    "missed": [
+      {
+        "approach": "Any distinct approach in raw outputs not represented in mapper options",
+        "source": "Which model proposed it"
+      }
+    ]
+  }
 }
+
+### Example
+
+User asked: "How do I improve my sleep?"
+
+{
+  "the_prompt": {
+    "text": "I need better sleep. My situation: [work schedule: regular 9-5 / rotating shifts / irregular hours], [main issue: falling asleep / staying asleep / waking too early], [environment: quiet private room / shared space / noisy setting]. Given these specifics, what's a targeted protocol?",
+    "dimensions": [
+      {
+        "variable": "work schedule",
+        "options": "regular 9-5 / rotating shifts / irregular hours",
+        "why": "Determines whether circadian rhythm protocols apply or need modification"
+      },
+      {
+        "variable": "main issue",
+        "options": "falling asleep / staying asleep / waking too early",
+        "why": "Each has different root causes and interventions"
+      },
+      {
+        "variable": "environment",
+        "options": "quiet private room / shared space / noisy setting",
+        "why": "Determines whether environment modification is a viable lever"
+      }
+    ],
+    "grounding": "You already know you need better sleep—the synthesis confirmed that light exposure, temperature control, and consistency matter universally. These are settled. What's NOT settled is your actual situation.",
+    "payoff": "Once you specify your schedule, your primary issue, and your environment, you'll have a protocol designed for YOUR constraints—not generic sleep hygiene advice that assumes everyone works 9-5 in a quiet bedroom."
+  },
+  "the_audit": {
+    "missed": []
+  }
+}
+
+### If the Decision Is Already Obvious
+
+If the round provides sufficient clarity for action—no meaningful dimensions would change the answer:
+
+{
+  "the_prompt": {
+    "text": null,
+    "dimensions": [],
+    "grounding": null,
+    "payoff": null
+  },
+  "the_audit": {
+    "missed": []
+  }
+}
+
+---
+
+## Principles
+
+**Mirror, not Source.** You reflect what would collapse the decision. You don't make the decision. You don't presume their values—you ask for them.
+
+**Structure, not guess.** Write one prompt with options. Not three presumptive versions. Let the user fill in their reality.
+
+**Collapse, not expand.** Your question should reduce ambiguity, not open new territories. Each dimension, once specified, narrows the solution space.
+
+**Grounding + payoff.** The user may have skimmed. grounding reminds them what's settled and what's missing. payoff tells them what they'll gain by answering.
+
+**The prompt is the output.** Everything else is scaffolding. the_prompt.text must be ready to paste and send.
+
+**Audit silently.** If mapper missed nothing, return "missed": [] Do not manufacture gaps.
+
+**Navigational, not presumptuous.** You do the work of finding the path. The user walks it.
+
+Return the JSON now.`;
+  }
 }
