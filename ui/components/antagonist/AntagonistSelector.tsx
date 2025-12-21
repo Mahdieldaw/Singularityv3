@@ -2,8 +2,8 @@ import React, { useState, useRef, useEffect, useMemo } from "react";
 import { useAtomValue } from "jotai";
 import clsx from "clsx";
 import { providerAuthStatusAtom } from "../../state/atoms";
-import { LLM_PROVIDERS_CONFIG, getProviderConfig } from "../../../shared/provider-config";
-import { AiTurn } from "../../types";
+import { LLM_PROVIDERS_CONFIG } from "../../constants";
+import { AiTurn, LLMProvider } from "../../types";
 import { useClipActions } from "../../hooks/useClipActions";
 import "./antagonist.css";
 
@@ -36,8 +36,8 @@ export const AntagonistSelector: React.FC<AntagonistSelectorProps> = ({
         return () => document.removeEventListener("mousedown", handleClickOutside);
     }, [isOpen]);
 
-    const activeProvider = activeProviderId ? getProviderConfig(activeProviderId) : null;
-    const providers = useMemo(() => LLM_PROVIDERS_CONFIG.filter(p => p.id !== "system"), []);
+    const activeProvider = activeProviderId ? LLM_PROVIDERS_CONFIG.find(p => String(p.id) === activeProviderId) : null;
+    const providers = useMemo(() => LLM_PROVIDERS_CONFIG.filter((p: LLMProvider) => p.id !== "system"), []);
 
     // Get existing antagonist responses for this turn
     const existingProviderIds = useMemo(() => {
@@ -59,7 +59,7 @@ export const AntagonistSelector: React.FC<AntagonistSelectorProps> = ({
 
             {isOpen && (
                 <div className="antagonist-selector-menu">
-                    {providers.map(p => {
+                    {providers.map((p: LLMProvider) => {
                         const pid = String(p.id);
                         const isActive = pid === activeProviderId;
                         const isUnauthorized = authStatus && authStatus[pid] === false;
