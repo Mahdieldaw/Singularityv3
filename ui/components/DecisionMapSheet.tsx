@@ -812,10 +812,10 @@ export const DecisionMapSheet = React.memo(() => {
       });
     } else if (refinerOutput?.unlistedOptions?.length) {
       // Fallback to refiner (legacy) if antagonist not providing
-      const refinerOptions = refinerOutput.unlistedOptions.map((opt: { title: string; description: string; source: string }) => ({
+      const refinerOptions = refinerOutput.unlistedOptions.map((opt: { title: string; description: string; source?: string }) => ({
         title: opt.title,
         description: opt.description,
-        citations: [opt.source]
+        citations: opt.source ? [opt.source] : []
       }));
 
       themes.push({

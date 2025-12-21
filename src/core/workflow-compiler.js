@@ -78,7 +78,6 @@ export class WorkflowCompiler {
               prompt: resolvedContext.sourceUserMessage,
               providers: [provider],
               providerContexts,
-              hidden: false,
               useThinking: !!request.useThinking,
             },
           };
@@ -176,7 +175,6 @@ export class WorkflowCompiler {
           context.type === "extend" ? context.providerContexts : undefined,
         previousContext: context.previousContext || null,
         providerMeta: request.providerMeta || {},
-        hidden: !!(request.includeSynthesis && request.providers.length > 1),
         useThinking: !!request.useThinking,
       },
     };

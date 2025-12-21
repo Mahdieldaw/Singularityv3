@@ -85,7 +85,6 @@ export interface PromptStepPayload {
     { meta: any; continueThread: boolean }
   >;
   providerMeta?: Partial<Record<ProviderKey, any>>;
-  hidden?: boolean;
   useThinking?: boolean;
 }
 
