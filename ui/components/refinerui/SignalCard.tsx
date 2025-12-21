@@ -1,5 +1,5 @@
 import React from 'react';
-import { Signal } from '../../../shared/parsing-utils';
+import type { Signal } from '../../../shared/parsing-utils';
 import { getSignalLabel, getSignalPriorityClasses } from '../../utils/signalUtils';
 
 export interface SignalCardProps {

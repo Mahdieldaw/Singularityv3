@@ -83,9 +83,8 @@ export function determineUIState(refiner: RefinerOutput | null): UIState {
     if (counts.risks > 2) return 'workbench';
     if (refiner.reframe) return 'workbench';
 
-    // Simple: no risks or enhancements, just proceed
     if (counts.risks === 0 && counts.enhancements <= 1 &&
-        refiner.nextStep?.action === 'proceed') {
+        refiner.leap?.action === 'proceed') {
         return 'simple';
     }
 

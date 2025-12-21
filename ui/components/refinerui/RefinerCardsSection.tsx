@@ -48,6 +48,7 @@ export const RefinerEpistemicAudit: React.FC<RefinerAuditProps> = ({ output, raw
 
     const { blockerSignals, riskSignals, enhancementSignals } = categorizeSignals(output.signals);
     const counts = getSignalCounts(output.signals);
+    const unlistedOptions = output.unlistedOptions || [];
 
     return (
         <div className={`flex flex-col gap-6 p-6 ${className}`}>
@@ -121,13 +122,13 @@ export const RefinerEpistemicAudit: React.FC<RefinerAuditProps> = ({ output, raw
             )}
 
             {/* Unlisted Options */}
-            {output.unlistedOptions.length > 0 && (
+            {unlistedOptions.length > 0 && (
                 <div>
                     <h3 className="text-xs uppercase font-bold text-white/50 mb-3 tracking-wider">
                         Unlisted Options
                     </h3>
                     <div className="space-y-2">
-                        {output.unlistedOptions.map((opt, idx) => (
+                        {unlistedOptions.map((opt, idx) => (
                             <div key={idx} className="p-3 bg-white/5 border border-white/10 rounded-lg">
                                 <div className="text-sm font-medium text-white">{opt.title}</div>
                                 <div className="text-xs text-white/70 mt-1">{opt.description}</div>
@@ -141,18 +142,18 @@ export const RefinerEpistemicAudit: React.FC<RefinerAuditProps> = ({ output, raw
             )}
 
             {/* Next Step */}
-            {output.nextStep && (
+            {output.leap && output.leap.target && (
                 <div className="bg-brand-500/10 border border-brand-500/20 rounded-xl p-5">
                     <div className="flex items-center gap-2 mb-2">
                         <span className="w-2 h-2 rounded-full bg-brand-400" />
                         <h4 className="text-xs font-bold text-brand-400 uppercase tracking-wider">Next Step</h4>
                     </div>
                     <div className="text-sm text-white/90">
-                        <strong className="text-brand-400">{output.nextStep.action}:</strong>{' '}
-                        {output.nextStep.target}
+                        <strong className="text-brand-400 capitalize">{output.leap.action}:</strong>{' '}
+                        {output.leap.target}
                     </div>
-                    {output.nextStep.why && (
-                        <div className="text-xs text-white/60 mt-2">{output.nextStep.why}</div>
+                    {output.leap.why && (
+                        <div className="text-xs text-white/60 mt-2">{output.leap.why}</div>
                     )}
                 </div>
             )}

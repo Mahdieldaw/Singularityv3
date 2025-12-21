@@ -43,7 +43,6 @@ import {
 import { useRefinerOutput } from "../hooks/useRefinerOutput";
 
 import { RefinerDot } from "./refinerui/RefinerDot";
-import type { LeapAction } from "../../shared/parsing-utils";
 
 // --- Helper Functions ---
 function parseMappingResponse(response?: string | null) {
@@ -153,6 +152,46 @@ function splitSynthesisAnswer(text: string): { shortAnswer: string; longAnswer: 
 }
 
 
+function truncateGemInsight(insight: string, maxLength: number = 70): string {
+  if (insight.length <= maxLength) return insight;
+  return insight.substring(0, maxLength).trimEnd() + "...";
+}
+
+interface GemFlashProps {
+  insight: string;
+}
+
+const GemFlash: React.FC<GemFlashProps> = ({ insight }) => {
+  const [visible, setVisible] = useState(false);
+  const [text, setText] = useState("");
+  const prevInsightRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const nextInsight = (insight || "").trim();
+    if (!nextInsight) return;
+    if (prevInsightRef.current === nextInsight) return;
+    prevInsightRef.current = nextInsight;
+    const truncated = truncateGemInsight(nextInsight, 70);
+    setText(truncated);
+    setVisible(true);
+    const timer = setTimeout(() => {
+      setVisible(false);
+    }, 2500);
+    return () => clearTimeout(timer);
+  }, [insight]);
+
+  if (!text) return null;
+
+  return (
+    <div
+      className={`mt-2 text-center text-[13px] text-text-secondary max-w-md mx-auto px-4 transition-opacity duration-300 ${
+        visible ? "opacity-100" : "opacity-0"
+      }`}
+    >
+      {text}
+    </div>
+  );
+};
 
 interface AiTurnBlockProps {
   aiTurn: AiTurn;
@@ -178,11 +217,13 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
   const workflowProgress = useAtomValue(workflowProgressAtom);
   const isThisTurnActive = activeAiTurnId === aiTurn.id && globalIsLoading;
 
-  const { output: refinerOutput } = useRefinerOutput(aiTurn.id);
+  const { output: refinerOutput, isLoading: isRefinerLoading } = useRefinerOutput(aiTurn.id);
 
   const setChatInput = useSetAtom(chatInputValueAtom);
   const setTrustPanelFocus = useSetAtom(trustPanelFocusAtom);
 
+  const [showEcho, setShowEcho] = useState(false);
+  const [showStepDetails, setShowStepDetails] = useState(false);
 
 
   const getProviderName = useCallback((pid: string) => {
@@ -811,8 +852,18 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                                   />
                                 </div>
 
-                                {/* Decision Map Button + Refiner Dot */}
-                                <div className="my-6 flex items-center justify-center gap-3 border-y border-border-subtle/60 py-3">
+                                <div className="my-6 flex items-center justify-center gap-6 border-y border-border-subtle/60 py-3">
+                                  {refinerOutput?.outlier && (
+                                    <button
+                                      onClick={() => setShowEcho((prev) => !prev)}
+                                      className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-surface-raised hover:bg-surface-highlight border border-border-subtle text-xs text-text-secondary"
+                                      title="View contrarian echo"
+                                    >
+                                      <span className="text-sm">📢</span>
+                                      <span>Echo</span>
+                                    </button>
+                                  )}
+
                                   <button
                                     onClick={() => setIsDecisionMapOpen({ turnId: aiTurn.id })}
                                     className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-surface-raised hover:bg-surface-highlight border border-border-subtle text-xs text-text-secondary"
@@ -822,13 +873,57 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                                     <span>Map</span>
                                   </button>
 
-                                  {refinerOutput && (
+                                  {(refinerOutput || isRefinerLoading) && (
                                     <RefinerDot
-                                      refiner={refinerOutput}
+                                      refiner={refinerOutput || null}
                                       onClick={() => setActiveSplitPanel({ turnId: aiTurn.id, providerId: '__trust__' })}
+                                      isLoading={isRefinerLoading}
                                     />
                                   )}
                                 </div>
+
+                                {refinerOutput?.outlier && showEcho && (
+                                  <div className="mt-3 mx-auto max-w-2xl rounded-xl border border-border-subtle bg-surface-raised px-4 py-3 text-sm text-text-primary">
+                                    <div className="flex items-center gap-2 mb-1">
+                                      <span className="text-xs uppercase tracking-wide text-text-muted">Echo</span>
+                                      {refinerOutput.outlier.source && (
+                                        <span className="inline-flex items-center px-1.5 py-0.5 rounded-full bg-chip text-[11px] text-text-secondary">
+                                          [{refinerOutput.outlier.source}]
+                                        </span>
+                                      )}
+                                    </div>
+                                    <div>{refinerOutput.outlier.position}</div>
+                                    {refinerOutput.outlier.why && (
+                                      <div className="mt-1 text-xs text-text-muted">
+                                        {refinerOutput.outlier.why}
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+
+                                {refinerOutput?.gem?.insight && (
+                                  <GemFlash insight={refinerOutput.gem.insight} />
+                                )}
+
+                                {refinerOutput?.gem?.action && (
+                                  <div className="mt-4 flex flex-col items-center">
+                                    <button
+                                      onClick={() => {
+                                        if (refinerOutput.gem?.action) {
+                                          setChatInput(refinerOutput.gem.action);
+                                          setTrustPanelFocus({ turnId: aiTurn.id, section: 'context' });
+                                        }
+                                      }}
+                                      className="px-4 py-2 bg-brand-500/10 hover:bg-brand-500/20 border border-brand-500/30 rounded-full text-brand-400 text-sm font-medium transition-all group/gem-action"
+                                    >
+                                      <span className="flex items-center gap-2">
+                                        <span className="text-xs">✨</span>
+                                        {refinerOutput.gem.action}
+                                        <span className="opacity-0 group-hover/gem-action:opacity-100 transition-opacity ml-1">→</span>
+                                      </span>
+                                    </button>
+                                  </div>
+                                )}
 
                                 {longAnswer && (
                                   <div className="text-base leading-relaxed text-text-primary">
@@ -856,18 +951,42 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                             );
                           })()}
 
-                          {/* Inline Leap - Replaces NextStepFooter */}
-                          {refinerOutput?.leap?.target && (
+                          {refinerOutput?.leap?.answer && (
                             <div className="mt-6 pt-4 border-t border-border-subtle/40">
-                              <div className="text-sm text-text-secondary">
-                                <span className="font-semibold text-text-primary">Next step: </span>
-                                <span className="capitalize">{refinerOutput.leap.action}</span>
-                                <span> — </span>
-                                <span>{refinerOutput.leap.target}</span>
-                                {refinerOutput.leap.why && (
-                                  <span className="text-text-muted"> {refinerOutput.leap.why}</span>
+                              <div className="flex items-center justify-between text-sm text-text-secondary">
+                                <div>
+                                  <span className="font-semibold text-text-primary">Next: </span>
+                                  <span>{refinerOutput.leap.answer}</span>
+                                </div>
+                                {(refinerOutput.leap.analysis || refinerOutput.leap.why || refinerOutput.leap.justification) && (
+                                  <button
+                                    onClick={() => setShowStepDetails((prev) => !prev)}
+                                    className="text-xs text-text-muted hover:text-text-secondary underline decoration-dotted"
+                                  >
+                                    {showStepDetails ? "Hide details" : "Details"}
+                                  </button>
                                 )}
                               </div>
+                              {showStepDetails && (
+                                <div className="mt-2 text-xs text-text-muted space-y-1">
+                                  {refinerOutput.leap.analysis && (
+                                    <div>{refinerOutput.leap.analysis}</div>
+                                  )}
+                                  {refinerOutput.leap.why && (
+                                    <div>{refinerOutput.leap.why}</div>
+                                  )}
+                                  {refinerOutput.leap.justification && (
+                                    <div className="pt-1">
+                                      <span
+                                        className="inline-flex items-center px-1.5 py-0.5 rounded-full bg-surface-highlight text-[11px] text-text-secondary cursor-help"
+                                        title={refinerOutput.leap.justification}
+                                      >
+                                        Why this path
+                                      </span>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
                             </div>
                           )}
                         </div>

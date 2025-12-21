@@ -3,13 +3,12 @@
 // Migrated features from deprecated ProviderCard.tsx and ProviderResponseBlock.tsx
 
 import React, { useState, useCallback, useMemo } from "react";
-import { useAtom, useAtomValue } from "jotai";
+import { useAtomValue } from "jotai";
 import {
     providerEffectiveStateFamily,
     turnStreamingStateFamily,
     activeRecomputeStateAtom,
     chatInputHeightAtom,
-    trustPanelFocusAtom,
 } from "../state/atoms";
 import { LLM_PROVIDERS_CONFIG } from "../constants";
 import { useProviderActions } from "../hooks/useProviderActions";

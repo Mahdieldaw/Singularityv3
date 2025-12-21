@@ -273,10 +273,23 @@ export function parseMappingResponse(response: string | null | undefined): {
 
 export type LeapAction = "proceed" | "verify" | "reframe" | "research";
 
+export type SignalPriority = "blocker" | "risk" | "enhancement";
+
+export type NextStepAction = LeapAction;
+
 export interface Gem {
     insight: string;
     source: string;
     impact: string;
+    action?: string;
+}
+
+export interface Signal {
+    type: string;
+    content: string;
+    source?: string;
+    priority: SignalPriority;
+    impact?: string;
 }
 
 export interface Outlier {
@@ -294,20 +307,20 @@ export interface Leap {
     action: LeapAction;
     target: string;
     why: string;
+    answer?: string;
+    analysis?: string;
+    justification?: string;
 }
 
 export interface RefinerOutput {
-    synthesisPlus: string | null;  // Enhanced answer with inline [ModelName] attributions
-
+    synthesisPlus: string | null;
     gem: Gem | null;
-
     outlier: Outlier | null;
-
     attributions: Attribution[];
-
     leap: Leap;
-
-    // rawText is essential for UI display
+    signals?: Signal[];
+    unlistedOptions?: Array<{ title: string; description: string; source?: string }>;
+    reframe?: { issue?: string; suggestion: string; unlocks?: string } | null;
     rawText?: string;
 }
 
@@ -345,6 +358,9 @@ function createEmptyRefinerOutput(rawText: string = ''): RefinerOutput {
         outlier: null,
         attributions: [],
         leap: { action: 'proceed', target: '', why: '' },
+        signals: [],
+        unlistedOptions: [],
+        reframe: null,
         rawText,
     };
 }
@@ -397,50 +413,93 @@ function tryParseJsonRefinerOutput(text: string): Omit<RefinerOutput, 'rawText'>
 }
 
 function normalizeRefinerObject(parsed: any): Omit<RefinerOutput, 'rawText'> | null {
-    // Validate it looks like a refiner output (new structure)
-    if (!('synthesisPlus' in parsed) && !('gem' in parsed) && !('leap' in parsed)) {
+    const hasLegacyShape = 'synthesisPlus' in parsed || 'gem' in parsed || 'leap' in parsed;
+    const hasSignalShape = 'final_word' in parsed || 'the_one' in parsed || 'the_step' in parsed || 'the_echo' in parsed;
+
+    if (!hasLegacyShape && !hasSignalShape) {
         return null;
     }
 
-    // Normalize synthesisPlus
-    const synthesisPlus = parsed.synthesisPlus ? String(parsed.synthesisPlus) : null;
+    const rawFinalWord = parsed.synthesisPlus ?? parsed.final_word ?? null;
+    const synthesisPlus = rawFinalWord != null ? String(rawFinalWord) : null;
 
-    // Normalize gem
+    const gemSource = parsed.gem || parsed.the_one || null;
     let gem: Gem | null = null;
-    if (parsed.gem && typeof parsed.gem === 'object') {
+    if (gemSource && typeof gemSource === 'object') {
         gem = {
-            insight: String(parsed.gem.insight || ''),
-            source: String(parsed.gem.source || ''),
-            impact: String(parsed.gem.impact || '')
+            insight: String(gemSource.insight || ''),
+            source: String(gemSource.source || ''),
+            impact: String(gemSource.impact || ''),
+            action: gemSource.action ? String(gemSource.action) : undefined,
         };
     }
 
-    // Normalize outlier
+    const outlierSource = parsed.outlier || parsed.the_echo || null;
     let outlier: Outlier | null = null;
-    if (parsed.outlier && typeof parsed.outlier === 'object') {
+    if (outlierSource && typeof outlierSource === 'object') {
         outlier = {
-            position: String(parsed.outlier.position || ''),
-            source: String(parsed.outlier.source || ''),
-            why: String(parsed.outlier.why || '')
+            position: String(outlierSource.position || ''),
+            source: String(outlierSource.source || ''),
+            why: String(outlierSource.why || ''),
         };
     }
 
-    // Normalize attributions
     const attributions: Attribution[] = Array.isArray(parsed.attributions)
         ? parsed.attributions.map((a: any) => ({
             claim: String(a.claim || ''),
-            source: String(a.source || '')
+            source: String(a.source || ''),
         }))
         : [];
 
-    // Normalize leap
+    const stepSource = parsed.the_step || parsed.leap || {};
+    const answer = stepSource.answer != null ? String(stepSource.answer) : '';
+    const analysis = stepSource.analysis != null ? String(stepSource.analysis) : '';
+    const stepWhy = stepSource.why != null ? String(stepSource.why) : '';
+    const justification = stepSource.justification != null ? String(stepSource.justification) : '';
+
+    let action: LeapAction = 'proceed';
+    const answerLower = answer.toLowerCase();
+    if (answerLower.includes('verify')) action = 'verify';
+    else if (answerLower.includes('reframe')) action = 'reframe';
+    else if (answerLower.includes('research')) action = 'research';
+    else if (answerLower.includes('proceed')) action = 'proceed';
+
+    const target = analysis || String(stepSource.target || '');
+
     const leap: Leap = {
-        action: (['proceed', 'verify', 'reframe', 'research'].includes(parsed.leap?.action)
-            ? parsed.leap.action
-            : 'proceed') as LeapAction,
-        target: String(parsed.leap?.target || ''),
-        why: String(parsed.leap?.why || '')
+        action,
+        target,
+        why: stepWhy,
+        answer: answer || undefined,
+        analysis: analysis || undefined,
+        justification: justification || undefined,
     };
+
+    const signals: Signal[] = Array.isArray(parsed.signals)
+        ? parsed.signals.map((s: any) => ({
+            type: String(s.type || ''),
+            content: String(s.content || ''),
+            source: s.source ? String(s.source) : undefined,
+            priority: (s.priority as SignalPriority) || 'enhancement',
+            impact: s.impact ? String(s.impact) : undefined,
+        }))
+        : [];
+
+    const unlistedOptions: Array<{ title: string; description: string; source?: string }> = Array.isArray(parsed.unlistedOptions)
+        ? parsed.unlistedOptions.map((opt: any) => ({
+            title: String(opt.title || ''),
+            description: String(opt.description || ''),
+            source: opt.source ? String(opt.source) : undefined,
+        }))
+        : [];
+
+    const reframe = parsed.reframe && typeof parsed.reframe === 'object'
+        ? {
+            issue: parsed.reframe.issue ? String(parsed.reframe.issue) : undefined,
+            suggestion: String(parsed.reframe.suggestion || ''),
+            unlocks: parsed.reframe.unlocks ? String(parsed.reframe.unlocks) : undefined,
+        }
+        : null;
 
     return {
         synthesisPlus,
@@ -448,6 +507,9 @@ function normalizeRefinerObject(parsed: any): Omit<RefinerOutput, 'rawText'> | n
         outlier,
         attributions,
         leap,
+        signals,
+        unlistedOptions,
+        reframe,
     };
 }
 
@@ -554,10 +616,11 @@ function extractGem(text: string): Gem | null {
         section.split('\n')[0]?.trim() || '';
     const source = extractLabeledValue(section, 'source') || '';
     const impact = extractLabeledValue(section, 'impact') || '';
+    const action = extractLabeledValue(section, 'action') || undefined;
 
     if (!insight) return null;
 
-    return { insight, source, impact };
+    return { insight, source, impact, action };
 }
 
 /**
@@ -617,7 +680,7 @@ function extractLeap(text: string): Leap {
         extractSection(text, 'Recommended Action') ||
         extractSection(text, 'Action');
 
-    const defaultLeap: Leap = { action: 'proceed', target: '', why: '' };
+    const defaultLeap: Leap = { action: 'proceed', target: '', why: '', answer: 'proceed' };
 
     if (!section) return defaultLeap;
 
@@ -631,23 +694,26 @@ function extractLeap(text: string): Leap {
         // Try to split into target and why
         const whyMatch = rest.match(/(.+?)(?:\s*[—\-]+\s*(?:because|why)[:\s]*(.+))?$/i);
 
+        const target = whyMatch?.[1]?.trim() || rest;
+        const why = whyMatch?.[2]?.trim() || '';
         return {
             action,
-            target: whyMatch?.[1]?.trim() || rest,
-            why: whyMatch?.[2]?.trim() || ''
+            target,
+            why,
+            answer: action,
+            analysis: target,
         };
     }
 
-    // Try labeled values
     const actionValue = extractLabeledValue(section, 'action');
     const action: LeapAction = (['proceed', 'verify', 'reframe', 'research'].includes(actionValue?.toLowerCase() || '')
         ? actionValue!.toLowerCase()
         : 'proceed') as LeapAction;
-    const target = extractLabeledValue(section, 'target') || '';
+    const labeledTarget = extractLabeledValue(section, 'target') || '';
     const why = extractLabeledValue(section, 'why') || extractLabeledValue(section, 'reason') || '';
 
-    if (target) {
-        return { action, target, why };
+    if (labeledTarget) {
+        return { action, target: labeledTarget, why, answer: action, analysis: labeledTarget };
     }
 
     // Fallback: use first sentence as target, infer action from keywords
@@ -657,9 +723,12 @@ function extractLeap(text: string): Leap {
     if (/reframe|rephrase|reconsider/i.test(section)) inferredAction = 'reframe';
     if (/research|investigate|explore|look into/i.test(section)) inferredAction = 'research';
 
+    const target = firstSentence?.trim() || section.slice(0, 100);
     return {
         action: inferredAction,
-        target: firstSentence?.trim() || section.slice(0, 100),
-        why: ''
+        target,
+        why: '',
+        answer: inferredAction,
+        analysis: target,
     };
 }

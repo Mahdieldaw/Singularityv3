@@ -3,11 +3,11 @@
  * Now displays only SynthesisPlus content with attribution click handling.
  */
 
-import React, { useState, useCallback } from 'react';
-import { useSetAtom } from 'jotai';
-import { activeSplitPanelAtom } from '../../state/atoms';
+import React, { useState, useCallback, useMemo } from 'react';
+import { useAtomValue, useSetAtom } from 'jotai';
+import { activeSplitPanelAtom, providerIdsForTurnFamily } from '../../state/atoms';
 import type { RefinerOutput } from '../../../shared/parsing-utils';
-import MarkdownDisplay from '../MarkdownDisplay';
+import { LLM_PROVIDERS_CONFIG } from '../../constants';
 
 interface TrustSignalsPanelProps {
   refiner: RefinerOutput;
@@ -17,28 +17,23 @@ interface TrustSignalsPanelProps {
   turnId?: string;
 }
 
-/**
- * Parse [ModelName] attributions from synthesisPlus text and make them clickable
- */
 function parseAttributions(text: string, onModelClick: (modelName: string) => void): React.ReactNode {
   if (!text) return null;
 
-  // Split by [ModelName] patterns
-  const parts = text.split(/(\[[A-Z][a-zA-Z]+\])/g);
+  const parts = text.split(/(\[[^\]]+\])/g);
 
   return parts.map((part, index) => {
-    // Check if this is a [ModelName] pattern
-    const match = part.match(/^\[([A-Z][a-zA-Z]+)\]$/);
+    const match = part.match(/^\[([^\]]+)\]$/);
     if (match) {
       const modelName = match[1];
       return (
         <button
           key={index}
           onClick={() => onModelClick(modelName)}
-          className="inline-flex items-center px-1.5 py-0.5 mx-0.5 rounded bg-brand-500/10 text-brand-400 text-sm font-medium hover:bg-brand-500/20 transition-colors cursor-pointer"
+          className="inline-flex items-center px-1.5 py-0.5 mx-0.5 rounded bg-brand-500/10 text-brand-400 text-xs font-medium hover:bg-brand-500/20 transition-colors cursor-pointer underline decoration-dotted"
           title={`View ${modelName}'s response`}
         >
-          {modelName}
+          {part}
         </button>
       );
     }
@@ -55,28 +50,70 @@ export function TrustSignalsPanel({
 }: TrustSignalsPanelProps) {
   const [showRaw, setShowRaw] = useState(false);
   const setActiveSplitPanel = useSetAtom(activeSplitPanelAtom);
+  const providerIds = useAtomValue(turnId ? providerIdsForTurnFamily(turnId) : providerIdsForTurnFamily(""));
 
-  // Handle attribution clicks - map model name to provider ID and open split pane
+  const providersById = useMemo(() => {
+    const map: Record<string, { id: string; name: string }> = {};
+    LLM_PROVIDERS_CONFIG.forEach((p) => {
+      map[String(p.id)] = { id: String(p.id), name: p.name };
+    });
+    return map;
+  }, []);
+
   const handleModelClick = useCallback((modelName: string) => {
     if (!turnId) return;
 
-    // Map common model names to provider IDs
-    const modelToProviderId: Record<string, string> = {
-      'Claude': 'anthropic',
-      'Anthropic': 'anthropic',
-      'Gemini': 'google',
-      'Google': 'google',
-      'GPT': 'openai',
-      'OpenAI': 'openai',
-      'ChatGPT': 'openai',
-      'Grok': 'grok',
-      'DeepSeek': 'deepseek',
-      'Mistral': 'mistral',
-    };
+    const normalized = modelName.toLowerCase().trim();
+    const compact = normalized.replace(/\s+/g, "");
 
-    const providerId = modelToProviderId[modelName] || modelName.toLowerCase();
+    const candidateIds = providerIds && providerIds.length > 0
+      ? providerIds
+      : LLM_PROVIDERS_CONFIG.map((p) => String(p.id));
+
+    let matchedId: string | null = null;
+
+    // 1. Direct match with name or ID
+    for (const pid of candidateIds) {
+      const cfg = providersById[pid] || { id: pid, name: pid };
+      const nameLower = cfg.name.toLowerCase();
+      const nameCompact = nameLower.replace(/\s+/g, "");
+      const idLower = cfg.id.toLowerCase();
+
+      if (
+        normalized === nameLower ||
+        compact === nameCompact ||
+        normalized === idLower ||
+        nameLower.includes(normalized) ||
+        normalized.includes(nameLower)
+      ) {
+        matchedId = cfg.id;
+        break;
+      }
+    }
+
+    // 2. Alias/Fuzzy match fallback
+    if (!matchedId) {
+      const aliases: Record<string, string[]> = {
+        'chatgpt': ['gpt', 'openai', 'o1', 'o3'],
+        'claude': ['anthropic', 'sonnet', 'opus', 'haiku'],
+        'gemini': ['google', 'deepmind', 'pro', 'flash'],
+        'qwen': ['alibaba', 'tongyi'],
+      };
+
+      for (const [pid, providerAliases] of Object.entries(aliases)) {
+        if (providerAliases.some(alias => normalized.includes(alias) || alias.includes(normalized))) {
+          // Verify if this provider is actually in candidateIds
+          if (candidateIds.includes(pid)) {
+            matchedId = pid;
+            break;
+          }
+        }
+      }
+    }
+
+    const providerId = matchedId || compact;
     setActiveSplitPanel({ turnId, providerId });
-  }, [turnId, setActiveSplitPanel]);
+  }, [turnId, setActiveSplitPanel, providerIds, providersById]);
 
   return (
     <div className="flex flex-col h-full bg-surface-raised border-l border-border-subtle">
@@ -96,12 +133,37 @@ export function TrustSignalsPanel({
         )}
       </div>
 
-      {/* Content */}
       <div
         className="flex-1 overflow-y-auto p-4 space-y-4"
         style={{ paddingBottom: bottomPadding ?? 160 }}
       >
-        {/* SynthesisPlus Content */}
+        {refiner.gem && (
+          <div className="gem-callout bg-gradient-to-br from-amber-400/10 via-amber-50/5 to-white/0 border border-amber-400/40 rounded-xl p-4">
+            <div className="flex items-center justify-between mb-2">
+              <div className="font-semibold text-sm text-text-primary flex items-center gap-2">
+                <span>💎</span>
+                <span>The Insight</span>
+              </div>
+              {refiner.gem?.source && (
+                <button
+                  onClick={() => handleModelClick(refiner.gem?.source || '')}
+                  className="gem-link text-[11px] text-brand-400 hover:text-brand-300 underline decoration-dotted cursor-pointer"
+                >
+                  See full →
+                </button>
+              )}
+            </div>
+            <div className="gem-content text-sm text-text-primary leading-relaxed mb-2">
+              {refiner.gem?.insight}
+            </div>
+            {refiner.gem?.source && (
+              <div className="gem-source text-xs text-text-muted flex items-center justify-between">
+                <span>— {refiner.gem.source}</span>
+              </div>
+            )}
+          </div>
+        )}
+
         {refiner.synthesisPlus ? (
           <div className="prose prose-sm max-w-none dark:prose-invert">
             <div className="text-text-primary leading-relaxed">
@@ -111,40 +173,6 @@ export function TrustSignalsPanel({
         ) : (
           <div className="text-text-muted italic text-center py-8">
             No enhanced synthesis available.
-          </div>
-        )}
-
-        {/* Gem Card (if present) */}
-        {refiner.gem && (
-          <div className="p-4 bg-gradient-to-br from-amber-500/10 to-yellow-500/10 border border-amber-500/20 rounded-xl">
-            <div className="flex items-center gap-2 mb-2">
-              <span className="text-lg">✨</span>
-              <span className="text-xs font-semibold text-amber-400 uppercase tracking-wide">Hidden Gem</span>
-            </div>
-            <div className="text-sm text-text-primary">{refiner.gem.insight}</div>
-            {refiner.gem.source && (
-              <div className="text-xs text-text-muted mt-2">Source: {refiner.gem.source}</div>
-            )}
-            {refiner.gem.impact && (
-              <div className="text-xs text-amber-300/80 mt-1">Impact: {refiner.gem.impact}</div>
-            )}
-          </div>
-        )}
-
-        {/* Outlier Card (if present) */}
-        {refiner.outlier && (
-          <div className="p-4 bg-violet-500/10 border border-violet-500/20 rounded-xl">
-            <div className="flex items-center gap-2 mb-2">
-              <span className="text-lg">🎯</span>
-              <span className="text-xs font-semibold text-violet-400 uppercase tracking-wide">Dissenting View</span>
-            </div>
-            <div className="text-sm text-text-primary">{refiner.outlier.position}</div>
-            {refiner.outlier.source && (
-              <div className="text-xs text-text-muted mt-2">Source: {refiner.outlier.source}</div>
-            )}
-            {refiner.outlier.why && (
-              <div className="text-xs text-violet-300/80 mt-1">Why: {refiner.outlier.why}</div>
-            )}
           </div>
         )}
 
