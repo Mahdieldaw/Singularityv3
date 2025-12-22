@@ -1,7 +1,7 @@
 import { useCallback } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
 import { turnsMapAtom, alertTextAtom, synthesisProviderAtom, mappingProviderAtom, refinerProviderAtom, antagonistProviderAtom } from "../state/atoms";
-import { useRoundActions } from "./useRoundActions";
+import { useRoundActions } from "./chat/useRoundActions";
 import type { AiTurn } from "../types";
 import { PRIMARY_STREAMING_PROVIDER_IDS } from "../constants";
 

@@ -11,7 +11,7 @@ import {
     chatInputHeightAtom,
 } from "../state/atoms";
 import { LLM_PROVIDERS_CONFIG } from "../constants";
-import { useProviderActions } from "../hooks/useProviderActions";
+import { useProviderActions } from "../hooks/providers/useProviderActions";
 import MarkdownDisplay from "./MarkdownDisplay";
 import { ArtifactOverlay, Artifact } from "./ArtifactOverlay";
 import { ChevronDownIcon, ChevronUpIcon } from "./Icons";

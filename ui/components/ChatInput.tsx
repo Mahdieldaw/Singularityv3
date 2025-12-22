@@ -20,7 +20,7 @@ import {
   workflowProgressAtom,
   isRoundActiveAtom,
 } from "../state/atoms";
-import { useChat } from "../hooks/useChat";
+import { useChat } from "../hooks/chat/useChat";
 import api from "../services/extension-api";
 import { LLM_PROVIDERS_CONFIG } from "../constants";
 import { getProviderName } from "../utils/provider-helpers";

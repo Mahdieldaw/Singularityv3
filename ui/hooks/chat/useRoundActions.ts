@@ -15,14 +15,14 @@ import {
   thinkMappingByRoundAtom,
   activeRecomputeStateAtom,
   alertTextAtom,
-} from "../state/atoms";
-import api from "../services/extension-api";
-import { PRIMARY_STREAMING_PROVIDER_IDS } from "../constants";
+} from "../../state/atoms";
+import api from "../../services/extension-api";
+import { PRIMARY_STREAMING_PROVIDER_IDS } from "../../constants";
 import type {
   ProviderKey,
   PrimitiveWorkflowRequest,
-} from "../../shared/contract";
-import type { TurnMessage, AiTurn, ProviderResponse } from "../types";
+} from "../../../shared/contract";
+import type { TurnMessage, AiTurn, ProviderResponse } from "../../types";
 
 export function useRoundActions() {
   const turnsMap = useAtomValue(turnsMapAtom);
@@ -328,6 +328,7 @@ export function useRoundActions() {
         next[effectiveMappingProvider] = arr;
         aiTurn.mappingResponses = next;
         aiTurn.mappingVersion = (aiTurn.mappingVersion ?? 0) + 1;
+        draft.set(ai.id, { ...aiTurn });
       });
 
       // ✅ Set loading state

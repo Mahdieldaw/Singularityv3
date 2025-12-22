@@ -1,5 +1,5 @@
-import { GraphTopology } from '../../../shared/parsing-utils';
-import { ClaimNode, ClaimEdge } from './DecisionMapGraph';
+import { GraphTopology, GraphNode, GraphEdge } from '../../shared/parsing-utils';
+import { ClaimNode, ClaimEdge } from '../components/DecisionMapGraph';
 
 /**
  * Converts mapper GraphTopology output to DecisionMapGraph format
@@ -13,18 +13,18 @@ export function adaptGraphTopology(topology: GraphTopology | null): {
     }
 
     // Convert nodes
-    const nodes: ClaimNode[] = topology.nodes.map(node => ({
+    const nodes: ClaimNode[] = topology.nodes.map((node: GraphNode) => ({
         id: node.id,
         label: node.label,
         theme: node.theme,
         supporters: node.supporters.map(s => String(s)),
         support_count: node.support_count,
         // Preserve consensus strength for visual sizing
-        consensusStrength: node.support_count / Math.max(...topology.nodes.map(n => n.support_count), 1),
+        consensusStrength: node.support_count / Math.max(...topology.nodes.map((n: GraphNode) => n.support_count), 1),
     }));
 
     // Convert edges - preserve all 3 semantic types
-    const edges: ClaimEdge[] = topology.edges.map(edge => ({
+    const edges: ClaimEdge[] = topology.edges.map((edge: GraphEdge) => ({
         source: edge.source,
         target: edge.target,
         reason: edge.reason,

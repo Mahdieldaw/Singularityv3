@@ -23,17 +23,17 @@ import {
   hasAutoOpenedPaneAtom,
   hasAutoWidenedForSynthesisAtom,
   splitPaneRatioAtom,
-} from "../state/atoms";
-import { activeRecomputeStateAtom, lastStreamingProviderAtom } from "../state/atoms";
-import { StreamingBuffer } from "../utils/streamingBuffer";
+} from "../../state/atoms";
+import { activeRecomputeStateAtom, lastStreamingProviderAtom } from "../../state/atoms";
+import { StreamingBuffer } from "../../utils/streamingBuffer";
 import {
   applyStreamingUpdates,
   createOptimisticAiTurn,
-} from "../utils/turn-helpers";
-import { normalizeProviderId } from "../utils/provider-id-mapper";
-import api from "../services/extension-api";
-import type { TurnMessage, UserTurn, AiTurn, ProviderKey } from "../types";
-import { LLM_PROVIDERS_CONFIG } from "../constants";
+} from "../../utils/turn-helpers";
+import { normalizeProviderId } from "../../utils/provider-id-mapper";
+import api from "../../services/extension-api";
+import type { TurnMessage, UserTurn, AiTurn, ProviderKey } from "../../types";
+import { LLM_PROVIDERS_CONFIG } from "../../constants";
 
 const PORT_DEBUG_UI = false;
 

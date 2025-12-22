@@ -2,7 +2,7 @@ import React, { useRef, useEffect } from "react";
 import { useAtom } from "jotai";
 import { launchpadOpenAtom } from "../state/atoms";
 import { useLaunchpadDrafts } from "../hooks/useLaunchpadDrafts";
-import { useChat } from "../hooks/useChat";
+import { useChat } from "../hooks/chat/useChat";
 import { DraftCard } from "./DraftCard";
 import { cn } from "../utils/cn";
 

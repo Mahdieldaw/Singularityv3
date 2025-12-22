@@ -7,7 +7,7 @@ import {
   alertTextAtom,
   lastActivityAtAtom,
   connectionStatusAtom,
-} from "../state/atoms";
+} from "../../state/atoms";
 
 const LOADING_TIMEOUT_MS = 45000; // 45 seconds
 

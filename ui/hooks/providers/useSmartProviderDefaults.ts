@@ -7,7 +7,7 @@ import {
     antagonistProviderAtom,
     refinerProviderAtom,
     providerLocksAtom,
-} from '../state/atoms';
+} from '../../state/atoms';
 import {
     selectBestProvider,
     isProviderAuthorized,

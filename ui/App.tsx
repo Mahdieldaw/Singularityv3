@@ -1,9 +1,9 @@
 import { useRef, Suspense } from "react";
 import { useAtom } from "jotai";
-import { usePortMessageHandler } from "./hooks/usePortMessageHandler";
+import { usePortMessageHandler } from "./hooks/chat/usePortMessageHandler";
 import { useConnectionMonitoring } from "./hooks/useConnectionMonitoring";
 import { useHistoryLoader } from "./hooks/useHistoryLoader";
-import { useResponsiveLoadingGuard } from "./hooks/useLoadingWatchdog";
+import { useResponsiveLoadingGuard } from "./hooks/ui/useLoadingWatchdog";
 import ChatView from "./views/ChatView";
 import Header from "./components/Header";
 import { safeLazy } from "./utils/safeLazy";
@@ -17,9 +17,9 @@ import { isHistoryPanelOpenAtom } from "./state/atoms";
 import { useInitialization } from "./hooks/useInitialization"; // Import the new hook
 import LaunchpadTab from "./components/LaunchpadTab"; // Import LaunchpadTab
 const LaunchpadDrawer = safeLazy(() => import("./components/LaunchpadDrawer")); // Lazy load LaunchpadDrawer
-import { useSmartProviderDefaults } from "./hooks/useSmartProviderDefaults";
+import { useSmartProviderDefaults } from "./hooks/providers/useSmartProviderDefaults";
 import { useOnClickOutside } from "usehooks-ts";
-import { useKey } from "./hooks/useKey";
+import { useKey } from "./hooks/ui/useKey";
 
 export default function App() {
   // This is now the entry point for all startup logic.

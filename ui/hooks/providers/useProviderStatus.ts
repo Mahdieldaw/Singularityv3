@@ -1,7 +1,7 @@
 import { useEffect, useCallback, useState } from 'react';
 import { useAtom } from 'jotai';
-import { providerAuthStatusAtom } from '../state/atoms';
-import api from '../services/extension-api';
+import { providerAuthStatusAtom } from '../../state/atoms';
+import api from '../../services/extension-api';
 
 export interface UseProviderStatusOptions {
   /**
@@ -105,7 +105,7 @@ export function useProviderStatus(
       });
 
       if (response?.success) {
-        setStatus(prev => ({ ...prev, ...response.data }));
+        setStatus((prev: Record<string, boolean>) => ({ ...prev, ...response.data }));
         return response.data;
       }
 

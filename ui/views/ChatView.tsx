@@ -17,11 +17,10 @@ import clsx from "clsx";
 import MessageRow from "../components/MessageRow";
 import ChatInput from "../components/ChatInput";
 import WelcomeScreen from "../components/WelcomeScreen";
-import { useScrollPersistence } from "../hooks/useScrollPersistence";
-import { useChat } from "../hooks/useChat";
+import { useChat } from "../hooks/chat/useChat";
 import { SplitPaneRightPanel } from "../components/SplitPaneRightPanel";
 import { CouncilOrbsVertical } from "../components/CouncilOrbsVertical";
-import { useSmartProviderDefaults } from "../hooks/useSmartProviderDefaults";
+import { useSmartProviderDefaults } from "../hooks/providers/useSmartProviderDefaults";
 
 import { safeLazy } from "../utils/safeLazy";
 // Lazy load DecisionMapSheet (named export adapter)
@@ -56,7 +55,6 @@ export default function ChatView() {
   // Smart Defaults
   useSmartProviderDefaults();
 
-  const scrollerRef = useScrollPersistence();
   const virtuosoRef = useRef<VirtuosoHandle | null>(null);
   const { selectChat } = useChat();
 
@@ -107,9 +105,6 @@ export default function ChatView() {
             else if (ref && "current" in (ref as any))
               (ref as React.MutableRefObject<HTMLDivElement | null>).current =
                 node as HTMLDivElement | null;
-            (
-              scrollerRef as React.MutableRefObject<HTMLElement | null>
-            ).current = node as HTMLDivElement | null;
           }}
           style={{
             ...(props.style || {}),
@@ -118,7 +113,7 @@ export default function ChatView() {
           className="h-full min-h-0 overflow-y-auto"
         />
       )),
-    [scrollerRef],
+    [],
   );
 
   // Jump-to-turn event listener with optional cross-session loading

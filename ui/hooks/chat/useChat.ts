@@ -1,7 +1,7 @@
 // ui/hooks/useChat.ts - MAP-BASED STATE MANAGEMENT
 import { useCallback } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
-import api from "../services/extension-api";
+import api from "../../services/extension-api";
 import {
   turnsMapAtom,
   turnIdsAtom,
@@ -27,14 +27,14 @@ import {
   activeProviderTargetAtom,
   launchpadDraftsAtom, // Import launchpad atom
   launchpadOpenAtom,
-} from "../state/atoms";
+} from "../../state/atoms";
 // Optimistic AI turn creation is now handled upon TURN_CREATED from backend
 import type {
   ProviderKey,
   PrimitiveWorkflowRequest,
-} from "../../shared/contract";
-import { LLM_PROVIDERS_CONFIG } from "../constants";
-import { computeThinkFlag } from "../../src/think/computeThinkFlag.js";
+} from "../../../shared/contract";
+import { LLM_PROVIDERS_CONFIG } from "../../constants";
+import { computeThinkFlag } from "../../../src/think/computeThinkFlag.js";
 
 import type {
   HistorySessionSummary,
@@ -43,7 +43,7 @@ import type {
   UserTurn,
   AiTurn,
   ProviderResponse,
-} from "../types";
+} from "../../types";
 
 export function useChat() {
   // Reads
@@ -530,7 +530,7 @@ export function useChat() {
                 ...(result.explanation ? [{ id: 'notes', title: 'Notes', text: result.explanation }] : [])
               ],
             };
-            setLaunchpadDrafts(prev => [newDraft, ...prev]);
+            setLaunchpadDrafts((prev: any[]) => [newDraft, ...prev]);
             setLaunchpadOpen(true);
           }
         } else {
@@ -571,7 +571,7 @@ export function useChat() {
               primarySectionId: primaryId,
               sections,
             };
-            setLaunchpadDrafts(prev => [analystDraft, ...prev]);
+            setLaunchpadDrafts((prev: any[]) => [analystDraft, ...prev]);
             setLaunchpadOpen(true);
           }
         }

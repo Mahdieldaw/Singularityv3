@@ -9,7 +9,7 @@ import {
   currentSessionIdAtom,
   toastAtom
 } from "../state/atoms";
-import { useChat } from "../hooks/useChat";
+import { useChat } from "../hooks/chat/useChat";
 import api from "../services/extension-api";
 import { normalizeBackendRoundsToTurns } from "../utils/turn-helpers";
 import { formatSessionForMarkdown, sanitizeSessionForExport } from "../utils/copy-format-utils";

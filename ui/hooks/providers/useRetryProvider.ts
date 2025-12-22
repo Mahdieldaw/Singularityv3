@@ -1,6 +1,6 @@
 // ui/hooks/useRetryProvider.ts
 import { useCallback } from 'react';
-import api from '../services/extension-api';
+import api from '../../services/extension-api';
 
 export function useRetryProvider() {
   const retryProviders = useCallback(

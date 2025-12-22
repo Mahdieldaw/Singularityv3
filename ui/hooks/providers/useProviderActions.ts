@@ -7,10 +7,10 @@ import {
     activeRecomputeStateAtom,
     activeProviderTargetAtom,
     turnsMapAtom,
-} from '../state/atoms';
-import api from '../services/extension-api';
-import type { AiTurn, ProviderKey } from '../types';
-import type { PrimitiveWorkflowRequest } from '../../shared/contract';
+} from '../../state/atoms';
+import api from '../../services/extension-api';
+import type { AiTurn, ProviderKey } from '../../types';
+import type { PrimitiveWorkflowRequest } from '../../../shared/contract';
 
 /**
  * Hook providing provider-level actions: retry, branch continuation, and targeting.

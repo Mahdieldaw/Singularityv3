@@ -1,4 +1,4 @@
-import  { useState } from "react";
+import { useState } from "react";
 import { useAtom } from "jotai";
 import {
   selectedModelsAtom,
@@ -8,7 +8,7 @@ import {
   isSettingsOpenAtom,
 } from "../state/atoms";
 import { LLM_PROVIDERS_CONFIG } from "../constants";
-import { useProviderStatus } from "../hooks/useProviderStatus";
+import { useProviderStatus } from "../hooks/providers/useProviderStatus";
 
 export default function SettingsPanel() {
   const [isSettingsOpen, setIsSettingsOpen] = useAtom(isSettingsOpenAtom);

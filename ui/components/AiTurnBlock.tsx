@@ -32,7 +32,7 @@ import {
 } from "../utils/turn-helpers";
 import clsx from "clsx";
 import ProviderErrorCard from "./ProviderErrorCard";
-import { useRetryProvider } from "../hooks/useRetryProvider";
+import { useRetryProvider } from "../hooks/providers/useRetryProvider";
 import {
   providerErrorsAtom,
   retryableProvidersAtom,
@@ -133,6 +133,13 @@ interface AiTurnBlockProps {
 const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
   aiTurn,
 }) => {
+  const renderCount = useRef(0);
+  renderCount.current += 1;
+
+  useEffect(() => {
+    console.log(`[AiTurnBlock] Rendered ${renderCount.current} times. ID: ${aiTurn.id}`);
+  });
+
   // --- CONNECTED STATE LOGIC ---
 
   const synthesisProvider = useAtomValue(synthesisProviderAtom);

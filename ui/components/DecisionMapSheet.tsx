@@ -4,8 +4,8 @@ import { isDecisionMapOpenAtom, turnByIdAtom, mappingProviderAtom, activeSplitPa
 import { useClipActions } from "../hooks/useClipActions";
 import { m, AnimatePresence, LazyMotion, domAnimation } from "framer-motion";
 import { safeLazy } from "../utils/safeLazy";
-const DecisionMapGraph = safeLazy(() => import("./experimental/DecisionMapGraph"));
-import { adaptGraphTopology } from "./experimental/graphAdapter";
+const DecisionMapGraph = safeLazy(() => import("./DecisionMapGraph"));
+import { adaptGraphTopology } from "../utils/graphAdapter";
 import MarkdownDisplay from "./MarkdownDisplay";
 import { LLM_PROVIDERS_CONFIG } from "../constants";
 import { getLatestResponse, normalizeResponseArray } from "../utils/turn-helpers";

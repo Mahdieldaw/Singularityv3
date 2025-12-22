@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as d3 from 'd3-force';
-import { getProviderColor } from '../../utils/provider-helpers';
+import { getProviderColor } from '../utils/provider-helpers';
 
 export interface ClaimNode extends d3.SimulationNodeDatum {
     id: string;
