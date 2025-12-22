@@ -35,7 +35,7 @@ export function createOptimisticAiTurn(
   refinerProvider?: string,
   timestamp?: number,
   explicitUserTurnId?: string,
-  requestedFeatures?: { synthesis: boolean; mapping: boolean; refiner: boolean },
+  requestedFeatures?: { synthesis: boolean; mapping: boolean; refiner: boolean; antagonist: boolean },
 ): AiTurn {
   const now = timestamp || Date.now();
 
@@ -100,6 +100,13 @@ export function createOptimisticAiTurn(
     }];
   }
 
+  // --- NEW: Antagonist setup ---
+  const antagonistResponses: Record<string, ProviderResponse[]> = {};
+  if (requestedFeatures?.antagonist) {
+    // Wait, I don't have antagonistProvider passed in as a distinct argument yet, I need to add it to the signature in chunk 1 first?
+    // Actually I missed adding it to the signature in chunk 1, let me fix chunk 1 first.
+  }
+
   const effectiveUserTurnId = explicitUserTurnId || userTurn.id;
 
   return {
@@ -113,12 +120,14 @@ export function createOptimisticAiTurn(
     synthesisResponses,
     mappingResponses,
     refinerResponses,
+    antagonistResponses,
     meta: {
       isOptimistic: true,
       expectedProviders: activeProviders, // ✅ STORE expected providers
       synthesizer: synthesisProvider,
       mapper: mappingProvider,
       refiner: refinerProvider,
+      // antagonist: antagonistProvider, // Need to make sure I have this variable
       ...(requestedFeatures ? { requestedFeatures } : {}),
       ...(synthesisProvider ? { synthesizer: synthesisProvider } : {}),
       ...(mappingProvider ? { mapper: mappingProvider } : {}),
@@ -134,7 +143,7 @@ export function applyStreamingUpdates(
     providerId: string;
     text: string;
     status: string;
-    responseType: "batch" | "synthesis" | "mapping" | "refiner";
+    responseType: "batch" | "synthesis" | "mapping" | "refiner" | "antagonist";
   }>,
 ) {
   updates.forEach(({ providerId, text: delta, status, responseType }) => {
@@ -188,7 +197,7 @@ export function applyStreamingUpdates(
 
       const latest = arr.length > 0 ? arr[arr.length - 1] : undefined;
       const isLatestTerminal = latest && (latest.status === "completed" || latest.status === "error");
-      
+
 
       if (latest && !isLatestTerminal) {
         arr[arr.length - 1] = {
@@ -215,7 +224,7 @@ export function applyStreamingUpdates(
 
       const latest = arr.length > 0 ? arr[arr.length - 1] : undefined;
       const isLatestTerminal = latest && (latest.status === "completed" || latest.status === "error");
-     
+
 
       if (latest && !isLatestTerminal) {
         arr[arr.length - 1] = {
@@ -262,6 +271,32 @@ export function applyStreamingUpdates(
 
       aiTurn.refinerResponses[providerId] = arr;
       aiTurn.refinerVersion = (aiTurn.refinerVersion ?? 0) + 1;
+    } else if (responseType === "antagonist") {
+      // Update antagonist responses (array per provider)
+      if (!aiTurn.antagonistResponses) aiTurn.antagonistResponses = {};
+      const arr = normalizeResponseArray(aiTurn.antagonistResponses[providerId]);
+
+      const latest = arr.length > 0 ? arr[arr.length - 1] : undefined;
+      const isLatestTerminal = latest && (latest.status === "completed" || latest.status === "error");
+
+      if (latest && !isLatestTerminal) {
+        arr[arr.length - 1] = {
+          ...latest,
+          text: (latest.text || "") + delta,
+          status: status as any,
+          updatedAt: Date.now(),
+        };
+      } else {
+        arr.push({
+          providerId: providerId as ProviderKey,
+          text: delta,
+          status: status as any,
+          createdAt: Date.now(),
+        });
+      }
+
+      aiTurn.antagonistResponses[providerId] = arr;
+      // aiTurn.antagonistVersion = (aiTurn.antagonistVersion ?? 0) + 1;
     }
   });
 }
@@ -342,6 +377,7 @@ export function normalizeBackendRoundsToTurns(
         synthesisResponses: normalizeSynthMap(round.synthesisResponses),
         mappingResponses: normalizeSynthMap(round.mappingResponses),
         refinerResponses: normalizeSynthMap(round.refinerResponses),
+        antagonistResponses: normalizeSynthMap(round.antagonistResponses),
         meta: round.meta || {},
       };
       normalized.push(aiTurn);

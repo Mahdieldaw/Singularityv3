@@ -14,6 +14,7 @@ import {
   mappingProviderAtom,
   synthesisProviderAtom,
   refinerProviderAtom,
+  antagonistProviderAtom,
   lastActivityAtAtom,
   workflowProgressAtom,
   providerErrorsAtom,
@@ -41,7 +42,7 @@ const PORT_DEBUG_UI = false;
  * CRITICAL: Step type detection must match backend stepId patterns
  * Backend generates: 'batch-<timestamp>', 'synthesis-<provider>-<timestamp>', 'mapping-<provider>-<timestamp>'
  */
-function getStepType(stepId: string): "batch" | "synthesis" | "mapping" | "refiner" | null {
+function getStepType(stepId: string): "batch" | "synthesis" | "mapping" | "refiner" | "antagonist" | null {
   if (!stepId || typeof stepId !== "string") return null;
 
   // Match backend patterns exactly
@@ -51,6 +52,8 @@ function getStepType(stepId: string): "batch" | "synthesis" | "mapping" | "refin
     return "mapping";
   if (stepId.startsWith("refiner-") || stepId.includes("-refiner-"))
     return "refiner";
+  if (stepId.startsWith("antagonist-") || stepId.includes("-antagonist-"))
+    return "antagonist";
   if (stepId.startsWith("batch-") || stepId.includes("prompt")) return "batch";
 
   console.warn(`[Port] Unknown stepId pattern: ${stepId}`);
@@ -63,7 +66,7 @@ function getStepType(stepId: string): "batch" | "synthesis" | "mapping" | "refin
  */
 function extractProviderFromStepId(
   stepId: string,
-  stepType: "synthesis" | "mapping" | "refiner",
+  stepType: "synthesis" | "mapping" | "refiner" | "antagonist",
 ): string | null {
   // Support provider IDs with hyphens/dots/etc., assuming last segment is numeric timestamp
   const re = new RegExp(`^${stepType}-(.+)-(\\d+)$`);
@@ -86,6 +89,7 @@ export function usePortMessageHandler() {
   const mappingProvider = useAtomValue(mappingProviderAtom);
   const synthesisProvider = useAtomValue(synthesisProviderAtom);
   const refinerProvider = useAtomValue(refinerProviderAtom);
+  const antagonistProvider = useAtomValue(antagonistProviderAtom);
   const setLastActivityAt = useSetAtom(lastActivityAtAtom);
   const setWorkflowProgress = useSetAtom(workflowProgressAtom);
   const setProviderErrors = useSetAtom(providerErrorsAtom);
@@ -164,7 +168,8 @@ export function usePortMessageHandler() {
             providers: msgProviders,
             synthesisProvider: msgSynthesisProvider,
             mappingProvider: msgMappingProvider,
-            refinerProvider: msgRefinerProvider
+            refinerProvider: msgRefinerProvider,
+            antagonistProvider: msgAntagonistProvider
           } = message;
 
           // Always adopt the backend sessionId for TURN_CREATED
@@ -183,6 +188,7 @@ export function usePortMessageHandler() {
           const effectiveSynthesisProvider = msgSynthesisProvider || synthesisProvider;
           const effectiveMappingProvider = msgMappingProvider || mappingProvider;
           const effectiveRefinerProvider = msgRefinerProvider || refinerProvider;
+          const effectiveAntagonistProvider = msgAntagonistProvider || antagonistProvider;
 
           // Single atomic update to turnsMap ensures we read the latest user turn
           setTurnsMap((draft: Map<string, TurnMessage>) => {
@@ -215,6 +221,7 @@ export function usePortMessageHandler() {
               !!effectiveSynthesisProvider,
               !!effectiveRefinerProvider,
               !!mappingEnabled && !!effectiveMappingProvider,
+              // TODO: Update createOptimisticAiTurn to partial support if needed, but for now Antagonist is effectively a parallel step
               effectiveSynthesisProvider || undefined,
               effectiveMappingProvider || undefined,
               effectiveRefinerProvider || undefined,
@@ -224,6 +231,7 @@ export function usePortMessageHandler() {
                 synthesis: !!effectiveSynthesisProvider,
                 mapping: !!mappingEnabled && !!effectiveMappingProvider,
                 refiner: !!effectiveRefinerProvider,
+                antagonist: !!effectiveAntagonistProvider // This hint helps UI if extended
               },
             );
             draft.set(aiTurnId, aiTurn);
@@ -638,7 +646,7 @@ export function usePortMessageHandler() {
                 if (
                   (!providerId || typeof providerId !== "string") &&
                   (!providerId || typeof providerId !== "string") &&
-                  (stepType === "synthesis" || stepType === "mapping" || stepType === "refiner")
+                  (stepType === "synthesis" || stepType === "mapping" || stepType === "refiner" || stepType === "antagonist")
                 ) {
                   providerId = extractProviderFromStepId(stepId, stepType);
                 }
@@ -770,6 +778,32 @@ export function usePortMessageHandler() {
                         [providerId!]: arr as any,
                       } as any;
                       aiTurn.refinerVersion = (aiTurn.refinerVersion ?? 0) + 1;
+                    } else if (stepType === "antagonist") {
+                      const arr = Array.isArray(aiTurn.antagonistResponses?.[providerId!])
+                        ? [...(aiTurn.antagonistResponses![providerId!] as any[])]
+                        : [];
+                      if (arr.length > 0) {
+                        const latest = arr[arr.length - 1] as any;
+                        arr[arr.length - 1] = {
+                          ...latest,
+                          status: "error",
+                          text: errText || (latest?.text ?? ""),
+                          updatedAt: now,
+                        } as any;
+                      } else {
+                        arr.push({
+                          providerId: providerId!,
+                          text: errText || "",
+                          status: "error",
+                          createdAt: now,
+                          updatedAt: now,
+                        } as any);
+                      }
+                      aiTurn.antagonistResponses = {
+                        ...(aiTurn.antagonistResponses || {}),
+                        [providerId!]: arr as any,
+                      } as any;
+                      // You might want to add antagonistVersion if atom dependency tracking is needed
                     }
                   });
                 }

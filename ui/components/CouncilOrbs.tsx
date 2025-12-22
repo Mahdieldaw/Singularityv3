@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useRef, useEffect } from "react";
 import { useAtom, useAtomValue } from "jotai";
-import { providerEffectiveStateFamily, isSplitOpenAtom, synthesisProviderAtom, mappingProviderAtom, composerModelAtom, analystModelAtom, providerAuthStatusAtom, selectedModelsAtom, refinerProviderAtom } from "../state/atoms";
+import { providerEffectiveStateFamily, isSplitOpenAtom, synthesisProviderAtom, mappingProviderAtom, composerModelAtom, analystModelAtom, providerAuthStatusAtom, selectedModelsAtom, refinerProviderAtom, antagonistProviderAtom } from "../state/atoms";
 import { LLMProvider } from "../types";
 import { PROVIDER_ACCENT_COLORS, WORKFLOW_STAGE_COLORS } from "../constants";
 import { getProviderColor, getProviderLogo } from "../utils/provider-helpers";
@@ -56,6 +56,7 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
     const [composerVal, setComposer] = useAtom(composerModelAtom);
     const [analystVal, setAnalyst] = useAtom(analystModelAtom);
     const [selectedModels, setSelectedModels] = useAtom(selectedModelsAtom);
+    const [antagonistProvider, setAntagonistProvider] = useAtom(antagonistProviderAtom);
     const containerRef = useRef<HTMLDivElement>(null);
 
     // Click Outside Listener

@@ -31,9 +31,11 @@ export interface InitializeRequest {
   includeMapping: boolean;
   includeSynthesis: boolean;
   includeRefiner?: boolean;
+  includeAntagonist?: boolean;
   synthesizer?: ProviderKey;
   mapper?: ProviderKey;
   refiner?: ProviderKey;
+  antagonist?: ProviderKey;
   useThinking?: boolean;
   providerMeta?: Partial<Record<ProviderKey, any>>;
   clientUserTurnId?: string; // Optional: client-side provisional ID for the user's turn.
@@ -53,7 +55,9 @@ export interface ExtendRequest {
   synthesizer?: ProviderKey;
   mapper?: ProviderKey;
   refiner?: ProviderKey;
+  antagonist?: ProviderKey;
   includeRefiner?: boolean;
+  includeAntagonist?: boolean;
   useThinking?: boolean;
   providerMeta?: Partial<Record<ProviderKey, any>>;
   clientUserTurnId?: string; // Optional: client-side provisional ID for the user's turn.
@@ -240,6 +244,8 @@ export interface TurnCreatedMessage {
   providers?: ProviderKey[];
   synthesisProvider?: ProviderKey | null;
   mappingProvider?: ProviderKey | null;
+  refinerProvider?: ProviderKey | null;
+  antagonistProvider?: ProviderKey | null;
 }
 
 export interface TurnFinalizedMessage {

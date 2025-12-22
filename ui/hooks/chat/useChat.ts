@@ -13,6 +13,7 @@ import {
   mappingProviderAtom,
   synthesisProviderAtom,
   refinerProviderAtom,
+  antagonistProviderAtom,
   powerUserModeAtom,
   thinkOnChatGPTAtom,
   activeAiTurnIdAtom,
@@ -56,6 +57,7 @@ export function useChat() {
   const currentSessionId = useAtomValue(currentSessionIdAtom);
   const turnIds = useAtomValue(turnIdsAtom);
   const refinerProvider = useAtomValue(refinerProviderAtom);
+  const antagonistProvider = useAtomValue(antagonistProviderAtom);
 
 
 
@@ -136,6 +138,15 @@ export function useChat() {
           }
         })();
         const effectiveRefinerProvider = refinerProvider || fallbackRefiner || null;
+
+        const fallbackAntagonist = (() => {
+          try {
+            return localStorage.getItem("htos_antagonist_provider");
+          } catch {
+            return null;
+          }
+        })();
+        const effectiveAntagonistProvider = antagonistProvider || fallbackAntagonist || null;
 
         const isInitialize =
           mode === "new" && (!currentSessionId || turnIds.length === 0);
@@ -234,6 +245,7 @@ export function useChat() {
       mappingEnabled,
       mappingProvider,
       refinerProvider,
+      antagonistProvider,
       thinkOnChatGPT,
       powerUserMode,
       turnIds.length,
