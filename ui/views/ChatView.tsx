@@ -23,8 +23,9 @@ import { SplitPaneRightPanel } from "../components/SplitPaneRightPanel";
 import { CouncilOrbsVertical } from "../components/CouncilOrbsVertical";
 import { useSmartProviderDefaults } from "../hooks/useSmartProviderDefaults";
 
+import { safeLazy } from "../utils/safeLazy";
 // Lazy load DecisionMapSheet (named export adapter)
-const DecisionMapSheet = React.lazy(() =>
+const DecisionMapSheet = safeLazy(() =>
   import("../components/DecisionMapSheet").then(module => ({ default: module.DecisionMapSheet }))
 );
 

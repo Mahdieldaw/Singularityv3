@@ -3,6 +3,7 @@ import { useAtomValue, useSetAtom } from "jotai";
 import { activeSplitPanelAtom, providerEffectiveStateFamily, turnsMapAtom } from "../state/atoms";
 import { LLM_PROVIDERS_CONFIG } from "../constants";
 import type { AiTurn } from "../types";
+import { useRefinerOutput } from "../hooks/useRefinerOutput";
 import clsx from "clsx";
 
 interface CouncilOrbsVerticalProps {
@@ -21,6 +22,7 @@ export const CouncilOrbsVertical: React.FC<CouncilOrbsVerticalProps> = React.mem
 
     const { turnId, providerId: activeProviderId } = activePanel;
     const turn = turnsMap.get(turnId);
+    const { output: refinerOutput } = useRefinerOutput(turnId);
 
     // Filter out system provider
     const allProviders = LLM_PROVIDERS_CONFIG.filter(p => p.id !== 'system');
@@ -42,13 +44,18 @@ export const CouncilOrbsVertical: React.FC<CouncilOrbsVerticalProps> = React.mem
     // Filter display providers to only those that contributed
     const displayProviders = allProviders.filter(p => contributingIds.includes(String(p.id)));
 
+    // Condition for trust button
+    const showTrustButton = !!(refinerOutput?.gem || refinerOutput?.synthesisPlus);
+    const isTrustActive = activeProviderId === '__trust__';
+    const middleIndex = Math.max(0, Math.floor(displayProviders.length / 2));
+
     return (
         <div className="flex flex-col items-center gap-3 py-4 w-full">
-            {displayProviders.map((p) => {
+            {displayProviders.map((p, idx) => {
                 const pid = String(p.id);
                 const isActive = pid === activeProviderId;
 
-                return (
+                const orbElement = (
                     <VerticalOrb
                         key={pid}
                         turnId={turnId}
@@ -59,7 +66,49 @@ export const CouncilOrbsVertical: React.FC<CouncilOrbsVerticalProps> = React.mem
                         hoveredOrb={hoveredOrb}
                     />
                 );
+
+                if (showTrustButton && idx === middleIndex) {
+                    return (
+                        <React.Fragment key={pid}>
+                            <button
+                                onClick={() => setActiveSplitPanel({ turnId, providerId: '__trust__' })}
+                                className={clsx(
+                                    "flex items-center justify-center w-6 h-6 rounded-full transition-all duration-300 shrink-0",
+                                    isTrustActive
+                                        ? "bg-brand-500 shadow-glow-brand-soft ring-2 ring-brand-400"
+                                        : "bg-surface-raised border border-border-subtle hover:bg-surface-highlight hover:scale-110"
+                                )}
+                                title="Trust Pane (Epistemic Audit)"
+                            >
+                                <span className={clsx("text-[10px]", isTrustActive ? "text-white" : "text-brand-400")}>
+                                    💎
+                                </span>
+                            </button>
+                            {orbElement}
+                        </React.Fragment>
+                    );
+                }
+
+                return orbElement;
             })}
+
+            {/* Fallback if no providers but trust button should show */}
+            {displayProviders.length === 0 && showTrustButton && (
+                <button
+                    onClick={() => setActiveSplitPanel({ turnId, providerId: '__trust__' })}
+                    className={clsx(
+                        "flex items-center justify-center w-6 h-6 rounded-full transition-all duration-300",
+                        isTrustActive
+                            ? "bg-brand-500 shadow-glow-brand-soft ring-2 ring-brand-400"
+                            : "bg-surface-raised border border-border-subtle hover:bg-surface-highlight hover:scale-110"
+                    )}
+                    title="Trust Pane (Epistemic Audit)"
+                >
+                    <span className={clsx("text-[10px]", isTrustActive ? "text-white" : "text-brand-400")}>
+                        💎
+                    </span>
+                </button>
+            )}
         </div>
     );
 });

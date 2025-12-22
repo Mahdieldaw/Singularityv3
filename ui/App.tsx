@@ -1,4 +1,4 @@
-import React, { useRef, Suspense } from "react";
+import { useRef, Suspense } from "react";
 import { useAtom } from "jotai";
 import { usePortMessageHandler } from "./hooks/usePortMessageHandler";
 import { useConnectionMonitoring } from "./hooks/useConnectionMonitoring";
@@ -6,16 +6,17 @@ import { useHistoryLoader } from "./hooks/useHistoryLoader";
 import { useResponsiveLoadingGuard } from "./hooks/useLoadingWatchdog";
 import ChatView from "./views/ChatView";
 import Header from "./components/Header";
-const HistoryPanel = React.lazy(() => import("./components/HistoryPanel"));
+import { safeLazy } from "./utils/safeLazy";
+const HistoryPanel = safeLazy(() => import("./components/HistoryPanel"));
 import Banner from "./components/Banner";
 
-const SettingsPanel = React.lazy(() => import("./components/SettingsPanel"));
+const SettingsPanel = safeLazy(() => import("./components/SettingsPanel"));
 import { Toast } from "./components/Toast";
 import { isHistoryPanelOpenAtom } from "./state/atoms";
 
 import { useInitialization } from "./hooks/useInitialization"; // Import the new hook
 import LaunchpadTab from "./components/LaunchpadTab"; // Import LaunchpadTab
-const LaunchpadDrawer = React.lazy(() => import("./components/LaunchpadDrawer")); // Lazy load LaunchpadDrawer
+const LaunchpadDrawer = safeLazy(() => import("./components/LaunchpadDrawer")); // Lazy load LaunchpadDrawer
 import { useSmartProviderDefaults } from "./hooks/useSmartProviderDefaults";
 import { useOnClickOutside } from "usehooks-ts";
 import { useKey } from "./hooks/useKey";
