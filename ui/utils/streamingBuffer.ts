@@ -20,7 +20,6 @@ export class StreamingBuffer {
     }
   > = new Map();
 
-  private flushTimer: number | null = null;
   private onFlushCallback: (updates: BatchUpdate[]) => void;
 
   constructor(onFlush: (updates: BatchUpdate[]) => void) {
@@ -47,22 +46,9 @@ export class StreamingBuffer {
     entry.status = status;
     entry.responseType = responseType;
 
-    this.scheduleBatchFlush();
-  }
-
-  private scheduleBatchFlush() {
-    // Cancel any pending flush
-    if (this.flushTimer !== null) {
-      cancelAnimationFrame(this.flushTimer);
-    }
-
-    // ⭐ DOUBLE-RAF PATTERN: First RAF schedules, second RAF executes after layout
-    this.flushTimer = window.requestAnimationFrame(() => {
-      window.requestAnimationFrame(() => {
-        this.flushAll();
-        this.flushTimer = null;
-      });
-    });
+    // ✅ IMMEDIATE FLUSH: Zero throttling.
+    // Rely on React 18 automatic batching and tab-based isolation for performance.
+    this.flushAll();
   }
 
   private flushAll() {
@@ -93,18 +79,10 @@ export class StreamingBuffer {
   }
 
   flushImmediate() {
-    if (this.flushTimer !== null) {
-      cancelAnimationFrame(this.flushTimer);
-      this.flushTimer = null;
-    }
     this.flushAll();
   }
 
   clear() {
-    if (this.flushTimer !== null) {
-      cancelAnimationFrame(this.flushTimer);
-      this.flushTimer = null;
-    }
     this.pendingDeltas.clear();
   }
 }
