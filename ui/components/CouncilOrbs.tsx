@@ -238,6 +238,18 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
         } catch { }
     };
 
+    const handleSelectAntagonist = (pid: string) => {
+        if (antagonistProvider === pid) {
+            setAntagonistProvider(null);
+        } else {
+            setAntagonistProvider(pid);
+            try {
+                localStorage.setItem('htos_antagonist_locked', 'true');
+                chrome?.storage?.local?.set?.({ provider_lock_settings: { antagonist_locked: true } });
+            } catch { }
+        }
+    };
+
 
     return (
         <div
@@ -512,6 +524,34 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
                                     const isUnauthorized = authStatus && authStatus[pid] === false;
                                     return (
                                         <option key={`a-${pid}`} value={pid} disabled={isUnauthorized}>
+                                            {p.name} {isUnauthorized ? "(Locked)" : ""}
+                                        </option>
+                                    );
+                                })}
+                            </select>
+                        </div>
+
+                        {/* Antagonist Dropdown */}
+                        <div>
+                            <div className="flex items-center gap-2 mb-2 text-sm"><span>🎭</span><span>Antagonist</span></div>
+                            <select
+                                value={antagonistProvider || ""}
+                                onChange={(e) => {
+                                    const val = e.target.value;
+                                    if (val === "") {
+                                        setAntagonistProvider(null);
+                                    } else {
+                                        handleSelectAntagonist(val);
+                                    }
+                                }}
+                                className="w-full bg-chip border border-border-subtle rounded-md px-2 py-1.5 text-xs text-text-primary outline-none focus:border-brand-500 transition-colors"
+                            >
+                                <option value="">None</option>
+                                {allProviders.map(p => {
+                                    const pid = String(p.id);
+                                    const isUnauthorized = authStatus && authStatus[pid] === false;
+                                    return (
+                                        <option key={`ant-${pid}`} value={pid} disabled={isUnauthorized}>
                                             {p.name} {isUnauthorized ? "(Locked)" : ""}
                                         </option>
                                     );

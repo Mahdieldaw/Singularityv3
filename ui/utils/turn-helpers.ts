@@ -27,12 +27,13 @@ export function createOptimisticAiTurn(
   aiTurnId: string,
   userTurn: UserTurn,
   activeProviders: ProviderKey[],
-  shouldUseSynthesis: boolean,
   shouldUseMapping: boolean,
+  shouldUseSynthesis: boolean,
   shouldUseRefiner: boolean,
-  synthesisProvider?: string,
   mappingProvider?: string,
+  synthesisProvider?: string,
   refinerProvider?: string,
+  antagonistProvider?: string,
   timestamp?: number,
   explicitUserTurnId?: string,
   requestedFeatures?: { synthesis: boolean; mapping: boolean; refiner: boolean; antagonist: boolean },
@@ -102,9 +103,14 @@ export function createOptimisticAiTurn(
 
   // --- NEW: Antagonist setup ---
   const antagonistResponses: Record<string, ProviderResponse[]> = {};
-  if (requestedFeatures?.antagonist) {
-    // Wait, I don't have antagonistProvider passed in as a distinct argument yet, I need to add it to the signature in chunk 1 first?
-    // Actually I missed adding it to the signature in chunk 1, let me fix chunk 1 first.
+  if (requestedFeatures?.antagonist && antagonistProvider) {
+    antagonistResponses[antagonistProvider] = [{
+      providerId: antagonistProvider as ProviderKey,
+      text: "",
+      status: PRIMARY_STREAMING_PROVIDER_IDS.includes(String(antagonistProvider)) ? "streaming" : "pending",
+      createdAt: now,
+      updatedAt: now,
+    }];
   }
 
   const effectiveUserTurnId = explicitUserTurnId || userTurn.id;
@@ -127,11 +133,12 @@ export function createOptimisticAiTurn(
       synthesizer: synthesisProvider,
       mapper: mappingProvider,
       refiner: refinerProvider,
-      // antagonist: antagonistProvider, // Need to make sure I have this variable
+      antagonist: antagonistProvider,
       ...(requestedFeatures ? { requestedFeatures } : {}),
       ...(synthesisProvider ? { synthesizer: synthesisProvider } : {}),
       ...(mappingProvider ? { mapper: mappingProvider } : {}),
       ...(refinerProvider ? { refiner: refinerProvider } : {}),
+      ...(antagonistProvider ? { antagonist: antagonistProvider } : {}),
     },
   };
 }
@@ -296,7 +303,7 @@ export function applyStreamingUpdates(
       }
 
       aiTurn.antagonistResponses[providerId] = arr;
-      // aiTurn.antagonistVersion = (aiTurn.antagonistVersion ?? 0) + 1;
+      aiTurn.antagonistVersion = (aiTurn.antagonistVersion ?? 0) + 1;
     }
   });
 }

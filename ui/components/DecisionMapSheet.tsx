@@ -629,6 +629,95 @@ const RefinerSelector: React.FC<{ aiTurn: AiTurn, activeProviderId?: string, onS
   );
 };
 
+const AntagonistSelector: React.FC<{ aiTurn: AiTurn, activeProviderId?: string, onSelect: (pid: string) => void }> = ({ aiTurn, activeProviderId, onSelect }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const { handleClipClick } = useClipActions();
+  const authStatus = useAtomValue(providerAuthStatusAtom);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    };
+    if (isOpen) document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [isOpen]);
+
+  const activeProvider = activeProviderId ? getProviderConfig(activeProviderId) : null;
+  const providers = useMemo(() => LLM_PROVIDERS_CONFIG.filter(p => p.id !== 'system'), []);
+
+  return (
+    <div className="relative" ref={menuRef}>
+      <button
+        type="button"
+        onClick={() => setIsOpen(!isOpen)}
+        className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 transition-all text-sm font-medium text-text-primary"
+      >
+        <span className="text-base">🎭</span>
+        <span className="opacity-70 text-xs uppercase tracking-wide">Antagonist</span>
+        <span className="w-px h-3 bg-white/20 mx-1" />
+        <span className={clsx(!activeProvider && "text-text-muted italic")}>
+          {activeProvider?.name || "Select Model"}
+        </span>
+        <svg
+          className={clsx("w-3 h-3 text-text-muted transition-transform", isOpen && "rotate-180")}
+          fill="none" viewBox="0 0 24 24" stroke="currentColor"
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+
+      {isOpen && (
+        <div className="absolute top-full left-0 mt-2 w-64 bg-surface-raised border border-border-subtle rounded-xl shadow-elevated overflow-hidden z-[3600] animate-in fade-in slide-in-from-top-2 duration-200">
+          <div className="p-2 grid gap-1">
+            {providers.map(p => {
+              const pid = String(p.id);
+              const isActive = pid === activeProviderId;
+              const isUnauthorized = authStatus && authStatus[pid] === false;
+              const latestResp = getLatestResponse(aiTurn.antagonistResponses?.[pid]);
+              const hasError = latestResp?.status === 'error';
+              const errorMessage = hasError ? (latestResp?.meta?._rawError || "Failed") : null;
+              const isDisabled = isUnauthorized;
+
+              return (
+                <button
+                  key={pid}
+                  onClick={() => { if (!isDisabled) { onSelect(pid); handleClipClick(aiTurn.id, "antagonist", pid); setIsOpen(false); } }}
+                  disabled={isDisabled}
+                  className={clsx(
+                    "w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left transition-colors relative group",
+                    isActive ? "bg-brand-500/10 text-brand-500" : "hover:bg-surface-highlight text-text-secondary",
+                    (isDisabled || hasError) && "opacity-60",
+                    isDisabled && "cursor-not-allowed",
+                  )}
+                  title={errorMessage && typeof errorMessage === 'string' ? errorMessage : undefined}
+                >
+                  <div
+                    className="w-2 h-2 rounded-full shadow-sm"
+                    style={{ backgroundColor: getProviderColor(pid) }}
+                  />
+                  <div className="flex-1 flex flex-col">
+                    <span className="text-xs font-medium">{p.name}</span>
+                  </div>
+                  {hasError && (
+                    <div className="absolute left-full ml-2 top-1/2 -translate-y-1/2 hidden group-hover:block z-50 w-48 bg-black/90 text-white text-[10px] p-2 rounded shadow-lg pointer-events-none">
+                      {typeof errorMessage === 'string' ? errorMessage : "Previous generation failed"}
+                    </div>
+                  )}
+                  {isActive && <span>✓</span>}
+                  {isUnauthorized && <span>🔒</span>}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
 // ============================================================================
 // MAIN COMPONENT
 // ============================================================================
@@ -641,7 +730,7 @@ export const DecisionMapSheet = React.memo(() => {
   const antagonistProvider = useAtomValue(antagonistProviderAtom); // Added
   const setActiveSplitPanel = useSetAtom(activeSplitPanelAtom);
 
-  const [activeTab, setActiveTab] = useState<'graph' | 'narrative' | 'options' | 'audit'>('graph');
+  const [activeTab, setActiveTab] = useState<'graph' | 'narrative' | 'options' | 'audit' | 'antagonist'>('graph');
   const [selectedNode, setSelectedNode] = useState<{ id: string; label: string; supporters: (string | number)[]; theme?: string } | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [dims, setDims] = useState<{ w: number; h: number }>({ w: window.innerWidth, h: 400 });
@@ -937,7 +1026,8 @@ export const DecisionMapSheet = React.memo(() => {
     { key: 'graph' as const, label: 'Graph', activeClass: 'decision-tab-active-graph' },
     { key: 'narrative' as const, label: 'Narrative', activeClass: 'decision-tab-active-narrative' },
     { key: 'options' as const, label: 'Options', activeClass: 'decision-tab-active-options' },
-    { key: 'audit' as const, label: 'Epistemic Audit', activeClass: 'decision-tab-active-audit' }
+    { key: 'audit' as const, label: 'Epistemic Audit', activeClass: 'decision-tab-active-audit' },
+    { key: 'antagonist' as const, label: 'Antagonist', activeClass: 'decision-tab-active-antagonist' }
   ];
 
   const sheetHeightPx = Math.max(260, Math.round(window.innerHeight * sheetHeightRatio));
@@ -968,7 +1058,7 @@ export const DecisionMapSheet = React.memo(() => {
 
               {/* Left: Provider Selector (Mapper or Refiner based on tab) */}
               <div className="w-1/3 flex justify-start">
-                {aiTurn && activeTab !== 'audit' && (
+                {aiTurn && activeTab !== 'audit' && activeTab !== 'antagonist' && (
                   <MapperSelector
                     aiTurn={aiTurn}
                     activeProviderId={activeMappingPid}
@@ -981,6 +1071,13 @@ export const DecisionMapSheet = React.memo(() => {
                     onSelect={(pid) => {
                       setActiveRefinerPid(pid);
                     }}
+                  />
+                )}
+                {aiTurn && activeTab === 'antagonist' && (
+                  <AntagonistSelector
+                    aiTurn={aiTurn}
+                    activeProviderId={activeAntagonistPid || undefined}
+                    onSelect={() => { }}
                   />
                 )}
               </div>
@@ -1146,6 +1243,72 @@ export const DecisionMapSheet = React.memo(() => {
                       <div className="flex flex-col items-center justify-center h-full text-text-muted text-sm gap-2 opacity-60">
                         <span>🔒</span>
                         <span>No epistemic audit available. Run Refiner to generate.</span>
+                      </div>
+                    )}
+                  </m.div>
+                )}
+
+                {activeTab === 'antagonist' && (
+                  <m.div
+                    key="antagonist"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    className="h-full overflow-y-auto relative custom-scrollbar p-6"
+                  >
+                    {antagonistOutput ? (
+                      <div className="max-w-4xl mx-auto space-y-8 animate-in fade-in duration-500">
+                        {/* Critique Section */}
+                        <div className="bg-surface border border-border-subtle rounded-2xl p-6 shadow-sm">
+                          <div className="flex items-center gap-2 mb-4 text-brand-400 font-semibold uppercase tracking-wider text-xs">
+                            <span>🎭</span>
+                            <span>Critique & Refinement</span>
+                          </div>
+
+                          {antagonistOutput.the_prompt.grounding && (
+                            <div className="text-text-secondary text-sm italic mb-4 border-l-2 border-brand-500/30 pl-4 py-1 bg-brand-500/5 rounded-r-lg">
+                              {antagonistOutput.the_prompt.grounding}
+                            </div>
+                          )}
+
+                          <div className="text-text-primary text-base leading-relaxed bg-surface-raised p-5 rounded-xl border border-border-subtle/50 mb-4">
+                            <MarkdownDisplay content={antagonistOutput.the_prompt.text || "No prompt generated."} />
+                          </div>
+
+                          {antagonistOutput.the_prompt.payoff && (
+                            <div className="flex items-start gap-2 text-brand-300 text-sm font-medium bg-brand-500/10 p-3 rounded-lg border border-brand-500/20">
+                              <span className="text-lg mt-[-2px]">→</span>
+                              <span>{antagonistOutput.the_prompt.payoff}</span>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Audit Section */}
+                        {antagonistOutput.the_audit.missed.length > 0 && (
+                          <div className="bg-surface-raised border border-border-subtle/60 rounded-2xl p-6">
+                            <div className="flex items-center gap-2 mb-4 text-text-muted font-semibold uppercase tracking-wider text-xs">
+                              <span className="text-brand-400">🔍</span>
+                              <span>Missed Approaches & Blindspots</span>
+                            </div>
+
+                            <div className="grid gap-3">
+                              {antagonistOutput.the_audit.missed.map((m, idx) => (
+                                <div key={idx} className="flex flex-col gap-1 p-3 bg-surface border border-border-subtle/40 rounded-xl hover:border-brand-500/30 transition-colors">
+                                  <div className="text-sm font-medium text-text-primary">{m.approach}</div>
+                                  <div className="text-xs text-text-muted flex items-center gap-1.5">
+                                    <span className="w-1 h-1 rounded-full bg-border-strong" />
+                                    Source: {m.source}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="flex flex-col items-center justify-center h-full text-text-muted text-sm gap-2 opacity-60">
+                        <span>🎭</span>
+                        <span>No Antagonist output available. Run Antagonist to generate.</span>
                       </div>
                     )}
                   </m.div>

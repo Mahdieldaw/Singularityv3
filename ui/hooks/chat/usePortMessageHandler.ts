@@ -218,20 +218,20 @@ export function usePortMessageHandler() {
               aiTurnId,
               ensuredUser,
               activeProviders,
-              !!effectiveSynthesisProvider,
-              !!effectiveRefinerProvider,
-              !!mappingEnabled && !!effectiveMappingProvider,
-              // TODO: Update createOptimisticAiTurn to partial support if needed, but for now Antagonist is effectively a parallel step
-              effectiveSynthesisProvider || undefined,
+              !!mappingEnabled && !!effectiveMappingProvider, // 1. Mapping
+              !!effectiveSynthesisProvider,                  // 2. Synthesis
+              !!effectiveRefinerProvider,                    // 3. Refiner
               effectiveMappingProvider || undefined,
+              effectiveSynthesisProvider || undefined,
               effectiveRefinerProvider || undefined,
+              effectiveAntagonistProvider || undefined,       // 4. Antagonist
               Date.now(),
               ensuredUser.id,
               {
-                synthesis: !!effectiveSynthesisProvider,
                 mapping: !!mappingEnabled && !!effectiveMappingProvider,
+                synthesis: !!effectiveSynthesisProvider,
                 refiner: !!effectiveRefinerProvider,
-                antagonist: !!effectiveAntagonistProvider // This hint helps UI if extended
+                antagonist: !!effectiveAntagonistProvider
               },
             );
             draft.set(aiTurnId, aiTurn);
@@ -604,6 +604,15 @@ export function usePortMessageHandler() {
                       ),
                     };
                     aiTurn.refinerVersion = (aiTurn.refinerVersion ?? 0) + 1;
+                  } else if (stepType === "antagonist") {
+                    aiTurn.antagonistResponses = {
+                      ...(aiTurn.antagonistResponses || {}),
+                      [normalizedId]: updateResponseList(
+                        aiTurn.antagonistResponses?.[normalizedId],
+                        baseEntry,
+                      ),
+                    };
+                    aiTurn.antagonistVersion = (aiTurn.antagonistVersion ?? 0) + 1;
                   }
 
                   // CRITICAL: ensure the Map entry is observed as changed
@@ -803,7 +812,7 @@ export function usePortMessageHandler() {
                         ...(aiTurn.antagonistResponses || {}),
                         [providerId!]: arr as any,
                       } as any;
-                      // You might want to add antagonistVersion if atom dependency tracking is needed
+                      aiTurn.antagonistVersion = (aiTurn.antagonistVersion ?? 0) + 1;
                     }
                   });
                 }

@@ -190,7 +190,11 @@ export function useChat() {
             refiner: shouldUseSynthesis && effectiveRefinerProvider // Only run refiner if synthesis acts (it audits synthesis)
               ? (effectiveRefinerProvider as ProviderKey)
               : undefined,
+            antagonist: effectiveAntagonistProvider
+              ? (effectiveAntagonistProvider as ProviderKey)
+              : undefined,
             includeRefiner: !!(shouldUseSynthesis && effectiveRefinerProvider),
+            includeAntagonist: !!effectiveAntagonistProvider,
             useThinking: computeThinkFlag({
               modeThinkButtonOn: thinkOnChatGPT,
               input: prompt,
@@ -214,7 +218,11 @@ export function useChat() {
             refiner: shouldUseSynthesis && effectiveRefinerProvider
               ? (effectiveRefinerProvider as ProviderKey)
               : undefined,
+            antagonist: effectiveAntagonistProvider
+              ? (effectiveAntagonistProvider as ProviderKey)
+              : undefined,
             includeRefiner: !!(shouldUseSynthesis && effectiveRefinerProvider),
+            includeAntagonist: !!effectiveAntagonistProvider,
             useThinking: computeThinkFlag({
               modeThinkButtonOn: thinkOnChatGPT,
               input: prompt,
@@ -365,6 +373,7 @@ export function useChat() {
               synthesisResponses: normalizeSynthMap(round.synthesisResponses),
               mappingResponses: normalizeSynthMap(round.mappingResponses),
               refinerResponses: normalizeSynthMap(round.refinerResponses),
+              antagonistResponses: normalizeSynthMap(round.antagonistResponses),
             };
             newIds.push(aiTurn.id);
             newMap.set(aiTurn.id, aiTurn);
