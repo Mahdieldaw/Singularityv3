@@ -1,7 +1,7 @@
 const fs = require("fs");
 
 // Check if we should save to file
-const saveToFile = process.argv.includes("--save");
+const saveToFile = process.argv.includes("--save") || process.argv.includes("-save");
 
 function formatBytes(bytes) {
     if (bytes === 0) return "0 B";
@@ -13,7 +13,7 @@ function formatBytes(bytes) {
 
 function analyzeMetafile(metaPath, bundleName) {
     if (!fs.existsSync(metaPath)) {
-        return `\n${bundleName}: Metafile not found\n`;
+        return `\n${bundleName}: Metafile not found (Run 'npm run build:analyze' first)\n`;
     }
 
     const metafile = JSON.parse(fs.readFileSync(metaPath, "utf8"));

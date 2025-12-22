@@ -3,6 +3,7 @@
 
 import React, { useState, useCallback } from 'react';
 import type { RefinerOutput } from '../../../shared/parsing-utils';
+import { shortenInsight } from '../../utils/refiner-helpers';
 
 interface RefinerDotProps {
     refiner: RefinerOutput | null;
@@ -49,7 +50,6 @@ export const RefinerDot: React.FC<RefinerDotProps> = ({ refiner, onClick, isActi
                     }
                     ${isActive ? 'ring-2 ring-brand-500/60' : ''}
                 `}
-                title={hasGem ? refiner.gem!.insight : "View enhanced synthesis"}
                 aria-label={hasGem ? "View gem insight" : "View synthesis+"}
             >
                 {hasGem ? (
@@ -61,7 +61,7 @@ export const RefinerDot: React.FC<RefinerDotProps> = ({ refiner, onClick, isActi
             {hovering && hasGem && (
                 <div
                     className="
-                        absolute bottom-full right-0 mb-2 
+                        absolute top-full left-0 mt-2 
                         bg-surface-raised border border-border-subtle 
                         rounded-lg shadow-elevated px-3 py-2
                         text-xs text-text-primary max-w-[280px]
@@ -72,7 +72,7 @@ export const RefinerDot: React.FC<RefinerDotProps> = ({ refiner, onClick, isActi
                     <div className="flex flex-col gap-1">
                         <div className="flex items-start gap-2">
                             <span className="text-sm flex-shrink-0">💎</span>
-                            <span>{refiner!.gem!.insight}</span>
+                            <span>{shortenInsight(refiner!.gem!.insight)}</span>
                         </div>
                         {refiner!.gem!.impact && (
                             <div className="text-[11px] text-text-secondary mt-0.5">

@@ -149,37 +149,60 @@ interface NextStepStyles {
 }
 
 export function getNextStepStyles(action: NextStepAction | null | undefined): NextStepStyles {
-	switch (action) {
-		case 'proceed':
-			return {
-				container: 'bg-emerald-500/10 border-emerald-500/60',
-				icon: 'text-emerald-400',
-				label: 'text-emerald-300',
-			};
-		case 'verify':
-			return {
-				container: 'bg-intent-warning/15 border-intent-warning/40',
-				icon: 'text-intent-warning',
-				label: 'text-intent-warning',
-			};
-		case 'reframe':
-			return {
-				container: 'bg-sky-500/10 border-sky-500/50',
-				icon: 'text-sky-400',
-				label: 'text-sky-300',
-			};
-		case 'research':
-			return {
-				container: 'bg-violet-500/15 border-violet-500/40',
-				icon: 'text-violet-400',
-				label: 'text-violet-300',
-			};
-		default:
-			return {
-				container: 'bg-surface-highlight/40 border-border-subtle',
-				icon: 'text-brand-400',
-				label: 'text-text-primary',
-			};
-	}
+    switch (action) {
+        case 'proceed':
+            return {
+                container: 'bg-emerald-500/10 border-emerald-500/60',
+                icon: 'text-emerald-400',
+                label: 'text-emerald-300',
+            };
+        case 'verify':
+            return {
+                container: 'bg-intent-warning/15 border-intent-warning/40',
+                icon: 'text-intent-warning',
+                label: 'text-intent-warning',
+            };
+        case 'reframe':
+            return {
+                container: 'bg-sky-500/10 border-sky-500/50',
+                icon: 'text-sky-400',
+                label: 'text-sky-300',
+            };
+        case 'research':
+            return {
+                container: 'bg-violet-500/15 border-violet-500/40',
+                icon: 'text-violet-400',
+                label: 'text-violet-300',
+            };
+        default:
+            return {
+                container: 'bg-surface-highlight/40 border-border-subtle',
+                icon: 'text-brand-400',
+                label: 'text-text-primary',
+            };
+    }
 }
 
+
+/**
+ * Shorten insight text for tooltips: first line, first sentence, max 8 words.
+ */
+export function shortenInsight(text: string | null | undefined): string {
+    if (!text) return '';
+
+    // 1. Get first line
+    const firstLine = text.split('\n')[0].trim();
+
+    // 2. Get first sentence (naive split on . followed by space or end)
+    const firstSentence = firstLine.split(/\.\s/)[0].trim();
+
+    // 3. Limit to 8 words
+    const words = firstSentence.split(/\s+/);
+    if (words.length <= 8) {
+        // If we didn't truncate words but the original was longer, add ellipsis
+        const result = firstSentence.replace(/\.$/, ''); // Remove trailing dot if it will be added back later or if it's the end
+        return result === firstLine ? result : result + '...';
+    }
+
+    return words.slice(0, 8).join(' ') + '...';
+}

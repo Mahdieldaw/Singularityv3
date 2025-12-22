@@ -1,0 +1,243 @@
+
+================================================================================
+BUNDLE SIZE ANALYSIS REPORT
+Generated: 12/20/2025, 2:18:20 PM
+================================================================================
+
+================================================================================
+UI BUNDLE (Main Application)
+================================================================================
+
+Summary:
+  Total Input:  3.12 MB
+  Bundle Size:  1.12 KB
+  Compression:  0.0%
+
+Top 100 Largest Modules:
+────────────────────────────────────────────────────────────────────────────────
+  1. 595.65 KB    18542L (18.6%  ) katex/dist/katex.mjs
+  2. 128.60 KB    323L   (4.0%   ) react-dom/cjs/react-dom.production.min.js
+  3. 88.88 KB     3317L  (2.8%   ) react-virtuoso/dist/index.mjs
+  4. 82.60 KB     2487L  (2.6%   ) react-resizable-panels/dist/react-resizable-panels.browser.js
+  5. 69.66 KB     1620L  (2.2%   ) framer-motion/dist/es/projection/node/create-projection-node.mjs
+  6. 44.70 KB     1138L  (1.4%   ) ui/components/DecisionMapSheet.tsx
+  7. 44.48 KB     1057L  (1.4%   ) ui/components/AiTurnBlock.tsx
+  8. 39.34 KB     1324L  (1.2%   ) unified/lib/index.js
+  9. 37.30 KB     1300L  (1.2%   ) immer/dist/immer.mjs
+ 10. 36.57 KB     942L   (1.1%   ) ui/hooks/usePortMessageHandler.ts
+ 11. 36.26 KB     772L   (1.1%   ) ui/components/CouncilOrbs.tsx
+ 12. 36.02 KB     167L   (1.1%   ) ui/assets/logos/logo-icon.png
+ 13. 31.14 KB     733L   (1.0%   ) ui/components/experimental/DecisionMapGraph.tsx
+ 14. 30.59 KB     1047L  (1.0%   ) usehooks-ts/dist/index.js
+ 15. 28.36 KB     827L   (0.9%   ) shared/parsing-utils.ts
+ 16. 28.33 KB     1177L  (0.9%   ) mdast-util-from-markdown/lib/index.js
+ 17. 26.13 KB     1060L  (0.8%   ) micromark/lib/compile.js
+ 18. 26.07 KB     748L   (0.8%   ) ui/components/HistoryPanel.tsx
+ 19. 25.47 KB     647L   (0.8%   ) ui/components/ChatInput.tsx
+ 20. 22.99 KB     755L   (0.7%   ) jotai/esm/vanilla/utils.mjs
+ 21. 21.39 KB     499L   (0.7%   ) framer-motion/dist/es/gestures/drag/VisualElementDragControls.mjs
+ 22. 21.24 KB     657L   (0.7%   ) jotai/esm/vanilla/internals.mjs
+ 23. 20.85 KB     627L   (0.7%   ) ui/hooks/useChat.ts
+ 24. 20.24 KB     819L   (0.6%   ) micromark-extension-gfm-table/lib/syntax.js
+ 25. 19.80 KB     854L   (0.6%   ) micromark-extension-gfm-autolink-literal/lib/syntax.js
+ 26. 19.29 KB     788L   (0.6%   ) hast-util-to-jsx-runtime/lib/index.js
+ 27. 19.20 KB     559L   (0.6%   ) ui/hooks/useRoundActions.ts
+ 28. 19.13 KB     634L   (0.6%   ) hast-util-to-text/lib/index.js
+ 29. 18.19 KB     876L   (0.6%   ) micromark-core-commonmark/lib/html-flow.js
+ 30. 18.15 KB     478L   (0.6%   ) framer-motion/dist/es/render/VisualElement.mjs
+ 31. 17.70 KB     458L   (0.6%   ) ui/utils/copy-format-utils.ts
+ 32. 17.44 KB     550L   (0.5%   ) ui/state/atoms.ts
+ 33. 17.18 KB     344L   (0.5%   ) ui/components/ModelResponsePanel.tsx
+ 34. 16.55 KB     644L   (0.5%   ) vfile/lib/index.js
+ 35. 16.11 KB     363L   (0.5%   ) framer-motion/dist/es/render/utils/animation-state.mjs
+ 36. 14.82 KB     611L   (0.5%   ) micromark/lib/create-tokenizer.js
+ 37. 14.78 KB     321L   (0.5%   ) ui/components/DraftCard.tsx
+ 38. 14.70 KB     474L   (0.5%   ) mdast-util-to-hast/lib/state.js
+ 39. 14.01 KB     568L   (0.4%   ) property-information/lib/svg.js
+ 40. 13.05 KB     678L   (0.4%   ) micromark-core-commonmark/lib/html-text.js
+ 41. 12.87 KB     350L   (0.4%   ) motion-dom/dist/es/animation/JSAnimation.mjs
+ 42. 12.50 KB     445L   (0.4%   ) react-markdown/lib/index.js
+ 43. 12.43 KB     437L   (0.4%   ) shared/contract.ts
+ 44. 12.36 KB     560L   (0.4%   ) micromark-core-commonmark/lib/label-end.js
+ 45. 12.19 KB     485L   (0.4%   ) micromark-extension-gfm-footnote/lib/syntax.js
+ 46. 11.78 KB     399L   (0.4%   ) src/persistence/SimpleIndexedDBAdapter.ts
+ 47. 11.48 KB     353L   (0.4%   ) ui/utils/turn-helpers.ts
+ 48. 11.48 KB     400L   (0.4%   ) unist-util-visit-parents/lib/index.js
+ 49. 11.17 KB     404L   (0.3%   ) src/persistence/database.ts
+ 50. 11.15 KB     427L   (0.3%   ) vfile/lib/minpath.browser.js
+ 51. 11.08 KB     250L   (0.3%   ) framer-motion/dist/es/animation/sequence/create.mjs
+ 52. 10.79 KB     402L   (0.3%   ) src/persistence/transactions.ts
+ 53. 10.61 KB     362L   (0.3%   ) micromark/lib/initialize/document.js
+ 54. 10.53 KB     378L   (0.3%   ) lodash.debounce/index.js
+ 55. 10.18 KB     294L   (0.3%   ) ui/components/MarkdownDisplay.tsx
+ 56. 10.03 KB     394L   (0.3%   ) markdown-table/index.js
+ 57. 10.03 KB     282L   (0.3%   ) ui/views/ChatView.tsx
+ 58. 9.91 KB      105L   (0.3%   ) ui/assets/gemini.svg
+ 59. 9.62 KB      324L   (0.3%   ) motion-dom/dist/es/value/index.mjs
+ 60. 9.50 KB      258L   (0.3%   ) hast-util-to-html/lib/index.js
+ 61. 9.40 KB      314L   (0.3%   ) unist-util-visit/lib/index.js
+ 62. 9.28 KB      205L   (0.3%   ) ui/components/refinerui/RefinerCardsSection.tsx
+ 63. 9.06 KB      460L   (0.3%   ) micromark-core-commonmark/lib/code-fenced.js
+ 64. 9.00 KB      321L   (0.3%   ) ui/services/extension-api.ts
+ 65. 8.82 KB      366L   (0.3%   ) hastscript/lib/create-h.js
+ 66. 8.78 KB      297L   (0.3%   ) unist-util-is/lib/index.js
+ 67. 8.53 KB      359L   (0.3%   ) hast-util-to-html/lib/omission/closing.js
+ 68. 8.45 KB      323L   (0.3%   ) property-information/lib/html.js
+ 69. 8.43 KB      318L   (0.3%   ) mdast-util-math/lib/index.js
+ 70. 8.02 KB      315L   (0.3%   ) vfile-message/lib/index.js
+ 71. 7.99 KB      301L   (0.2%   ) mdast-util-gfm-table/lib/index.js
+ 72. 7.84 KB      222L   (0.2%   ) ui/components/refinerui/TrustSignalsPanel.tsx
+ 73. 7.59 KB      279L   (0.2%   ) hast-util-is-element/lib/index.js
+ 74. 7.49 KB      253L   (0.2%   ) mdast-util-to-hast/lib/footer.js
+ 75. 7.44 KB      251L   (0.2%   ) micromark-util-subtokenize/lib/splice-buffer.js
+ 76. 7.39 KB      266L   (0.2%   ) hast-util-to-html/lib/handle/element.js
+ 77. 7.28 KB      176L   (0.2%   ) motion-dom/dist/es/animation/generators/spring/index.mjs
+ 78. 7.24 KB      156L   (0.2%   ) motion-dom/dist/es/view/start.mjs
+ 79. 7.05 KB      101L   (0.2%   ) motion-dom/dist/es/index.mjs
+ 80. 7.00 KB      241L   (0.2%   ) micromark-core-commonmark/lib/attention.js
+ 81. 6.92 KB      171L   (0.2%   ) ui/components/SettingsPanel.tsx
+ 82. 6.90 KB      246L   (0.2%   ) micromark-util-character/index.js
+ 83. 6.83 KB      217L   (0.2%   ) ui/components/Icons.tsx
+ 84. 6.79 KB      172L   (0.2%   ) framer-motion/dist/es/animation/optimized-appear/start.mjs
+ 85. 6.77 KB      27L    (0.2%   ) react/cjs/react.production.min.js
+ 86. 6.77 KB      167L   (0.2%   ) framer-motion/dist/es/components/AnimatePresence/index.mjs
+ 87. 6.69 KB      228L   (0.2%   ) micromark-util-subtokenize/index.js
+ 88. 6.66 KB      345L   (0.2%   ) micromark-extension-math/lib/math-flow.js
+ 89. 6.62 KB      135L   (0.2%   ) ui/components/LaunchpadDrawer.tsx
+ 90. 6.55 KB      281L   (0.2%   ) mdast-util-gfm-autolink-literal/lib/index.js
+ 91. 6.54 KB      262L   (0.2%   ) mdast-util-find-and-replace/lib/index.js
+ 92. 6.24 KB      179L   (0.2%   ) motion-dom/dist/es/animation/AsyncMotionValueAnimation.mjs
+ 93. 6.22 KB      154L   (0.2%   ) micromark-extension-gfm-footnote/lib/html.js
+ 94. 6.10 KB      213L   (0.2%   ) micromark-core-commonmark/lib/list.js
+ 95. 6.00 KB      141L   (0.2%   ) framer-motion/dist/es/motion/utils/use-visual-element.mjs
+ 96. 5.74 KB      132L   (0.2%   ) motion-dom/dist/es/animation/keyframes/DOMKeyframesResolver.mjs
+ 97. 5.73 KB      156L   (0.2%   ) framer-motion/dist/es/gestures/pan/PanSession.mjs
+ 98. 5.68 KB      148L   (0.2%   ) framer-motion/dist/es/motion/features/layout/MeasureLayout.mjs
+ 99. 5.66 KB      85L    (0.2%   ) framer-motion/dist/es/index.mjs
+100. 5.54 KB      199L   (0.2%   ) ui/services/port-health-manager.ts
+
+Top 15 Heaviest Packages:
+────────────────────────────────────────────────────────────────────────────────
+  1. 595.65 KB    (18.6%  ) katex/dist
+  2. 380.77 KB    (11.9%  ) framer-motion/dist
+  3. 178.12 KB    (5.6%   ) motion-dom/dist
+  4. 128.60 KB    (4.0%   ) react-dom/cjs
+  5. 110.96 KB    (3.5%   ) micromark-core-commonmark/lib
+  6. 88.88 KB     (2.8%   ) react-virtuoso/dist
+  7. 82.60 KB     (2.6%   ) react-resizable-panels/dist
+  8. 66.76 KB     (2.1%   ) micromark/lib
+  9. 64.60 KB     (2.0%   ) mdast-util-to-markdown/lib
+ 10. 52.64 KB     (1.6%   ) jotai/esm
+ 11. 51.40 KB     (1.6%   ) mdast-util-to-hast/lib
+ 12. 40.71 KB     (1.3%   ) unified/lib
+ 13. 37.30 KB     (1.2%   ) immer/dist
+ 14. 36.16 KB     (1.1%   ) hast-util-to-html/lib
+ 15. 34.12 KB     (1.1%   ) property-information/lib
+
+================================================================================
+SERVICE WORKER BUNDLE
+================================================================================
+
+Summary:
+  Total Input:  587.99 KB
+  Bundle Size:  214.29 KB
+  Compression:  36.4%
+
+Top 100 Largest Modules:
+────────────────────────────────────────────────────────────────────────────────
+  1. 74.30 KB     2185L  (12.6%  ) src/core/workflow-engine.js
+  2. 39.39 KB     1228L  (6.7%   ) src/persistence/SessionManager.js
+  3. 37.75 KB     1218L  (6.4%   ) src/providers/chatgpt.js
+  4. 33.72 KB     925L   (5.7%   ) src/sw-entry.js
+  5. 28.36 KB     827L   (4.8%   ) shared/parsing-utils.ts
+  6. 25.97 KB     614L   (4.4%   ) src/core/PromptService.ts
+  7. 25.82 KB     921L   (4.4%   ) src/HTOS/BusController.js
+  8. 24.54 KB     698L   (4.2%   ) src/core/connection-handler.js
+  9. 24.12 KB     899L   (4.1%   ) src/utils/ErrorHandler.js
+ 10. 19.12 KB     672L   (3.3%   ) src/core/dnr-utils.js
+ 11. 17.53 KB     394L   (3.0%   ) src/core/ResponseProcessor.ts
+ 12. 17.04 KB     554L   (2.9%   ) src/providers/claude.js
+ 13. 16.49 KB     550L   (2.8%   ) src/providers/gemini.js
+ 14. 15.79 KB     574L   (2.7%   ) src/HTOS/NetRulesManager.js
+ 15. 15.46 KB     476L   (2.6%   ) src/core/workflow-compiler.js
+ 16. 14.41 KB     465L   (2.5%   ) src/core/request-lifecycle-manager.js
+ 17. 12.80 KB     415L   (2.2%   ) src/providers/chatgpt-adapter.js
+ 18. 12.63 KB     432L   (2.1%   ) src/providers/qwen.js
+ 19. 11.78 KB     399L   (2.0%   ) src/persistence/SimpleIndexedDBAdapter.ts
+ 20. 11.65 KB     366L   (2.0%   ) src/core/auth-manager.js
+ 21. 11.17 KB     404L   (1.9%   ) src/persistence/database.ts
+ 22. 10.79 KB     402L   (1.8%   ) src/persistence/transactions.ts
+ 23. 10.77 KB     355L   (1.8%   ) src/providers/gemini-adapter.js
+ 24. 9.80 KB      320L   (1.7%   ) src/providers/claude-adapter.js
+ 25. 8.56 KB      346L   (1.5%   ) src/core/PersistenceMonitor.js
+ 26. 8.37 KB      285L   (1.4%   ) src/providers/qwen-adapter.js
+ 27. 7.91 KB      250L   (1.3%   ) src/core/context-resolver.js
+ 28. 6.06 KB      187L   (1.0%   ) src/core/context-utils.js
+ 29. 5.26 KB      146L   (0.9%   ) shared/artifact-processor.ts
+ 30. 4.32 KB      172L   (0.7%   ) src/core/lifecycle-manager.js
+ 31. 4.08 KB      106L   (0.7%   ) src/core/preflight-validator.js
+ 32. 3.79 KB      125L   (0.6%   ) src/core/provider-health-tracker.js
+ 33. 3.65 KB      145L   (0.6%   ) src/core/error-classifier.js
+ 34. 3.08 KB      120L   (0.5%   ) src/persistence/index.ts
+ 35. 3.07 KB      152L   (0.5%   ) src/persistence/types.ts
+ 36. 1.66 KB      55L    (0.3%   ) shared/provider-config.ts
+ 37. 1.57 KB      51L    (0.3%   ) src/persistence/schemaVerification.ts
+ 38. 1.52 KB      55L    (0.3%   ) shared/provider-locks.ts
+ 39. 1.45 KB      45L    (0.2%   ) src/core/service-registry.js
+ 40. 1.21 KB      45L    (0.2%   ) src/shared/auth-config.ts
+ 41. 665.00 B     16L    (0.1%   ) shared/provider-limits.ts
+ 42. 588.00 B     24L    (0.1%   ) src/core/vendor-exports.js
+
+================================================================================
+CONTENT SCRIPT BUNDLE
+================================================================================
+
+Summary:
+  Total Input:  6.92 KB
+  Bundle Size:  4.54 KB
+  Compression:  65.6%
+
+Top 100 Largest Modules:
+────────────────────────────────────────────────────────────────────────────────
+  1. 6.92 KB      255L   (100.0% ) src/cs-openai.js
+
+================================================================================
+OFFSCREEN BUNDLE
+================================================================================
+
+Summary:
+  Total Input:  34.65 KB
+  Bundle Size:  12.56 KB
+  Compression:  36.2%
+
+Top 100 Largest Modules:
+────────────────────────────────────────────────────────────────────────────────
+  1. 25.82 KB     921L   (74.5%  ) src/HTOS/BusController.js
+  2. 8.46 KB      262L   (24.4%  ) src/HTOS/OffscreenBootstrap.js
+  3. 374.00 B     11L    (1.1%   ) src/offscreen-entry.js
+
+================================================================================
+OI BUNDLE
+================================================================================
+
+Summary:
+  Total Input:  40.82 KB
+  Bundle Size:  23.24 KB
+  Compression:  56.9%
+
+Top 100 Largest Modules:
+────────────────────────────────────────────────────────────────────────────────
+  1. 40.82 KB     1270L  (100.0% ) src/oi.js
+
+================================================================================
+RECOMMENDATIONS:
+================================================================================
+1. Focus on modules larger than 50 KB
+2. Consider lazy loading for heavy features
+3. Check if you're importing full libraries vs specific components
+4. Use dynamic imports for code splitting
+5. Review if all imported packages are actually used
+
+For interactive visualization: npm run analyze:ui
+================================================================================
+
