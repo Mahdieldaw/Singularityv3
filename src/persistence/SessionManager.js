@@ -3,13 +3,10 @@
 
 import { SimpleIndexedDBAdapter } from "./SimpleIndexedDBAdapter.js";
 
-// Global session cache (maintains backward compatibility)
-const __HTOS_SESSIONS = (self.__HTOS_SESSIONS = self.__HTOS_SESSIONS || {});
+
 
 export class SessionManager {
   constructor() {
-    this.sessions = __HTOS_SESSIONS;
-    this.storageKey = "htos_sessions";
     this.isExtensionContext = false;
 
     // Persistence layer components will be injected
@@ -107,6 +104,8 @@ export class SessionManager {
     }
     const now = Date.now();
 
+    const contextSummary = this._buildContextSummary(result);
+
     // 1) Create session
     const sessionRecord = {
       id: sessionId,
@@ -175,7 +174,7 @@ export class SessionManager {
       mappingResponseCount: this.countResponses(result.mappingOutputs),
       refinerResponseCount: this.countResponses(result.refinerOutputs),
       antagonistResponseCount: this.countResponses(result.antagonistOutputs),
-      lastContextSummary: null, // Initial turn has no previous context
+      lastContextSummary: contextSummary,
       meta: await this._attachRunIdMeta(aiTurnId),
     };
     await this.adapter.put("turns", aiTurnRecord);
@@ -188,16 +187,6 @@ export class SessionManager {
     sessionRecord.updatedAt = now;
     await this.adapter.put("sessions", sessionRecord);
 
-    // 7) Update lightweight session cache (metadata only)
-    this.sessions[sessionId] = {
-      id: sessionRecord.id,
-      title: sessionRecord.title,
-      createdAt: sessionRecord.createdAt,
-      updatedAt: sessionRecord.updatedAt,
-      lastTurnId: sessionRecord.lastTurnId,
-      lastActivity: sessionRecord.updatedAt || now,
-    };
-
     return { sessionId, userTurnId, aiTurnId };
   }
 
@@ -207,6 +196,8 @@ export class SessionManager {
   async _persistExtend(request, context, result) {
     const { sessionId } = request;
     const now = Date.now();
+
+    const contextSummary = this._buildContextSummary(result);
 
     // Validate last turn
     if (!context?.lastTurnId) {
@@ -280,6 +271,7 @@ export class SessionManager {
       mappingResponseCount: this.countResponses(result.mappingOutputs),
       refinerResponseCount: this.countResponses(result.refinerOutputs),
       antagonistResponseCount: this.countResponses(result.antagonistOutputs),
+      lastContextSummary: contextSummary,
       meta: await this._attachRunIdMeta(aiTurnId),
     };
     await this.adapter.put("turns", aiTurnRecord);
@@ -301,16 +293,6 @@ export class SessionManager {
       session.updatedAt = now;
       await this.adapter.put("sessions", session);
     }
-
-    // 6) Update lightweight session cache (metadata only)
-    this.sessions[sessionId] = {
-      id: session.id,
-      title: session.title,
-      createdAt: session.createdAt,
-      updatedAt: session.updatedAt,
-      lastTurnId: session.lastTurnId,
-      lastActivity: session.lastActivity,
-    };
 
     return { sessionId, userTurnId, aiTurnId };
   }
@@ -621,14 +603,7 @@ export class SessionManager {
       }, respId);
     }
 
-    // NEW: Asynchronously extract and store context summary
-    // Fire-and-forget to avoid blocking the main persistence flow
-    setTimeout(() => {
-      const contextSummary = this._buildContextSummary(result);
-      if (contextSummary) {
-        this._updateTurnContextSummary(aiTurnId, contextSummary);
-      }
-    }, 0);
+    // Context summary is now persisted atomically during turn creation.
   }
 
   /**
@@ -691,76 +666,43 @@ export class SessionManager {
   async getOrCreateSession(sessionId) {
     if (!sessionId) throw new Error("sessionId required");
 
-    // 1. Check in-memory cache first
-    if (this.sessions?.[sessionId]) {
-      console.log(`[SessionManager] Cache hit for session: ${sessionId}`);
-      return this.sessions[sessionId];
-    }
+    // Direct persistence-backed retrieval/creation
+    // 1. Try to get existing session from DB
+    let sessionRecord = await this.adapter.get("sessions", sessionId);
 
-    // 2. Fallback to persistence-backed retrieval/creation
-    console.log(
-      `[SessionManager] Cache miss for session: ${sessionId}. Fetching from DB...`,
-    );
-
-    try {
-      // Try to get existing session from DB
-      let sessionRecord = await this.adapter.get("sessions", sessionId);
-
-      // Create new session if doesn't exist
-      if (!sessionRecord) {
-        sessionRecord = {
-          id: sessionId,
-          userId: "default-user",
-          provider: "multi",
-          title: "",
-          isActive: true,
-          createdAt: Date.now(),
-          updatedAt: Date.now(),
-          lastTurnId: null,
-          lastActivity: Date.now(),
-        };
-
-        await this.adapter.put("sessions", sessionRecord);
-
-        // Create default thread
-        const defaultThread = {
-          id: "default-thread",
-          sessionId: sessionId,
-          parentThreadId: null,
-          branchPointTurnId: null,
-          title: "Main Thread",
-          isActive: true,
-          createdAt: Date.now(),
-          updatedAt: Date.now(),
-        };
-
-        await this.adapter.put("threads", defaultThread);
-      }
-
-      // Build lightweight session metadata for cache/UI
-      const lightweightSession = {
-        id: sessionRecord.id,
-        title: sessionRecord.title,
-        createdAt: sessionRecord.createdAt,
-        updatedAt: sessionRecord.updatedAt,
-        lastTurnId: sessionRecord.lastTurnId || null,
-        lastActivity:
-          sessionRecord.lastActivity ||
-          sessionRecord.updatedAt ||
-          sessionRecord.createdAt,
+    // 2. Create new session if doesn't exist
+    if (!sessionRecord) {
+      sessionRecord = {
+        id: sessionId,
+        userId: "default-user",
+        provider: "multi",
+        title: "",
+        isActive: true,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        lastTurnId: null,
+        lastActivity: Date.now(),
       };
 
-      // Update cache
-      this.sessions[sessionId] = lightweightSession;
+      await this.adapter.put("sessions", sessionRecord);
 
-      return lightweightSession;
-    } catch (error) {
-      console.error(
-        `[SessionManager] Failed to get/create session ${sessionId}:`,
-        error,
-      );
-      return null;
+      // Create default thread
+      const defaultThread = {
+        id: "default-thread",
+        sessionId: sessionId,
+        parentThreadId: null,
+        branchPointTurnId: null,
+        title: "Main Thread",
+        isActive: true,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      };
+
+      await this.adapter.put("threads", defaultThread);
+      console.log(`[SessionManager] Created new session: ${sessionId}`);
     }
+
+    return sessionRecord;
   }
 
   /**
@@ -768,29 +710,21 @@ export class SessionManager {
    */
   async saveSession(sessionId) {
     try {
-      const session = this.sessions[sessionId];
-      if (!session) return;
-
-      // Update session record
+      // Direct DB update - typically used to sync explicit saves/metadata
       const sessionRecord = await this.adapter.get("sessions", sessionId);
       if (sessionRecord) {
-        sessionRecord.title = session.title;
         sessionRecord.updatedAt = Date.now();
         await this.adapter.put("sessions", sessionRecord);
+        console.log(`[SessionManager] Updated session ${sessionId} timestamp`);
       }
-
-      console.log(
-        `[SessionManager] Saved session ${sessionId} to persistence layer`,
-      );
     } catch (error) {
       console.error(
-        `[SessionManager] Failed to save session ${sessionId} to persistence layer:`,
+        `[SessionManager] Failed to update session ${sessionId}:`,
         error,
       );
     }
   }
 
-  // addTurn() and addTurnWithPersistence() removed. Use persist() primitives.
 
   /**
    * Delete session (enhanced with persistence layer support)
@@ -907,24 +841,16 @@ export class SessionManager {
         },
       );
 
-      // Remove lightweight cache entry outside the transaction
-      if (this.sessions[sessionId]) {
-        delete this.sessions[sessionId];
-      }
-
       return true;
     } catch (error) {
       console.error(
         `[SessionManager] Failed to delete session ${sessionId} from persistence layer:`,
         error,
       );
-      return false;
+      throw error; // Changed: Throw explicit error
     }
   }
 
-  /**
-   * Legacy delete session method
-   */
 
   /**
    * Update provider context (enhanced with persistence layer support)
@@ -932,7 +858,7 @@ export class SessionManager {
   async updateProviderContext(
     sessionId,
     providerId,
-    result = true,
+    result = {},
     options = {},
   ) {
     const { skipSave = true } = options;
@@ -1003,19 +929,18 @@ export class SessionManager {
       // Save or update context
       await this.adapter.put("provider_contexts", contextRecord);
 
-      // Update legacy session for compatibility
-      session.providers = session.providers || {};
-      session.providers[providerId] = contextRecord.contextData;
-      session.lastActivity = Date.now();
-
-      if (!skipSave) {
-        await this.saveSession(sessionId);
+      // Direct session update for activity tracking
+      if (session) {
+        session.lastActivity = Date.now();
+        session.updatedAt = Date.now();
+        await this.adapter.put("sessions", session);
       }
     } catch (error) {
       console.error(
         `[SessionManager] Failed to update provider context in persistence layer:`,
         error,
       );
+      throw error; // Changed: Propagate errors
     }
   }
 
@@ -1079,15 +1004,13 @@ export class SessionManager {
 
         // Persist updated context
         await this.adapter.put("provider_contexts", contextRecord);
-
-        // Update legacy session cache
-        session.providers = session.providers || {};
-        session.providers[providerId] = contextRecord.contextData;
       }
 
-      session.lastActivity = now;
-      if (!skipSave) {
-        await this.saveSession(sessionId);
+      // Direct session update for activity tracking
+      if (session) {
+        session.lastActivity = now;
+        session.updatedAt = now;
+        await this.adapter.put("sessions", session);
       }
     } catch (error) {
       console.error(
@@ -1097,9 +1020,6 @@ export class SessionManager {
     }
   }
 
-  /**
-   * Legacy update provider context method
-   */
 
   /**
    * Get provider contexts (persistence-backed, backward compatible shape)
@@ -1139,11 +1059,6 @@ export class SessionManager {
     }
   }
 
-  // createThread* and switchThread* removed. Thread operations will be handled by persist() primitives in future phases.
-
-  // saveTurn() removed. Use persist() primitives.
-
-  // saveTurnWithPersistence() removed. Use persist() primitives.
 
   /**
    * Extract "The Short Answer" section or fallback to intro paragraphs from synthesis text
@@ -1247,18 +1162,7 @@ export class SessionManager {
     return finalSummary;
   }
 
-  async _updateTurnContextSummary(turnId, contextSummary) {
-    try {
-      const turn = await this.adapter.get("turns", turnId);
-      if (turn) {
-        turn.lastContextSummary = contextSummary;
-        await this.adapter.put("turns", turn);
-        console.log(`[SessionManager] Updated context summary for turn ${turnId}`);
-      }
-    } catch (e) {
-      console.warn(`[SessionManager] Failed to update turn context summary:`, e);
-    }
-  }
+
 
   /**
    * Get persistence adapter status

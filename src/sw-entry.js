@@ -143,10 +143,7 @@ async function initializeSessionManager(pl) {
   try {
     console.log("[SW] Creating new SessionManager");
     const sm = new SessionManager();
-    // Legacy global for session storage if needed by SM internal methods
-    // Ideally SessionManager should not rely on this global, but keeping for safety if it does.
-    self.__HTOS_SESSIONS = self.__HTOS_SESSIONS || {};
-    sm.sessions = self.__HTOS_SESSIONS;
+
 
     await sm.initialize({ adapter: persistence?.adapter });
     services.register('sessionManager', sm);
@@ -857,7 +854,7 @@ async function handleUnifiedMessage(message, sender, sendResponse) {
         sendResponse({ success: true, status });
         return true;
       }
-   // --- ADD THIS HERE ---
+      // --- ADD THIS HERE ---
       default: {
         // This catches "htos.keepalive" or any typos so the channel closes properly
         console.warn("[SW] Unknown message type ignored:", message.type);
@@ -884,12 +881,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
   if (request?.type) {
-  // 2. Ensure handleUnifiedMessage calls sendResponse even if type is unknown
+    // 2. Ensure handleUnifiedMessage calls sendResponse even if type is unknown
     handleUnifiedMessage(request, sender, sendResponse)
       .catch(err => {
         try {
           sendResponse({ success: false, error: err.message });
-        } catch(e) { /* ignore channel closed */ }
+        } catch (e) { /* ignore channel closed */ }
       });
     return true;
   }

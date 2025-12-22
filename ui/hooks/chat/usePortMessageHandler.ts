@@ -144,7 +144,6 @@ export function usePortMessageHandler() {
       }
 
       switch (message.type) {
-        // SESSION_STARTED is deprecated. UI now initializes session from TURN_CREATED.
 
         case "PREFLIGHT_WARNINGS": {
           const { warnings } = message;
