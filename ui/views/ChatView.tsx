@@ -24,7 +24,7 @@ import { CouncilOrbsVertical } from "../components/CouncilOrbsVertical";
 import { useSmartProviderDefaults } from "../hooks/useSmartProviderDefaults";
 
 // Lazy load DecisionMapSheet (named export adapter)
-const DecisionMapSheet = React.lazy(() => 
+const DecisionMapSheet = React.lazy(() =>
   import("../components/DecisionMapSheet").then(module => ({ default: module.DecisionMapSheet }))
 );
 
@@ -243,14 +243,13 @@ export default function ChatView() {
               <PanelResizeHandle className="w-1.5 bg-border-subtle hover:bg-brand-500/50 transition-colors cursor-col-resize relative z-10">
                 {/* Adjacent Orb Column - uses fixed Y centering to prevent shift when ChatInput changes */}
                 <div
-                  className="divider-handle absolute left-0 -translate-x-full w-10 flex flex-col items-center justify-center gap-2 bg-surface-raised border-y border-l border-border-subtle rounded-l-xl shadow-sm z-20"
+                  className="divider-handle absolute left-0 -translate-x-full w-10 h-full flex flex-col items-center justify-center z-20"
                   style={{
                     pointerEvents: 'none',
-                    top: 'calc(50vh - 60px)',  // Center relative to viewport height, offset for ChatInput
                     transform: 'translateX(-100%)'
                   }}
                 >
-                  <div className="orb-bar pointer-events-auto cursor-default" style={{ cursor: 'default' }}>
+                  <div className="orb-bar pointer-events-auto cursor-default bg-surface-raised border-y border-l border-border-subtle rounded-l-xl shadow-sm p-1 flex flex-col items-center justify-center gap-2" style={{ cursor: 'default' }}>
                     <CouncilOrbsVertical />
                   </div>
                 </div>
@@ -266,7 +265,7 @@ export default function ChatView() {
 
       {/* Decision Map - Fixed Overlay */}
       <Suspense fallback={null}>
-      <DecisionMapSheet />
+        <DecisionMapSheet />
       </Suspense>
 
       <div

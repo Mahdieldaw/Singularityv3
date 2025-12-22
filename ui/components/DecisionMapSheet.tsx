@@ -1,9 +1,9 @@
-import React, { useMemo, useCallback, useEffect, useRef, useState } from "react";
+import React, { useMemo, useCallback, useEffect, useRef, useState, Suspense } from "react";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { isDecisionMapOpenAtom, turnByIdAtom, mappingProviderAtom, activeSplitPanelAtom, providerAuthStatusAtom, refinerProviderAtom, antagonistProviderAtom } from "../state/atoms";
 import { useClipActions } from "../hooks/useClipActions";
 import { m, AnimatePresence, LazyMotion, domAnimation } from "framer-motion";
-import DecisionMapGraph from "./experimental/DecisionMapGraph";
+const DecisionMapGraph = React.lazy(() => import("./experimental/DecisionMapGraph"));
 import { adaptGraphTopology } from "./experimental/graphAdapter";
 import MarkdownDisplay from "./MarkdownDisplay";
 import { LLM_PROVIDERS_CONFIG } from "../constants";
@@ -23,6 +23,7 @@ import {
   extractGraphTopologyAndStrip,
   cleanOptionsText,
 } from "../../shared/parsing-utils";
+import { normalizeProviderId } from "../utils/provider-id-mapper";
 
 import { useRefinerOutput } from "../hooks/useRefinerOutput";
 import { useAntagonistOutput } from "../hooks/useAntagonistOutput";
@@ -849,7 +850,8 @@ export const DecisionMapSheet = React.memo(() => {
     try {
       // If it's a string, it's a direct provider ID from Refiner unlisted options
       if (typeof modelNumber === 'string') {
-        setActiveSplitPanel({ turnId: aiTurn?.id || '', providerId: modelNumber });
+        const targetId = normalizeProviderId(modelNumber.toLowerCase());
+        setActiveSplitPanel({ turnId: aiTurn?.id || '', providerId: targetId });
         return;
       }
 
@@ -1050,14 +1052,16 @@ export const DecisionMapSheet = React.memo(() => {
                         />
                       </div>
                     )}
-                    <DecisionMapGraph
-                      nodes={adapted.nodes}
-                      edges={adapted.edges}
-                      citationSourceOrder={citationSourceOrder}
-                      width={dims.w}
-                      height={dims.h}
-                      onNodeClick={handleNodeClick}
-                    />
+                    <Suspense fallback={<div className="w-full h-full flex items-center justify-center opacity-50"><div className="w-8 h-8 rounded-full border-2 border-brand-500 border-t-transparent animate-spin" /></div>}>
+                      <DecisionMapGraph
+                        nodes={adapted.nodes}
+                        edges={adapted.edges}
+                        citationSourceOrder={citationSourceOrder}
+                        width={dims.w}
+                        height={dims.h}
+                        onNodeClick={handleNodeClick}
+                      />
+                    </Suspense>
                   </m.div>
                 )}
 

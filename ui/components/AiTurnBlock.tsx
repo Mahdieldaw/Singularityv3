@@ -225,7 +225,6 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
   const setTrustPanelFocus = useSetAtom(trustPanelFocusAtom);
 
   const [showEcho, setShowEcho] = useState(false);
-  const [showStepDetails, setShowStepDetails] = useState(false);
 
 
   const getProviderName = useCallback((pid: string) => {
@@ -953,42 +952,17 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                             );
                           })()}
 
-                          {refinerOutput?.leap?.answer && (
+                          {refinerOutput?.leap?.target && (
                             <div className="mt-6 pt-4 border-t border-border-subtle/40">
-                              <div className="flex items-center justify-between text-sm text-text-secondary">
-                                <div>
-                                  <span className="font-semibold text-text-primary">Next: </span>
-                                  <span>{refinerOutput.leap.answer}</span>
-                                </div>
-                                {(refinerOutput.leap.analysis || refinerOutput.leap.why || refinerOutput.leap.justification) && (
-                                  <button
-                                    onClick={() => setShowStepDetails((prev) => !prev)}
-                                    className="text-xs text-text-muted hover:text-text-secondary underline decoration-dotted"
-                                  >
-                                    {showStepDetails ? "Hide details" : "Details"}
-                                  </button>
+                              <div className="text-sm text-text-secondary">
+                                <span className="font-semibold text-text-primary">Next step: </span>
+                                <span className="capitalize">{refinerOutput.leap.action}</span>
+                                <span> — </span>
+                                <span>{refinerOutput.leap.target}</span>
+                                {refinerOutput.leap.why && (
+                                  <span className="text-text-muted"> {refinerOutput.leap.why}</span>
                                 )}
                               </div>
-                              {showStepDetails && (
-                                <div className="mt-2 text-xs text-text-muted space-y-1">
-                                  {refinerOutput.leap.analysis && (
-                                    <div>{refinerOutput.leap.analysis}</div>
-                                  )}
-                                  {refinerOutput.leap.why && (
-                                    <div>{refinerOutput.leap.why}</div>
-                                  )}
-                                  {refinerOutput.leap.justification && (
-                                    <div className="pt-1">
-                                      <span
-                                        className="inline-flex items-center px-1.5 py-0.5 rounded-full bg-surface-highlight text-[11px] text-text-secondary cursor-help"
-                                        title={refinerOutput.leap.justification}
-                                      >
-                                        Why this path
-                                      </span>
-                                    </div>
-                                  )}
-                                </div>
-                              )}
                             </div>
                           )}
                         </div>
