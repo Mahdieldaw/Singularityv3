@@ -250,9 +250,10 @@ export function extractOptionsAndStrip(text: string): { text: string; options: s
 export function parseMappingResponse(response: string | null | undefined): {
     narrative: string;
     options: string | null;
+    optionTitles: string[];
     graphTopology: any | null;
 } {
-    if (!response) return { narrative: '', options: null, graphTopology: null };
+    if (!response) return { narrative: '', options: null, optionTitles: [], graphTopology: null };
 
     // First extract graph topology
     const { text: textWithoutTopology, topology } = extractGraphTopologyAndStrip(response);
@@ -260,11 +261,36 @@ export function parseMappingResponse(response: string | null | undefined): {
     // Then extract options from remaining text
     const { text: narrative, options } = extractOptionsAndStrip(textWithoutTopology);
 
+    // Extract option titles if options were found
+    const optionTitles = options ? parseOptionTitles(options) : [];
+
     return {
         narrative: cleanNarrativeText(narrative),
         options: options ? cleanOptionsText(options) : null,
+        optionTitles,
         graphTopology: topology,
     };
+}
+
+/**
+ * Extract bold titles from options text
+ */
+export function parseOptionTitles(optionsText: string): string[] {
+    if (!optionsText) return [];
+    const titles: string[] = [];
+    const lines = optionsText.split('\n');
+    for (const line of lines) {
+        // Match: **Bold Title** (with optional colon/dash after)
+        const match = line.match(/\*\*([^*]+)\*\*/);
+        if (match) {
+            const title = match[1].trim();
+            // Avoid duplicates
+            if (title && !titles.includes(title)) {
+                titles.push(title);
+            }
+        }
+    }
+    return titles;
 }
 
 // ============================================================================

@@ -42,81 +42,12 @@ import {
   antagonistProviderAtom,
 } from "../state/atoms";
 import { useRefinerOutput } from "../hooks/useRefinerOutput";
+import { parseMappingResponse } from "../../shared/parsing-utils";
 
 import { RefinerDot } from "./refinerui/RefinerDot";
 import { AntagonistCard } from "./antagonist/AntagonistCard";
 
 // --- Helper Functions ---
-function parseMappingResponse(response?: string | null) {
-  if (!response) return { mapping: "", options: null };
-
-  let normalized = response
-    .replace(/\\=/g, '=')      // \= → =
-    .replace(/\\_/g, '_')      // \_ → _
-    .replace(/\\\*/g, '*')     // \* → *
-    .replace(/\\-/g, '-')     // \- → -
-    .replace(/[＝═⁼˭꓿﹦]/g, '=')
-    .replace(/[‗₌]/g, '=')
-    .replace(/\u2550/g, '=')
-    .replace(/\uFF1D/g, '=');
-
-  const topoMatch = normalized.match(/={3,}\s*GRAPH[_\s]*TOPOLOGY\s*={3,}/i);
-  if (topoMatch && typeof topoMatch.index === 'number') {
-    normalized = normalized.slice(0, topoMatch.index).trim();
-  }
-
-  // Context-aware patterns with position constraints
-  const optionsPatterns = [
-    // Strict delimiters (can appear anywhere)
-    { re: /\n={3,}\s*ALL[_\s]*AVAILABLE[_\s]*OPTIONS\s*={3,}\n/i, minPosition: 0 },
-    { re: /\n[=\-─━═＝]{3,}\s*ALL[_\s]*AVAILABLE[_\s]*OPTIONS\s*[=\-─━═＝]{3,}\n/i, minPosition: 0 },
-    { re: /\n\*{0,2}={3,}\s*ALL[_\s]*AVAILABLE[_\s]*OPTIONS\s*={3,}\*{0,2}\n/i, minPosition: 0 },
-
-    // Markdown headings (require newline, can appear mid-document)
-    { re: /\n#{1,3}\s*All\s+Available\s+Options:?\n/i, minPosition: 0.25 },
-    { re: /\n\*{2}All\s+Available\s+Options:?\*{2}\n/i, minPosition: 0.25 },
-
-    // Loose patterns - require at least 30% through to avoid narrative mentions
-    { re: /\nAll\s+Available\s+Options:\n/i, minPosition: 0.3 },
-  ];
-
-  let bestMatch = null;
-  let bestScore = -1;
-
-  for (const pattern of optionsPatterns) {
-    const match = normalized.match(pattern.re);
-    if (match && typeof match.index === 'number') {
-      const position = match.index / normalized.length;
-
-      // Reject matches too early in text
-      if (position < pattern.minPosition) continue;
-
-      // Score: later position is better
-      const score = position * 100;
-
-      if (score > bestScore) {
-        bestScore = score;
-        bestMatch = { index: match.index, length: match[0].length };
-      }
-    }
-  }
-
-  if (bestMatch) {
-    const afterDelimiter = normalized.substring(bestMatch.index + bestMatch.length).trim();
-
-    // Validate: check for list structure
-    const listPreview = afterDelimiter.slice(0, 100);
-    const hasListStructure = /^\s*[-*•]\s+|\n\s*[-*•]\s+|^\s*\d+\.\s+|\n\s*\d+\.\s+/.test(listPreview);
-
-    if (hasListStructure) {
-      const mapping = normalized.substring(0, bestMatch.index).trim();
-      const options = afterDelimiter || null;
-      return { mapping, options };
-    }
-  }
-
-  return { mapping: normalized, options: null };
-}
 
 function splitSynthesisAnswer(text: string): { shortAnswer: string; longAnswer: string | null } {
   const input = String(text || '').replace(/\r\n/g, '\n');
@@ -290,81 +221,14 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
       return metaTopology;
     }
 
-    // FALLBACK: Extract from raw text for historical responses that weren't parsed
+    // FALLBACK: Extract from raw text using shared utility
     const rawText = (latestMapping as any)?.text;
     if (!rawText || typeof rawText !== 'string') {
       return null;
     }
 
-    try {
-      // Normalize escapes like backend does
-      let normalized = rawText
-        .replace(/\\=/g, '=')
-        .replace(/\\_/g, '_')
-        .replace(/\\\*/g, '*')
-        .replace(/\\-/g, '-');
-
-      const match = normalized.match(/={3,}\s*GRAPH[_\s]*TOPOLOGY\s*={3,}/i);
-      if (!match || typeof match.index !== 'number') {
-        return null;
-      }
-
-      const start = match.index + match[0].length;
-      let rest = normalized.slice(start).trim();
-
-      // Strip markdown code fence if present (```json ... ```)
-      const codeBlockMatch = rest.match(/^```(?:json)?\s*\n([\s\S]*?)\n```/);
-      if (codeBlockMatch) {
-        rest = codeBlockMatch[1].trim();
-      }
-
-      // Find opening brace
-      let i = 0;
-      while (i < rest.length && rest[i] !== '{') i++;
-      if (i >= rest.length) return null;
-
-      // Extract JSON object
-      let depth = 0;
-      let inStr = false;
-      let esc = false;
-      for (let j = i; j < rest.length; j++) {
-        const ch = rest[j];
-        if (inStr) {
-          if (esc) {
-            esc = false;
-          } else if (ch === '\\') {
-            esc = true;
-          } else if (ch === '"') {
-            inStr = false;
-          }
-          continue;
-        }
-        if (ch === '"') {
-          inStr = true;
-          continue;
-        }
-        if (ch === '{') {
-          depth++;
-        } else if (ch === '}') {
-          depth--;
-          if (depth === 0) {
-            let jsonText = rest.slice(i, j + 1);
-
-            // FIX: Replace unquoted S in supporter arrays (common LLM error)
-            // Pattern: "supporters": [S, 1, 2] -> "supporters": ["S", 1, 2]
-            jsonText = jsonText.replace(/("supporters"\s*:\s*\[)\s*S\s*([,\]])/g, '$1"S"$2');
-
-            const parsed = JSON.parse(jsonText);
-            // console.log('[AiTurnBlock] Extracted graph topology from historical response for turn:', aiTurn.id);
-            return parsed;
-          }
-        }
-      }
-    } catch (e) {
-      console.warn('[AiTurnBlock] Failed to extract graph topology from turn ' + aiTurn.id + ':', e);
-    }
-
-    return null;
+    const { graphTopology } = parseMappingResponse(rawText);
+    return graphTopology;
   }, [activeMappingClipProviderId, aiTurn.mappingResponses, aiTurn.id]);
 
 
@@ -585,7 +449,7 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
 
   const getMappingAndOptions = useCallback(
     (take: ProviderResponse | undefined) => {
-      if (!take?.text) return { mapping: "", options: null };
+      if (!take?.text) return { narrative: "", options: null, graphTopology: null };
       return parseMappingResponse(String(take.text));
     },
     []
@@ -607,7 +471,7 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
 
   const displayedMappingText = useMemo(() => {
     if (!displayedMappingTake?.text) return "";
-    return String(getMappingAndOptions(displayedMappingTake).mapping ?? "");
+    return String(getMappingAndOptions(displayedMappingTake).narrative ?? "");
   }, [displayedMappingTake, getMappingAndOptions]);
 
 
