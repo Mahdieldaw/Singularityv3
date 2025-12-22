@@ -4,7 +4,7 @@
 // Pure response processing - NO I/O
 // ═══════════════════════════════════════════════════════════════════════════
 
-import { parseRefinerOutput, RefinerOutput, normalizeText, parseMappingResponse } from '../../shared/parsing-utils';
+import { parseRefinerOutput, RefinerOutput, parseMappingResponse } from '../../shared/parsing-utils';
 export type { RefinerOutput };
 
 export interface ComposerResult {
