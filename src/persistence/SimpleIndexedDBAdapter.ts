@@ -171,6 +171,55 @@ export class SimpleIndexedDBAdapter {
   }
 
   /**
+   * Batch put records into the specified store in a single transaction
+   */
+  async batchPut(
+    storeName: string,
+    values: SimpleRecord[],
+  ): Promise<void> {
+    this.ensureReady();
+    if (!values || values.length === 0) return;
+
+    const resolved = this.resolveStoreName(storeName);
+    const now = Date.now();
+
+    try {
+      await withTransaction(
+        this.db!,
+        [resolved],
+        "readwrite",
+        async (tx) => {
+          const store = tx.objectStore(resolved);
+          const hasKeyPath = (store as any).keyPath !== null && (store as any).keyPath !== undefined;
+
+          // Process all puts within the single transaction
+          const promises = values.map(value => {
+            return new Promise<void>((resolve, reject) => {
+              // Clone and auto-populate
+              const clonedValue = JSON.parse(JSON.stringify(value));
+              if (!clonedValue.id) clonedValue.id = crypto.randomUUID();
+              if (!clonedValue.createdAt) clonedValue.createdAt = now;
+              clonedValue.updatedAt = now;
+
+              const request = hasKeyPath
+                ? store.put(clonedValue)
+                : store.put(clonedValue, clonedValue.id);
+
+              request.onsuccess = () => resolve();
+              request.onerror = () => reject(request.error);
+            });
+          });
+
+          await Promise.all(promises);
+        }
+      );
+    } catch (error) {
+      console.error(`persistence:batchPut(${resolved}) - error:`, error);
+      throw error;
+    }
+  }
+
+  /**
    * Delete a record by key from the specified store
    */
   async delete(storeName: string, key: string): Promise<boolean> {

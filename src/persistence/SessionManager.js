@@ -441,29 +441,48 @@ export class SessionManager {
   /**
    * Helper: Persist provider responses for a turn
    */
+  /**
+   * Helper: Persist provider responses for a turn (BATCHED)
+   */
   async _persistProviderResponses(sessionId, aiTurnId, result, now) {
-    let count = 0;
-    // Batch (versioned per provider)
-    for (const [providerId, output] of Object.entries(
-      result?.batchOutputs || {},
-    )) {
-      // Determine next responseIndex for this provider/type
-      let nextIndex = 0;
-      try {
-        const existing = await this.adapter.getResponsesByTurnId(aiTurnId);
-        const mine = (existing || []).filter(
-          (r) => r && r.providerId === providerId && r.responseType === "batch",
-        );
-        if (mine.length > 0) {
-          const maxIdx = Math.max(
-            ...mine.map((r) => (typeof r.responseIndex === "number" ? r.responseIndex : 0)),
-          );
-          nextIndex = maxIdx + 1;
-        }
-      } catch (_) { }
+    const recordsToSave = [];
+    let existingResponses = [];
 
+    // Pre-fetch all existing responses for this turn to calculate indices correctly
+    try {
+      existingResponses = await this.adapter.getResponsesByTurnId(aiTurnId) || [];
+    } catch (_) { }
+
+    // Helper to calculate next index for a specific provider/type
+    const getNextIndex = (providerId, type) => {
+      // Check existing persisted records
+      const persisted = existingResponses.filter(
+        (r) => r.providerId === providerId && r.responseType === type
+      );
+      // Check currently pending records to handle multiple items of same type in this batch
+      const pending = recordsToSave.filter(
+        (r) => r.providerId === providerId && r.responseType === type
+      );
+
+      const maxPersisted = persisted.length > 0
+        ? Math.max(...persisted.map(r => (typeof r.responseIndex === "number" ? r.responseIndex : 0)))
+        : -1;
+
+      const maxPending = pending.length > 0
+        ? Math.max(...pending.map(r => (typeof r.responseIndex === "number" ? r.responseIndex : 0)))
+        : -1;
+
+      return Math.max(maxPersisted, maxPending) + 1;
+    };
+
+    let count = 0;
+
+    // 1. Batch Responses (versioned)
+    for (const [providerId, output] of Object.entries(result?.batchOutputs || {})) {
+      const nextIndex = getNextIndex(providerId, "batch");
       const respId = `pr-${sessionId}-${aiTurnId}-${providerId}-batch-${nextIndex}-${now}-${count++}`;
-      await this.adapter.put("provider_responses", {
+
+      recordsToSave.push({
         id: respId,
         sessionId,
         aiTurnId,
@@ -478,132 +497,112 @@ export class SessionManager {
         completedAt: now,
       });
     }
-    // Synthesis
-    for (const [providerId, output] of Object.entries(
-      result?.synthesisOutputs || {},
-    )) {
-      // Idempotent upsert on compound key (aiTurnId, providerId, responseType, 0)
-      let existing = [];
-      try {
-        existing = await this.adapter.getByIndex(
-          "provider_responses",
-          "byCompoundKey",
-          [aiTurnId, providerId, "synthesis", 0],
-        );
-      } catch (_) { existing = []; }
-      const existingId = existing?.[0]?.id;
-      const createdAtKeep = existing?.[0]?.createdAt || now;
-      const respId = existingId || `pr-${sessionId}-${aiTurnId}-${providerId}-synthesis-0-${now}-${count++}`;
-      await this.adapter.put("provider_responses", {
+
+    // 2. Synthesis (idempotent/singleton per provider)
+    for (const [providerId, output] of Object.entries(result?.synthesisOutputs || {})) {
+      // Check if exists to preserve ID/createdAt (simulating upset logic)
+      const existing = existingResponses.find(
+        r => r.providerId === providerId && r.responseType === "synthesis" && r.responseIndex === 0
+      );
+
+      const respId = existing?.id || `pr-${sessionId}-${aiTurnId}-${providerId}-synthesis-0-${now}-${count++}`;
+      const createdAtKeep = existing?.createdAt || now;
+
+      recordsToSave.push({
         id: respId,
         sessionId,
         aiTurnId,
         providerId,
         responseType: "synthesis",
         responseIndex: 0,
-        text: output?.text || existing?.[0]?.text || "",
-        status: output?.status || existing?.[0]?.status || "completed",
-        meta: output?.meta || existing?.[0]?.meta || {},
+        text: output?.text || existing?.text || "",
+        status: output?.status || existing?.status || "completed",
+        meta: output?.meta || existing?.meta || {},
         createdAt: createdAtKeep,
         updatedAt: now,
         completedAt: now,
-      }, respId);
+      });
     }
-    // Mapping
-    for (const [providerId, output] of Object.entries(
-      result?.mappingOutputs || {},
-    )) {
-      // Idempotent upsert on compound key (aiTurnId, providerId, responseType, 0)
-      let existing = [];
-      try {
-        existing = await this.adapter.getByIndex(
-          "provider_responses",
-          "byCompoundKey",
-          [aiTurnId, providerId, "mapping", 0],
-        );
-      } catch (_) { existing = []; }
-      const existingId = existing?.[0]?.id;
-      const createdAtKeep = existing?.[0]?.createdAt || now;
-      const respId = existingId || `pr-${sessionId}-${aiTurnId}-${providerId}-mapping-0-${now}-${count++}`;
-      await this.adapter.put("provider_responses", {
+
+    // 3. Mapping (idempotent/singleton per provider)
+    for (const [providerId, output] of Object.entries(result?.mappingOutputs || {})) {
+      const existing = existingResponses.find(
+        r => r.providerId === providerId && r.responseType === "mapping" && r.responseIndex === 0
+      );
+
+      const respId = existing?.id || `pr-${sessionId}-${aiTurnId}-${providerId}-mapping-0-${now}-${count++}`;
+      const createdAtKeep = existing?.createdAt || now;
+
+      recordsToSave.push({
         id: respId,
         sessionId,
         aiTurnId,
         providerId,
         responseType: "mapping",
         responseIndex: 0,
-        text: output?.text || existing?.[0]?.text || "",
-        status: output?.status || existing?.[0]?.status || "completed",
-        meta: output?.meta || existing?.[0]?.meta || {},
+        text: output?.text || existing?.text || "",
+        status: output?.status || existing?.status || "completed",
+        meta: output?.meta || existing?.meta || {},
         createdAt: createdAtKeep,
         updatedAt: now,
         completedAt: now,
-      }, respId);
+      });
     }
-    // Refiner
-    for (const [providerId, output] of Object.entries(
-      result?.refinerOutputs || {},
-    )) {
-      // Idempotent upsert on compound key (aiTurnId, providerId, responseType, 0)
-      let existing = [];
-      try {
-        existing = await this.adapter.getByIndex(
-          "provider_responses",
-          "byCompoundKey",
-          [aiTurnId, providerId, "refiner", 0],
-        );
-      } catch (_) { existing = []; }
-      const existingId = existing?.[0]?.id;
-      const createdAtKeep = existing?.[0]?.createdAt || now;
-      const respId = existingId || `pr-${sessionId}-${aiTurnId}-${providerId}-refiner-0-${now}-${count++}`;
-      await this.adapter.put("provider_responses", {
+
+    // 4. Refiner (idempotent/singleton per provider)
+    for (const [providerId, output] of Object.entries(result?.refinerOutputs || {})) {
+      const existing = existingResponses.find(
+        r => r.providerId === providerId && r.responseType === "refiner" && r.responseIndex === 0
+      );
+
+      const respId = existing?.id || `pr-${sessionId}-${aiTurnId}-${providerId}-refiner-0-${now}-${count++}`;
+      const createdAtKeep = existing?.createdAt || now;
+
+      recordsToSave.push({
         id: respId,
         sessionId,
         aiTurnId,
         providerId,
         responseType: "refiner",
         responseIndex: 0,
-        text: output?.text || existing?.[0]?.text || "",
-        status: output?.status || existing?.[0]?.status || "completed",
-        meta: output?.meta || existing?.[0]?.meta || {},
+        text: output?.text || existing?.text || "",
+        status: output?.status || existing?.status || "completed",
+        meta: output?.meta || existing?.meta || {},
         createdAt: createdAtKeep,
         updatedAt: now,
         completedAt: now,
-      }, respId);
+      });
     }
-    // Antagonist
-    for (const [providerId, output] of Object.entries(
-      result?.antagonistOutputs || {},
-    )) {
-      // Idempotent upsert on compound key (aiTurnId, providerId, responseType, 0)
-      let existing = [];
-      try {
-        existing = await this.adapter.getByIndex(
-          "provider_responses",
-          "byCompoundKey",
-          [aiTurnId, providerId, "antagonist", 0],
-        );
-      } catch (_) { existing = []; }
-      const existingId = existing?.[0]?.id;
-      const createdAtKeep = existing?.[0]?.createdAt || now;
-      const respId = existingId || `pr-${sessionId}-${aiTurnId}-${providerId}-antagonist-0-${now}-${count++}`;
-      await this.adapter.put("provider_responses", {
+
+    // 5. Antagonist (idempotent/singleton per provider)
+    for (const [providerId, output] of Object.entries(result?.antagonistOutputs || {})) {
+      const existing = existingResponses.find(
+        r => r.providerId === providerId && r.responseType === "antagonist" && r.responseIndex === 0
+      );
+
+      const respId = existing?.id || `pr-${sessionId}-${aiTurnId}-${providerId}-antagonist-0-${now}-${count++}`;
+      const createdAtKeep = existing?.createdAt || now;
+
+      recordsToSave.push({
         id: respId,
         sessionId,
         aiTurnId,
         providerId,
         responseType: "antagonist",
         responseIndex: 0,
-        text: output?.text || existing?.[0]?.text || "",
-        status: output?.status || existing?.[0]?.status || "completed",
-        meta: output?.meta || existing?.[0]?.meta || {},
+        text: output?.text || existing?.text || "",
+        status: output?.status || existing?.status || "completed",
+        meta: output?.meta || existing?.meta || {},
         createdAt: createdAtKeep,
         updatedAt: now,
         completedAt: now,
-      }, respId);
+      });
     }
 
-    // Context summary is now persisted atomically during turn creation.
+    // Perform single batch write
+    if (recordsToSave.length > 0) {
+      await this.adapter.batchPut("provider_responses", recordsToSave);
+    }
   }
 
   /**
