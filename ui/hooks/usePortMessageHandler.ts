@@ -112,7 +112,7 @@ export function usePortMessageHandler() {
   const activeAiTurnIdRef = useRef<string | null>(null);
   const activeRecomputeRef = useRef<{
     aiTurnId: string;
-    stepType: "synthesis" | "mapping" | "batch" | "refiner";
+    stepType: "synthesis" | "mapping" | "batch" | "refiner" | "antagonist";
     providerId: string;
   } | null>(null);
   // Track whether we've already logged the first PARTIAL_RESULT for a given

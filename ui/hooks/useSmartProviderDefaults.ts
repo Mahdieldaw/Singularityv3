@@ -4,6 +4,8 @@ import {
     providerAuthStatusAtom,
     synthesisProviderAtom,
     mappingProviderAtom,
+    antagonistProviderAtom,
+    refinerProviderAtom,
     providerLocksAtom,
 } from '../state/atoms';
 import {
@@ -27,6 +29,8 @@ export function useSmartProviderDefaults() {
     const authStatus = useAtomValue(providerAuthStatusAtom);
     const [synthesisProvider, setSynthesisProvider] = useAtom(synthesisProviderAtom);
     const [mappingProvider, setMappingProvider] = useAtom(mappingProviderAtom);
+    const [antagonistProvider, setAntagonistProvider] = useAtom(antagonistProviderAtom);
+    const [refinerProvider, setRefinerProvider] = useAtom(refinerProviderAtom);
     const setLocks = useSetAtom(providerLocksAtom);
 
     // Track if we've done initial selection to avoid flash
@@ -71,8 +75,34 @@ export function useSmartProviderDefaults() {
             }
         }
 
+        // === Antagonist Provider ===
+        if (!locks.antagonist) {
+            const currentValid = antagonistProvider && isProviderAuthorized(antagonistProvider, authStatus);
+
+            if (!currentValid) {
+                const best = selectBestProvider('antagonist', authStatus);
+                if (best && best !== antagonistProvider) {
+                    console.log(`[SmartDefaults] Antagonist: ${antagonistProvider} → ${best}`);
+                    setAntagonistProvider(best);
+                }
+            }
+        }
+
+        // === Refiner Provider ===
+        if (!locks.refiner) {
+            const currentValid = refinerProvider && isProviderAuthorized(refinerProvider, authStatus);
+
+            if (!currentValid) {
+                const best = selectBestProvider('refiner', authStatus);
+                if (best && best !== refinerProvider) {
+                    console.log(`[SmartDefaults] Refiner: ${refinerProvider} → ${best}`);
+                    setRefinerProvider(best);
+                }
+            }
+        }
+
         initializedRef.current = true;
-    }, [authStatus, locks, synthesisProvider, mappingProvider, setSynthesisProvider, setMappingProvider]);
+    }, [authStatus, locks, synthesisProvider, mappingProvider, antagonistProvider, refinerProvider, setSynthesisProvider, setMappingProvider, setAntagonistProvider, setRefinerProvider]);
 
     return { isInitialized: initializedRef.current };
 }

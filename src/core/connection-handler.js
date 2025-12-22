@@ -114,6 +114,7 @@ export class ConnectionHandler {
         synthesisResponses: {},
         mappingResponses: {},
         refinerResponses: {},
+        antagonistResponses: {},
       };
       for (const r of resps || []) {
         if (!r) continue;
@@ -133,6 +134,8 @@ export class ConnectionHandler {
           (buckets.mappingResponses[r.providerId] ||= []).push(entry);
         } else if (r.responseType === "refiner") {
           (buckets.refinerResponses[r.providerId] ||= []).push(entry);
+        } else if (r.responseType === "antagonist") {
+          (buckets.antagonistResponses[r.providerId] ||= []).push(entry);
         }
       }
 
@@ -141,7 +144,8 @@ export class ConnectionHandler {
         Object.keys(buckets.batchResponses).length > 0 ||
         Object.keys(buckets.synthesisResponses).length > 0 ||
         Object.keys(buckets.mappingResponses).length > 0 ||
-        Object.keys(buckets.refinerResponses).length > 0;
+        Object.keys(buckets.refinerResponses).length > 0 ||
+        Object.keys(buckets.antagonistResponses).length > 0;
       if (!hasAny) return;
 
       this.port?.postMessage({
@@ -176,6 +180,7 @@ export class ConnectionHandler {
             synthesisResponses: buckets.synthesisResponses,
             mappingResponses: buckets.mappingResponses,
             refinerResponses: buckets.refinerResponses,
+            antagonistResponses: buckets.antagonistResponses,
             meta: aiTurn.meta || {},
           },
         },
@@ -550,41 +555,6 @@ export class ConnectionHandler {
    */
   // Legacy hydration helper removed: session hydration now handled by persistence-backed readers
 
-  /**
-   * Normalize provider modes for continuation requests:
-   * - Providers WITH context → default to 'continuation' (unless explicitly overridden)
-   * - Providers WITHOUT context → default to 'new-conversation' (unless explicitly overridden)
-   *
-   * This allows new providers to join existing chats without triggering errors.
-   */
-  _normalizeProviderModesForContinuation(executeRequest) {
-    // Legacy continuation mode normalization removed; compiler handles defaults and context resolution
-  }
-
-  /**
-   * Fast-fail validation: check if providers explicitly marked for continuation
-   * actually have the required context.
-   *
-   * This catches reconnection bugs where context was lost but shouldn't have been.
-   * It does NOT fail for new providers joining an existing chat.
-   */
-  _precheckContinuation(executeRequest) {
-    // Legacy precheck removed; engine and resolver enforce required contexts
-  }
-
-  /**
-   * Emit a clean failure message when continuation precheck fails
-   */
-  // Legacy failure emitter removed; modern workflow emits structured errors directly
-
-  /**
-   * Session relocation guard: if the UI sends sessionId=null for a request that
-   * is clearly NOT a new conversation (historical mapping/synthesis or continuation),
-   * find the correct session to attach to.
-   */
-  async _relocateSessionId(executeRequest) {
-    // Legacy relocation logic removed; primitives carry explicit session context
-  }
 
   /**
    * Preflight authorization check and smart-defaults routing.
@@ -605,6 +575,8 @@ export class ConnectionHandler {
         providers: executeRequest.providers,
         synthesizer: executeRequest.synthesizer,
         mapper: executeRequest.mapper,
+        antagonist: executeRequest.antagonist,
+        refiner: executeRequest.refiner,
       },
       authStatus,
       availableProviders
@@ -614,6 +586,8 @@ export class ConnectionHandler {
     executeRequest.providers = result.providers;
     executeRequest.synthesizer = result.synthesizer;
     executeRequest.mapper = result.mapper;
+    executeRequest.antagonist = result.antagonist;
+    executeRequest.refiner = result.refiner;
 
     // Emit warnings (not errors!)
     if (result.warnings.length > 0) {
@@ -628,13 +602,17 @@ export class ConnectionHandler {
     const hasAnyProvider =
       result.providers.length > 0 ||
       result.synthesizer !== null ||
-      result.mapper !== null;
+      result.mapper !== null ||
+      result.antagonist !== null ||
+      result.refiner !== null;
 
     if (!hasAnyProvider) {
       const attempted = [
         ...(executeRequest.providers || []),
         executeRequest.synthesizer,
-        executeRequest.mapper
+        executeRequest.mapper,
+        executeRequest.antagonist,
+        executeRequest.refiner,
       ].filter(Boolean);
 
       const errorMsg = createAuthErrorMessage(

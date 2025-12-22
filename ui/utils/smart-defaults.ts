@@ -2,12 +2,12 @@
 // Priority list for Synthesis (Single Speaker)
 // Claude as strongest, gemini 3.0 exp next in line, then Qwen, Then gemini 2.5 pro, then chatgpt, then gemini default
 export const SYNTHESIS_PRIORITY = [
-    'claude',
-    'gemini-exp',
     'qwen',
+    'gemini',
+    'claude',
     'gemini-pro',
     'chatgpt',
-    'gemini'
+    'gemini-exp'
 ];
 
 // Priority list for Mapping (Decision Map)
@@ -15,10 +15,32 @@ export const SYNTHESIS_PRIORITY = [
 export const MAPPING_PRIORITY = [
     'gemini',
     'qwen',
-    'chatgpt',
+    'gemini-pro',
     'gemini-exp',
     'claude',
-    'gemini-pro'
+    'chatgpt'
+];
+
+// Priority list for Antagonist
+// Claude as strongest, gemini 3.0 exp next in line, then Qwen, Then gemini 2.5 pro, then chatgpt, then gemini default
+export const ANTAGONIST_PRIORITY = [
+    'gemini',
+    'qwen',
+    'claude',
+    'gemini-pro',
+    'gemini-exp',
+    'chatgpt'
+];
+
+// Priority list for Refiner
+// Best for refiner: gemini default, qwen, chatgpt, gemini 3.0, claude, gemini 2.5 pro
+export const REFINDER_PRIORITY = [
+    'claude',
+    'qwen',
+    'gemini',
+    'gemini-pro',
+    'gemini-exp',
+    'chatgpt'
 ];
 
 /**

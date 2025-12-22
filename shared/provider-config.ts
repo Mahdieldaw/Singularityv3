@@ -10,6 +10,8 @@ export const PROVIDER_PRIORITIES = {
      * Gemini > Qwen > ChatGPT > Gemini Exp > Claude > Gemini Pro
      */
     mapping: ['gemini', 'qwen', 'chatgpt', 'gemini-exp', 'claude', 'gemini-pro'],
+    antagonist: ['gemini', 'qwen', 'chatgpt', 'gemini-exp', 'claude', 'gemini-pro'],
+    refiner: ['gemini', 'qwen', 'chatgpt', 'gemini-exp', 'claude', 'gemini-pro'],
 
     /**
      * For batch queries: Balance of speed + quality

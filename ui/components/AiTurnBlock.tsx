@@ -214,9 +214,7 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
   const { retryProviders } = useRetryProvider();
 
   // Streaming UX: determine if this is the active running turn
-  const activeRefinerPid = useAtomValue(refinerProviderAtom);
   const activeAntagonistPid = useAtomValue(antagonistProviderAtom);
-  const activeRecompute = useAtomValue(activeRecomputeStateAtom);
   const activeAiTurnId = useAtomValue(activeAiTurnIdAtom);
   const globalIsLoading = useAtomValue(isLoadingAtom);
   const workflowProgress = useAtomValue(workflowProgressAtom);
