@@ -388,11 +388,21 @@ class FaultTolerantOrchestrator {
           }
 
           if (!result.text && aggregatedText) result.text = aggregatedText;
+
+          // ✅ Granular completion signal
+          if (options.onProviderComplete) {
+            options.onProviderComplete(providerId, { status: "fulfilled", value: result });
+          }
+
           return { providerId, status: "fulfilled", value: result };
 
         } catch (error) {
           if (aggregatedText) {
-            return { providerId, status: "fulfilled", value: { text: aggregatedText, meta: {}, softError: { name: error.name, message: error.message } } };
+            const val = { text: aggregatedText, meta: {}, softError: { name: error.name, message: error.message } };
+            if (options.onProviderComplete) {
+              options.onProviderComplete(providerId, { status: "fulfilled", value: val });
+            }
+            return { providerId, status: "fulfilled", value: val };
           }
           return { providerId, status: "rejected", reason: error };
         }

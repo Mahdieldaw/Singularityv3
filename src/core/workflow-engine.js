@@ -1571,7 +1571,31 @@ Answer the user's message directly. Use context only to disambiguate.
             const entry = providerStatuses.find((s) => s.providerId === providerId);
             if (entry) {
               entry.status = 'streaming';
-              entry.progress = typeof entry.progress === 'number' ? entry.progress : undefined;
+              // ✅ FIX: Use undefined for indeterminate progress instead of 0, so UI shows "Generating..."
+              entry.progress = undefined;
+              this.port.postMessage({
+                type: 'WORKFLOW_PROGRESS',
+                sessionId: context.sessionId,
+                aiTurnId: context.canonicalAiTurnId || 'unknown',
+                phase: 'batch',
+                providerStatuses,
+                completedCount: providerStatuses.filter((p) => p.status === 'completed').length,
+                totalCount: providers.length,
+              });
+            }
+          } catch (_) { }
+        },
+        // ✅ NEW: Handle granular completion
+        onProviderComplete: (providerId, resultWrapper) => {
+          try {
+            this.healthTracker.recordSuccess(providerId);
+            const entry = providerStatuses.find((s) => s.providerId === providerId);
+            if (entry) {
+              entry.status = 'completed';
+              entry.progress = 100;
+              if (entry.error) delete entry.error;
+
+              // Emit immediate progress update
               this.port.postMessage({
                 type: 'WORKFLOW_PROGRESS',
                 sessionId: context.sessionId,
@@ -1594,7 +1618,7 @@ Answer the user's message directly. Use context only to disambiguate.
               error: error?.message || String(error),
             });
           } catch (_) { }
-          reject(error);
+          // Don't reject yet, let Promise.all handle it
         },
         onAllComplete: (results, errors) => {
           // Build batch updates

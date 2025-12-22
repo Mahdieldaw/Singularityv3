@@ -752,7 +752,11 @@ const Orb: React.FC<OrbProps> = ({
                     {workflowStage !== 'idle' && (
                         <span className="council-tooltip__stage">
                             {workflowStage === 'thinking' && 'Processing...'}
-                            {workflowStage === 'streaming' && `Generating (${workflowProgress}%)`}
+                            {workflowStage === 'streaming' && (
+                                typeof workflowProgress === 'number' && workflowProgress > 0
+                                    ? `Generating (${workflowProgress}%)`
+                                    : 'Generating...'
+                            )}
                             {workflowStage === 'synthesizing' && 'Synthesizing...'}
                             {workflowStage === 'complete' && 'Complete'}
                             {workflowStage === 'error' && 'Error'}
