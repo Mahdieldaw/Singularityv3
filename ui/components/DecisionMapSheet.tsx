@@ -2,7 +2,7 @@ import React, { useMemo, useCallback, useEffect, useRef, useState } from "react"
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { isDecisionMapOpenAtom, turnByIdAtom, mappingProviderAtom, activeSplitPanelAtom, providerAuthStatusAtom, refinerProviderAtom, antagonistProviderAtom } from "../state/atoms";
 import { useClipActions } from "../hooks/useClipActions";
-import { motion, AnimatePresence } from "framer-motion";
+import { m, AnimatePresence, LazyMotion, domAnimation } from "framer-motion";
 import DecisionMapGraph from "./experimental/DecisionMapGraph";
 import { adaptGraphTopology } from "./experimental/graphAdapter";
 import MarkdownDisplay from "./MarkdownDisplay";
@@ -377,7 +377,7 @@ const DetailView: React.FC<DetailViewProps> = ({ node, narrativeExcerpt, citatio
   const nodeColor = getNodeColor();
 
   return (
-    <motion.div
+    <m.div
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -20 }}
@@ -450,7 +450,7 @@ const DetailView: React.FC<DetailViewProps> = ({ node, narrativeExcerpt, citatio
           No matching narrative excerpt found for this option.
         </div>
       )}
-    </motion.div>
+    </m.div>
   );
 };
 
@@ -942,211 +942,213 @@ export const DecisionMapSheet = React.memo(() => {
   return (
     <AnimatePresence>
       {openState && (
-        <motion.div
-          initial={{ y: "100%" }}
-          animate={{ y: 0 }}
-          exit={{ y: "100%" }}
-          transition={{ type: "spring", damping: 25, stiffness: 300 }}
-          className="fixed inset-x-0 bottom-0 decision-sheet-bg border-t border-border-strong shadow-elevated z-[3500] rounded-t-2xl flex flex-col pointer-events-auto"
-          style={{ height: sheetHeightPx }}
-        >
-          {/* Drag handle */}
-          <div className="h-8 flex items-center justify-center border-b border-white/10 hover:bg-white/5 transition-colors rounded-t-2xl relative z-10">
-            <div className="flex-1 h-full cursor-ns-resize" onPointerDown={handleResizePointerDown} />
-            <button type="button" className="h-full px-6 cursor-pointer flex items-center justify-center" onClick={() => setOpenState(null)}>
-              <div className="w-12 h-1.5 bg-white/20 rounded-full" />
-            </button>
-            <div className="flex-1 h-full cursor-ns-resize" onPointerDown={handleResizePointerDown} />
-          </div>
-
-          {/* Header Row: Mapper Selector (Left) + Tabs (Center) */}
-          <div className="flex items-center justify-between px-6 py-4 border-b border-white/10 relative z-20">
-
-            {/* Left: Provider Selector (Mapper or Refiner based on tab) */}
-            <div className="w-1/3 flex justify-start">
-              {aiTurn && activeTab !== 'audit' && (
-                <MapperSelector
-                  aiTurn={aiTurn}
-                  activeProviderId={activeMappingPid}
-                />
-              )}
-              {aiTurn && activeTab === 'audit' && (
-                <RefinerSelector
-                  aiTurn={aiTurn}
-                  activeProviderId={activeRefinerPid || undefined}
-                  onSelect={(pid) => {
-                    setActiveRefinerPid(pid);
-                  }}
-                />
-              )}
-            </div>
-
-            {/* Center: Tabs */}
-            <div className="flex items-center justify-center gap-4">
-              {tabConfig.map(({ key, label, activeClass }) => {
-                // Hide audit tab if no data (optional, but requested to always show)
-                // if (key === 'audit' && !refinerOutput) return null;
-                return (
-                  <button
-                    key={key}
-                    type="button"
-                    className={clsx(
-                      "decision-tab-pill",
-                      activeTab === key && activeClass
-                    )}
-                    onClick={() => {
-                      setActiveTab(key);
-                      if (key !== 'graph') setSelectedNode(null);
-                    }}
-                  >
-                    {label}
-                  </button>
-                );
-              })}
-            </div>
-
-            {/* Right: Spacer/Close (keeps tabs centered) */}
-            <div className="w-1/3 flex justify-end items-center gap-2">
-              <CopyButton
-                text={formatDecisionMapForMd(
-                  mappingText,
-                  optionsText,
-                  graphTopology
-                )}
-                label="Copy full decision map"
-                buttonText="Copy Map"
-                className="mr-2"
-              />
-              <button
-                onClick={() => setOpenState(null)}
-                className="p-2 text-text-muted hover:text-text-primary hover:bg-white/5 rounded-full transition-colors"
-              >
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
+        <LazyMotion features={domAnimation}>
+          <m.div
+            initial={{ y: "100%" }}
+            animate={{ y: 0 }}
+            exit={{ y: "100%" }}
+            transition={{ type: "spring", damping: 25, stiffness: 300 }}
+            className="fixed inset-x-0 bottom-0 decision-sheet-bg border-t border-border-strong shadow-elevated z-[3500] rounded-t-2xl flex flex-col pointer-events-auto"
+            style={{ height: sheetHeightPx }}
+          >
+            {/* Drag handle */}
+            <div className="h-8 flex items-center justify-center border-b border-white/10 hover:bg-white/5 transition-colors rounded-t-2xl relative z-10">
+              <div className="flex-1 h-full cursor-ns-resize" onPointerDown={handleResizePointerDown} />
+              <button type="button" className="h-full px-6 cursor-pointer flex items-center justify-center" onClick={() => setOpenState(null)}>
+                <div className="w-12 h-1.5 bg-white/20 rounded-full" />
               </button>
+              <div className="flex-1 h-full cursor-ns-resize" onPointerDown={handleResizePointerDown} />
             </div>
-          </div>
 
-          {/* Content */}
-          <div className="flex-1 overflow-hidden relative z-10" onClick={(e) => e.stopPropagation()}>
-            <AnimatePresence mode="wait">
-              {activeTab === 'graph' && !selectedNode && (
-                <motion.div
-                  key="graph"
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  ref={containerRef}
-                  className="w-full h-full relative"
-                >
-                  {graphTopology && (
-                    <div className="absolute top-4 right-4 z-50">
-                      <CopyButton
-                        text={formatGraphForMd(graphTopology)}
-                        label="Copy graph as list"
-                        variant="icon"
-                      />
-                    </div>
-                  )}
-                  <DecisionMapGraph
-                    nodes={adapted.nodes}
-                    edges={adapted.edges}
-                    citationSourceOrder={citationSourceOrder}
-                    width={dims.w}
-                    height={dims.h}
-                    onNodeClick={handleNodeClick}
+            {/* Header Row: Mapper Selector (Left) + Tabs (Center) */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-white/10 relative z-20">
+
+              {/* Left: Provider Selector (Mapper or Refiner based on tab) */}
+              <div className="w-1/3 flex justify-start">
+                {aiTurn && activeTab !== 'audit' && (
+                  <MapperSelector
+                    aiTurn={aiTurn}
+                    activeProviderId={activeMappingPid}
                   />
-                </motion.div>
-              )}
-
-              {activeTab === 'graph' && selectedNode && (
-                <motion.div
-                  key="detail"
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  className="w-full h-full"
-                >
-                  <DetailView
-                    node={selectedNode}
-                    narrativeExcerpt={narrativeExcerpt}
-                    citationSourceOrder={citationSourceOrder}
-                    onBack={() => setSelectedNode(null)}
-                    onOrbClick={handleDetailOrbClick}
+                )}
+                {aiTurn && activeTab === 'audit' && (
+                  <RefinerSelector
+                    aiTurn={aiTurn}
+                    activeProviderId={activeRefinerPid || undefined}
+                    onSelect={(pid) => {
+                      setActiveRefinerPid(pid);
+                    }}
                   />
-                </motion.div>
-              )}
+                )}
+              </div>
 
-              {activeTab === 'narrative' && (
-                <motion.div
-                  key="narrative"
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  className="p-6 h-full overflow-y-auto relative"
-                >
-                  {mappingText && (
-                    <div className="absolute top-4 right-4 z-10">
-                      <CopyButton
-                        text={mappingText}
-                        label="Copy narrative"
-                        variant="icon"
-                      />
-                    </div>
-                  )}
-                  {mappingText ? (
-                    <div className="narrative-prose">
-                      <MarkdownDisplay content={transformCitations(mappingText)} components={markdownComponents} />
-                    </div>
-                  ) : (
-                    <div className="text-text-muted text-sm text-center py-8">No narrative available.</div>
-                  )}
-                </motion.div>
-              )}
+              {/* Center: Tabs */}
+              <div className="flex items-center justify-center gap-4">
+                {tabConfig.map(({ key, label, activeClass }) => {
+                  // Hide audit tab if no data (optional, but requested to always show)
+                  // if (key === 'audit' && !refinerOutput) return null;
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      className={clsx(
+                        "decision-tab-pill",
+                        activeTab === key && activeClass
+                      )}
+                      onClick={() => {
+                        setActiveTab(key);
+                        if (key !== 'graph') setSelectedNode(null);
+                      }}
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
 
-              {activeTab === 'options' && (
-                <motion.div
-                  key="options"
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  className="h-full overflow-y-auto relative"
-                >
-                  {optionsText && (
-                    <div className="absolute top-4 right-4 z-10">
-                      <CopyButton
-                        text={optionsText}
-                        label="Copy options"
-                        variant="icon"
-                      />
-                    </div>
+              {/* Right: Spacer/Close (keeps tabs centered) */}
+              <div className="w-1/3 flex justify-end items-center gap-2">
+                <CopyButton
+                  text={formatDecisionMapForMd(
+                    mappingText,
+                    optionsText,
+                    graphTopology
                   )}
-                  <OptionsTab themes={parsedThemes} citationSourceOrder={citationSourceOrder} onCitationClick={handleCitationClick} />
-                </motion.div>
-              )}
+                  label="Copy full decision map"
+                  buttonText="Copy Map"
+                  className="mr-2"
+                />
+                <button
+                  onClick={() => setOpenState(null)}
+                  className="p-2 text-text-muted hover:text-text-primary hover:bg-white/5 rounded-full transition-colors"
+                >
+                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            </div>
 
-              {activeTab === 'audit' && (
-                <motion.div
-                  key="audit"
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  className="h-full overflow-y-auto relative custom-scrollbar"
-                >
-                  {refinerOutput ? (
-                    <RefinerEpistemicAudit output={refinerOutput!} rawText={refinerRawText} />
-                  ) : (
-                    <div className="flex flex-col items-center justify-center h-full text-text-muted text-sm gap-2 opacity-60">
-                      <span>🔒</span>
-                      <span>No epistemic audit available. Run Refiner to generate.</span>
-                    </div>
-                  )}
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
-        </motion.div>
+            {/* Content */}
+            <div className="flex-1 overflow-hidden relative z-10" onClick={(e) => e.stopPropagation()}>
+              <AnimatePresence mode="wait">
+                {activeTab === 'graph' && !selectedNode && (
+                  <m.div
+                    key="graph"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    ref={containerRef}
+                    className="w-full h-full relative"
+                  >
+                    {graphTopology && (
+                      <div className="absolute top-4 right-4 z-50">
+                        <CopyButton
+                          text={formatGraphForMd(graphTopology)}
+                          label="Copy graph as list"
+                          variant="icon"
+                        />
+                      </div>
+                    )}
+                    <DecisionMapGraph
+                      nodes={adapted.nodes}
+                      edges={adapted.edges}
+                      citationSourceOrder={citationSourceOrder}
+                      width={dims.w}
+                      height={dims.h}
+                      onNodeClick={handleNodeClick}
+                    />
+                  </m.div>
+                )}
+
+                {activeTab === 'graph' && selectedNode && (
+                  <m.div
+                    key="detail"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    className="w-full h-full"
+                  >
+                    <DetailView
+                      node={selectedNode}
+                      narrativeExcerpt={narrativeExcerpt}
+                      citationSourceOrder={citationSourceOrder}
+                      onBack={() => setSelectedNode(null)}
+                      onOrbClick={handleDetailOrbClick}
+                    />
+                  </m.div>
+                )}
+
+                {activeTab === 'narrative' && (
+                  <m.div
+                    key="narrative"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    className="p-6 h-full overflow-y-auto relative"
+                  >
+                    {mappingText && (
+                      <div className="absolute top-4 right-4 z-10">
+                        <CopyButton
+                          text={mappingText}
+                          label="Copy narrative"
+                          variant="icon"
+                        />
+                      </div>
+                    )}
+                    {mappingText ? (
+                      <div className="narrative-prose">
+                        <MarkdownDisplay content={transformCitations(mappingText)} components={markdownComponents} />
+                      </div>
+                    ) : (
+                      <div className="text-text-muted text-sm text-center py-8">No narrative available.</div>
+                    )}
+                  </m.div>
+                )}
+
+                {activeTab === 'options' && (
+                  <m.div
+                    key="options"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    className="h-full overflow-y-auto relative"
+                  >
+                    {optionsText && (
+                      <div className="absolute top-4 right-4 z-10">
+                        <CopyButton
+                          text={optionsText}
+                          label="Copy options"
+                          variant="icon"
+                        />
+                      </div>
+                    )}
+                    <OptionsTab themes={parsedThemes} citationSourceOrder={citationSourceOrder} onCitationClick={handleCitationClick} />
+                  </m.div>
+                )}
+
+                {activeTab === 'audit' && (
+                  <m.div
+                    key="audit"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    className="h-full overflow-y-auto relative custom-scrollbar"
+                  >
+                    {refinerOutput ? (
+                      <RefinerEpistemicAudit output={refinerOutput!} rawText={refinerRawText} />
+                    ) : (
+                      <div className="flex flex-col items-center justify-center h-full text-text-muted text-sm gap-2 opacity-60">
+                        <span>🔒</span>
+                        <span>No epistemic audit available. Run Refiner to generate.</span>
+                      </div>
+                    )}
+                  </m.div>
+                )}
+              </AnimatePresence>
+            </div>
+          </m.div>
+        </LazyMotion>
       )}
     </AnimatePresence>
   );
