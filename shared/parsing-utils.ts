@@ -73,7 +73,7 @@ export function extractGraphTopologyAndStrip(text: string): { text: string; topo
     if (!text || typeof text !== 'string') return { text: text || '', topology: null };
 
     const normalized = normalizeText(text);
-    const match = normalized.match(/={3,}\s*GRAPH[_\s]*TOPOLOGY\s*={3,}/i);
+    const match = normalized.match(GRAPH_TOPOLOGY_PATTERN);
 
     if (!match || typeof match.index !== 'number') {
         return { text: normalized, topology: null };
@@ -152,23 +152,24 @@ const OPTIONS_PATTERNS = [
     // Emoji-prefixed format (🛠️ ALL_AVAILABLE_OPTIONS) - standalone
     { re: /\n?[🛠️🔧⚙️🛠]\s*ALL[_\s]*AVAILABLE[_\s]*OPTIONS\s*\n/i, minPosition: 0.15 },
 
-    // Standard delimiter with === wrapper
-    { re: /\n?={2,}\s*ALL[_\s]*AVAILABLE[_\s]*OPTIONS\s*={2,}\n?/i, minPosition: 0 },
-    { re: /\n?={2,}\s*ALL[_\s]*OPTIONS\s*={2,}\n?/i, minPosition: 0 },
+    // Standard delimiter with === or --- or unicode equivalent wrapper
+    { re: /\n?[=\-─━═＝]{2,}\s*ALL[_\s]*AVAILABLE[_\s]*OPTIONS\s*[=\-─━═＝]{2,}\n?/i, minPosition: 0 },
+    { re: /\n?[=\-─━═＝]{2,}\s*ALL[_\s]*OPTIONS\s*[=\-─━═＝]{2,}\n?/i, minPosition: 0 },
 
-    // Markdown wrapped variants
-    { re: /\n\*\*\s*={2,}\s*ALL[_\s]*AVAILABLE[_\s]*OPTIONS\s*={2,}\s*\*\*\n?/i, minPosition: 0 },
-    { re: /\n###\s*={2,}\s*ALL[_\s]*AVAILABLE[_\s]*OPTIONS\s*={2,}\n?/i, minPosition: 0 },
+    // Markdown wrapped variants or multi-char blocks
+    { re: /\n\*\*\s*[=\-─━═＝]{2,}\s*ALL[_\s]*AVAILABLE[_\s]*OPTIONS\s*[=\-─━═＝]{2,}\s*\*\*\n?/i, minPosition: 0 },
+    { re: /\n\*{0,2}[=\-─━═＝]{3,}\s*ALL[_\s]*AVAILABLE[_\s]*OPTIONS\s*[=\-─━═＝]{3,}\*{0,2}\n/i, minPosition: 0 },
+    { re: /\n###\s*[=\-─━═＝]{2,}\s*ALL[_\s]*AVAILABLE[_\s]*OPTIONS\s*[=\-─━═＝]{2,}\n?/i, minPosition: 0 },
 
     // Heading styles
-    { re: /\n\*\*All Available Options:?\*\*\n/i, minPosition: 0.25 },
-    { re: /\n## All Available Options:?\n/i, minPosition: 0.25 },
-    { re: /\n### All Available Options:?\n/i, minPosition: 0.25 },
+    { re: /\n\*\*\s*All\s+Available\s+Options:?\s*\*\*\n/i, minPosition: 0.25 },
+    { re: /\n##\s+All\s+Available\s+Options:?\n/i, minPosition: 0.25 },
+    { re: /\n###\s+All\s+Available\s+Options:?\n/i, minPosition: 0.25 },
 
     // Looser patterns
-    { re: /\nAll Available Options:\n/i, minPosition: 0.3 },
-    { re: /\n\*\*Options:?\*\*\n/i, minPosition: 0.3 },
-    { re: /\n## Options:?\n/i, minPosition: 0.3 },
+    { re: /\nAll\s+Available\s+Options:\n/i, minPosition: 0.3 },
+    { re: /\n\*\*\s*Options:?\s*\*\*\n/i, minPosition: 0.3 },
+    { re: /\n##\s+Options:?\n/i, minPosition: 0.3 },
 ];
 
 /**
