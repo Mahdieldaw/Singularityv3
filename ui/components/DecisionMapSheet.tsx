@@ -644,7 +644,7 @@ export const DecisionMapSheet = React.memo(() => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [dims, setDims] = useState<{ w: number; h: number }>({ w: window.innerWidth, h: 400 });
   const [activeRefinerPid, setActiveRefinerPid] = useState<string | null>(null);
-  const [activeAntagonistPid, setActiveAntagonistPid] = useState<string | null>(antagonistProvider); // Initialized with antagonistProvider
+  const activeAntagonistPid = antagonistProvider; // Uses current atom value
   const [sheetHeightRatio, setSheetHeightRatio] = useState(0.5);
   const resizeRef = useRef<{ active: boolean; startY: number; startRatio: number; moved: boolean }>({
     active: false,

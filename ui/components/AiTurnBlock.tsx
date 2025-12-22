@@ -40,7 +40,6 @@ import {
   isLoadingAtom,
   workflowProgressAtom,
   antagonistProviderAtom,
-  refinerProviderAtom,
 } from "../state/atoms";
 import { useRefinerOutput } from "../hooks/useRefinerOutput";
 
