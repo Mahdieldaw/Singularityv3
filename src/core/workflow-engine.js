@@ -159,6 +159,107 @@ const logger = {
   warn: console.warn.bind(console),
   error: console.error.bind(console),
 };
+
+function normalizeCitationId(value) {
+  if (value == null) return null;
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  const s = String(value).trim();
+  if (!s) return null;
+  if (/^\d+$/.test(s)) return Number(s);
+  return null;
+}
+
+function normalizeSupporterProviderIds(supporters, citationSourceOrder) {
+  const out = new Set();
+  const list = Array.isArray(supporters) ? supporters : [];
+  const order = citationSourceOrder && typeof citationSourceOrder === "object" ? citationSourceOrder : {};
+
+  for (const s of list) {
+    const citationNum = normalizeCitationId(s);
+    if (citationNum != null) {
+      const pid = order[citationNum] || order[String(citationNum)];
+      if (pid) {
+        out.add(String(pid));
+      } else {
+        out.add(String(citationNum));
+      }
+      continue;
+    }
+    if (s != null) out.add(String(s));
+  }
+
+  return Array.from(out);
+}
+
+function computeConsensusGateFromMapping({ stepResults, mappingSteps }) {
+  try {
+    const mappingStep = Array.isArray(mappingSteps) ? mappingSteps[0] : null;
+    if (!mappingStep) return null;
+
+    const mappingTake = stepResults?.get(mappingStep.stepId);
+    const mappingResult = mappingTake?.status === "completed" ? mappingTake.result : null;
+    const mappingMeta = mappingResult?.meta && typeof mappingResult.meta === "object" ? mappingResult.meta : null;
+    const graphTopology = mappingMeta?.graphTopology;
+    const nodes = graphTopology?.nodes;
+    if (!Array.isArray(nodes) || nodes.length === 0) return null;
+
+    const batchStepId = Array.isArray(mappingStep?.payload?.sourceStepIds) ? mappingStep.payload.sourceStepIds[0] : null;
+    if (!batchStepId) return null;
+    const batchTake = stepResults?.get(batchStepId);
+    const batchResults = batchTake?.status === "completed" ? batchTake.result?.results : null;
+    if (!batchResults || typeof batchResults !== "object") return null;
+
+    const completedProviders = Object.entries(batchResults)
+      .filter(([_pid, r]) => r && r.status === "completed" && String(r.text || "").trim().length > 0)
+      .map(([pid]) => String(pid));
+
+    const totalCompleted = completedProviders.length;
+    const completedSet = new Set(completedProviders);
+
+    const citationSourceOrder = mappingMeta?.citationSourceOrder;
+
+    const approaches = nodes
+      .map((n) => {
+        const supporterIds = normalizeSupporterProviderIds(n?.supporters, citationSourceOrder).filter((pid) =>
+          completedSet.has(pid),
+        );
+        const supportCount = supporterIds.length;
+        const supportRatio = totalCompleted > 0 ? supportCount / totalCompleted : 0;
+        return {
+          id: n?.id != null ? String(n.id) : "",
+          label: n?.label != null ? String(n.label) : "",
+          supportCount,
+          supportRatio,
+          supporterProviderIds: supporterIds,
+        };
+      })
+      .filter((a) => a.id || a.label);
+
+    if (approaches.length === 0) return null;
+
+    const maxSupporters = Math.max(...approaches.map((a) => a.supportCount));
+    const skipRefiner = approaches.length === 1 || maxSupporters <= 2;
+
+    let reason = "has_anchor_outlier";
+    if (approaches.length === 1) reason = "monoculture";
+    else if (maxSupporters <= 2) reason = "no_anchor";
+
+    return {
+      consensusOnly: !!skipRefiner,
+      skipRefiner: !!skipRefiner,
+      skipAntagonist: !!skipRefiner,
+      reason,
+      stats: {
+        totalModelsCompleted: totalCompleted,
+        approachesCount: approaches.length,
+        maxSupporters,
+        approaches,
+      },
+    };
+  } catch (_) {
+    return null;
+  }
+}
 // =============================================================================
 // WORKFLOW ENGINE - FIXED
 // =============================================================================
@@ -468,6 +569,14 @@ export class WorkflowEngine {
       // 2. Execute mapping steps first (Sequential)
       await mappingLoop();
 
+      const consensusGate =
+        resolvedContext?.type === "recompute"
+          ? null
+          : computeConsensusGateFromMapping({ stepResults, mappingSteps });
+      if (consensusGate) {
+        context.workflowControl = consensusGate;
+      }
+
       // 3. Execute synthesis steps (Sequential, after mapping)
       // Now synthesis steps can access mapping results/options
       for (const step of synthesisSteps) {
@@ -529,129 +638,132 @@ export class WorkflowEngine {
         }
       }
 
-      // 4. Refiner Step (Sequential, after synthesis/mapping)
-      const refinerSteps = steps.filter((step) => step.type === "refiner");
-      for (const step of refinerSteps) {
-        try {
-          const result = await this.executeRefinerStep(
-            step,
-            context,
-            stepResults,
-          );
-          stepResults.set(step.stepId, { status: "completed", result });
-          this.port.postMessage({
-            type: "WORKFLOW_STEP_UPDATE",
-            sessionId: context.sessionId,
-            stepId: step.stepId,
-            status: "completed",
-            result,
-            isRecompute: resolvedContext?.type === "recompute",
-            sourceTurnId: resolvedContext?.sourceTurnId,
-          });
-          // Immediate idempotent persistence to avoid data loss on later failures (non-recompute only)
+      const consensusOnly = !!context?.workflowControl?.consensusOnly;
+      if (!consensusOnly) {
+        // 4. Refiner Step (Sequential, after synthesis/mapping)
+        const refinerSteps = steps.filter((step) => step.type === "refiner");
+        for (const step of refinerSteps) {
           try {
-            if (resolvedContext?.type !== "recompute") {
-              const aiTurnId = context?.canonicalAiTurnId;
-              const providerId = step?.payload?.refinerProvider;
-              if (aiTurnId && providerId) {
-                this.sessionManager
-                  .upsertProviderResponse(
-                    context.sessionId,
-                    aiTurnId,
-                    providerId,
-                    "refiner",
-                    0,
-                    {
-                      text: result?.text || "",
-                      status: result?.status || "completed",
-                      meta: result?.meta || {},
-                    },
-                  )
-                  .catch(() => { });
+            const result = await this.executeRefinerStep(
+              step,
+              context,
+              stepResults,
+            );
+            stepResults.set(step.stepId, { status: "completed", result });
+            this.port.postMessage({
+              type: "WORKFLOW_STEP_UPDATE",
+              sessionId: context.sessionId,
+              stepId: step.stepId,
+              status: "completed",
+              result,
+              isRecompute: resolvedContext?.type === "recompute",
+              sourceTurnId: resolvedContext?.sourceTurnId,
+            });
+            // Immediate idempotent persistence to avoid data loss on later failures (non-recompute only)
+            try {
+              if (resolvedContext?.type !== "recompute") {
+                const aiTurnId = context?.canonicalAiTurnId;
+                const providerId = step?.payload?.refinerProvider;
+                if (aiTurnId && providerId) {
+                  this.sessionManager
+                    .upsertProviderResponse(
+                      context.sessionId,
+                      aiTurnId,
+                      providerId,
+                      "refiner",
+                      0,
+                      {
+                        text: result?.text || "",
+                        status: result?.status || "completed",
+                        meta: result?.meta || {},
+                      },
+                    )
+                    .catch(() => { });
+                }
               }
-            }
-          } catch (_) { }
-        } catch (error) {
-          console.error(
-            `[WorkflowEngine] Refiner step ${step.stepId} failed:`,
-            error,
-          );
-          stepResults.set(step.stepId, {
-            status: "failed",
-            error: error.message,
-          });
-          this.port.postMessage({
-            type: "WORKFLOW_STEP_UPDATE",
-            sessionId: context.sessionId,
-            stepId: step.stepId,
-            status: "failed",
-            error: error.message,
-            isRecompute: resolvedContext?.type === "recompute",
-            sourceTurnId: resolvedContext?.sourceTurnId,
-          });
+            } catch (_) { }
+          } catch (error) {
+            console.error(
+              `[WorkflowEngine] Refiner step ${step.stepId} failed:`,
+              error,
+            );
+            stepResults.set(step.stepId, {
+              status: "failed",
+              error: error.message,
+            });
+            this.port.postMessage({
+              type: "WORKFLOW_STEP_UPDATE",
+              sessionId: context.sessionId,
+              stepId: step.stepId,
+              status: "failed",
+              error: error.message,
+              isRecompute: resolvedContext?.type === "recompute",
+              sourceTurnId: resolvedContext?.sourceTurnId,
+            });
+          }
         }
-      }
 
-      // 5. Antagonist Step (Sequential, after refiner)
-      const antagonistSteps = steps.filter((step) => step.type === "antagonist");
-      for (const step of antagonistSteps) {
-        try {
-          const result = await this.executeAntagonistStep(
-            step,
-            context,
-            stepResults,
-          );
-          stepResults.set(step.stepId, { status: "completed", result });
-          this.port.postMessage({
-            type: "WORKFLOW_STEP_UPDATE",
-            sessionId: context.sessionId,
-            stepId: step.stepId,
-            status: "completed",
-            result,
-            isRecompute: resolvedContext?.type === "recompute",
-            sourceTurnId: resolvedContext?.sourceTurnId,
-          });
-          // Immediate idempotent persistence to avoid data loss on later failures (non-recompute only)
+        // 5. Antagonist Step (Sequential, after refiner)
+        const antagonistSteps = steps.filter((step) => step.type === "antagonist");
+        for (const step of antagonistSteps) {
           try {
-            if (resolvedContext?.type !== "recompute") {
-              const aiTurnId = context?.canonicalAiTurnId;
-              const providerId = step?.payload?.antagonistProvider;
-              if (aiTurnId && providerId) {
-                this.sessionManager
-                  .upsertProviderResponse(
-                    context.sessionId,
-                    aiTurnId,
-                    providerId,
-                    "antagonist",
-                    0,
-                    {
-                      text: result?.text || "",
-                      status: result?.status || "completed",
-                      meta: result?.meta || {},
-                    },
-                  )
-                  .catch(() => { });
+            const result = await this.executeAntagonistStep(
+              step,
+              context,
+              stepResults,
+            );
+            stepResults.set(step.stepId, { status: "completed", result });
+            this.port.postMessage({
+              type: "WORKFLOW_STEP_UPDATE",
+              sessionId: context.sessionId,
+              stepId: step.stepId,
+              status: "completed",
+              result,
+              isRecompute: resolvedContext?.type === "recompute",
+              sourceTurnId: resolvedContext?.sourceTurnId,
+            });
+            // Immediate idempotent persistence to avoid data loss on later failures (non-recompute only)
+            try {
+              if (resolvedContext?.type !== "recompute") {
+                const aiTurnId = context?.canonicalAiTurnId;
+                const providerId = step?.payload?.antagonistProvider;
+                if (aiTurnId && providerId) {
+                  this.sessionManager
+                    .upsertProviderResponse(
+                      context.sessionId,
+                      aiTurnId,
+                      providerId,
+                      "antagonist",
+                      0,
+                      {
+                        text: result?.text || "",
+                        status: result?.status || "completed",
+                        meta: result?.meta || {},
+                      },
+                    )
+                    .catch(() => { });
+                }
               }
-            }
-          } catch (_) { }
-        } catch (error) {
-          console.error(
-            `[WorkflowEngine] Antagonist step ${step.stepId} failed:`,
-            error,
-          );
-          stepResults.set(step.stepId, {
-            status: "failed",
-            error: error.message,
-          });
-          this.port.postMessage({
-            type: "WORKFLOW_STEP_UPDATE",
-            sessionId: context.sessionId,
-            stepId: step.stepId,
-            status: "failed",
-            error: error.message,
-            isRecompute: resolvedContext?.type === "recompute",
-            sourceTurnId: resolvedContext?.sourceTurnId,
-          });
+            } catch (_) { }
+          } catch (error) {
+            console.error(
+              `[WorkflowEngine] Antagonist step ${step.stepId} failed:`,
+              error,
+            );
+            stepResults.set(step.stepId, {
+              status: "failed",
+              error: error.message,
+            });
+            this.port.postMessage({
+              type: "WORKFLOW_STEP_UPDATE",
+              sessionId: context.sessionId,
+              stepId: step.stepId,
+              status: "failed",
+              error: error.message,
+              isRecompute: resolvedContext?.type === "recompute",
+              sourceTurnId: resolvedContext?.sourceTurnId,
+            });
+          }
         }
       }
 
@@ -743,6 +855,7 @@ export class WorkflowEngine {
         sessionId: context.sessionId,
         workflowId: request.workflowId,
         finalResults: Object.fromEntries(stepResults),
+        ...(context?.workflowControl?.consensusOnly ? { haltReason: "consensus_only" } : {}),
       });
 
       // ✅ Clean up delta cache
@@ -924,6 +1037,13 @@ export class WorkflowEngine {
         meta: {
           synthesizer: primarySynthesizer,
           mapper: primaryMapper,
+          requestedFeatures: {
+            synthesis: steps.some((s) => s.type === "synthesis"),
+            mapping: steps.some((s) => s.type === "mapping"),
+            refiner: !!(steps.some((s) => s.type === "refiner") && !context?.workflowControl?.consensusOnly),
+            antagonist: !!(steps.some((s) => s.type === "antagonist") && !context?.workflowControl?.consensusOnly),
+          },
+          ...(context?.workflowControl ? { workflowControl: context.workflowControl } : {}),
         },
       };
 
