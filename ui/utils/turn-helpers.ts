@@ -153,23 +153,23 @@ export function applyStreamingUpdates(
     responseType: "batch" | "synthesis" | "mapping" | "refiner" | "antagonist";
   }>,
 ) {
+  let batchChanged = false;
+  let synthesisChanged = false;
+  let mappingChanged = false;
+  let refinerChanged = false;
+  let antagonistChanged = false;
+
   updates.forEach(({ providerId, text: delta, status, responseType }) => {
     if (responseType === "batch") {
-      // Update batch responses (array per provider)
+      batchChanged = true;
       if (!aiTurn.batchResponses) aiTurn.batchResponses = {};
-      const arr = normalizeResponseArray(
-        aiTurn.batchResponses[providerId],
-      );
+      const arr = normalizeResponseArray(aiTurn.batchResponses[providerId]);
 
-      // Check if we should start a new response (branching/retry)
-      // If the latest response is terminal (completed/error) and the new update is active (streaming/pending),
-      // we must preserve the history and start a new entry.
       const latest = arr.length > 0 ? arr[arr.length - 1] : undefined;
       const isLatestTerminal = latest && (latest.status === "completed" || latest.status === "error");
       const isNewStream = status === "streaming" || status === "pending";
 
       if (latest && !isLatestTerminal) {
-        // Update existing active response
         arr[arr.length - 1] = {
           ...latest,
           text: (latest.text || "") + delta,
@@ -177,8 +177,6 @@ export function applyStreamingUpdates(
           updatedAt: Date.now(),
         };
       } else if (isLatestTerminal && !isNewStream) {
-        // Edge case: late arrival of terminal update for already terminal response?
-        // Or maybe just updating metadata. For safety, we update the latest.
         arr[arr.length - 1] = {
           ...latest,
           text: (latest.text || "") + delta,
@@ -186,7 +184,6 @@ export function applyStreamingUpdates(
           updatedAt: Date.now(),
         };
       } else {
-        // Create new response (either first one, or branching from terminal)
         arr.push({
           providerId: providerId as ProviderKey,
           text: delta,
@@ -198,13 +195,12 @@ export function applyStreamingUpdates(
 
       aiTurn.batchResponses[providerId] = arr;
     } else if (responseType === "synthesis") {
-      // Update synthesis responses (array per provider)
+      synthesisChanged = true;
       if (!aiTurn.synthesisResponses) aiTurn.synthesisResponses = {};
       const arr = normalizeResponseArray(aiTurn.synthesisResponses[providerId]);
 
       const latest = arr.length > 0 ? arr[arr.length - 1] : undefined;
       const isLatestTerminal = latest && (latest.status === "completed" || latest.status === "error");
-
 
       if (latest && !isLatestTerminal) {
         arr[arr.length - 1] = {
@@ -223,15 +219,13 @@ export function applyStreamingUpdates(
       }
 
       aiTurn.synthesisResponses[providerId] = arr;
-      aiTurn.synthesisVersion = (aiTurn.synthesisVersion ?? 0) + 1;
     } else if (responseType === "mapping") {
-      // Update mapping responses (array per provider)
+      mappingChanged = true;
       if (!aiTurn.mappingResponses) aiTurn.mappingResponses = {};
       const arr = normalizeResponseArray(aiTurn.mappingResponses[providerId]);
 
       const latest = arr.length > 0 ? arr[arr.length - 1] : undefined;
       const isLatestTerminal = latest && (latest.status === "completed" || latest.status === "error");
-
 
       if (latest && !isLatestTerminal) {
         arr[arr.length - 1] = {
@@ -250,10 +244,8 @@ export function applyStreamingUpdates(
       }
 
       aiTurn.mappingResponses[providerId] = arr;
-      aiTurn.mappingVersion = (aiTurn.mappingVersion ?? 0) + 1;
-    }
-    else if (responseType === "refiner") {
-      // Update refiner responses (array per provider)
+    } else if (responseType === "refiner") {
+      refinerChanged = true;
       if (!aiTurn.refinerResponses) aiTurn.refinerResponses = {};
       const arr = normalizeResponseArray(aiTurn.refinerResponses[providerId]);
 
@@ -277,9 +269,8 @@ export function applyStreamingUpdates(
       }
 
       aiTurn.refinerResponses[providerId] = arr;
-      aiTurn.refinerVersion = (aiTurn.refinerVersion ?? 0) + 1;
     } else if (responseType === "antagonist") {
-      // Update antagonist responses (array per provider)
+      antagonistChanged = true;
       if (!aiTurn.antagonistResponses) aiTurn.antagonistResponses = {};
       const arr = normalizeResponseArray(aiTurn.antagonistResponses[providerId]);
 
@@ -303,9 +294,15 @@ export function applyStreamingUpdates(
       }
 
       aiTurn.antagonistResponses[providerId] = arr;
-      aiTurn.antagonistVersion = (aiTurn.antagonistVersion ?? 0) + 1;
     }
   });
+
+  // ✅ Bump versions only for changed types
+  if (batchChanged) aiTurn.batchVersion = (aiTurn.batchVersion ?? 0) + 1;
+  if (synthesisChanged) aiTurn.synthesisVersion = (aiTurn.synthesisVersion ?? 0) + 1;
+  if (mappingChanged) aiTurn.mappingVersion = (aiTurn.mappingVersion ?? 0) + 1;
+  if (refinerChanged) aiTurn.refinerVersion = (aiTurn.refinerVersion ?? 0) + 1;
+  if (antagonistChanged) aiTurn.antagonistVersion = (aiTurn.antagonistVersion ?? 0) + 1;
 }
 
 /**
