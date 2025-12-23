@@ -472,7 +472,13 @@ export const SynthesisBubble = React.memo<SynthesisBubbleProps>(
                                 providerId={pid}
                                 providerName={getProviderName(pid)}
                                 error={error as any}
-                                onRetry={() => onRetryProvider(pid)}
+                                // ✅ FIX: Only pass the function if retryable AND session exists.
+                                // Otherwise pass undefined to hide the button.
+                                onRetry={
+                                    (error as any)?.retryable && aiTurn.sessionId
+                                        ? () => onRetryProvider(pid)
+                                        : undefined
+                                }
                             />
                         ))}
                     </div>

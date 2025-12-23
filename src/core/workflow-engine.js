@@ -343,8 +343,21 @@ export class WorkflowEngine {
           const resultsObj = result && result.results ? result.results : {};
           const successfulCount = Object.values(resultsObj).filter(r => r.status === 'completed').length;
 
-          if (successfulCount < 2) {
+          // ✅ Only enforce for initial workflows, not recomputes
+          if (resolvedContext?.type !== "recompute" && successfulCount < 2) {
             console.warn(`[WorkflowEngine] Pipeline halted: only ${successfulCount} models responded (need 2).`);
+
+            // Still persist what we have before halting
+            try {
+              const result = { batchOutputs: resultsObj, synthesisOutputs: {}, mappingOutputs: {} };
+              await this.sessionManager.persist({
+                type: resolvedContext?.type || "initialize",
+                sessionId: context.sessionId,
+                userMessage: context?.userMessage || this.currentUserMessage || "",
+                canonicalUserTurnId: context?.canonicalUserTurnId,
+                canonicalAiTurnId: context?.canonicalAiTurnId,
+              }, resolvedContext, result);
+            } catch (_) { }
 
             this._emitTurnFinalized(context, steps, stepResults, resolvedContext);
             this.port.postMessage({
