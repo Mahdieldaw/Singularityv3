@@ -4,7 +4,7 @@ import { usePortMessageHandler } from "./hooks/chat/usePortMessageHandler";
 import { useConnectionMonitoring } from "./hooks/useConnectionMonitoring";
 import { useHistoryLoader } from "./hooks/useHistoryLoader";
 import { useResponsiveLoadingGuard } from "./hooks/ui/useLoadingWatchdog";
-import ChatView from "./views/ChatView";
+const ChatView = safeLazy(() => import("./views/ChatView"));
 import Header from "./components/Header";
 import { safeLazy } from "./utils/safeLazy";
 const HistoryPanel = safeLazy(() => import("./components/HistoryPanel"));
@@ -64,7 +64,13 @@ export default function App() {
         <LaunchpadTab /> {/* Add Launchpad Tab */}
 
         <main className="chat-main flex-1 flex flex-col relative min-h-0">
-          <ChatView />
+          <Suspense fallback={
+            <div className="flex items-center justify-center h-full w-full">
+              <div className="loading-spinner" />
+            </div>
+          }>
+            <ChatView />
+          </Suspense>
         </main>
 
         <Suspense fallback={null}>

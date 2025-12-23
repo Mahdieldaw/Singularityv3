@@ -11,7 +11,7 @@ import {
   splitPaneRatioAtom,
   chatInputHeightAtom
 } from "../state/atoms";
-import { Panel, PanelGroup, PanelResizeHandle, ImperativePanelGroupHandle } from "react-resizable-panels";
+import { ResizableSplitLayout } from "../components/ResizableSplitLayout";
 import clsx from "clsx";
 
 import MessageRow from "../components/MessageRow";
@@ -24,6 +24,7 @@ import { useSmartProviderDefaults } from "../hooks/providers/useSmartProviderDef
 
 import { safeLazy } from "../utils/safeLazy";
 // Lazy load DecisionMapSheet (named export adapter)
+// Uses safeLazy for robust loading
 const DecisionMapSheet = safeLazy(() =>
   import("../components/DecisionMapSheet").then(module => ({ default: module.DecisionMapSheet }))
 );
@@ -42,15 +43,8 @@ export default function ChatView() {
   const isDecisionMapOpen = useAtomValue(isDecisionMapOpenAtom);
   const setDecisionMapOpen = useSetAtom(isDecisionMapOpenAtom);
   const splitPaneRatio = useAtomValue(splitPaneRatioAtom);
+  const setSplitPaneRatio = useSetAtom(splitPaneRatioAtom);
   const chatInputHeight = useAtomValue(chatInputHeightAtom);
-  const panelGroupRef = useRef<ImperativePanelGroupHandle>(null);
-
-  // Sync split pane ratio to panel layout (for auto-open/widen)
-  useEffect(() => {
-    if (panelGroupRef.current && isSplitOpen) {
-      panelGroupRef.current.setLayout([splitPaneRatio, 100 - splitPaneRatio]);
-    }
-  }, [splitPaneRatio, isSplitOpen]);
 
   // Smart Defaults
   useSmartProviderDefaults();
@@ -207,14 +201,13 @@ export default function ChatView() {
       {showWelcome ? (
         <WelcomeScreen />
       ) : (
-        <PanelGroup
-          ref={panelGroupRef}
-          direction="horizontal"
+        <ResizableSplitLayout
           className="flex-1 h-full"
           style={{ paddingBottom: (chatInputHeight || 80) + 12 }}
-        >
-          {/* LEFT: Main Thread */}
-          <Panel defaultSize={60} minSize={35}>
+          isSplitOpen={!!isSplitOpen}
+          ratio={splitPaneRatio}
+          onRatioChange={setSplitPaneRatio}
+          leftPane={
             <Virtuoso
               className="h-full"
               data={turnIds}
@@ -230,33 +223,14 @@ export default function ChatView() {
               computeItemKey={(index, turnId) => turnId || `fallback-${index}`}
               ref={virtuosoRef as any}
             />
-          </Panel>
-
-          {/* RIGHT: Model Response Panel (only when open) */}
-          {isSplitOpen && (
-            <>
-              {/* Divider with Orbs */}
-              <PanelResizeHandle className="w-1.5 bg-border-subtle hover:bg-brand-500/50 transition-colors cursor-col-resize relative z-10">
-                {/* Adjacent Orb Column - uses fixed Y centering to prevent shift when ChatInput changes */}
-                <div
-                  className="divider-handle absolute left-0 -translate-x-full w-10 h-full flex flex-col items-center justify-center z-20"
-                  style={{
-                    pointerEvents: 'none',
-                    transform: 'translateX(-100%)'
-                  }}
-                >
-                  <div className="orb-bar pointer-events-auto cursor-default bg-surface-raised border-y border-l border-border-subtle rounded-l-xl shadow-sm p-1 flex flex-col items-center justify-center gap-2" style={{ cursor: 'default' }}>
-                    <CouncilOrbsVertical />
-                  </div>
-                </div>
-              </PanelResizeHandle>
-
-              <Panel defaultSize={40} minSize={0} className="min-w-0 overflow-hidden">
-                <SplitPaneRightPanel />
-              </Panel>
-            </>
-          )}
-        </PanelGroup>
+          }
+          rightPane={<SplitPaneRightPanel />}
+          dividerContent={
+            <div className="orb-bar pointer-events-auto cursor-default bg-surface-raised border-y border-l border-border-subtle rounded-l-xl shadow-sm p-1 flex flex-col items-center justify-center gap-2" style={{ cursor: 'default' }}>
+              <CouncilOrbsVertical />
+            </div>
+          }
+        />
       )}
 
       {/* Decision Map - Fixed Overlay */}
