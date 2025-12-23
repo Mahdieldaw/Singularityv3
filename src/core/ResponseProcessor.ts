@@ -4,7 +4,7 @@
 // Pure response processing - NO I/O
 // ═══════════════════════════════════════════════════════════════════════════
 
-import { parseRefinerOutput, RefinerOutput, parseMappingResponse } from '../../shared/parsing-utils';
+import { parseRefinerOutput, RefinerOutput, parseMappingResponse, parseOptionTitles } from '../../shared/parsing-utils';
 export type { RefinerOutput };
 
 export interface ComposerResult {
@@ -188,5 +188,9 @@ export class ResponseProcessor {
 
     parseRefinerResponse(text: string): RefinerOutput {
         return parseRefinerOutput(text);
+    }
+
+    parseOptionTitles(text: string): string[] {
+        return parseOptionTitles(text);
     }
 }

@@ -1117,7 +1117,7 @@ export class WorkflowEngine {
       // C. Mapping Text (striped of topology)
       const rawMapping = await fetchHistoricalText('mapping');
       if (rawMapping) {
-        const { text } = this.responseProcessor.extractGraphTopology(rawMapping);
+        const { text } = this.responseProcessor.processMappingResponse(rawMapping);
         mappingText = text;
       }
 
@@ -1148,7 +1148,7 @@ export class WorkflowEngine {
           const res = stepResults.get(id);
           if (res?.status === "completed" && res.result?.text) {
             const raw = res.result.text;
-            const { text } = this.responseProcessor.extractGraphTopology(raw);
+            const { text } = this.responseProcessor.processMappingResponse(raw);
             mappingText = text;
             break;
           }
@@ -1174,9 +1174,9 @@ export class WorkflowEngine {
         const data = await this.resolveSourceData(mappingPayload, context, stepResults);
         const rawMapping = data[0]?.text || "";
         if (rawMapping) {
-          const { options } = this.responseProcessor.extractOptions(rawMapping);
-          if (options) {
-            mapperOptionTitles = this.responseProcessor.parseOptionTitles(options);
+          const { optionTitles } = this.responseProcessor.processMappingResponse(rawMapping);
+          if (optionTitles) {
+            mapperOptionTitles = optionTitles;
           }
         }
       } catch (e) {
@@ -1282,7 +1282,7 @@ export class WorkflowEngine {
       // C. Mapping Text (striped of topology)
       const rawMapping = await fetchHistoricalText('mapping');
       if (rawMapping) {
-        const { text } = this.responseProcessor.extractGraphTopology(rawMapping);
+        const { text } = this.responseProcessor.processMappingResponse(rawMapping);
         mappingText = text;
       }
 
@@ -1319,7 +1319,7 @@ export class WorkflowEngine {
           const res = stepResults.get(id);
           if (res?.status === "completed" && res.result?.text) {
             const raw = res.result.text;
-            const { text } = this.responseProcessor.extractGraphTopology(raw);
+            const { text } = this.responseProcessor.processMappingResponse(raw);
             mappingText = text;
             break;
           }
@@ -1357,9 +1357,9 @@ export class WorkflowEngine {
         const data = await this.resolveSourceData(mappingPayload, context, stepResults);
         const rawMapping = data[0]?.text || "";
         if (rawMapping) {
-          const { options } = this.responseProcessor.extractOptions(rawMapping);
-          if (options) {
-            mapperOptionTitles = this.responseProcessor.parseOptionTitles(options);
+          const { optionTitles } = this.responseProcessor.processMappingResponse(rawMapping);
+          if (optionTitles) {
+            mapperOptionTitles = optionTitles;
           }
         }
       } catch (e) {

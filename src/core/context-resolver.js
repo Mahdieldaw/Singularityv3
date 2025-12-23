@@ -1,6 +1,5 @@
 // src/core/context-resolver.js
 import {
-  extractBatchOutputs,
   aggregateBatchOutputs,
   findLatestMappingOutput,
   findLatestSynthesisOutput,
