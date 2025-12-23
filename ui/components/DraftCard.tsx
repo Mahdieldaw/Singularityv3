@@ -229,25 +229,29 @@ export const DraftCard: React.FC<DraftCardProps> = ({
                             ] : sections;
                             return ordered.map((sec) => (
                                 <div key={sec.id} className="rounded-lg border border-border-subtle/60 bg-surface">
-                                    <button
-                                        className="w-full flex items-center justify-between px-3 py-2 text-left"
-                                        onClick={(e) => {
-                                            e.stopPropagation();
-                                            setOpenSections((prev) => ({ ...prev, [sec.id]: !prev[sec.id] }));
-                                        }}
-                                    >
-                                        <div className="text-xs font-semibold text-text-secondary uppercase tracking-wider flex items-center gap-1">
-                                            <span className={`transition-transform ${openSections[sec.id] !== false ? '' : '-rotate-90'}`}>▸</span>
-                                            {sec.title}
-                                        </div>
+                                    <div className="w-full flex items-center justify-between px-3 py-2 gap-2">
                                         <button
+                                            type="button"
+                                            className="flex-1 text-left"
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                setOpenSections((prev) => ({ ...prev, [sec.id]: !prev[sec.id] }));
+                                            }}
+                                        >
+                                            <div className="text-xs font-semibold text-text-secondary uppercase tracking-wider flex items-center gap-1">
+                                                <span className={`transition-transform ${openSections[sec.id] !== false ? '' : '-rotate-90'}`}>▸</span>
+                                                {sec.title}
+                                            </div>
+                                        </button>
+                                        <button
+                                            type="button"
                                             onClick={(e) => { e.stopPropagation(); extractToInput(sec.text + "\n\n" + chatInputValue); }}
                                             className="px-2 py-1 text-xs bg-chip-soft hover:bg-surface-highlight border border-border-subtle rounded-md text-text-secondary"
                                             title="Extract this section to input"
                                         >
                                             Extract →
                                         </button>
-                                    </button>
+                                    </div>
                                     {openSections[sec.id] !== false && (
                                         <div className="px-3 pb-3 text-sm text-text-primary whitespace-pre-wrap leading-relaxed max-h-64 overflow-y-auto">
                                             {sec.text}

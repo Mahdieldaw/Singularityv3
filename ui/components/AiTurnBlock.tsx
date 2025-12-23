@@ -28,7 +28,6 @@ import {
   normalizeResponseArray,
   getLatestResponse,
 } from "../utils/turn-helpers";
-import ProviderErrorCard from "./ProviderErrorCard";
 import { useRetryProvider } from "../hooks/providers/useRetryProvider";
 import {
   providerErrorsAtom,
