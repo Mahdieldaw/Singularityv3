@@ -337,60 +337,58 @@ export class WorkflowEngine {
             stepId: step.stepId,
             status: "completed",
             result,
-            // Attach recompute metadata for UI routing/clearing
             isRecompute: resolvedContext?.type === "recompute",
             sourceTurnId: resolvedContext?.sourceTurnId,
           });
 
-          // Cache provider contexts from this batch step into workflowContexts so
-          // subsequent synthesis/mapping steps in the same workflow can continue
-          // the freshly-created conversations immediately.
+          // Validation: Need at least 2 successful batch responses to proceed
+          const resultsObj = result && result.results ? result.results : {};
+          const successfulCount = Object.values(resultsObj).filter(r => r.status === 'completed').length;
+
+          if (successfulCount < 2) {
+            console.warn(`[WorkflowEngine] Pipeline halted: only ${successfulCount} models responded (need 2).`);
+
+            this._emitTurnFinalized(context, steps, stepResults, resolvedContext);
+            this.port.postMessage({
+              type: "WORKFLOW_COMPLETE",
+              sessionId: context.sessionId,
+              workflowId: request.workflowId,
+              finalResults: Object.fromEntries(stepResults),
+              haltReason: "insufficient_witnesses"
+            });
+            return; // EXIT EARLY
+          }
+
+          // Cache provider contexts from this batch step
           try {
-            const resultsObj = result && result.results ? result.results : {};
-            const cachedProviders = [];
             Object.entries(resultsObj).forEach(([pid, data]) => {
               if (data && data.meta && Object.keys(data.meta).length > 0) {
                 workflowContexts[pid] = data.meta;
-                cachedProviders.push(pid);
               }
             });
-            if (cachedProviders.length > 0) {
-              console.log(
-                `[WorkflowEngine] Cached contexts for providers: ${cachedProviders.join(
-                  ", ",
-                )}`,
-              );
-            }
-          } catch (e) {
-            /* best-effort logging */
-          }
+          } catch (e) { }
         } catch (error) {
-          console.error(
-            `[WorkflowEngine] Prompt step ${step.stepId} failed:`,
-            error,
-          );
-          stepResults.set(step.stepId, {
-            status: "failed",
-            error: error.message,
-          });
+          console.error(`[WorkflowEngine] Batch step failed:`, error);
+          stepResults.set(step.stepId, { status: "failed", error: error.message });
           this.port.postMessage({
             type: "WORKFLOW_STEP_UPDATE",
             sessionId: context.sessionId,
             stepId: step.stepId,
             status: "failed",
             error: error.message,
-            // Attach recompute metadata for UI routing/clearing
             isRecompute: resolvedContext?.type === "recompute",
             sourceTurnId: resolvedContext?.sourceTurnId,
           });
-          // If the main prompt fails, the entire workflow cannot proceed.
+
+          this._emitTurnFinalized(context, steps, stepResults, resolvedContext);
           this.port.postMessage({
             type: "WORKFLOW_COMPLETE",
             sessionId: context.sessionId,
             workflowId: request.workflowId,
             finalResults: Object.fromEntries(stepResults),
+            haltReason: "batch_failed"
           });
-          return; // Exit early
+          return; // EXIT EARLY
         }
       }
 
@@ -412,53 +410,46 @@ export class WorkflowEngine {
               stepId: step.stepId,
               status: "completed",
               result,
-              // Attach recompute metadata for UI routing/clearing
               isRecompute: resolvedContext?.type === "recompute",
               sourceTurnId: resolvedContext?.sourceTurnId,
             });
-            // Immediate idempotent persistence to avoid data loss on later failures (non-recompute only)
+            // Immediate idempotent persistence
             try {
               if (resolvedContext?.type !== "recompute") {
                 const aiTurnId = context?.canonicalAiTurnId;
                 const providerId = step?.payload?.mappingProvider;
                 if (aiTurnId && providerId) {
-                  this.sessionManager
-                    .upsertProviderResponse(
-                      context.sessionId,
-                      aiTurnId,
-                      providerId,
-                      "mapping",
-                      0,
-                      {
-                        text: result?.text || "",
-                        status: result?.status || "completed",
-                        meta: result?.meta || {},
-                      },
-                    )
-                    .catch(() => { });
+                  this.sessionManager.upsertProviderResponse(context.sessionId, aiTurnId, providerId, "mapping", 0, {
+                    text: result?.text || "",
+                    status: result?.status || "completed",
+                    meta: result?.meta || {},
+                  }).catch(() => { });
                 }
               }
             } catch (_) { }
           } catch (error) {
-            console.error(
-              `[WorkflowEngine] Mapping step ${step.stepId} failed:`,
-              error,
-            );
-            stepResults.set(step.stepId, {
-              status: "failed",
-              error: error.message,
-            });
+            console.error(`[WorkflowEngine] Mapping failed (HALTING):`, error);
+            stepResults.set(step.stepId, { status: "failed", error: error.message });
             this.port.postMessage({
               type: "WORKFLOW_STEP_UPDATE",
               sessionId: context.sessionId,
               stepId: step.stepId,
               status: "failed",
               error: error.message,
-              // Attach recompute metadata for UI routing/clearing
               isRecompute: resolvedContext?.type === "recompute",
               sourceTurnId: resolvedContext?.sourceTurnId,
             });
-            // Continue with other mapping steps even if one fails
+
+            // HALT PIPELINE: Mapping failure stops synthesis and beyond
+            this._emitTurnFinalized(context, steps, stepResults, resolvedContext);
+            this.port.postMessage({
+              type: "WORKFLOW_COMPLETE",
+              sessionId: context.sessionId,
+              workflowId: request.workflowId,
+              finalResults: Object.fromEntries(stepResults),
+              haltReason: "mapping_failed"
+            });
+            return; // EXIT EARLY
           }
         }
       };
@@ -484,42 +475,26 @@ export class WorkflowEngine {
             stepId: step.stepId,
             status: "completed",
             result,
-            // Attach recompute metadata for UI routing/clearing
             isRecompute: resolvedContext?.type === "recompute",
             sourceTurnId: resolvedContext?.sourceTurnId,
           });
-          // Immediate idempotent persistence to avoid data loss on later failures (non-recompute only)
+          // Immediate idempotent persistence
           try {
             if (resolvedContext?.type !== "recompute") {
               const aiTurnId = context?.canonicalAiTurnId;
               const providerId = step?.payload?.synthesisProvider;
               if (aiTurnId && providerId) {
-                this.sessionManager
-                  .upsertProviderResponse(
-                    context.sessionId,
-                    aiTurnId,
-                    providerId,
-                    "synthesis",
-                    0,
-                    {
-                      text: result?.text || "",
-                      status: result?.status || "completed",
-                      meta: result?.meta || {},
-                    },
-                  )
-                  .catch(() => { });
+                this.sessionManager.upsertProviderResponse(context.sessionId, aiTurnId, providerId, "synthesis", 0, {
+                  text: result?.text || "",
+                  status: result?.status || "completed",
+                  meta: result?.meta || {},
+                }).catch(() => { });
               }
             }
           } catch (_) { }
         } catch (error) {
-          console.error(
-            `[WorkflowEngine] Synthesis step ${step.stepId} failed:`,
-            error,
-          );
-          stepResults.set(step.stepId, {
-            status: "failed",
-            error: error.message,
-          });
+          console.error(`[WorkflowEngine] Synthesis failed (HALTING):`, error);
+          stepResults.set(step.stepId, { status: "failed", error: error.message });
           this.port.postMessage({
             type: "WORKFLOW_STEP_UPDATE",
             sessionId: context.sessionId,
@@ -529,6 +504,17 @@ export class WorkflowEngine {
             isRecompute: resolvedContext?.type === "recompute",
             sourceTurnId: resolvedContext?.sourceTurnId,
           });
+
+          // HALT PIPELINE: Synthesis failure stops refiner and beyond
+          this._emitTurnFinalized(context, steps, stepResults, resolvedContext);
+          this.port.postMessage({
+            type: "WORKFLOW_COMPLETE",
+            sessionId: context.sessionId,
+            workflowId: request.workflowId,
+            finalResults: Object.fromEntries(stepResults),
+            haltReason: "synthesis_failed"
+          });
+          return; // EXIT EARLY
         }
       }
 

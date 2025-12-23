@@ -5,21 +5,29 @@ import { AiTurn } from "../types";
 import { parseRefinerOutput, RefinerOutput } from "../../shared/parsing-utils";
 import { SimpleIndexedDBAdapter } from "../../src/persistence/SimpleIndexedDBAdapter";
 
-export function useRefinerOutput(aiTurnId: string | null, forcedProviderId?: string | null) {
+export interface RefinerOutputState {
+    output: RefinerOutput | null;
+    isLoading: boolean;
+    isError: boolean;
+    providerId?: string | null;
+    rawText?: string;
+}
+
+export function useRefinerOutput(aiTurnId: string | null, forcedProviderId?: string | null): RefinerOutputState {
     const turnsMap = useAtomValue(turnsMapAtom);
-    const [state, setState] = useState<{ output: RefinerOutput | null; isLoading: boolean; providerId?: string | null; rawText?: string } | null>(null);
+    const [state, setState] = useState<RefinerOutputState | null>(null);
 
     const memoResult = useMemo(() => {
-        if (!aiTurnId) return { output: null as RefinerOutput | null, isLoading: false };
+        if (!aiTurnId) return { output: null, isLoading: false, isError: false };
 
         const turn = turnsMap.get(aiTurnId);
-        if (!turn || turn.type !== "ai") return { output: null as RefinerOutput | null, isLoading: false };
+        if (!turn || turn.type !== "ai") return { output: null, isLoading: false, isError: false };
 
         const aiTurn = turn as AiTurn;
         const refinerResponses = aiTurn.refinerResponses;
 
         if (!refinerResponses || Object.keys(refinerResponses).length === 0) {
-            return { output: null as RefinerOutput | null, isLoading: false };
+            return { output: null, isLoading: false, isError: false };
         }
 
         // Use forced provider if valid, otherwise fallback to first available
@@ -30,12 +38,13 @@ export function useRefinerOutput(aiTurnId: string | null, forcedProviderId?: str
         }
 
         const responses = refinerResponses[providerId];
-        if (!responses || responses.length === 0) return { output: null as RefinerOutput | null, isLoading: false };
+        if (!responses || responses.length === 0) return { output: null, isLoading: false, isError: false };
 
         const latestResponse = responses[responses.length - 1];
 
-        // Check if streaming/pending
+        // Check if streaming/pending or error
         const isLoading = latestResponse.status === "streaming" || latestResponse.status === "pending";
+        const isError = latestResponse.status === "error";
 
         // Parse output
         let parsed: RefinerOutput | null = null;
@@ -48,9 +57,10 @@ export function useRefinerOutput(aiTurnId: string | null, forcedProviderId?: str
         return {
             output: parsed,
             isLoading,
+            isError,
             providerId,
             rawText: latestResponse.text
-        } as { output: RefinerOutput | null; isLoading: boolean; providerId?: string | null; rawText?: string };
+        };
     }, [aiTurnId, turnsMap, forcedProviderId]);
 
     useEffect(() => {
@@ -66,7 +76,7 @@ export function useRefinerOutput(aiTurnId: string | null, forcedProviderId?: str
             // Check for richer data using new structure
             const hasRicher = !!current?.output?.synthesisPlus ||
                 !!current?.output?.gem ||
-                !!current?.output?.leap?.target;
+                !!current?.output?.leap?.action;
 
             if (current?.isLoading || hasRicher) return;
 
@@ -98,11 +108,12 @@ export function useRefinerOutput(aiTurnId: string | null, forcedProviderId?: str
                         // Check for richer data using new structure
                         const richer = !!parsed.synthesisPlus ||
                             !!parsed.gem ||
-                            !!parsed.leap?.target;
+                            !!parsed.leap?.action;
                         if (!hasCore || richer) {
                             setState({
                                 output: parsed,
                                 isLoading: false,
+                                isError: false,
                                 providerId: chosen.providerId || current?.providerId || null,
                                 rawText: text,
                             });

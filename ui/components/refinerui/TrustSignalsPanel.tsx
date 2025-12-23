@@ -8,9 +8,13 @@ import { useAtomValue, useSetAtom } from 'jotai';
 import { activeSplitPanelAtom, providerIdsForTurnFamily } from '../../state/atoms';
 import type { RefinerOutput } from '../../../shared/parsing-utils';
 import { LLM_PROVIDERS_CONFIG } from '../../constants';
+import { PipelineErrorBanner } from '../PipelineErrorBanner';
 
 interface TrustSignalsPanelProps {
-  refiner: RefinerOutput;
+  refiner: RefinerOutput | null;
+  isError?: boolean;
+  providerId?: string | null;
+  onRetry?: (pid: string) => void;
   rawText?: string;
   onClose?: () => void;
   bottomPadding?: number;
@@ -43,6 +47,9 @@ function parseAttributions(text: string, onModelClick: (modelName: string) => vo
 
 export function TrustSignalsPanel({
   refiner,
+  isError,
+  providerId,
+  onRetry,
   rawText,
   onClose,
   bottomPadding,
@@ -137,7 +144,18 @@ export function TrustSignalsPanel({
         className="flex-1 overflow-y-auto p-4 space-y-4"
         style={{ paddingBottom: bottomPadding ?? 160 }}
       >
-        {refiner.gem && (
+        {isError && (
+          <div className="py-2">
+            <PipelineErrorBanner
+              type="refiner"
+              failedProviderId={providerId || ""}
+              onRetry={onRetry || (() => { })}
+              compact
+            />
+          </div>
+        )}
+
+        {refiner?.gem && (
           <div className="gem-callout bg-gradient-to-br from-amber-400/10 via-amber-50/5 to-white/0 border border-amber-400/40 rounded-xl p-4">
             <div className="flex items-center justify-between mb-2">
               <div className="font-semibold text-sm text-text-primary flex items-center gap-2">
@@ -156,6 +174,11 @@ export function TrustSignalsPanel({
             <div className="gem-content text-sm text-text-primary leading-relaxed mb-2">
               {refiner.gem?.insight}
             </div>
+            {refiner.gem?.impact && (
+              <div className="text-sm text-text-secondary italic mb-2">
+                {refiner.gem.impact}
+              </div>
+            )}
             {refiner.gem?.source && (
               <div className="gem-source text-xs text-text-muted flex items-center justify-between">
                 <span>— {refiner.gem.source}</span>
@@ -164,13 +187,13 @@ export function TrustSignalsPanel({
           </div>
         )}
 
-        {refiner.synthesisPlus ? (
+        {refiner?.synthesisPlus ? (
           <div className="prose prose-sm max-w-none dark:prose-invert">
             <div className="text-text-primary leading-relaxed">
               {parseAttributions(refiner.synthesisPlus, handleModelClick)}
             </div>
           </div>
-        ) : (
+        ) : !isError && (
           <div className="text-text-muted italic text-center py-8">
             No enhanced synthesis available.
           </div>

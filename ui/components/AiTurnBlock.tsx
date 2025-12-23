@@ -43,6 +43,7 @@ import {
 } from "../state/atoms";
 import { useRefinerOutput } from "../hooks/useRefinerOutput";
 import { parseMappingResponse, cleanAntagonistResponse } from "../../shared/parsing-utils";
+import { PipelineErrorBanner } from "./PipelineErrorBanner";
 
 import { RefinerDot } from "./refinerui/RefinerDot";
 import { AntagonistCard } from "./antagonist/AntagonistCard";
@@ -198,13 +199,13 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
     // Fallback to meta.mapper from backend
     if (aiTurn.meta?.mapper) return aiTurn.meta.mapper;
 
-    // Final fallback: first provider with mapping responses
-    const mappingProviders = Object.keys(aiTurn.mappingResponses || {});
-    if (mappingProviders.length > 0) {
-      return mappingProviders[0];
-    }
-    return undefined;
+    const keys = Object.keys(aiTurn.mappingResponses || {});
+    return keys[0] || null;
   })();
+
+  const mapperResp = activeMappingClipProviderId ? getLatestResponse(aiTurn.mappingResponses?.[activeMappingClipProviderId]) : null;
+  const isMappingError = mapperResp?.status === 'error';
+  const isMappingLoading = mapperResp?.status === 'pending' || mapperResp?.status === 'streaming';
 
 
   // Extract graph topology from mapping response metadata (if available)
@@ -648,200 +649,194 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                         </div>
                       );
 
-                    // --- USE ACTIVE TAB INSTEAD OF GLOBAL ACTIVE PID ---
-                    const activeTab = synthesisTabs.find(t => t.id === activeSynthTabId) || synthesisTabs[synthesisTabs.length - 1]; // Fallback to last
+                    // 1. Handle Mapping Failure
+                    if (isMappingError && activeMappingClipProviderId) {
+                      return (
+                        <div className="py-4">
+                          <PipelineErrorBanner
+                            type="mapping"
+                            failedProviderId={activeMappingClipProviderId}
+                            onRetry={(pid) => onClipClick("mapping", pid)}
+                            onContinue={() => {
+                              const el = document.getElementById(`orbs-${aiTurn.id}`);
+                              el?.scrollIntoView({ behavior: 'smooth' });
+                            }}
+                          />
+                        </div>
+                      );
+                    }
 
-                    // Fallback to old behavior if no tabs (shouldn't happen if responses exist)
-                    const latest = activeTab
-                      ? activeTab.response
-                      : (activeSynthPid ? getLatestResponse(synthesisResponses[activeSynthPid]) : undefined);
-
-                    // Derive isGenerating from the SPECIFIC response status
+                    // 2. Determine currently active data
+                    const activeTab = effectiveActiveSynthTab;
+                    const latest = activeTab?.response || (activeSynthPid ? getLatestResponse(synthesisResponses[activeSynthPid]) : undefined);
                     const isGenerating = latest && (latest.status === "streaming" || latest.status === "pending");
 
-                    // If specifically targeting synthesis recompute for a provider NOT yet in tabs (rare race condition), show loader
-                    if (!activeTab && isSynthesisTarget) {
+                    // 3. Show loading state if generating and no text yet
+                    if (isGenerating && !latest?.text) {
                       return (
                         <div className="flex items-center justify-center gap-2 text-text-muted relative z-10">
                           <span className="italic">
-                            Starting synthesis...
+                            {isSynthesisTarget ? "Starting synthesis..." : "Synthesis generating"}
                           </span>
                           <span className="streaming-dots" />
                         </div>
                       );
                     }
 
-                    // ONLY show placeholder if we have NO text yet
-                    if (isGenerating && !latest?.text)
+                    // 4. Handle Synthesis Failure (for the active tab)
+                    if (activeTab && activeTab.response.status === "error") {
                       return (
-                        <div className="flex items-center justify-center gap-2 text-text-muted relative z-10">
-                          <span className="italic">
-                            Synthesis generating
-                          </span>
-                          <span className="streaming-dots" />
-                        </div>
-                      );
-
-                    if (activeTab) {
-                      const take = activeTab.response;
-
-                      if (take && take.status === "error") {
-                        return (
-                          <div className="bg-intent-danger/15 border border-intent-danger text-intent-danger rounded-lg p-3 relative z-10">
-                            <div className="text-xs mb-2">
-                              {activeTab.label} · error
-                            </div>
-                            <div className="prose prose-sm max-w-none dark:prose-invert leading-7 text-sm">
-                              <MarkdownDisplay
-                                content={String(
-                                  take.text || "Synthesis failed"
-                                )}
-                              />
-                            </div>
-                          </div>
-                        );
-                      }
-
-                      if (!take)
-                        return (
-                          <div className="text-text-muted relative z-10">
-                            No synthesis content.
-                          </div>
-                        );
-
-                      return (
-                        <div className="animate-in fade-in duration-300 relative z-10">
-                          {(() => {
-                            const cleanText = take.text || '';
-                            const artifacts = take.artifacts || [];
-                            const { shortAnswer, longAnswer } = splitSynthesisAnswer(cleanText);
-
-                            return (
-                              <>
-                                <div className="text-base leading-relaxed text-text-primary">
-                                  <MarkdownDisplay
-                                    content={cleanAntagonistResponse(String(shortAnswer || cleanText || take.text || ""))}
-                                  />
-                                </div>
-
-                                <div className="my-6 flex items-center justify-center gap-6 border-y border-border-subtle/60 py-3">
-                                  {refinerOutput?.outlier && (
-                                    <button
-                                      onClick={() => setShowEcho((prev) => !prev)}
-                                      className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-surface-raised hover:bg-surface-highlight border border-border-subtle text-xs text-text-secondary"
-                                      title="View contrarian echo"
-                                    >
-                                      <span className="text-sm">📢</span>
-                                      <span>Echo</span>
-                                    </button>
-                                  )}
-
-                                  <button
-                                    onClick={() => setIsDecisionMapOpen({ turnId: aiTurn.id })}
-                                    className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-surface-raised hover:bg-surface-highlight border border-border-subtle text-xs text-text-secondary"
-                                    title="Open decision map"
-                                  >
-                                    <span className="text-sm">📊</span>
-                                    <span>Map</span>
-                                  </button>
-
-                                  {(refinerOutput || isRefinerLoading) && (
-                                    <RefinerDot
-                                      refiner={refinerOutput || null}
-                                      onClick={() => setActiveSplitPanel({ turnId: aiTurn.id, providerId: '__trust__' })}
-                                      isLoading={isRefinerLoading}
-                                    />
-                                  )}
-                                </div>
-
-                                {refinerOutput?.outlier && showEcho && (
-                                  <div className="mt-3 mx-auto max-w-2xl rounded-xl border border-border-subtle bg-surface-raised px-4 py-3 text-sm text-text-primary">
-                                    <div className="flex items-center gap-2 mb-1">
-                                      <span className="text-xs uppercase tracking-wide text-text-muted">Echo</span>
-                                      {refinerOutput.outlier.source && (
-                                        <span className="inline-flex items-center px-1.5 py-0.5 rounded-full bg-chip text-[11px] text-text-secondary">
-                                          [{refinerOutput.outlier.source}]
-                                        </span>
-                                      )}
-                                    </div>
-                                    <div>{refinerOutput.outlier.position}</div>
-                                    {refinerOutput.outlier.why && (
-                                      <div className="mt-1 text-xs text-text-muted">
-                                        {refinerOutput.outlier.why}
-                                      </div>
-                                    )}
-                                  </div>
-                                )}
-
-                                {refinerOutput?.gem?.insight && (
-                                  <GemFlash insight={refinerOutput.gem.insight} />
-                                )}
-
-                                {refinerOutput?.gem?.action && (
-                                  <div className="mt-4 flex flex-col items-center">
-                                    <button
-                                      onClick={() => {
-                                        if (refinerOutput.gem?.action) {
-                                          setChatInput(refinerOutput.gem.action);
-                                          setTrustPanelFocus({ turnId: aiTurn.id, section: 'context' });
-                                        }
-                                      }}
-                                      className="px-4 py-2 bg-brand-500/10 hover:bg-brand-500/20 border border-brand-500/30 rounded-full text-brand-400 text-sm font-medium transition-all group/gem-action"
-                                    >
-                                      <span className="flex items-center gap-2">
-                                        <span className="text-xs">✨</span>
-                                        {refinerOutput.gem.action}
-                                        <span className="opacity-0 group-hover/gem-action:opacity-100 transition-opacity ml-1">→</span>
-                                      </span>
-                                    </button>
-                                  </div>
-                                )}
-
-                                {longAnswer && (
-                                  <div className="text-base leading-relaxed text-text-primary">
-                                    <MarkdownDisplay
-                                      content={cleanAntagonistResponse(String(longAnswer))}
-                                    />
-                                  </div>
-                                )}
-
-                                {/* Artifact badges */}
-                                {artifacts.length > 0 && (
-                                  <div className="mt-3 flex flex-wrap gap-2 justify-center">
-                                    {artifacts.map((artifact, idx) => (
-                                      <button
-                                        key={idx}
-                                        onClick={() => setSelectedArtifact(artifact)}
-                                        className="bg-gradient-to-br from-brand-500 to-brand-600 border border-brand-400 rounded-lg px-3 py-2 text-text-primary text-sm font-medium cursor-pointer flex items-center gap-1.5 hover:-translate-y-px hover:shadow-glow-brand-soft transition-all"
-                                      >
-                                        📄 {artifact.title}
-                                      </button>
-                                    ))}
-                                  </div>
-                                )}
-                              </>
-                            );
-                          })()}
-
-                          {refinerOutput?.leap?.target && (
-                            <div className="mt-6 pt-4 border-t border-border-subtle/40">
-                              <div className="text-sm text-text-secondary">
-                                <span className="font-semibold text-text-primary">Next step: </span>
-                                <span className="capitalize">{refinerOutput.leap.action}</span>
-                                <span> — </span>
-                                <span>{refinerOutput.leap.target}</span>
-                                {refinerOutput.leap.why && (
-                                  <span className="text-text-muted"> {refinerOutput.leap.why}</span>
-                                )}
-                              </div>
+                        <div className="py-4">
+                          <PipelineErrorBanner
+                            type="synthesis"
+                            failedProviderId={activeTab.providerId}
+                            onRetry={(pid) => onClipClick("synthesis", pid)}
+                            onExplore={() => setIsDecisionMapOpen({ turnId: aiTurn.id })}
+                          />
+                          {activeTab.response.text && activeTab.response.text !== "Synthesis failed" && (
+                            <div className="mt-4 opacity-60 grayscale scale-[0.98] pointer-events-none border-t border-border-subtle pt-4">
+                              <MarkdownDisplay content={activeTab.response.text} />
                             </div>
                           )}
                         </div>
                       );
                     }
+
+                    // 5. Success state (or fallback when no active tab yet)
+                    if (activeTab) {
+                      const take = activeTab.response;
+                      const cleanText = take.text || '';
+                      const artifacts = take.artifacts || [];
+                      const { shortAnswer, longAnswer } = splitSynthesisAnswer(cleanText);
+
+                      return (
+                        <div className="animate-in fade-in duration-300 relative z-10">
+                          <div className="text-base leading-relaxed text-text-primary">
+                            <MarkdownDisplay
+                              content={cleanAntagonistResponse(String(shortAnswer || cleanText || take.text || ""))}
+                            />
+                          </div>
+
+                          <div className="my-6 flex items-center justify-center gap-6 border-y border-border-subtle/60 py-3">
+                            {refinerOutput?.outlier && (
+                              <button
+                                onClick={() => setShowEcho((prev) => !prev)}
+                                className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-surface-raised hover:bg-surface-highlight border border-border-subtle text-xs text-text-secondary"
+                                title="View contrarian echo"
+                              >
+                                <span className="text-sm">📢</span>
+                                <span>Echo</span>
+                              </button>
+                            )}
+
+                            <button
+                              onClick={() => setIsDecisionMapOpen({ turnId: aiTurn.id })}
+                              className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-surface-raised hover:bg-surface-highlight border border-border-subtle text-xs text-text-secondary"
+                              title="Open decision map"
+                            >
+                              <span className="text-sm">📊</span>
+                              <span>Map</span>
+                            </button>
+
+                            {(refinerOutput || isRefinerLoading) && (
+                              <RefinerDot
+                                refiner={refinerOutput || null}
+                                onClick={() => setActiveSplitPanel({ turnId: aiTurn.id, providerId: '__trust__' })}
+                                isLoading={isRefinerLoading}
+                              />
+                            )}
+                          </div>
+
+                          {refinerOutput?.outlier && showEcho && (
+                            <div className="mt-3 mx-auto max-w-2xl rounded-xl border border-border-subtle bg-surface-raised px-4 py-3 text-sm text-text-primary">
+                              <div className="flex items-center gap-2 mb-1">
+                                <span className="text-xs uppercase tracking-wide text-text-muted">Echo</span>
+                                {refinerOutput.outlier.source && (
+                                  <span className="inline-flex items-center px-1.5 py-0.5 rounded-full bg-chip text-[11px] text-text-secondary">
+                                    [{refinerOutput.outlier.source}]
+                                  </span>
+                                )}
+                              </div>
+                              <div>{refinerOutput.outlier.position}</div>
+                              {refinerOutput.outlier.why && (
+                                <div className="mt-1 text-xs text-text-muted">
+                                  {refinerOutput.outlier.why}
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          {refinerOutput?.gem?.insight && (
+                            <GemFlash insight={refinerOutput.gem.insight} />
+                          )}
+
+                          {refinerOutput?.gem?.action && (
+                            <div className="mt-4 flex flex-col items-center">
+                              <button
+                                onClick={() => {
+                                  if (refinerOutput.gem?.action) {
+                                    setChatInput(refinerOutput.gem.action);
+                                    setTrustPanelFocus({ turnId: aiTurn.id, section: 'context' });
+                                  }
+                                }}
+                                className="px-4 py-2 bg-brand-500/10 hover:bg-brand-500/20 border border-brand-500/30 rounded-full text-brand-400 text-sm font-medium transition-all group/gem-action"
+                              >
+                                <span className="flex items-center gap-2">
+                                  <span className="text-xs">✨</span>
+                                  {refinerOutput.gem.action}
+                                  <span className="opacity-0 group-hover/gem-action:opacity-100 transition-opacity ml-1">→</span>
+                                </span>
+                              </button>
+                            </div>
+                          )}
+
+                          {longAnswer && (
+                            <div className="text-base leading-relaxed text-text-primary">
+                              <MarkdownDisplay
+                                content={cleanAntagonistResponse(String(longAnswer))}
+                              />
+                            </div>
+                          )}
+
+                          {/* Artifact badges */}
+                          {artifacts.length > 0 && (
+                            <div className="mt-3 flex flex-wrap gap-2 justify-center">
+                              {artifacts.map((artifact, idx) => (
+                                <button
+                                  key={idx}
+                                  onClick={() => setSelectedArtifact(artifact)}
+                                  className="bg-gradient-to-br from-brand-500 to-brand-600 border border-brand-400 rounded-lg px-3 py-2 text-text-primary text-sm font-medium cursor-pointer flex items-center gap-1.5 hover:-translate-y-px hover:shadow-glow-brand-soft transition-all"
+                                >
+                                  📄 {artifact.title}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+
+                          {refinerOutput?.leap?.action && (
+                            <div className="mt-6 pt-4 border-t border-border-subtle/40">
+                              <div className="text-base font-semibold text-text-primary mb-1">
+                                {refinerOutput.leap.action}
+                              </div>
+                              {refinerOutput.leap.rationale && (
+                                <div className="text-sm text-text-secondary leading-relaxed italic opacity-85">
+                                  {refinerOutput.leap.rationale}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    }
+
                     return (
                       <div className="flex items-center justify-center h-full text-text-muted italic relative z-10">
-                        Choose a model.
+                        {isMappingLoading ? (
+                          <div className="flex items-center gap-2">
+                            <span>Analyzing sources...</span>
+                            <span className="streaming-dots" />
+                          </div>
+                        ) : "Synthesis unavailable."}
                       </div>
                     );
                   })()}

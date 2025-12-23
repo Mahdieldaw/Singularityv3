@@ -142,18 +142,19 @@ export const RefinerEpistemicAudit: React.FC<RefinerAuditProps> = ({ output, raw
             )}
 
             {/* Next Step */}
-            {output.leap && output.leap.target && (
+            {output.leap && output.leap.action && (
                 <div className="bg-brand-500/10 border border-brand-500/20 rounded-xl p-5">
-                    <div className="flex items-center gap-2 mb-2">
+                    <div className="flex items-center gap-2 mb-3">
                         <span className="w-2 h-2 rounded-full bg-brand-400" />
-                        <h4 className="text-xs font-bold text-brand-400 uppercase tracking-wider">Next Step</h4>
+                        <h4 className="text-xs font-bold text-brand-400 uppercase tracking-wider">The Next Move</h4>
                     </div>
-                    <div className="text-sm text-white/90">
-                        <strong className="text-brand-400 capitalize">{output.leap.action}:</strong>{' '}
-                        {output.leap.target}
+                    <div className="text-lg font-bold text-white leading-snug mb-2">
+                        {output.leap.action}
                     </div>
-                    {output.leap.why && (
-                        <div className="text-xs text-white/60 mt-2">{output.leap.why}</div>
+                    {output.leap.rationale && (
+                        <div className="text-sm text-white/70 italic border-l-2 border-brand-400/30 pl-3 py-0.5">
+                            {output.leap.rationale}
+                        </div>
                     )}
                 </div>
             )}

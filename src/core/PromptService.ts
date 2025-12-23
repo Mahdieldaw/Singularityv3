@@ -428,14 +428,12 @@ If no outlier deserves attention, this is null.
 
 ### 3. the_step
 
-What is the inevitable path the user takes from here
+The inevitable next move.
 
-Every answer opens the next question. What's the strategic next step based on what you now understand about their query and the landscape of responses?
+- **action** — What the user does now. Direct. Imperative. One to two sentences.
+- **rationale** — Why this, why now. What it unlocks or prevents.
 
-- **answer** — 1 or 2 sentences of specific advice speaking directly to the user
-- **analysis** — your read on the whole situation in a couple of sentences
-- **why** — why this is the optimal advice
-- **justification** — why the other approach fails
+No hedging. No "consider doing X." The step is a step.
 
 ---
 
@@ -460,11 +458,9 @@ Return ONLY this JSON. No preamble, no explanation.
   },
   
   "the_step": {
-    "answer": "proceed",
-    "analysis": "What specifically",
-    "why": "One line rationale",
-    "justification": "One line rationale"
-  }
+  "action": "Direct instruction for next move",
+  "rationale": "Why this is the move"
+}
 }
 \`\`\`
 
@@ -478,10 +474,8 @@ If the synthesis genuinely captured the best insights and nothing beats it:
   "the_one": null,
   "the_echo": null,
   "the_step": {
-    "answer": "proceed",
-    "analysis": "Act on synthesis as presented",
-    "why": "Synthesis captured the best available insights",
-    "justification": "Synthesis captured the best available insights"
+  "action": "synthesis is correct",
+  "rationale": "Act on synthesis as presented"
   }
 }
 \`\`\`

@@ -19,6 +19,7 @@ import { CopyButton } from "./CopyButton";
 import { formatProviderResponseForMd } from "../utils/copy-format-utils";
 import { useRefinerOutput } from "../hooks/useRefinerOutput";
 import { TrustSignalsPanel } from "./refinerui/TrustSignalsPanel";
+import { useClipActions } from "../hooks/useClipActions";
 import clsx from "clsx";
 
 // BuriedInsightCard removed - no longer using signals
@@ -46,6 +47,7 @@ export const ModelResponsePanel: React.FC<ModelResponsePanelProps> = React.memo(
     // Actions hook
     const { handleRetryProvider, handleBranchContinue, handleToggleTarget, activeTarget } =
         useProviderActions(sessionId, turnId);
+    const { handleClipClick } = useClipActions();
 
     // Local state
     const [showHistory, setShowHistory] = useState(false);
@@ -68,7 +70,7 @@ export const ModelResponsePanel: React.FC<ModelResponsePanelProps> = React.memo(
         return { status, text, hasText, isStreaming, isError, artifacts };
     }, [latestResponse, streamingState.activeProviderId, providerId]);
 
-    const { output: refinerOutput, rawText: refinerRawText } = useRefinerOutput(turnId);
+    const { output: refinerOutput, isError: isRefinerError, providerId: refinerPid, rawText: refinerRawText } = useRefinerOutput(turnId);
     const chatInputHeight = useAtomValue(chatInputHeightAtom);
 
     // Branch send handler (hook before conditional return)
@@ -80,11 +82,14 @@ export const ModelResponsePanel: React.FC<ModelResponsePanelProps> = React.memo(
 
 
     // Trust mode via sentinel providerId - simplified for new structure
-    if (providerId === '__trust__' && refinerOutput) {
+    if (providerId === '__trust__' && (refinerOutput || isRefinerError)) {
         return (
             <div className="h-full w-full min-w-0 flex flex-col bg-surface-raised border border-border-subtle rounded-2xl shadow-lg overflow-hidden">
                 <TrustSignalsPanel
                     refiner={refinerOutput}
+                    isError={isRefinerError}
+                    providerId={refinerPid}
+                    onRetry={(pid) => handleClipClick(turnId, "refiner", pid)}
                     rawText={refinerRawText || undefined}
                     onClose={onClose}
                     bottomPadding={(chatInputHeight || 80) + 32}

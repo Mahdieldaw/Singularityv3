@@ -331,12 +331,8 @@ export interface Attribution {
 }
 
 export interface Leap {
-    action: LeapAction;
-    target: string;
-    why: string;
-    answer?: string;
-    analysis?: string;
-    justification?: string;
+    action: string;
+    rationale: string;
 }
 
 export interface RefinerOutput {
@@ -384,7 +380,7 @@ function createEmptyRefinerOutput(rawText: string = ''): RefinerOutput {
         gem: null,
         outlier: null,
         attributions: [],
-        leap: { action: 'proceed', target: '', why: '' },
+        leap: { action: '', rationale: '' },
         signals: [],
         unlistedOptions: [],
         reframe: null,
@@ -479,27 +475,12 @@ function normalizeRefinerObject(parsed: any): Omit<RefinerOutput, 'rawText'> | n
         : [];
 
     const stepSource = parsed.the_step || parsed.leap || {};
-    const answer = stepSource.answer != null ? String(stepSource.answer) : '';
-    const analysis = stepSource.analysis != null ? String(stepSource.analysis) : '';
-    const stepWhy = stepSource.why != null ? String(stepSource.why) : '';
-    const justification = stepSource.justification != null ? String(stepSource.justification) : '';
-
-    let action: LeapAction = 'proceed';
-    const answerLower = answer.toLowerCase();
-    if (answerLower.includes('verify')) action = 'verify';
-    else if (answerLower.includes('reframe')) action = 'reframe';
-    else if (answerLower.includes('research')) action = 'research';
-    else if (answerLower.includes('proceed')) action = 'proceed';
-
-    const target = analysis || String(stepSource.target || '');
+    const action = stepSource.action || stepSource.answer || "";
+    const rationale = stepSource.rationale || stepSource.why || stepSource.justification || "";
 
     const leap: Leap = {
-        action,
-        target,
-        why: stepWhy,
-        answer: answer || undefined,
-        analysis: analysis || undefined,
-        justification: justification || undefined,
+        action: String(action),
+        rationale: String(rationale),
     };
 
     const signals: Signal[] = Array.isArray(parsed.signals)
@@ -699,15 +680,25 @@ function extractAttributions(text: string): Attribution[] {
 }
 
 /**
+ * Helper to infer LeapAction from text
+ */
+function inferAction(text: string): LeapAction {
+    if (/verify|check|confirm|validate/i.test(text)) return 'verify';
+    if (/reframe|rephrase|reconsider/i.test(text)) return 'reframe';
+    if (/research|investigate|explore|look into/i.test(text)) return 'research';
+    return 'proceed';
+}
+
+/**
  * Extract leap (next step) from text
  */
-function extractLeap(text: string): Leap {
+export function extractLeap(text: string): Leap {
     const section = extractSection(text, 'Leap') ||
         extractSection(text, 'Next Step') ||
         extractSection(text, 'Recommended Action') ||
         extractSection(text, 'Action');
 
-    const defaultLeap: Leap = { action: 'proceed', target: '', why: '', answer: 'proceed' };
+    const defaultLeap: Leap = { action: 'proceed', rationale: '' };
 
     if (!section) return defaultLeap;
 
@@ -718,17 +709,13 @@ function extractLeap(text: string): Leap {
         const action = actionMatch[1].toLowerCase() as LeapAction;
         const rest = actionMatch[2].trim();
 
-        // Try to split into target and why
+        // Try to split into rationale and why
         const whyMatch = rest.match(/(.+?)(?:\s*[—\-]+\s*(?:because|why)[:\s]*(.+))?$/i);
+        const rationale = whyMatch ? (whyMatch[2] || whyMatch[1]).trim() : rest;
 
-        const target = whyMatch?.[1]?.trim() || rest;
-        const why = whyMatch?.[2]?.trim() || '';
         return {
             action,
-            target,
-            why,
-            answer: action,
-            analysis: target,
+            rationale,
         };
     }
 
@@ -736,27 +723,19 @@ function extractLeap(text: string): Leap {
     const action: LeapAction = (['proceed', 'verify', 'reframe', 'research'].includes(actionValue?.toLowerCase() || '')
         ? actionValue!.toLowerCase()
         : 'proceed') as LeapAction;
-    const labeledTarget = extractLabeledValue(section, 'target') || '';
-    const why = extractLabeledValue(section, 'why') || extractLabeledValue(section, 'reason') || '';
+    const rationale = extractLabeledValue(section, 'rationale') || extractLabeledValue(section, 'why') || extractLabeledValue(section, 'reason') || '';
 
-    if (labeledTarget) {
-        return { action, target: labeledTarget, why, answer: action, analysis: labeledTarget };
+    if (rationale) {
+        return { action, rationale };
     }
 
-    // Fallback: use first sentence as target, infer action from keywords
+    // Fallback: use first sentence as rationale, infer action from keywords
     const firstSentence = section.split(/[.!?]\s/)[0];
-    let inferredAction: LeapAction = 'proceed';
-    if (/verify|check|confirm|validate/i.test(section)) inferredAction = 'verify';
-    if (/reframe|rephrase|reconsider/i.test(section)) inferredAction = 'reframe';
-    if (/research|investigate|explore|look into/i.test(section)) inferredAction = 'research';
+    const inferredAction = inferAction(section);
 
-    const target = firstSentence?.trim() || section.slice(0, 100);
     return {
         action: inferredAction,
-        target,
-        why: '',
-        answer: inferredAction,
-        analysis: target,
+        rationale: firstSentence?.trim() || section.slice(0, 100),
     };
 }
 

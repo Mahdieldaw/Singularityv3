@@ -4,6 +4,7 @@ import { useAntagonistOutput } from "../../hooks/useAntagonistOutput";
 import { parseBrackets, buildFinalPrompt, ParsedBracket } from "../../../shared/parsing-utils";
 import { AntagonistSelector } from "./AntagonistSelector";
 import { DimensionDropdown } from "./DimensionDropdown";
+import { PipelineErrorBanner } from "../PipelineErrorBanner";
 import "./antagonist.css";
 
 interface AntagonistCardProps {
@@ -17,7 +18,7 @@ export const AntagonistCard: React.FC<AntagonistCardProps> = ({
     activeProviderId,
     onProviderSelect,
 }) => {
-    const { output, isLoading, providerId } = useAntagonistOutput(aiTurn.id, activeProviderId);
+    const { output, isLoading, isError, providerId } = useAntagonistOutput(aiTurn.id, activeProviderId);
     const [selections, setSelections] = useState<Record<string, string>>({});
     const [copied, setCopied] = useState(false);
 
@@ -64,6 +65,20 @@ export const AntagonistCard: React.FC<AntagonistCardProps> = ({
                     <h4><span className="antagonist-icon">💭</span> Refining your question...</h4>
                 </div>
                 <div style={{ opacity: 0.6, fontSize: 14 }}>Analyzing context...</div>
+            </div>
+        );
+    }
+
+    // Error state
+    if (isError) {
+        return (
+            <div className="antagonist-card p-0 overflow-hidden">
+                <PipelineErrorBanner
+                    type="antagonist"
+                    failedProviderId={providerId || ""}
+                    onRetry={(pid) => handleProviderChange(pid)}
+                    compact
+                />
             </div>
         );
     }

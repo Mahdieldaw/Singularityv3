@@ -185,24 +185,47 @@ export function getNextStepStyles(action: NextStepAction | null | undefined): Ne
 
 
 /**
- * Shorten insight text for tooltips: first line, first sentence, max 8 words.
+ * Truncate text at punctuation or word limit.
  */
-export function shortenInsight(text: string | null | undefined): string {
+function truncateAtPunctuation(text: string, wordLimit: number): string {
     if (!text) return '';
 
-    // 1. Get first line
-    const firstLine = text.split('\n')[0].trim();
+    // First, find the boundary of the word limit
+    const words = text.split(/\s+/);
+    const wordLimitBoundary = words.slice(0, wordLimit).join(' ').length;
 
-    // 2. Get first sentence (naive split on . followed by space or end)
-    const firstSentence = firstLine.split(/\.\s/)[0].trim();
+    // Look for punctuation: , . - \n bullet points
+    // We also include common dashes and list markers
+    const puncRegex = /[,.\-\n—–•*]|^\s*[-*•]/m;
+    const match = text.match(puncRegex);
 
-    // 3. Limit to 8 words
-    const words = firstSentence.split(/\s+/);
-    if (words.length <= 8) {
-        // If we didn't truncate words but the original was longer, add ellipsis
-        const result = firstSentence.replace(/\.$/, ''); // Remove trailing dot if it will be added back later or if it's the end
-        return result === firstLine ? result : result + '...';
+    if (match && match.index !== undefined && match.index <= wordLimitBoundary + 5) {
+        // Truncate at punctuation if it's before or very close to the word limit
+        const truncated = text.slice(0, match.index).trim();
+        if (truncated.length < text.trim().length) {
+            return truncated + '...';
+        }
+        return truncated;
     }
 
-    return words.slice(0, 8).join(' ') + '...';
+    // Fallback to word limit
+    if (words.length > wordLimit) {
+        return words.slice(0, wordLimit).join(' ') + '...';
+    }
+
+    return text.trim();
+}
+
+/**
+ * Shorten insight text for tooltips: punctuation-based, max 10 words.
+ */
+export function shortenInsight(text: string | null | undefined): string {
+    return truncateAtPunctuation(text || '', 10);
+}
+
+/**
+ * Shorten impact text for tooltips: punctuation-based, max 15 words.
+ */
+export function shortenImpact(text: string | null | undefined): string {
+    return truncateAtPunctuation(text || '', 15);
 }
