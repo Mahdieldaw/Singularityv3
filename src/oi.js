@@ -27,7 +27,7 @@
       const a = {};
       const c = (A) => Object.assign(e, A);
       const h = new Proxy(e, {
-        get(_i, r) {
+        get(i, r) {
           if (r === "assign") {
             return c;
           }
@@ -79,7 +79,7 @@
             return e[r];
           }
         },
-        set: (_A, t, i) => {
+        set: (A, t, i) => {
           e[t] = i;
           a[t] = i;
           if (n) {
@@ -96,7 +96,7 @@
       }
       const [r, n, s] = (function (A) {
         let e = 0;
-        A.split("").forEach((_t, i) => {
+        A.split("").forEach((t, i) => {
           e = A.charCodeAt(i) + ((e << 5) - e);
         });
         return [(e & 16711680) >> 16, (e & 65280) >> 8, e & 255];
@@ -137,9 +137,9 @@
             r(A.value);
           } else {
             ((e = A.value),
-            e instanceof t
-              ? e
-              : new t(function (A) {
+              e instanceof t
+                ? e
+                : new t(function (A) {
                   A(e);
                 })).then(s, o);
           }
@@ -155,12 +155,10 @@
         this.mutex = Promise.resolve();
       }
       lock() {
-        let A_resolve = (_val) => {};
-        this.mutex = this.mutex.then(() => new Promise((resolve) => {
-          A_resolve = resolve;
-        }));
+        let A = () => { };
+        this.mutex = this.mutex.then(() => new Promise(A));
         return new Promise((e) => {
-          A_resolve(e);
+          A = e;
         });
       }
       dispatch(A) {
@@ -205,27 +203,27 @@
     var l =
       n !== null
         ? (A) => {
-            if (typeof A == "string") {
-              const e = n.from(A, "utf8");
-              return new Uint8Array(e.buffer, e.byteOffset, e.length);
-            }
-            if (n.isBuffer(A)) {
-              return new Uint8Array(A.buffer, A.byteOffset, A.length);
-            }
-            if (ArrayBuffer.isView(A)) {
-              return new Uint8Array(A.buffer, A.byteOffset, A.byteLength);
-            }
-            throw new Error("Invalid data type!");
+          if (typeof A == "string") {
+            const e = n.from(A, "utf8");
+            return new Uint8Array(e.buffer, e.byteOffset, e.length);
           }
+          if (n.isBuffer(A)) {
+            return new Uint8Array(A.buffer, A.byteOffset, A.length);
+          }
+          if (ArrayBuffer.isView(A)) {
+            return new Uint8Array(A.buffer, A.byteOffset, A.byteLength);
+          }
+          throw new Error("Invalid data type!");
+        }
         : (A) => {
-            if (typeof A == "string") {
-              return s.encode(A);
-            }
-            if (ArrayBuffer.isView(A)) {
-              return new Uint8Array(A.buffer, A.byteOffset, A.byteLength);
-            }
-            throw new Error("Invalid data type!");
-          };
+          if (typeof A == "string") {
+            return s.encode(A);
+          }
+          if (ArrayBuffer.isView(A)) {
+            return new Uint8Array(A.buffer, A.byteOffset, A.byteLength);
+          }
+          throw new Error("Invalid data type!");
+        };
     var I = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     var g = new Uint8Array(256);
     for (let A = 0; A < I.length; A++) {
@@ -318,7 +316,7 @@
             return h(g, r, t);
           }
         };
-        const E = (A, _e = null) =>
+        const E = (A) =>
           typeof A == "string" ? A.length < 4096 : A.byteLength < u;
         let f = E;
         switch (A.name) {
@@ -421,7 +419,7 @@
             n = true;
           },
           calculate: (A, e = null, n = null) => {
-            if (!f(A, e || 0)) {
+            if (!f(A, e)) {
               c(e);
               I(A);
               return C("hex", n);
@@ -559,8 +557,8 @@
         }
         const r = URL.createObjectURL(A);
         if (i) {
-          const A_delay = typeof i === "number" ? i : 60000;
-          setTimeout(() => URL.revokeObjectURL(r), A_delay);
+          const A = e.is.number(i) ? i : 60000;
+          setTimeout(() => URL.revokeObjectURL(r), A);
         }
         return r;
       },
@@ -576,13 +574,13 @@
     const { $utils: e } = A;
     e.pickRandom = (A) => A[Math.floor(Math.random() * A.length)];
   })();
-  (Array.prototype)["toReversed"] &&= function () {
+  Array.prototype.toReversed &&= function () {
     return [...this].reverse();
   };
-  (Array.prototype)["at"] ||= function (A) {
+  Array.prototype.at ||= function (A) {
     return this[A >= 0 ? A : this.length + A];
   };
-  (Array.prototype)["findLastIndex"] ||= function (A, e) {
+  Array.prototype.findLastIndex ||= function (A, e) {
     for (let t = this.length - 1; t >= 0; t--) {
       if (A.call(e, this[t], t, this)) {
         return t;
@@ -658,7 +656,7 @@
         try {
           const s = (A) => {
             const e = JSON.stringify(A);
-            return btoa(String.fromCharCode(...Array.from(new TextEncoder().encode(e))));
+            return btoa(String.fromCharCode(...new TextEncoder().encode(e)));
           };
           const o = performance.now();
           const a = Object.keys(Object.getPrototypeOf(navigator));
@@ -666,7 +664,7 @@
           const h = [
             navigator.hardwareConcurrency + screen.width + screen.height,
             new Date().toString(),
-            performance["memory"] ? performance["memory"].jsHeapSizeLimit : 0,
+            performance.memory.jsHeapSizeLimit,
             Math.random(),
             navigator.userAgent,
             t.pickRandom(i),
@@ -698,21 +696,21 @@
           return { error: error.message || "Failed to generate proof token" };
         }
       },
-      async _ensureSetup(A, _e) {
+      async _ensureSetup(A, e) {
         if (this._setupPromise) {
           return this._setupPromise;
         }
         this._setupPromise = t.createPromise();
         this._patchArkoseIframe(A);
-        window["useArkoseSetupEnforcement"] = async (e) => {
+        window.useArkoseSetupEnforcement = async (e) => {
           e.setConfig({
             ...A.params,
             [A.selectorKey]: "#challenge",
-            [A.onErrorKey]: (A_err) => {
-              this._fetchTokenPromise.reject(A_err);
+            [A.onErrorKey]: (A) => {
+              this._fetchTokenPromise.reject(A);
             },
-            [A.onCompletedKey]: (e_comp) => {
-              this._fetchTokenPromise.resolve(e_comp[A.resultTokenKey]);
+            [A.onCompletedKey]: (e) => {
+              this._fetchTokenPromise.resolve(e[A.resultTokenKey]);
             },
           });
           this._arkose = e;
@@ -933,11 +931,11 @@
           }
         }
       },
-      _setupPp() {},
-      _setupBg() {},
-      async _setupCs() {},
-      _setupNj() {},
-      _setupOs() {},
+      _setupPp() { },
+      _setupBg() { },
+      async _setupCs() { },
+      _setupNj() { },
+      _setupOs() { },
       _setupOi() {
         window.addEventListener("message", async ({ data: A }) => {
           if (!this._isBusMsg(A)) {
@@ -1061,8 +1059,7 @@
           };
           window.addEventListener("message", t);
         }),
-      _callHandlers(A_obj = {}, r = null) {
-        const { name: A, args: t, argsStr: i } = A_obj;
+      _callHandlers({ name: A, args: t, argsStr: i } = {}, r = null) {
         let n = this._handlers[A];
         if (n) {
           if (r) {
@@ -1073,23 +1070,22 @@
           } else {
             return new Promise(async (resolve) => {
               // If args were serialized, deserialize them; ensure args is an array
-              let t_args = t;
               if (i) {
                 const des = await this._deserialize(i);
                 if (Array.isArray(des)) {
-                  t_args = des;
+                  t = des;
                 } else if (des === null || des === undefined) {
-                  t_args = [];
+                  t = [];
                 } else {
-                  t_args = [des];
+                  t = [des];
                 }
               }
-              if (!t_args) t_args = [];
+              if (!t) t = [];
               resolve(
                 await this._pick(
                   n.map(async (handler) => {
                     try {
-                      return await handler.fn.call(handler.this, ...t_args);
+                      return await handler.fn.call(handler.this, ...t);
                     } catch (err) {
                       e.error(`failed to handle "${handler.name}".`, err);
                       return err;
@@ -1104,76 +1100,76 @@
         }
       },
       _removeProxyHandlers(A) {
-        Object.keys(this._handlers).forEach((e_h) => {
-          this._handlers[e_h] = this._handlers[e_h].filter((e_f) => e_f.proxy !== A);
-          if (this._handlers[e_h].length === 0) {
-            delete this._handlers[e_h];
+        Object.keys(this._handlers).forEach((e) => {
+          this._handlers[e] = this._handlers[e].filter((e) => e.proxy !== A);
+          if (this._handlers[e].length === 0) {
+            delete this._handlers[e];
           }
         });
       },
-      _serialize(A_val) {
-        if (i.is.nil(A_val)) {
+      _serialize(A) {
+        if (i.is.nil(A)) {
           return null;
         } else {
-          return JSON.stringify(A_val, (_A, e_s) => {
-            if (i.is.blob(e_s)) {
+          return JSON.stringify(A, (A, e) => {
+            if (i.is.blob(e)) {
               if (this._is("bg")) {
-                const A_bid = this._generateId();
-                this._blobs[A_bid] = e_s;
-                return `bus.blob.${A_bid}`;
+                const A = this._generateId();
+                this._blobs[A] = e;
+                return `bus.blob.${A}`;
               }
-              return `bus.blob.${i.objectUrl.create(e_s, true)}`;
+              return `bus.blob.${i.objectUrl.create(e, true)}`;
             }
-            if (i.is.error(e_s)) {
-              return `bus.error.${e_s.message}`;
+            if (i.is.error(e)) {
+              return `bus.error.${e.message}`;
             } else {
-              return e_s;
+              return e;
             }
           });
         }
       },
-      async _deserialize(A_des) {
-        if (!i.is.string(A_des)) {
+      async _deserialize(A) {
+        if (!i.is.string(A)) {
           return null;
         }
-        const e_map = new Map();
-        const t_res = JSON.parse(A_des, (_A, t_p) => {
-          const r_s = i.is.string(t_p);
-          if (r_s && t_p.startsWith("bus.blob.")) {
-            e_map.set(t_p, t_p.slice("bus.blob.".length));
-            return t_p;
-          } else if (r_s && t_p.startsWith("bus.error.")) {
-            return new Error(t_p.slice("bus.error.".length));
+        const e = new Map();
+        const t = JSON.parse(A, (A, t) => {
+          const r = i.is.string(t);
+          if (r && t.startsWith("bus.blob.")) {
+            e.set(t, t.slice("bus.blob.".length));
+            return t;
+          } else if (r && t.startsWith("bus.error.")) {
+            return new Error(t.slice("bus.error.".length));
           } else {
-            return t_p;
+            return t;
           }
         });
         await Promise.all(
-          Array.from(e_map.keys()).map(async (A_key) => {
-            let t_url;
-            const i_id = e_map.get(A_key);
-            t_url = i_id.startsWith("blob:")
-              ? i_id
-              : await this._sendToExt("bus.blobIdToObjectUrl", i_id);
-            const r_b = await fetch(t_url).then((A_f) => A_f.blob());
-            e_map.set(A_key, r_b);
+          [...e.keys()].map(async (A) => {
+            let t;
+            const i = e.get(A);
+            t = i.startsWith("blob:")
+              ? i
+              : await this._sendToExt("bus.blobIdToObjectUrl", i);
+            const r = await fetch(t).then((A) => A.blob());
+            e.set(A, r);
           }),
         );
-        return this._applyBlobs(t_res, e_map);
+        return this._applyBlobs(t, e);
       },
-      _applyBlobs(A_app, e_app) {
-        if (e_app.has(A_app)) {
-          return e_app.get(A_app);
+      _applyBlobs(A, e) {
+        if (e.has(A)) {
+          return e.get(A);
         }
-        if (i.is.array(A_app) || i.is.object(A_app)) {
-          for (const t_a in A_app) {
-            A_app[t_a] = this._applyBlobs(A_app[t_a], e_app);
+        if (i.is.array(A) || i.is.object(A)) {
+          for (const t in A) {
+            A[t] = this._applyBlobs(A[t], e);
           }
         }
-        return A_app;
+        return A;
       },
-      async _blobIdToObjectUrl(_A) {},
-      async _blobToObjectUrl(_A) {},
+      async _blobIdToObjectUrl(A) { },
+      async _blobToObjectUrl(A) { },
       _is(...A) {
         return A.includes(this._locus);
       },
@@ -1200,21 +1196,21 @@
         A.length === 0
           ? null
           : await new Promise((e) => {
-              let t = 0;
-              A.forEach(async (r) => {
-                const n = await r;
-                if (i.is.nil(n)) {
-                  if (t === A.length - 1) {
-                    return e(null);
-                  } else {
-                    t++;
-                    return;
-                  }
+            let t = 0;
+            A.forEach(async (r) => {
+              const n = await r;
+              if (i.is.nil(n)) {
+                if (t === A.length - 1) {
+                  return e(null);
                 } else {
-                  return e(n);
+                  t++;
+                  return;
                 }
-              });
-            }),
+              } else {
+                return e(n);
+              }
+            });
+          }),
     };
   })();
   (() => {
