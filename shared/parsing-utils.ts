@@ -944,3 +944,26 @@ export function buildFinalPrompt(text: string, selections: Record<string, string
     return result;
 }
 
+/**
+ * Clean antagonist response for user-facing display.
+ * Extracts the user-facing prompt text and strips out the metadata JSON.
+ */
+export function cleanAntagonistResponse(text: string): string {
+    if (!text || typeof text !== 'string') return '';
+
+    // Antagonist responses are often JSON blobs.
+    // If it looks like JSON, try to parse and extract the prompt text.
+    if (text.trim().startsWith('{')) {
+        try {
+            const parsed = parseAntagonistOutput(text);
+            if (parsed && parsed.the_prompt && parsed.the_prompt.text) {
+                return parsed.the_prompt.text;
+            }
+        } catch (e) {
+            // Fall back to original text if parsing fails
+        }
+    }
+
+    return text;
+}
+

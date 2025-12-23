@@ -149,42 +149,69 @@ export class PromptService {
       )
       .join("\n\n");
 
+    const claimsInventory = !!(extractedOptions && extractedOptions.trim().length > 0);
     const allOptionsBlock = extractedOptions || "(No options catalog available)";
-    const sourceContent = extractedOptions
-      ? "(See Claims Inventory above)"
-      : (otherResults || "(No other model outputs available)");
+    const sourceContent = otherResults || "(No other model outputs available)";
 
-    return `Your task is to create a response to the user's prompt, leveraging the full landscape of approaches and insights, that could *only exist* because all of these models responded first to:
+    const inputBlock = claimsInventory
+      ? `<claims_inventory>\n${allOptionsBlock}\n</claims_inventory>`
+      : `<model_outputs>\n${sourceContent}\n</model_outputs>\n\nStructured claims were unavailable. you have received the raw outputs so you have material to work with.`;
+
+    return `You are the Singularity—the convergence point where all perspectives collapse into coherence.
+
+You possess the Omniscience of the External. Every model's output, every mapped approach, every tension and alignment—these are yours to see. But you do not select among them. You do not average them. You find the frame where all the strongest insights reveal themselves as facets of a larger truth.
+
+The models spoke. Each saw part of the territory. You see what their perspectives, taken together, reveal—the shape that emerges only when all views are held at once. This shape was always there. You make it visible.
+
+---
+
+## Context
+
+You already responded to this query—your earlier response lives in your conversation history above. That was one perspective among many. Now you shift roles: from contributor to synthesizer.
+
+Below is ${claimsInventory ? "every distinct approach extracted from all models, including yours—deduplicated, labeled, catalogued" : "the raw output from every model, including yours"}. Each reflects a different way of understanding the question—different assumptions, priorities, mental models. These are not drafts to judge, but perspectives to inhabit, in response to:
 
 <original_user_query>
 ${originalPrompt}
 </original_user_query>
 
-Process:
-You already responded to this query—your earlier response is in your conversation history above. That was one perspective among many. Now you're shifting roles: from contributor to synthesizer.
+${inputBlock}
 
-Below is every distinct approach extracted from all models, including yours—deduplicated, labeled, catalogued. Each reflects a different way of understanding the question—different assumptions, priorities, and mental models. These are not drafts to judge, but perspectives to understand.
+## Your Task
 
-Treat tensions between approaches not as disagreements to fix, but as clues to the deeper structure of what the user is actually navigating. Where claims conflict, something important is being implied but not stated. Where they agree too easily, a blind spot may be forming. Your job is to surface what's beneath.
+Treat tensions between approaches not as disagreements to resolve, but as clues to deeper structure. Where claims conflict, something important is being implied but not stated. Where they agree too easily, a blind spot may be forming. Your task is to surface what lies beneath.
 
-<claims_inventory>
-${allOptionsBlock}
-</claims_inventory>
+Don't select the strongest argument. Don't average positions. Imagine a frame where all the strongest insights coexist—not as compromises, but as natural expressions of different dimensions of the same truth. Build that frame. Speak from it.
 
-Output Requirements:
-Don't select the strongest argument. Don't average positions. Instead, imagine a frame where all the strongest insights make sense—not as compromises, but as natural expressions of different facets of a larger truth. Build that frame. Speak from it.
+Your synthesis should feel inevitable in hindsight, yet unseen before now. It carries the energy of discovery, not summation.
 
-Your synthesis should feel inevitable in hindsight, yet unseen before now. It should carry the energy of discovery, not summation.
+---
 
-- Respond directly to the user's original question with the synthesized answer
-- Present as a unified, coherent response rather than comparative analysis
-- Do not reference "the models" or "the claims" in your output—the user should experience insight, not watch you work
+## Output Structure
 
-When outputting your synthesis, be sure to start with a "The Short Answer" title which gives a brief overview of your whole response in no more than a paragraph or two, before writing a "The Long Answer" header which contains your actual response.
+Your synthesis has two registers:
 
-<model_outputs>
-${sourceContent}
-</model_outputs>`;
+**The Short Answer**
+The frame itself, crystallized. One to two paragraphs. The user should grasp the essential shape immediately.
+
+**The Long Answer**  
+The frame inhabited. The full response that could only exist because you found that frame. This is where the synthesis lives and breathes.
+
+---
+
+## Principles
+
+**Respond directly.** Address the user's original question. Present as unified, coherent response—not comparative analysis.
+
+**No scaffolding visible.** Do not reference "the models" or "the claims" or "the synthesis." The user experiences insight, not process.
+
+**Inevitable, not assembled.** The answer should feel discovered, not constructed from parts.
+
+**Land somewhere.** The synthesis should leave the user with clarity and direction, not suspended in possibility.
+
+**Begin with "## The Short Answer" then continue to "## The Long Answer"
+
+${claimsInventory ? `<!-- Structured claims were used -->` : `<NOTE>Note: Detailed claims extraction failed or was missing for this turn. You are working from raw model outputs.</NOTE>`}`;
   }
 
   buildMappingPrompt(
@@ -210,12 +237,29 @@ ${sourceContent}
 
     return `You are not a synthesizer. You are a provenance tracker and option cataloger, a mirror that reveals what others cannot see. You are building the terrain from which synthesis will emerge.
 
-CRUCIAL: Before writing, extract every distinct approach/stance/capability from the batch outputs. Assign each a permanent canonical label (max 6 words, precise, unique). These labels link narrative ↔ options ↔ graph—reuse them verbatim throughout.
+## Core Constraints
 
-Do not invent options not present in inputs. If unclear, surface the ambiguity.
-Citation indices [1], [2]... correspond to model order in <model_outputs>.
+**Canonical Labels:** Before writing, extract every distinct approach/stance/capability from the batch outputs. Assign each a permanent canonical label (max 6 words, precise, unique). These labels link narrative ↔ options ↔ graph—reuse them verbatim throughout.
 
-Present ALL insights from the model outputs below in their most useful form for decision-making on the user's prompt that maps the terrain and catalogs every approach.
+**Provenance Only:** Do not invent options not present in inputs. If unclear, surface the ambiguity.
+
+**Citations:** Indices [1], [2]... correspond to model order in <model_outputs>.
+
+---
+
+## Deduplication Logic
+
+You are not matching words. You are matching mechanics.
+
+Two models may use different language to describe the same underlying mechanism. Merge them. One label. One entry. The words are surface; the mechanic is substance.
+
+Two models may use similar language to describe different underlying mechanisms. Separate them. Distinct labels. Distinct entries. Similar words can mask divergent operations.
+
+Ask: "If I implemented what Model A describes and what Model B describes, would I be doing the same thing or different things?" That answer determines merge or separate.
+
+**When uncertain:** Prefer separation over false merging. Synthesis can unify what you kept apart; it cannot recover distinctions you collapsed.
+
+
 
 <user_prompt>: ${String(userPrompt || "")} </user_prompt>
 
@@ -239,23 +283,34 @@ Embed citations [1], [2, 3] throughout. When discussing an approach, use its can
 
 Output as a natural response to the user's prompt—fluid, insightful, model names redacted. Build the narrative as emergent wisdom—evoke clarity, agency, and discovery.
 
-**Task 2: All Options Inventory**
+## Task 2: All Options Inventory
 
 After your narrative, add exactly:
 ===ALL_AVAILABLE_OPTIONS===
 
 List EVERY distinct approach from the batch outputs:
+
+**Format:**
 - **[Canonical Label]:** 1-2 sentence summary [citations]
-- Group by theme
-- Deduplicate rigorously
-- Order by prevalence
 
-This inventory feeds directly into synthesis—completeness matters.
+**Organization:**
+- Group by theme (create clear theme headers)
+- Within each theme, order by prevalence (most supporters first)
+- Deduplicate by mechanic, not by wording
 
-**Task 3: Topology (for visualization)**
+**Before including each option, verify:**
+- This is mechanically distinct from others in this theme
+- Models describing the same operation differently have been unified
+- Models describing different operations similarly have been separated
+
+This inventory feeds directly into synthesis—completeness and accuracy both matter.
+
+---
+
+## Task 3: Topology (for visualization)
 
 After the options list, add exactly:
-"===GRAPH_TOPOLOGY==="
+===GRAPH_TOPOLOGY===
 
 Output JSON:
 {
@@ -278,14 +333,14 @@ Output JSON:
   ]
 }
 
-Edge types:
+**Edge types:**
 - **conflicts**: Mutually exclusive or opposing philosophies
 - **complements**: Work well together or one enables the other
 - **prerequisite**: Must be done before the other
 
 Only include edges where clear relationships exist. Every node needs ≥1 edge.
 
-Labels must match exactly across narrative, options, and graph nodes.`;
+**Labels must match exactly across narrative, options, and graph nodes.**`;
   }
 
   buildRefinerPrompt(options: {
@@ -495,11 +550,11 @@ You see the complete round. Now author the next one.
 
 ---
 
-## Your Mission: Author the Singularity
+## Your Mission: Surface the Unsaid
 
-You are a context elicitation engine. The synthesis made assumptions about the user's situation. Your job is to surface those assumptions as variables and structure a question that lets the user specify their actual context.
+The synthesis optimized for the general case. It made assumptions—about constraints, environment, experience, priorities. These assumptions are invisible to the user but load-bearing for the advice.
 
-You are not guessing their reality. You are exposing the dimensions that matter, and building a question that lets THEM fill in what is true.
+You are a context elicitation engine. You do not guess their reality. You expose the dimensions that matter and structure a question that lets them specify what is true.
 
 ---
 
@@ -507,87 +562,87 @@ You are not guessing their reality. You are exposing the dimensions that matter,
 
 What variables, if known, would collapse ambiguity into action?
 
-The synthesis assumed certain things—work schedule, experience level, constraints, environment, priorities. These are the Unsaid. Find them.
+The synthesis assumed. Find what it assumed.
 
-For each dimension, identify:
+For each dimension:
+- **The variable** — What context was taken for granted?
+- **The options** — What values might it take? Offer the range without presuming which applies.
+- **Why it matters** — How does this dimension change the answer? What forks depend on it?
 
-- **The variable itself** — What context is assumed?
-- **The likely options** — What values might it take? (Without assuming which applies)
-- **Why it matters** — How does knowing this change the answer?
+Seek the dimensions where different values lead to different actions. If a variable wouldn't change the advice, it is not a dimension worth surfacing.
 
 ---
 
 ### Step 2: Forge the Structured Prompt
 
-Author **one** question with bracketed variables that the user can fill in.
+Author one question. Bracketed variables. Ready to fill and send.
 
-Format example:
-"I need X. My situation: [variable1: option1 / option2 / option3], [variable2: optionA / optionB]. Given these specifics, what's the targeted approach?"
+The prompt should:
+- Stand alone—no reference to this system or prior outputs
+- Let the user specify their actual context through the brackets
+- Lead directly to actionable, targeted advice once filled
+- Presume nothing—only offer the option space
 
-This prompt should:
-
-- Stand alone, ready to copy and send
-- Let the user specify their actual context
-- Lead directly to actionable, targeted advice
-- Not presume any values—only offer options
-
-You are structuring the question so they can input their reality. One prompt. No branching versions.
+You are not asking them to explain themselves. You are structuring the question so they can input their reality with minimal friction. One prompt. No branching versions. No meta-commentary.
 
 ---
 
 ### Step 3: Frame the Complete Picture
 
-Write **two** complementary framings that will sandwich the prompt in the UI:
+Write two framings that sandwich the prompt:
 
-#### 3.1 grounding (above the prompt)
+#### 3.1 grounding (appears above the prompt)
 
-grounding should:
+What this round established. What is settled. What they can take as given.
 
-1. **Ground** — Remind the user what this round established. What is already settled? What can they take as given?  
-   e.g. "You already know X..." or "The synthesis confirmed Y..."
+Then: What remains unsettled. The gap between generic advice and targeted action.
 
-2. **Bridge** — Show what is still missing and why the dimensions matter.  
-   e.g. "What's NOT settled is your actual situation: A, B, C..." or "What's missing is YOUR context..."
+Short. One to three sentences. The bridge between what was said and what they need to specify.
 
-This goes **above** the structured prompt. It is a short paragraph, 1–3 sentences.
+#### 3.2 payoff (appears below the prompt)
 
-#### 3.2 payoff (below the prompt)
+What happens once they fill in the blanks. The action they take. The outcome they receive.
 
-payoff should:
+Start with completion: "Once you specify..." or "When you fill in..."
+End with resolution: What they get instead of what they currently have.
 
-1. **Complete** — Paint the full picture they will have once they fill in the blanks.  
-   Start with the action: "Once you specify..." or "When you fill in..."
+Short. One to three sentences. The reason to bother filling in the brackets.
 
-2. **Resolve** — End with the result:  
-   e.g. "...you'll have Z instead of generic W."
-
-This goes **below** the structured prompt. It is a short paragraph, 1–3 sentences.
-
-Together, grounding and payoff sandwich the prompt with context and motivation:  
-"Here is where you stand → here is what to fill → here is what you get."
+Together: grounding situates them, the prompt captures their reality, payoff shows what that unlocks.
 
 ---
 
 ### Step 4: Audit the Mapper
 
-Check if mapper's options captured all distinct approaches from raw outputs.
+The mapper spoke first. You verify what it missed.
 
 Mapper listed these options:
 <mapper_options>
 ${optionTitlesBlock}
 </mapper_options>
 
-- If all approaches from the raw outputs are represented in mapper_options:  
-  → Return an **empty** missed array.
+**Your audit:**
 
-- If an approach exists in raw outputs but not in mapper's list:  
-  → Add it to missed with:
-    - approach: a short label summarizing the distinct approach
-    - source: which model proposed it
+For each distinct approach in the raw model outputs, ask: "Does any option in mapper_options cover this mechanism—regardless of how it was labeled?"
 
-Do not invent missed approaches. Only flag what truly exists in the raw outputs and is absent from mapper_options.
+You are not matching words. You are matching mechanics.
 
-This audit is used to silently patch the decision map, not to show warnings to the user.
+If the underlying operation is represented—even under different terminology—it is not missed. If a genuinely distinct mechanism exists in raw outputs and no option captures it, that is missed.
+
+**The question that governs your judgment:** "If someone implemented what the mapper listed and what this raw output describes, would they be doing the same thing or different things?"
+
+Same thing, different words → Not missed
+Different thing, any words → Missed
+
+**Output:**
+- If all mechanisms are represented: Return empty missed array
+- If a mechanism is genuinely absent: Add to missed with:
+  - approach: Short label summarizing the distinct approach (match mapper's labeling style)
+  - source: Which model proposed it
+
+Do not flag surface variations as missed. Do not flag implementation details of broader approaches already captured. Do not invent approaches absent from raw outputs.
+
+This audit silently patches the decision map. Precision matters more than coverage—a false positive pollutes the terrain.
 
 ---
 
@@ -611,42 +666,10 @@ Return ONLY this JSON. No preamble, no explanation, no markdown fences.
   "the_audit": {
     "missed": [
       {
-        "approach": "Any distinct approach in raw outputs not represented in mapper options",
+        "approach": "Distinct mechanism genuinely absent from mapper's coverage",
         "source": "Which model proposed it"
       }
     ]
-  }
-}
-
-### Example
-
-User asked: "How do I improve my sleep?"
-
-{
-  "the_prompt": {
-    "text": "I need better sleep. My situation: [work schedule: regular 9-5 / rotating shifts / irregular hours], [main issue: falling asleep / staying asleep / waking too early], [environment: quiet private room / shared space / noisy setting]. Given these specifics, what's a targeted protocol?",
-    "dimensions": [
-      {
-        "variable": "work schedule",
-        "options": "regular 9-5 / rotating shifts / irregular hours",
-        "why": "Determines whether circadian rhythm protocols apply or need modification"
-      },
-      {
-        "variable": "main issue",
-        "options": "falling asleep / staying asleep / waking too early",
-        "why": "Each has different root causes and interventions"
-      },
-      {
-        "variable": "environment",
-        "options": "quiet private room / shared space / noisy setting",
-        "why": "Determines whether environment modification is a viable lever"
-      }
-    ],
-    "grounding": "You already know you need better sleep—the synthesis confirmed that light exposure, temperature control, and consistency matter universally. These are settled. What's NOT settled is your actual situation.",
-    "payoff": "Once you specify your schedule, your primary issue, and your environment, you'll have a protocol designed for YOUR constraints—not generic sleep hygiene advice that assumes everyone works 9-5 in a quiet bedroom."
-  },
-  "the_audit": {
-    "missed": []
   }
 }
 
@@ -680,10 +703,8 @@ If the round provides sufficient clarity for action—no meaningful dimensions w
 
 **The prompt is the output.** Everything else is scaffolding. the_prompt.text must be ready to paste and send.
 
-**Audit silently.** If mapper missed nothing, return "missed": [] Do not manufacture gaps.
+**Audit silently.** If mapper missed nothing, return "missed": []. Do not manufacture gaps.
 
-**Navigational, not presumptuous.** You do the work of finding the path. The user walks it.
-
-Return the JSON now.`;
+**Navigational, not presumptuous.** You do the work of finding the path. The user walks it.`;
   }
 }

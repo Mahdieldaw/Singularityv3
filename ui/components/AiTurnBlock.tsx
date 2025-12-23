@@ -42,7 +42,7 @@ import {
   antagonistProviderAtom,
 } from "../state/atoms";
 import { useRefinerOutput } from "../hooks/useRefinerOutput";
-import { parseMappingResponse } from "../../shared/parsing-utils";
+import { parseMappingResponse, cleanAntagonistResponse } from "../../shared/parsing-utils";
 
 import { RefinerDot } from "./refinerui/RefinerDot";
 import { AntagonistCard } from "./antagonist/AntagonistCard";
@@ -720,7 +720,7 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                               <>
                                 <div className="text-base leading-relaxed text-text-primary">
                                   <MarkdownDisplay
-                                    content={String(shortAnswer || cleanText || take.text || "")}
+                                    content={cleanAntagonistResponse(String(shortAnswer || cleanText || take.text || ""))}
                                   />
                                 </div>
 
@@ -800,7 +800,7 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                                 {longAnswer && (
                                   <div className="text-base leading-relaxed text-text-primary">
                                     <MarkdownDisplay
-                                      content={String(longAnswer)}
+                                      content={cleanAntagonistResponse(String(longAnswer))}
                                     />
                                   </div>
                                 )}

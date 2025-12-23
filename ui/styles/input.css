@@ -4,6 +4,7 @@
 
 /* Import Math Styles (Lazy-loaded logic handled by component, but styles here for now) */
 @import './math-styles.css';
+@import '../components/antagonist/antagonist.css';
 
 /* CSS Custom Properties */
 :root {

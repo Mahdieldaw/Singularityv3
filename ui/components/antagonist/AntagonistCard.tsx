@@ -91,19 +91,6 @@ export const AntagonistCard: React.FC<AntagonistCardProps> = ({
                 <div className="antagonist-null-state">
                     Decision path is clear — no additional context needed.
                 </div>
-                {hasMissed && (
-                    <div className="antagonist-audit-section">
-                        <div className="antagonist-audit-header">
-                            <span>🔍</span> Missed Approaches
-                        </div>
-                        {output.the_audit.missed.map((m, idx) => (
-                            <div key={idx} className="missed-approach-item">
-                                <span className="missed-approach-label">{m.approach}</span>
-                                <span className="missed-approach-source">— {m.source}</span>
-                            </div>
-                        ))}
-                    </div>
-                )}
             </div>
         );
     }
@@ -119,14 +106,20 @@ export const AntagonistCard: React.FC<AntagonistCardProps> = ({
                 />
             </div>
 
-            {/* Prompt Section */}
-            <div className="antagonist-prompt-section">
-                {output.the_prompt.grounding && (
-                    <div className="antagonist-grounding">
+            {/* Grounding Card */}
+            {output.the_prompt.grounding && (
+                <div className="antagonist-grounding-card">
+                    <div className="antagonist-card-label">
+                        <span className="text-[16px]">🧩</span> Grounding Context
+                    </div>
+                    <div className="antagonist-card-content">
                         {output.the_prompt.grounding}
                     </div>
-                )}
+                </div>
+            )}
 
+            {/* Main Prompt Section */}
+            <div className="antagonist-prompt-section">
                 <div className="antagonist-prompt-text">
                     {/* Display prompt with interactive dropdowns */}
                     {brackets.length > 0 ? (
@@ -135,12 +128,6 @@ export const AntagonistCard: React.FC<AntagonistCardProps> = ({
                         output.the_prompt.text
                     )}
                 </div>
-
-                {output.the_prompt.payoff && (
-                    <div className="antagonist-payoff">
-                        → {output.the_prompt.payoff}
-                    </div>
-                )}
             </div>
 
             {/* Actions */}
@@ -153,20 +140,18 @@ export const AntagonistCard: React.FC<AntagonistCardProps> = ({
                 </button>
             </div>
 
-            {/* Missed Approaches */}
-            {output.the_audit.missed.length > 0 && (
-                <div className="antagonist-audit-section">
-                    <div className="antagonist-audit-header">
-                        <span>🔍</span> Missed Approaches
+            {/* Payoff Card */}
+            {output.the_prompt.payoff && (
+                <div className="antagonist-payoff-card">
+                    <div className="antagonist-card-label antagonist-payoff-label">
+                        <span className="text-[16px]">🚀</span> The Strategic Payoff
                     </div>
-                    {output.the_audit.missed.map((m, idx) => (
-                        <div key={idx} className="missed-approach-item">
-                            <span className="missed-approach-label">{m.approach}</span>
-                            <span className="missed-approach-source">— {m.source}</span>
-                        </div>
-                    ))}
+                    <div className="antagonist-payoff-text">
+                        {output.the_prompt.payoff}
+                    </div>
                 </div>
             )}
+
         </div>
     );
 };
