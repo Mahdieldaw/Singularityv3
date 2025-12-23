@@ -189,7 +189,7 @@ export class ContextResolver {
       ) {
         return await this.sessionManager.adapter.get("sessions", sessionId);
       }
-      return this.sessionManager?.sessions?.[sessionId] || null;
+      return null;
     } catch (e) {
       console.error("[ContextResolver] _getSessionMetadata failed:", e);
       return null;
@@ -203,12 +203,6 @@ export class ContextResolver {
         this.sessionManager.adapter.isReady()
       ) {
         return await this.sessionManager.adapter.get("turns", turnId);
-      }
-      const sessions = this.sessionManager?.sessions || {};
-      for (const session of Object.values(sessions)) {
-        const turns = Array.isArray(session.turns) ? session.turns : [];
-        const t = turns.find((x) => x && x.id === turnId);
-        if (t) return t;
       }
       return null;
     } catch (e) {

@@ -1774,7 +1774,6 @@ Answer the user's message directly. Use context only to disambiguate.
       );
 
       // Prefer adapter lookup: turnId may be a user or AI turn
-      let session = this.sessionManager.sessions[context.sessionId];
       let aiTurn = null;
       try {
         const adapter = this.sessionManager?.adapter;
@@ -1783,127 +1782,57 @@ Answer the user's message directly. Use context only to disambiguate.
           if (turn && (turn.type === "ai" || turn.role === "assistant")) {
             aiTurn = turn;
           } else if (turn && turn.type === "user") {
-            // If we have the user turn, try to locate the subsequent AI turn in memory
-            if (session && Array.isArray(session.turns)) {
-              const userIdx = session.turns.findIndex(
-                (t) => t.id === turnId && t.type === "user",
-              );
-              if (userIdx !== -1) {
-                const next = session.turns[userIdx + 1];
-                if (next && (next.type === "ai" || next.role === "assistant"))
-                  aiTurn = next;
+            // Need next turn (AI) from sequence
+            // We can't easily jump to next turn without querying by sequence or getting all turns
+            // Strategy: get all turns for session and find next
+            try {
+              const sessionTurns = await adapter.getTurnsBySessionId(context.sessionId);
+              if (Array.isArray(sessionTurns)) {
+                const userIdx = sessionTurns.findIndex(t => t.id === turnId);
+                if (userIdx !== -1) {
+                  const next = sessionTurns[userIdx + 1];
+                  if (next && (next.type === "ai" || next.role === "assistant")) {
+                    aiTurn = next;
+                  }
+                }
               }
-            }
+            } catch (ignored) { }
           }
         }
-      } catch (_) { }
-
-      // Fallback: resolve from current session memory
-      if (!aiTurn && session && Array.isArray(session.turns)) {
-        // If turnId is an AI id, pick that turn directly
-        aiTurn =
-          session.turns.find(
-            (t) =>
-              t &&
-              t.id === turnId &&
-              (t.type === "ai" || t.role === "assistant"),
-          ) || null;
-        if (!aiTurn) {
-          // Otherwise treat as user id and take the next AI turn
-          const userTurnIndex = session.turns.findIndex(
-            (t) => t.id === turnId && t.type === "user",
-          );
-          if (userTurnIndex !== -1) {
-            aiTurn = session.turns[userTurnIndex + 1] || null;
-          }
-        }
+      } catch (e) {
+        console.warn("[WorkflowEngine] resolveSourceData adapter lookup failed:", e);
       }
 
-      // Fallback: search across all sessions (helps after reconnects or wrong session targeting)
-      if (!aiTurn) {
-        try {
-          const allSessions = this.sessionManager.sessions || {};
-          for (const [sid, s] of Object.entries(allSessions)) {
-            if (!s || !Array.isArray(s.turns)) continue;
-            const direct = s.turns.find(
-              (t) =>
-                t &&
-                t.id === turnId &&
-                (t.type === "ai" || t.role === "assistant"),
-            );
-            if (direct) {
-              aiTurn = direct;
-              session = s;
-              break;
-            }
-            const idx = s.turns.findIndex(
-              (t) => t.id === turnId && t.type === "user",
-            );
-            if (idx !== -1) {
-              aiTurn = s.turns[idx + 1];
-              session = s;
-              console.warn(
-                `[WorkflowEngine] Historical turn ${turnId} resolved in different session ${sid}; proceeding with that context.`,
-              );
-              break;
-            }
-          }
-        } catch (_) { }
-      }
+      // Fallback: search across all sessions NOT SUPPORTED individually anymore without cache.
+      // If we didn't find it via adapter, we likely won't find it.
 
       if (!aiTurn || aiTurn.type !== "ai") {
-        // Fallback: try to resolve by matching user text when IDs differ (optimistic vs canonical)
-        const fallbackText =
-          context?.userMessage || this.currentUserMessage || "";
-        if (fallbackText && fallbackText.trim().length > 0) {
+        // Try text matching fallback if ID lookup failed (via adapter)
+        const fallbackText = context?.userMessage || this.currentUserMessage || "";
+        if (fallbackText && fallbackText.trim().length > 0 && this.sessionManager?.adapter?.isReady && this.sessionManager.adapter.isReady()) {
           try {
-            // Search current session first
-            let found = null;
-            const searchInSession = (sess) => {
-              if (!sess || !Array.isArray(sess.turns)) return null;
-              for (let i = 0; i < sess.turns.length; i++) {
-                const t = sess.turns[i];
-                if (
-                  t &&
-                  t.type === "user" &&
-                  String(t.text || "") === String(fallbackText)
-                ) {
-                  const next = sess.turns[i + 1];
-                  if (next && next.type === "ai") return next;
+            const sessionTurns = await this.sessionManager.adapter.getTurnsBySessionId(context.sessionId);
+            if (Array.isArray(sessionTurns)) {
+              for (let i = 0; i < sessionTurns.length; i++) {
+                const t = sessionTurns[i];
+                if (t && t.type === "user" && String(t.text || "") === String(fallbackText)) {
+                  const next = sessionTurns[i + 1];
+                  if (next && next.type === "ai") {
+                    aiTurn = next;
+                    break;
+                  }
                 }
               }
-              return null;
-            };
-
-            found = searchInSession(session);
-            if (!found) {
-              // Fallback: search across all sessions
-              const allSessions = this.sessionManager.sessions || {};
-              for (const [sid, s] of Object.entries(allSessions)) {
-                found = searchInSession(s);
-                if (found) {
-                  console.warn(
-                    `[WorkflowEngine] Historical fallback matched by text in different session ${sid}; proceeding with that context.`,
-                  );
-                  break;
-                }
-              }
-            }
-
-            if (found) {
-              aiTurn = found;
-            } else {
-              throw new Error(
-                `Could not find corresponding AI turn for ${turnId}`,
-              );
             }
           } catch (e) {
-            throw new Error(
-              `Could not find corresponding AI turn for ${turnId}`,
-            );
+            throw new Error(`Could not find corresponding AI turn for ${turnId} (text fallback failed)`);
           }
-        } else {
-          throw new Error(`Could not find corresponding AI turn for ${turnId}`);
+        }
+
+        if (!aiTurn) {
+          console.warn(`[WorkflowEngine] Could not resolve AI turn for source ${turnId}`);
+          // Return empty allows workflow to continue gracefully (maybe with partial data) rather than crash
+          return [];
         }
       }
 
@@ -1941,19 +1870,11 @@ Answer the user's message directly. Use context only to disambiguate.
         this.sessionManager.adapter.isReady()
       ) {
         try {
-          let responses = [];
-          if (
-            typeof this.sessionManager.adapter.getResponsesByTurnId ===
-            "function"
-          ) {
-            responses = await this.sessionManager.adapter.getResponsesByTurnId(
-              aiTurn.id,
-            );
-          } else {
-            responses = await this.sessionManager.adapter.getResponsesByTurnId(
-              aiTurn.id,
-            );
-          }
+          // Use unified method
+          const responses = await this.sessionManager.adapter.getResponsesByTurnId(
+            aiTurn.id,
+          );
+
           const respType = responseType || "batch";
           sourceArray = (responses || [])
             .filter(
