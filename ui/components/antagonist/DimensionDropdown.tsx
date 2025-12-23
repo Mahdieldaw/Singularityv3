@@ -35,9 +35,10 @@ export const DimensionDropdown: React.FC<DimensionDropdownProps> = ({
 
     const displayValue = selectedValue || options[0] || "Select...";
 
+    const filteredOptions = options.filter(opt => opt !== displayValue);
+
     const handleTriggerClick = (e: React.MouseEvent) => {
         e.stopPropagation();
-        console.log('[DimensionDropdown] Opening with options:', options, 'for variable:', variable);
         setIsOpen(!isOpen);
     };
 
@@ -79,7 +80,7 @@ export const DimensionDropdown: React.FC<DimensionDropdownProps> = ({
                         boxShadow: '0 12px 32px rgba(0, 0, 0, 0.6)',
                     }}
                 >
-                    {options.map((option, idx) => (
+                    {filteredOptions.map((option, idx) => (
                         <button
                             key={idx}
                             type="button"
