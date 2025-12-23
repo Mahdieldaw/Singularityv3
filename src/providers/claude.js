@@ -71,6 +71,9 @@ export class ClaudeProviderError extends Error {
 // CLAUDE SESSION API
 // =============================================================================
 export class ClaudeSessionApi {
+  /**
+   * @param {{ sharedState?: any, utils?: any, fetchImpl?: typeof fetch }} dependencies
+   */
   constructor({ sharedState, utils, fetchImpl = fetch } = {}) {
     this._logs = true;
     this.sharedState = sharedState;
@@ -153,6 +156,9 @@ export class ClaudeSessionApi {
   }
   /**
    * Send prompt to Claude AI and handle streaming response
+   * @param {string} prompt
+   * @param {any} options
+   * @param {(payload: any, isFirstChunk: boolean) => void} onChunk
    */
   async ask(prompt, options = {}, onChunk = () => { }) {
     let { orgId, chatId, signal, emoji } = options;
@@ -545,9 +551,9 @@ export default ClaudeProviderController;
 
 // For global browser usage
 if (typeof window !== "undefined") {
-  window.HTOSClaudeProvider = ClaudeProviderController;
-  window.HTOSClaudeSessionApi = ClaudeSessionApi;
-  window.HTOSClaudeModels = ClaudeModels;
+  window["HTOSClaudeProvider"] = ClaudeProviderController;
+  window["HTOSClaudeSessionApi"] = ClaudeSessionApi;
+  window["HTOSClaudeModels"] = ClaudeModels;
 }
 // Provider-specific debug flag (off by default)
 const CLAUDE_DEBUG = false;

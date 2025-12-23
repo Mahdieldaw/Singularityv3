@@ -53,9 +53,9 @@ const IframeController = {
     this._iframe = iframe;
 
     // Register this iframe with the bus so it knows where to forward messages
-    if (window.bus && typeof window.bus.setIframe === "function") {
+    if (window["bus"] && typeof window["bus"]["setIframe"] === "function") {
       try {
-        window.bus.setIframe(iframe);
+        window["bus"]["setIframe"](iframe);
         console.log(
           "[OffscreenBootstrap] setIframe called immediately after append",
         );
@@ -88,13 +88,13 @@ const IframeController = {
     // and treat any non-response within 5s as not-ready.
     const timeoutMs = 5000;
     try {
-      if (!window.bus || typeof window.bus.poll !== "function") {
+      if (!window["bus"] || typeof window["bus"]["poll"] !== "function") {
         console.warn("[OffscreenBootstrap] Bus is not available for polling.");
         return false;
       }
 
       const ok = await Promise.race([
-        window.bus
+        window["bus"]
           .poll("startup.oiReady")
           .then(() => true)
           .catch(() => false),
@@ -130,12 +130,12 @@ const IframeController = {
 const UtilsController = {
   async init() {
     console.log("[OffscreenBootstrap] Initializing UtilsController...");
-    if (window.bus) {
+    if (window["bus"]) {
       // Listen for requests from the service worker and proxy them to localStorage
-      window.bus.on("utils.ls.get", this._localStorageGet.bind(this));
-      window.bus.on("utils.ls.set", this._localStorageSet.bind(this));
-      window.bus.on("utils.ls.has", this._localStorageHas.bind(this));
-      window.bus.on("utils.ls.remove", this._localStorageRemove.bind(this));
+      window["bus"].on("utils.ls.get", this._localStorageGet.bind(this));
+      window["bus"].on("utils.ls.set", this._localStorageSet.bind(this));
+      window["bus"].on("utils.ls.has", this._localStorageHas.bind(this));
+      window["bus"].on("utils.ls.remove", this._localStorageRemove.bind(this));
     }
   },
 
@@ -198,10 +198,10 @@ const OffscreenBootstrap = {
   // Bus discovery shim - probes multiple global names for tolerant discovery
   _discoverBus() {
     const candidates = [
-      { name: "BusController", ref: window.BusController },
-      { name: "HTOSBusController", ref: window.HTOSBusController },
-      { name: "__htos_global.$bus", ref: window.__htos_global?.$bus },
-      { name: "window.bus", ref: window.bus },
+      { name: "BusController", ref: window["BusController"] },
+      { name: "HTOSBusController", ref: window["HTOSBusController"] },
+      { name: "__htos_global.$bus", ref: window["__htos_global"]?.$bus },
+      { name: "window.bus", ref: window["bus"] },
     ];
 
     for (const candidate of candidates) {
@@ -229,7 +229,7 @@ const OffscreenBootstrap = {
       console.log("[OffscreenBootstrap] Initializing BusController...");
       const busController = this._discoverBus();
       await busController.init();
-      window.bus = busController;
+      window["bus"] = busController;
       console.log(
         "[OffscreenBootstrap] BusController initialized and available as window.bus",
       );

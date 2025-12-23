@@ -76,6 +76,10 @@ export class HTOSError extends Error {
     this.id = `error_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
   }
 
+  get details() {
+    return this.context;
+  }
+
   toJSON() {
     return {
       id: this.id,
@@ -161,8 +165,6 @@ export function isNetworkError(error) {
  * Create a ProviderAuthError from a generic error
  */
 export function createProviderAuthError(providerId, originalError, context = {}) {
-  const config = PROVIDER_CONFIG[providerId] || {};
-
   return new ProviderAuthError(providerId, null, {
     ...context,
     originalError,
@@ -238,7 +240,7 @@ export class ErrorHandler {
     // NEW: Provider auth fallback - use alternative provider
     this.fallbackStrategies.set(
       "PROVIDER_AUTH_FAILED",
-      async (operation, context) => {
+      async (_operation, context) => {
         const { failedProvider, availableProviders, authManager } = context;
 
         console.warn(`🔄 Provider ${failedProvider} auth failed, checking alternatives`);
@@ -513,7 +515,7 @@ export class ErrorHandler {
       // NEW: Rate limit recovery
       RATE_LIMITED: {
         name: "Rate Limit Recovery",
-        execute: async (error, context) => {
+        execute: async (_error, context) => {
           console.log(`⏳ Rate limited by ${context.providerId}, waiting...`);
           return await this.retryWithBackoff(
             context.operation,
@@ -536,7 +538,7 @@ export class ErrorHandler {
       },
       NETWORK_ERROR: {
         name: "Network Recovery",
-        execute: async (error, context) => {
+        execute: async (_error, context) => {
           // Wait and retry with exponential backoff
           return await this.retryWithBackoff(
             context.operation,
@@ -547,7 +549,7 @@ export class ErrorHandler {
       },
       TIMEOUT: {
         name: "Timeout Recovery",
-        execute: async (error, context) => {
+        execute: async (_error, context) => {
           // Retry with longer timeout
           const newContext = {
             ...context,
@@ -753,7 +755,7 @@ export class ErrorHandler {
     }
   }
 
-  async directPersistenceOperation(context) {
+  async directPersistenceOperation(_context) {
     // Implement direct persistence without service worker
     throw new HTOSError(
       "Direct persistence not implemented",
@@ -761,7 +763,7 @@ export class ErrorHandler {
     );
   }
 
-  async directSessionOperation(context) {
+  async directSessionOperation(_context) {
     // Implement direct session management without service worker
     throw new HTOSError(
       "Direct session management not implemented",
@@ -834,7 +836,7 @@ export class ErrorHandler {
       circuitBreaker: null,
     };
 
-    for (const [code, count] of this.errorCounts.entries()) {
+    for (const [code, count] of Array.from(this.errorCounts.entries())) {
       if (code.startsWith(prefix)) {
         stats.errors[code.substring(prefix.length)] = count;
       }
@@ -861,12 +863,12 @@ export class ErrorHandler {
       circuitBreakers: {},
     };
 
-    for (const [code, count] of this.errorCounts.entries()) {
+    for (const [code, count] of Array.from(this.errorCounts.entries())) {
       stats.errorsByCode[code] = count;
       stats.totalErrors += count;
     }
 
-    for (const [code, breaker] of this.circuitBreakers.entries()) {
+    for (const [code, breaker] of Array.from(this.circuitBreakers.entries())) {
       stats.circuitBreakers[code] = {
         state: breaker.state,
         failures: breaker.failures,

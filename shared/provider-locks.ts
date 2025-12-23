@@ -46,7 +46,7 @@ export function subscribeToLockChanges(
     ) => {
         if (area === 'local' && changes[STORAGE_KEY]) {
             const newValue = changes[STORAGE_KEY].newValue || {};
-            callback({ ...DEFAULT_LOCKS, ...newValue });
+            callback({ ...DEFAULT_LOCKS, ...(newValue as Partial<ProviderLocks>) });
         }
     };
 

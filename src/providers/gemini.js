@@ -9,7 +9,7 @@
  * Build-phase safe: emitted to dist/adapters/*
  */
 import { BusController } from "../core/vendor-exports.js";
-import { ArtifactProcessor } from "../../shared/artifact-processor.ts";
+import { ArtifactProcessor } from "../../shared/artifact-processor";
 
 // =============================================================================
 // GEMINI MODELS CONFIGURATION
@@ -66,6 +66,9 @@ export class GeminiProviderError extends Error {
 // GEMINI SESSION API
 // =============================================================================
 export class GeminiSessionApi {
+  /**
+   * @param {{ sharedState?: any, utils?: any, fetchImpl?: typeof fetch }} dependencies
+   */
   constructor({ sharedState, utils, fetchImpl = fetch } = {}) {
     this._logs = true;
     this.sharedState = sharedState;
@@ -82,11 +85,7 @@ export class GeminiSessionApi {
   /**
    * Send prompt to Gemini AI and handle response
    * @param {string} prompt - The prompt text
-   * @param {Object} options - Request options
-   * @param {string|null} options.token - Authentication token (auto-fetched if null)
-   * @param {Array} options.cursor - Conversation cursor for continuity
-   * @param {string} options.model - Model to use ("gemini-flash" or "gemini-pro")
-   * @param {AbortSignal} options.signal - Abort signal for cancellation
+   * @param {{ token?: {at: string, bl: string} | null, cursor?: any[], model?: string, signal?: AbortSignal }} options - Request options
    * @param {boolean} retrying - Internal retry flag
    */
   async ask(
@@ -104,7 +103,9 @@ export class GeminiSessionApi {
       token = this.sharedState.prefetchedToken;
       delete this.sharedState.prefetchedToken; // Consume once
     }
-    token || (token = await this._fetchToken());
+    if (!token) {
+      token = await this._fetchToken();
+    }
 
     // ✅ NEW: Generate collision-resistant request ID
     const reqId = Date.now() * 1000 + Math.floor(Math.random() * 1000);
@@ -287,15 +288,15 @@ export class GeminiSessionApi {
     // Replace Image Placeholders with Markdown Images
     // Use shared ArtifactProcessor for consistent handling
     const processor = new ArtifactProcessor();
-    if (images.length > 0 && u.text) {
+    if (images.length > 0 && u?.text) {
       u.text = processor.injectImages(u.text, images);
     }
 
     // Append extracted content as Claude-style artifacts
-    if (immersiveContent.length > 0) {
+    if (immersiveContent.length > 0 && u) {
       immersiveContent.forEach((item) => {
         // Avoid duplicates if multiple chunks contain the same item
-        if (!u.text.includes(`identifier="${item.identifier}"`)) {
+        if (u.text && !u.text.includes(`identifier="${item.identifier}"`)) {
           u.text += processor.formatArtifact(item);
         }
       });
@@ -311,9 +312,14 @@ export class GeminiSessionApi {
         model: modelConfig.name,
       });
 
+    if (!u) {
+      this._throw("failedToReadResponse", { step: "answer", error: "No payload extracted" });
+      return { text: "", cursor: [], token: token!, modelName: modelConfig.name }; // Should not reach here
+    }
+
     return {
-      text: u.text,
-      cursor: u.cursor,
+      text: u.text || "",
+      cursor: u.cursor || [],
       token,
       modelName: modelConfig.name, // Include model name in response
     };
@@ -542,8 +548,8 @@ export default GeminiProviderController;
 
 // Build-phase safe: Browser global compatibility
 if (typeof window !== "undefined") {
-  window.HTOS = window.HTOS || {};
-  window.HTOS.GeminiProvider = GeminiProviderController;
+  window["HTOS"] = window["HTOS"] || {};
+  window["HTOS"]["GeminiProvider"] = GeminiProviderController;
 }
 // Provider-specific debug flag (off by default)
 const GEMINI_DEBUG = false;

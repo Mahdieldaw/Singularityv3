@@ -65,7 +65,7 @@ export class ProviderHealthTracker {
   /**
    * Record a failed request
    */
-  recordFailure(providerId, error) {
+  recordFailure(providerId, _error) {
     const now = Date.now();
     const state = this.circuitState.get(providerId);
 
@@ -94,13 +94,13 @@ export class ProviderHealthTracker {
    */
   getHealthReport() {
     const report = {};
-    for (const [providerId, state] of this.circuitState) {
+    this.circuitState.forEach((state, providerId) => {
       report[providerId] = {
         state: state.state,
         recentFailures: this.failures.get(providerId)?.length || 0,
         lastSuccess: this.lastSuccess.get(providerId) || null
       };
-    }
+    });
     return report;
   }
 

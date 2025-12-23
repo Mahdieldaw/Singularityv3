@@ -23,8 +23,8 @@ export class WorkflowCompiler {
   /**
    * PURE COMPILE: Primitive + Context → Workflow Steps
    *
-   * @param {PrimitiveWorkflowRequest} request - Initialize/Extend/Recompute primitive
-   * @param {ResolvedContext} resolvedContext - REQUIRED from ContextResolver
+   * @param {Object} request - Initialize/Extend/Recompute primitive
+   * @param {Object} resolvedContext - REQUIRED from ContextResolver
    * @returns {Object} Executable workflow
    */
   compile(request, resolvedContext) {
@@ -39,8 +39,6 @@ export class WorkflowCompiler {
     const steps = [];
     // Track created step IDs to ensure correct linkage
     let batchStepId = null;
-    let synthesisStepId = null;
-    let mappingStepId = null;
 
     console.log(`[Compiler] Compiling ${resolvedContext.type} workflow`);
 

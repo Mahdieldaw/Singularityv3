@@ -187,8 +187,8 @@ export class ChatGPTProviderController {
   async isAvailable() {
     try {
       const bus =
-        (typeof self !== "undefined" && self.bus) ||
-        (typeof globalThis !== "undefined" && globalThis.bus) ||
+        (typeof self !== "undefined" && self["bus"]) ||
+        (typeof globalThis !== "undefined" && globalThis["bus"]) ||
         (typeof BusController !== "undefined" && BusController);
 
       if (bus?.poll) {
@@ -249,6 +249,9 @@ export class ChatGPTProviderController {
 // CHATGPT SESSION API
 // =============================================================================
 export class ChatGPTSessionApi {
+  /**
+   * @param {{ sharedState?: any, utils?: any, fetchImpl?: typeof fetch }} dependencies
+   */
   constructor({ sharedState, utils, fetchImpl = fetch } = {}) {
     this._logs = true;
     this.sharedState = sharedState;
@@ -269,9 +272,9 @@ export class ChatGPTSessionApi {
   // Helper: return the shared `htos` object if present (page or global)
   _getHtos() {
     try {
-      if (typeof window !== "undefined" && window.htos) return window.htos;
-      if (typeof globalThis !== "undefined" && globalThis.htos)
-        return globalThis.htos;
+      if (typeof window !== "undefined" && window["htos"]) return window["htos"];
+      if (typeof globalThis !== "undefined" && globalThis["htos"])
+        return globalThis["htos"];
     } catch (e) { }
     return null;
   }
@@ -282,9 +285,9 @@ export class ChatGPTSessionApi {
     const htos = this._getHtos();
     if (htos?.$bus) return htos.$bus;
     try {
-      if (typeof self !== "undefined" && self.bus) return self.bus;
-      if (typeof globalThis !== "undefined" && globalThis.bus)
-        return globalThis.bus;
+      if (typeof self !== "undefined" && self["bus"]) return self["bus"];
+      if (typeof globalThis !== "undefined" && globalThis["bus"])
+        return globalThis["bus"];
       // Final fallback: return the controller object (may be uninitialized)
       if (typeof BusController !== "undefined" && BusController)
         return BusController;
@@ -298,18 +301,11 @@ export class ChatGPTSessionApi {
 
   /**
    * Ask ChatGPT with mandatory Arkose preflight and PoW.
+   * @param {string} prompt
+   * @param {any} options
+   * @param {(payload: any) => void} onChunk
    */
   async ask(prompt, options = {}, onChunk = () => { }) {
-    const dbg = (...args) => {
-      if (this._debug) console.debug(...args);
-    };
-    // For log safety only: prepare a display-limited version without altering the actual prompt
-    const safeDisplayPrompt =
-      typeof prompt === "string"
-        ? prompt.length > 300
-          ? prompt.slice(0, 300) + "..."
-          : prompt
-        : "";
     // NOTE: prompt display logging moved to adapter layer to avoid duplicate logs.
     // Keep no-op here to avoid double-logging of the same prompt.
 
@@ -647,6 +643,10 @@ export class ChatGPTSessionApi {
     return undefined;
   }
 
+  /**
+   * @param {string} path
+   * @param {{headers?: any, body?: any, credentials?: string, [key: string]: any}} opts
+   */
   async _fetchAuth(path, opts = {}) {
     const did = await this._getDeviceId();
     const headers = {
@@ -667,7 +667,7 @@ export class ChatGPTSessionApi {
           ? { Authorization: `Bearer ${this._accessToken}` }
           : {}),
       },
-      credentials: payload.credentials || "include",
+      credentials: payload["credentials"] || "include",
     };
 
     let res;
@@ -718,7 +718,7 @@ export class ChatGPTSessionApi {
       return this._scriptsCache;
     try {
       const html = await this.fetch(AE_CONFIG.chatUrl).then((r) => r.text());
-      const scripts = [...html.matchAll(/src="([^"]*)"/g)].map((m) => m[1]);
+      const scripts = Array.from(html.matchAll(/src="([^"]*)"/g)).map((m) => m[1]);
       this._scriptsCache = scripts.length ? scripts : [null];
     } catch {
       this._scriptsCache = [null];
@@ -1212,6 +1212,6 @@ export class ChatGPTSessionApi {
 // =============================================================================
 export default ChatGPTProviderController;
 if (typeof window !== "undefined") {
-  window.HTOS = window.HTOS || {};
-  window.HTOS.ChatGPTProvider = ChatGPTProviderController;
+  window["HTOS"] = window["HTOS"] || {};
+  window["HTOS"]["ChatGPTProvider"] = ChatGPTProviderController;
 }

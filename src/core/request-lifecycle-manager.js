@@ -365,7 +365,7 @@ export class HTOSUnifiedRequestController {
   init() {
     this.lifecycleManager.init();
   }
-  async startRequest(chatId, options = {}) {
+  async startRequest(chatId, _options = {}) {
     const chat = this.sharedState.chats.get(chatId);
     if (!chat) {
       throw new Error(`Chat not found: ${chatId}`);

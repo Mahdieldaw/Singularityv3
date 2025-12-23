@@ -300,7 +300,7 @@ export class SessionManager {
   /**
    * Recompute: Create derived turn (timeline branch)
    */
-  async _persistRecompute(request, context, result) {
+  async _persistRecompute(request, _context, result) {
     const { sessionId, sourceTurnId, stepType, targetProvider } = request;
     const now = Date.now();
 
@@ -860,7 +860,7 @@ export class SessionManager {
     result = {},
     options = {},
   ) {
-    const { skipSave = true } = options;
+    const { skipSave: _skipSave = true } = options;
     if (!sessionId || !providerId) return;
 
     try {
@@ -948,7 +948,7 @@ export class SessionManager {
    * updates shape: { [providerId]: { text?: string, meta?: object } }
    */
   async updateProviderContextsBatch(sessionId, updates = true, options = {}) {
-    const { skipSave = true } = options;
+    const { skipSave: _skipSave = true } = options;
     if (!sessionId || !updates || typeof updates !== "object") return;
 
     try {
@@ -1024,7 +1024,7 @@ export class SessionManager {
    * Get provider contexts (persistence-backed, backward compatible shape)
    * Returns an object: { [providerId]: { meta: <contextMeta> } }
    */
-  async getProviderContexts(sessionId, threadId = "default-thread") {
+  async getProviderContexts(sessionId, _threadId = "default-thread") {
     try {
       if (!sessionId) {
         console.warn(
@@ -1083,12 +1083,9 @@ export class SessionManager {
 
     // 2. Fallback: If text starts with header, take text between first and second header
     if (text.trim().match(/^#+\s/)) {
-      const headers = [...text.matchAll(/\n#+\s/g)];
+      const headers = Array.from(text.matchAll(/\n#+\s/g));
       if (headers.length > 0) {
         // Text starts with header (index 0 implied), find next header
-        const end = headers[0].index;
-        // If the first match is actually later in the text (not at 0), we take text before it
-        // But the regex checks if text STARTS with header.
         // Let's simplify: split by headers and take the first non-empty content block
         const parts = text.split(/\n#+\s/).map(p => p.trim()).filter(p => p.length > 0);
         return parts[0] || "";

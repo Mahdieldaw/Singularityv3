@@ -8,6 +8,8 @@
  * throughout the application without circular imports or global pollution.
  */
 export class ServiceRegistry {
+    static instance = null;
+
     constructor() {
         this.services = new Map();
     }

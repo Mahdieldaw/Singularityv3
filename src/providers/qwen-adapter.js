@@ -28,6 +28,10 @@ export class QwenAdapter {
     this.controller = controller;
   }
 
+  async init() {
+    return;
+  }
+
   async sendPrompt(req, onChunk, signal, _isRetry = false) {
     const startTime = Date.now();
     let aggregatedText = "";

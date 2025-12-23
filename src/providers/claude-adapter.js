@@ -89,7 +89,7 @@ export class ClaudeAdapter {
       const result = await this.controller.claudeSession.ask(
         req.originalPrompt,
         { signal, chatId: req.meta?.chatId },
-        ({ text, chatId, orgId }, isFirstChunk) => {
+        ({ text, chatId, orgId }, _isFirstChunk) => {
           if (!this.capabilities.supportsStreaming || !onChunk) return;
           aggregatedText = text || aggregatedText;
           // Forward partials to orchestrator/port
@@ -188,9 +188,9 @@ export class ClaudeAdapter {
   async sendContinuation(prompt, providerContext, sessionId, onChunk, signal, _isRetry = false) {
     const startTime = Date.now();
     let aggregatedText = "";
+    const meta = providerContext?.meta || providerContext || {};
 
     try {
-      const meta = providerContext?.meta || providerContext || {};
       const chatId = providerContext?.chatId ?? meta.chatId ?? providerContext?.threadUrl ?? meta.threadUrl;
 
       if (!chatId) {
@@ -201,7 +201,7 @@ export class ClaudeAdapter {
       const result = await this.controller.claudeSession.ask(
         prompt,
         { signal, chatId },
-        ({ text, chatId: newChatId, orgId }, isFirstChunk) => {
+        ({ text, chatId: newChatId, orgId }, _isFirstChunk) => {
           if (!this.capabilities.supportsStreaming || !onChunk) return;
           aggregatedText = text || aggregatedText;
 

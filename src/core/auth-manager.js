@@ -14,7 +14,7 @@
  * - Just credentials: 'include'
  */
 
-import { AUTH_COOKIES, GEMINI_VARIANTS } from '../shared/auth-config.ts';
+import { AUTH_COOKIES, GEMINI_VARIANTS } from '../shared/auth-config';
 
 class AuthManager {
     constructor() {

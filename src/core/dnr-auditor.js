@@ -183,7 +183,7 @@ export class DNRRuleAuditor {
     };
     return JSON.stringify(
       exportData,
-      (key, value) => {
+      (_key, value) => {
         // Convert Maps to objects for JSON serialization
         if (value instanceof Map) {
           return Object.fromEntries(value);

@@ -63,7 +63,7 @@ export function aggregateBatchOutputs(providerResponses = []) {
                 byProvider.set(pid, r);
             }
         }
-        for (const [pid, r] of byProvider.entries()) {
+        byProvider.forEach((r, pid) => {
             frozen[pid] = {
                 providerId: pid,
                 text: r.text || "",
@@ -72,7 +72,7 @@ export function aggregateBatchOutputs(providerResponses = []) {
                 createdAt: r.createdAt || Date.now(),
                 updatedAt: r.updatedAt || r.createdAt || Date.now(),
             };
-        }
+        });
         return frozen;
     } catch (e) {
         console.warn("[ContextUtils] aggregateBatchOutputs failed:", e);

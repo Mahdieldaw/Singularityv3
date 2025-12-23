@@ -1,17 +1,15 @@
 // src/core/workflow-engine.js - FIXED VERSION
-import { ArtifactProcessor } from '../../shared/artifact-processor.ts';
-import { PromptService } from './PromptService.ts';
-import { ResponseProcessor } from './ResponseProcessor.ts';
+import { ArtifactProcessor } from '../../shared/artifact-processor';
+import { PromptService } from './PromptService';
+import { ResponseProcessor } from './ResponseProcessor';
 import { getHealthTracker } from './provider-health-tracker.js';
 import { classifyError } from './error-classifier.js';
 import {
   errorHandler,
   createMultiProviderAuthError,
-  ProviderAuthError,
   isProviderAuthError
 } from '../utils/ErrorHandler.js';
-import { authManager } from '../core/auth-manager.js';
-import { PROVIDER_LIMITS } from '../../shared/provider-limits.ts';
+import { PROVIDER_LIMITS } from '../../shared/provider-limits';
 // Parsing and Prompt building functions moved to ResponseProcessor.ts and PromptService.ts
 
 // Track last seen text per provider/session for delta streaming
@@ -1190,7 +1188,7 @@ export class WorkflowEngine {
       {
         sessionId: context.sessionId,
         timeout: 90000, // Slightly longer for analysis
-        onPartial: (pid, chunk) => {
+        onPartial: (_pid, _chunk) => {
           // Optional: stream refiner delta if UI supports it
           // For now, we don't stream refiner analysis to main chat flow usually, but we could.
         }
@@ -1386,7 +1384,7 @@ export class WorkflowEngine {
       {
         sessionId: context.sessionId,
         timeout: 90000,
-        onPartial: (pid, chunk) => {
+        onPartial: (_pid, _chunk) => {
           // Optional: stream antagonist delta if UI supports it
         }
       }
@@ -1572,7 +1570,7 @@ Answer the user's message directly. Use context only to disambiguate.
           } catch (_) { }
         },
         // ✅ NEW: Handle granular completion
-        onProviderComplete: (providerId, resultWrapper) => {
+        onProviderComplete: (providerId, _resultWrapper) => {
           try {
             this.healthTracker.recordSuccess(providerId);
             const entry = providerStatuses.find((s) => s.providerId === providerId);
@@ -1699,9 +1697,7 @@ Answer the user's message directly. Use context only to disambiguate.
             // If all failed and we have auth errors, throw MultiProviderAuthError
             if (authErrors.length > 0 && authErrors.length === errors.size) {
               const providerIds = Array.from(errors.keys());
-              reject(createMultiProviderAuthError(providerIds, {
-                originalErrors: authErrors
-              }));
+              reject(createMultiProviderAuthError(providerIds, "Multiple authentication errors occurred."));
               return;
             }
 

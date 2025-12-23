@@ -12,8 +12,7 @@ import {
   ArkoseController,
   BusController,
   LifecycleManager,
-  HTOSRequestLifecycleManager,
-  utils,
+  DNRUtils as _unused_DNRUtils, // To avoid collision if needed, but actually we just remove the unused ones
 } from "./core/vendor-exports.js";
 import { WorkflowCompiler } from "./core/workflow-compiler.js";
 import { ContextResolver } from "./core/context-resolver.js";
@@ -38,13 +37,13 @@ import { persistenceMonitor } from "./core/PersistenceMonitor.js";
 
 // Global Services Registry
 import { services } from "./core/service-registry.js";
-import { PromptService } from "./core/PromptService.ts";
-import { ResponseProcessor } from "./core/ResponseProcessor.ts";
+import { PromptService } from "./core/PromptService";
+import { ResponseProcessor } from "./core/ResponseProcessor";
 
 // ============================================================================
 // FEATURE FLAGS (Source of Truth)
 // ============================================================================
-const HTOS_PERSISTENCE_ENABLED = true;
+// HTOS_PERSISTENCE_ENABLED removed as it was unused
 
 // Ensure fetch is correctly bound
 try {
@@ -54,7 +53,7 @@ try {
 } catch (_) { }
 
 // Initialize BusController globally (needed for message bus)
-self.BusController = BusController;
+self["BusController"] = BusController;
 
 // ============================================================================
 // LIFECYCLE & STARTUP HANDLERS (Unified)
@@ -114,7 +113,7 @@ async function initializePersistence() {
     services.register('persistenceLayer', pl);
 
     // Legacy global for debug only
-    self.__HTOS_PERSISTENCE_LAYER = pl;
+    self["__HTOS_PERSISTENCE_LAYER"] = pl;
 
     persistenceMonitor.recordConnection("HTOSPersistenceDB", 1, [
       "sessions", "threads", "turns", "provider_responses", "provider_contexts", "metadata",
@@ -352,7 +351,6 @@ class FaultTolerantOrchestrator {
         }
 
         let aggregatedText = "";
-        const startTime = Date.now();
 
         const request = {
           originalPrompt: prompt,
@@ -438,13 +436,13 @@ async function initializeOrchestrator() {
     services.register('lifecycleManager', lm);
 
     // Legacy global
-    self.lifecycleManager = lm;
+    self["lifecycleManager"] = lm;
 
     const orchestrator = new FaultTolerantOrchestrator(services);
     services.register('orchestrator', orchestrator);
 
     // Legacy global
-    self.faultTolerantOrchestrator = orchestrator;
+    self["faultTolerantOrchestrator"] = orchestrator;
 
     console.log("[SW] ✓ FaultTolerantOrchestrator initialized");
     return orchestrator;
@@ -519,7 +517,7 @@ async function initializeGlobalInfrastructure() {
     await DNRUtils.initialize();
     await OffscreenController.init();
     await BusController.init();
-    self.bus = BusController;
+    self["bus"] = BusController;
   } catch (e) {
     console.error("[SW] Infra init failed", e);
   }
@@ -548,7 +546,7 @@ const OffscreenController = {
 // ============================================================================
 // UNIFIED MESSAGE HANDLER
 // ============================================================================
-async function handleUnifiedMessage(message, sender, sendResponse) {
+async function handleUnifiedMessage(message, _sender, sendResponse) {
   try {
     const svcs = await initializeGlobalServices();
     const sm = svcs.sessionManager;

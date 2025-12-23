@@ -123,6 +123,11 @@ export class QwenSessionApi {
     }
   }
 
+  /**
+   * @param {string} prompt
+   * @param {any} options
+   * @param {(payload: any) => void} onChunk
+   */
   async ask(prompt, options = {}, onChunk = () => { }) {
     const { sessionId, parentMsgId, model = "tongyi-qwen3-max-model", signal } = options;
     const csrfToken = await this._fetchCsrfToken();
@@ -420,6 +425,10 @@ export class QwenSessionApi {
 export class QwenProviderController {
   constructor(dependencies = {}) {
     this.api = new QwenSessionApi(dependencies);
+  }
+
+  async init() {
+    return;
   }
 
   get qwenSession() {

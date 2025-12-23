@@ -223,6 +223,7 @@ const BusController = {
           {
             name: e,
             args: n,
+            argsStr: null,
           },
           (e) => e.proxy,
         ),
@@ -240,6 +241,7 @@ const BusController = {
       {
         name: e,
         args: t,
+        argsStr: null,
       },
       (e) => !e.proxy,
     );
@@ -509,7 +511,7 @@ const BusController = {
 
     // LISTENER 2: Receives messages from the Service Worker (and other contexts)
     // This listener is also set up ONCE.
-    chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       if (!this._isBusMsg(message)) return false; // Ignore non-bus messages (do not keep channel open)
 
       // This is a message that needs to be forwarded DOWN to the child iframe.
@@ -732,7 +734,7 @@ const BusController = {
   _serialize(e) {
     return utils.is.nil(e)
       ? null
-      : JSON.stringify(e, (e, t) => {
+      : JSON.stringify(e, (_key, t) => {
           if (utils.is.blob(t)) {
             if (this._is("bg")) {
               const newId = this._generateId();
@@ -748,7 +750,7 @@ const BusController = {
     if (!utils.is.string(e)) return null;
 
     const t = new Map(),
-      n = JSON.parse(e, (e, n) => {
+      n = JSON.parse(e, (_key, n) => {
         const o = utils.is.string(n);
         return o && n.startsWith("bus.blob.")
           ? (t.set(n, n.slice("bus.blob.".length)), n)
@@ -758,7 +760,7 @@ const BusController = {
       });
 
     await Promise.all(
-      [...t.keys()].map(async (e) => {
+      Array.from(t.keys()).map(async (e) => {
         let n;
         const a = t.get(e);
         n = a.startsWith("blob:")
@@ -914,7 +916,7 @@ export { BusController, utils, env };
 
 // For global browser usage
 if (typeof window !== "undefined") {
-  window.HTOSBusController = BusController;
-  window.HTOSBusUtils = utils;
-  window.HTOSEnv = env;
+  window["HTOSBusController"] = BusController;
+  window["HTOSBusUtils"] = utils;
+  window["HTOSEnv"] = env;
 }

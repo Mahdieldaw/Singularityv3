@@ -27,7 +27,7 @@
       const a = {};
       const c = (A) => Object.assign(e, A);
       const h = new Proxy(e, {
-        get(i, r) {
+        get(_i, r) {
           if (r === "assign") {
             return c;
           }
@@ -79,7 +79,7 @@
             return e[r];
           }
         },
-        set: (A, t, i) => {
+        set: (_A, t, i) => {
           e[t] = i;
           a[t] = i;
           if (n) {
@@ -96,7 +96,7 @@
       }
       const [r, n, s] = (function (A) {
         let e = 0;
-        A.split("").forEach((t, i) => {
+        A.split("").forEach((_t, i) => {
           e = A.charCodeAt(i) + ((e << 5) - e);
         });
         return [(e & 16711680) >> 16, (e & 65280) >> 8, e & 255];
@@ -155,8 +155,10 @@
         this.mutex = Promise.resolve();
       }
       lock() {
-        let A = () => {};
-        this.mutex = this.mutex.then(() => new Promise(A));
+        let A = (_val) => {};
+        this.mutex = this.mutex.then(() => new Promise((resolve) => {
+          A = resolve;
+        }));
         return new Promise((e) => {
           A = e;
         });
@@ -419,7 +421,7 @@
             n = true;
           },
           calculate: (A, e = null, n = null) => {
-            if (!f(A, e)) {
+            if (!f(A, e || 0)) {
               c(e);
               I(A);
               return C("hex", n);
@@ -557,8 +559,8 @@
         }
         const r = URL.createObjectURL(A);
         if (i) {
-          const A = e.is.number(i) ? i : 60000;
-          setTimeout(() => URL.revokeObjectURL(r), A);
+          const A_delay = e.is.number(i) ? i : 60000;
+          setTimeout(() => URL.revokeObjectURL(r), A_delay);
         }
         return r;
       },
@@ -574,13 +576,13 @@
     const { $utils: e } = A;
     e.pickRandom = (A) => A[Math.floor(Math.random() * A.length)];
   })();
-  Array.prototype.toReversed &&= function () {
+  (Array.prototype)["toReversed"] &&= function () {
     return [...this].reverse();
   };
-  Array.prototype.at ||= function (A) {
+  (Array.prototype)["at"] ||= function (A) {
     return this[A >= 0 ? A : this.length + A];
   };
-  Array.prototype.findLastIndex ||= function (A, e) {
+  (Array.prototype)["findLastIndex"] ||= function (A, e) {
     for (let t = this.length - 1; t >= 0; t--) {
       if (A.call(e, this[t], t, this)) {
         return t;
@@ -656,7 +658,7 @@
         try {
           const s = (A) => {
             const e = JSON.stringify(A);
-            return btoa(String.fromCharCode(...new TextEncoder().encode(e)));
+            return btoa(String.fromCharCode(...Array.from(new TextEncoder().encode(e))));
           };
           const o = performance.now();
           const a = Object.keys(Object.getPrototypeOf(navigator));
@@ -664,7 +666,7 @@
           const h = [
             navigator.hardwareConcurrency + screen.width + screen.height,
             new Date().toString(),
-            performance.memory.jsHeapSizeLimit,
+            performance["memory"] ? performance["memory"].jsHeapSizeLimit : 0,
             Math.random(),
             navigator.userAgent,
             t.pickRandom(i),
@@ -696,21 +698,21 @@
           return { error: error.message || "Failed to generate proof token" };
         }
       },
-      async _ensureSetup(A, e) {
+      async _ensureSetup(A, _e) {
         if (this._setupPromise) {
           return this._setupPromise;
         }
         this._setupPromise = t.createPromise();
         this._patchArkoseIframe(A);
-        window.useArkoseSetupEnforcement = async (e) => {
+        window["useArkoseSetupEnforcement"] = async (e) => {
           e.setConfig({
             ...A.params,
             [A.selectorKey]: "#challenge",
-            [A.onErrorKey]: (A) => {
-              this._fetchTokenPromise.reject(A);
+            [A.onErrorKey]: (A_err) => {
+              this._fetchTokenPromise.reject(A_err);
             },
-            [A.onCompletedKey]: (e) => {
-              this._fetchTokenPromise.resolve(e[A.resultTokenKey]);
+            [A.onCompletedKey]: (e_comp) => {
+              this._fetchTokenPromise.resolve(e_comp[A.resultTokenKey]);
             },
           });
           this._arkose = e;
@@ -1059,7 +1061,8 @@
           };
           window.addEventListener("message", t);
         }),
-      _callHandlers({ name: A, args: t, argsStr: i } = {}, r = null) {
+      _callHandlers(A_obj = {}, r = null) {
+        const { name: A, args: t, argsStr: i } = A_obj;
         let n = this._handlers[A];
         if (n) {
           if (r) {
@@ -1070,22 +1073,23 @@
           } else {
             return new Promise(async (resolve) => {
               // If args were serialized, deserialize them; ensure args is an array
+              let t_args = t;
               if (i) {
                 const des = await this._deserialize(i);
                 if (Array.isArray(des)) {
-                  t = des;
+                  t_args = des;
                 } else if (des === null || des === undefined) {
-                  t = [];
+                  t_args = [];
                 } else {
-                  t = [des];
+                  t_args = [des];
                 }
               }
-              if (!t) t = [];
+              if (!t_args) t_args = [];
               resolve(
                 await this._pick(
                   n.map(async (handler) => {
                     try {
-                      return await handler.fn.call(handler.this, ...t);
+                      return await handler.fn.call(handler.this, ...t_args);
                     } catch (err) {
                       e.error(`failed to handle "${handler.name}".`, err);
                       return err;
@@ -1100,76 +1104,76 @@
         }
       },
       _removeProxyHandlers(A) {
-        Object.keys(this._handlers).forEach((e) => {
-          this._handlers[e] = this._handlers[e].filter((e) => e.proxy !== A);
-          if (this._handlers[e].length === 0) {
-            delete this._handlers[e];
+        Object.keys(this._handlers).forEach((e_h) => {
+          this._handlers[e_h] = this._handlers[e_h].filter((e_f) => e_f.proxy !== A);
+          if (this._handlers[e_h].length === 0) {
+            delete this._handlers[e_h];
           }
         });
       },
-      _serialize(A) {
-        if (i.is.nil(A)) {
+      _serialize(A_val) {
+        if (i.is.nil(A_val)) {
           return null;
         } else {
-          return JSON.stringify(A, (A, e) => {
-            if (i.is.blob(e)) {
+          return JSON.stringify(A_val, (_A, e_s) => {
+            if (i.is.blob(e_s)) {
               if (this._is("bg")) {
-                const A = this._generateId();
-                this._blobs[A] = e;
-                return `bus.blob.${A}`;
+                const A_bid = this._generateId();
+                this._blobs[A_bid] = e_s;
+                return `bus.blob.${A_bid}`;
               }
-              return `bus.blob.${i.objectUrl.create(e, true)}`;
+              return `bus.blob.${i.objectUrl.create(e_s, true)}`;
             }
-            if (i.is.error(e)) {
-              return `bus.error.${e.message}`;
+            if (i.is.error(e_s)) {
+              return `bus.error.${e_s.message}`;
             } else {
-              return e;
+              return e_s;
             }
           });
         }
       },
-      async _deserialize(A) {
-        if (!i.is.string(A)) {
+      async _deserialize(A_des) {
+        if (!i.is.string(A_des)) {
           return null;
         }
-        const e = new Map();
-        const t = JSON.parse(A, (A, t) => {
-          const r = i.is.string(t);
-          if (r && t.startsWith("bus.blob.")) {
-            e.set(t, t.slice("bus.blob.".length));
-            return t;
-          } else if (r && t.startsWith("bus.error.")) {
-            return new Error(t.slice("bus.error.".length));
+        const e_map = new Map();
+        const t_res = JSON.parse(A_des, (_A, t_p) => {
+          const r_s = i.is.string(t_p);
+          if (r_s && t_p.startsWith("bus.blob.")) {
+            e_map.set(t_p, t_p.slice("bus.blob.".length));
+            return t_p;
+          } else if (r_s && t_p.startsWith("bus.error.")) {
+            return new Error(t_p.slice("bus.error.".length));
           } else {
-            return t;
+            return t_p;
           }
         });
         await Promise.all(
-          [...e.keys()].map(async (A) => {
-            let t;
-            const i = e.get(A);
-            t = i.startsWith("blob:")
-              ? i
-              : await this._sendToExt("bus.blobIdToObjectUrl", i);
-            const r = await fetch(t).then((A) => A.blob());
-            e.set(A, r);
+          Array.from(e_map.keys()).map(async (A_key) => {
+            let t_url;
+            const i_id = e_map.get(A_key);
+            t_url = i_id.startsWith("blob:")
+              ? i_id
+              : await this._sendToExt("bus.blobIdToObjectUrl", i_id);
+            const r_b = await fetch(t_url).then((A_f) => A_f.blob());
+            e_map.set(A_key, r_b);
           }),
         );
-        return this._applyBlobs(t, e);
+        return this._applyBlobs(t_res, e_map);
       },
-      _applyBlobs(A, e) {
-        if (e.has(A)) {
-          return e.get(A);
+      _applyBlobs(A_app, e_app) {
+        if (e_app.has(A_app)) {
+          return e_app.get(A_app);
         }
-        if (i.is.array(A) || i.is.object(A)) {
-          for (const t in A) {
-            A[t] = this._applyBlobs(A[t], e);
+        if (i.is.array(A_app) || i.is.object(A_app)) {
+          for (const t_a in A_app) {
+            A_app[t_a] = this._applyBlobs(A_app[t_a], e_app);
           }
         }
-        return A;
+        return A_app;
       },
-      async _blobIdToObjectUrl(A) {},
-      async _blobToObjectUrl(A) {},
+      async _blobIdToObjectUrl(_A) {},
+      async _blobToObjectUrl(_A) {},
       _is(...A) {
         return A.includes(this._locus);
       },

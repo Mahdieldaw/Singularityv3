@@ -487,6 +487,7 @@ export class DNRUtils {
   static async restorePersistedRules() {
     try {
       const result = await chrome.storage.local.get(this.STORAGE_KEY);
+      /** @type {any} */
       const rulesData = result[this.STORAGE_KEY];
 
       if (!rulesData) return;

@@ -163,9 +163,9 @@ export class PersistenceMonitor {
     };
 
     // Convert performance metrics to plain objects
-    for (const [key, value] of this.metrics.performance.entries()) {
+    this.metrics.performance.forEach((value, key) => {
       report.performance[key] = { ...value };
-    }
+    });
 
     return report;
   }

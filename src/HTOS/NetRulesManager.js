@@ -97,14 +97,6 @@ const utils = {
 };
 
 // =============================================================================
-// MOCK DATA CONTEXT
-// =============================================================================
-
-const data = {
-  name: "htos", // Updated from 'HTOS1'
-};
-
-// =============================================================================
 // NET RULES MANAGER IMPLEMENTATION
 // =============================================================================
 
@@ -493,7 +485,8 @@ const ArkoseController = {
     durationMs,
   }) {
     try {
-      const ruleId = await DNRUtils.registerHeaderRule({
+      const ruleId = NetRulesManager._lastRuleId++;
+      await DNRUtils.registerHeaderRule({
         tabId,
         urlFilter,
         resourceTypes: [
@@ -503,6 +496,7 @@ const ArkoseController = {
         headerValue,
         operation: "set",
         providerId: "arkose",
+        ruleId,
         durationMs,
       });
 
@@ -565,9 +559,9 @@ export {
 
 // For global browser usage
 if (typeof window !== "undefined") {
-  window.HTOSNetRulesManager = NetRulesManager;
-  window.HTOSCSPController = CSPController;
-  window.HTOSUserAgentController = UserAgentController;
-  window.HTOSArkoseController = ArkoseController;
-  window.HTOSNetRulesUtils = utils;
+  window["HTOSNetRulesManager"] = NetRulesManager;
+  window["HTOSCSPController"] = CSPController;
+  window["HTOSUserAgentController"] = UserAgentController;
+  window["HTOSArkoseController"] = ArkoseController;
+  window["HTOSNetRulesUtils"] = utils;
 }
