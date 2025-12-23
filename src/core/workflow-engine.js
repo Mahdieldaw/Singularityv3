@@ -1830,24 +1830,33 @@ Answer the user's message directly. Use context only to disambiguate.
         case "mapping":
           sourceContainer = aiTurn.mappingResponses || {};
           break;
+        case "refiner":
+          sourceContainer = aiTurn.refinerResponses || {};
+          break;
+        case "antagonist":
+          sourceContainer = aiTurn.antagonistResponses || {};
+          break;
         default:
           sourceContainer = aiTurn.batchResponses || {};
           break;
       }
 
-      // Convert to array format
-      let sourceArray = Object.values(sourceContainer)
-        .flat()
-        .filter(
-          (res) =>
-            res.status === "completed" &&
-            res.text &&
-            res.text.trim().length > 0,
-        )
-        .map((res) => ({
-          providerId: res.providerId,
-          text: res.text,
-        }));
+      // Convert to array format, keeping only the LATEST version per provider
+      const latestMap = new Map();
+      Object.keys(sourceContainer).forEach(pid => {
+        const versions = (sourceContainer[pid] || [])
+          .filter(r => r.status === "completed" && r.text?.trim())
+          .sort((a, b) => (b.responseIndex || 0) - (a.responseIndex || 0)); // Descending index
+
+        if (versions.length > 0) {
+          latestMap.set(pid, {
+            providerId: pid,
+            text: versions[0].text
+          });
+        }
+      });
+
+      let sourceArray = Array.from(latestMap.values());
 
       // If embedded responses were not present, attempt provider_responses fallback (prefer indexed lookup)
       if (
@@ -1862,20 +1871,22 @@ Answer the user's message directly. Use context only to disambiguate.
           );
 
           const respType = responseType || "batch";
-          sourceArray = (responses || [])
-            .filter(
-              (r) =>
-                r &&
-                r.responseType === respType &&
-                r.text &&
-                String(r.text).trim().length > 0,
-            )
-            .sort(
-              (a, b) =>
-                (a.updatedAt || a.createdAt || 0) -
-                (b.updatedAt || b.createdAt || 0),
-            )
-            .map((r) => ({ providerId: r.providerId, text: r.text }));
+          const dbLatestMap = new Map();
+
+          (responses || [])
+            .filter(r => r?.responseType === respType && r.text?.trim())
+            .forEach(r => {
+              const existing = dbLatestMap.get(r.providerId);
+              // Keep the one with the higher index
+              if (!existing || (r.responseIndex || 0) >= (existing.responseIndex || 0)) {
+                dbLatestMap.set(r.providerId, r);
+              }
+            });
+
+          sourceArray = Array.from(dbLatestMap.values()).map(r => ({
+            providerId: r.providerId,
+            text: r.text
+          }));
           if (sourceArray.length > 0) {
             console.log(
               "[WorkflowEngine] provider_responses fallback succeeded for historical sources",
