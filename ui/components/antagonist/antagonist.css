@@ -69,68 +69,97 @@
 
 .dimension-dropdown {
   position: relative;
-  display: inline-flex;
-  flex-direction: column;
-  min-width: 140px;
+  display: inline-block;
+  vertical-align: baseline;
 }
 
 .dimension-dropdown-trigger {
-  background: var(--surface-elevated, rgba(99, 102, 241, 0.15));
-  border: 1px solid var(--border-accent, rgba(99, 102, 241, 0.4));
-  border-radius: 6px;
-  padding: 6px 12px;
-  font-size: 13px;
-  color: var(--text-accent, #a78bfa);
+  background: rgba(99, 102, 241, 0.2);
+  border: 1px solid rgba(99, 102, 241, 0.5);
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: inherit;
+  font-family: inherit;
+  color: #a78bfa;
   cursor: pointer;
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  transition: all 0.2s ease;
+  gap: 4px;
+  transition: all 0.15s ease;
+  line-height: inherit;
+  white-space: nowrap;
+  font-weight: 500;
 }
 
 .dimension-dropdown-trigger:hover {
-  background: var(--surface-elevated, rgba(99, 102, 241, 0.25));
-  border-color: var(--border-accent, rgba(99, 102, 241, 0.6));
+  background: rgba(99, 102, 241, 0.35);
+  border-color: rgba(99, 102, 241, 0.7);
+  color: #c4b5fd;
+}
+
+.dimension-dropdown-trigger:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.3);
+}
+
+.dropdown-value {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dropdown-chevron {
+  font-size: 10px;
+  opacity: 0.8;
+  margin-left: 2px;
+  transition: transform 0.2s ease;
 }
 
 .dimension-dropdown-menu {
   position: absolute;
   top: calc(100% + 4px);
   left: 0;
-  right: 0;
-  background: var(--surface-raised, #1c1c1c);
-  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.15));
+  min-width: 120px;
+  width: max-content;
+  max-width: 320px;
+  background: #1a1a1a;
+  border: 1px solid rgba(99, 102, 241, 0.4);
   border-radius: 8px;
-  padding: 4px;
-  z-index: 100;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  padding: 6px;
+  z-index: 9999;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.6), 0 4px 12px rgba(0, 0, 0, 0.4);
+
+  /* Ensure vertical stacking */
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .dimension-dropdown-option {
+  display: block;
+  width: 100%;
   padding: 8px 12px;
   font-size: 13px;
-  color: var(--text-secondary, rgba(255, 255, 255, 0.8));
+  color: rgba(255, 255, 255, 0.9);
+  background: transparent;
+  border: none;
   cursor: pointer;
   border-radius: 6px;
-  transition: background 0.15s ease;
+  text-align: left;
+  transition: all 0.12s ease;
+  white-space: normal;
+  word-wrap: break-word;
 }
 
 .dimension-dropdown-option:hover {
-  background: var(--surface-hover, rgba(255, 255, 255, 0.08));
+  background: rgba(99, 102, 241, 0.15);
+  color: #fff;
 }
 
 .dimension-dropdown-option.selected {
-  background: var(--surface-accent, rgba(99, 102, 241, 0.2));
-  color: var(--text-accent, #a78bfa);
-}
-
-.dimension-label {
-  font-size: 11px;
-  color: var(--text-muted, rgba(255, 255, 255, 0.5));
-  margin-bottom: 4px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
+  background: rgba(99, 102, 241, 0.25);
+  color: #c4b5fd;
+  font-weight: 500;
 }
 
 /* Missed approaches section */
@@ -264,8 +293,9 @@
 
 /* Chevron icon */
 .chevron-icon {
-  width: 12px;
-  height: 12px;
+  width: 6px;
+  height: 6px;
+  flex-shrink: 0;
   transition: transform 0.2s ease;
 }
 

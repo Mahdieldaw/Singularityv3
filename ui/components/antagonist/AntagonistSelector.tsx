@@ -52,8 +52,8 @@ export const AntagonistSelector: React.FC<AntagonistSelectorProps> = ({
                 className="antagonist-selector-trigger"
             >
                 <span>{activeProvider?.name || "Select Model"}</span>
-                <svg className={clsx("chevron-icon", isOpen && "open")} viewBox="0 0 12 12" fill="currentColor">
-                    <path d="M2 4L6 8L10 4" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                <svg className={clsx("chevron-icon", isOpen && "open")} width="8" height="8" viewBox="0 0 12 12">
+                    <path d="M2 4L6 8L10 4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
                 </svg>
             </button>
 

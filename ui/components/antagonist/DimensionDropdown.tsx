@@ -16,56 +16,98 @@ export const DimensionDropdown: React.FC<DimensionDropdownProps> = ({
     onSelect,
 }) => {
     const [isOpen, setIsOpen] = useState(false);
-    const menuRef = useRef<HTMLDivElement>(null);
+    const containerRef = useRef<HTMLSpanElement>(null);
 
     // Close on outside click
     useEffect(() => {
+        if (!isOpen) return;
+
         const handleClickOutside = (e: MouseEvent) => {
-            if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+            if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
                 setIsOpen(false);
             }
         };
-        if (isOpen) {
-            document.addEventListener("mousedown", handleClickOutside);
-        }
-        return () => document.removeEventListener("mousedown", handleClickOutside);
+
+        // Use capture phase to catch clicks before they're stopped
+        document.addEventListener("click", handleClickOutside, true);
+        return () => document.removeEventListener("click", handleClickOutside, true);
     }, [isOpen]);
 
     const displayValue = selectedValue || options[0] || "Select...";
 
+    const handleTriggerClick = (e: React.MouseEvent) => {
+        e.stopPropagation();
+        console.log('[DimensionDropdown] Opening with options:', options, 'for variable:', variable);
+        setIsOpen(!isOpen);
+    };
+
+    const handleOptionClick = (e: React.MouseEvent, option: string) => {
+        e.stopPropagation();
+        onSelect(option);
+        setIsOpen(false);
+    };
+
     return (
-        <div className="dimension-dropdown" ref={menuRef}>
-            <span className="dimension-label">{variable}</span>
+        <span className="dimension-dropdown" ref={containerRef} style={{ position: 'relative', display: 'inline-block' }}>
             <button
                 type="button"
-                onClick={() => setIsOpen(!isOpen)}
+                onClick={handleTriggerClick}
                 className="dimension-dropdown-trigger"
+                title={variable}
             >
-                <span>{displayValue}</span>
-                <svg className={clsx("chevron-icon", isOpen && "open")} viewBox="0 0 12 12" fill="currentColor">
-                    <path d="M2 4L6 8L10 4" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
+                <span className="dropdown-value">{displayValue}</span>
+                <span className="dropdown-chevron">{isOpen ? '▴' : '▾'}</span>
             </button>
 
             {isOpen && (
-                <div className="dimension-dropdown-menu">
+                <div
+                    className="dimension-dropdown-menu"
+                    style={{
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '4px',
+                        position: 'absolute',
+                        top: 'calc(100% + 4px)',
+                        left: 0,
+                        minWidth: '150px',
+                        maxWidth: '350px',
+                        background: '#1a1a1a',
+                        border: '1px solid rgba(99, 102, 241, 0.5)',
+                        borderRadius: '8px',
+                        padding: '6px',
+                        zIndex: 9999,
+                        boxShadow: '0 12px 32px rgba(0, 0, 0, 0.6)',
+                    }}
+                >
                     {options.map((option, idx) => (
                         <button
                             key={idx}
-                            onClick={() => {
-                                onSelect(option);
-                                setIsOpen(false);
-                            }}
+                            type="button"
+                            onClick={(e) => handleOptionClick(e, option)}
                             className={clsx(
                                 "dimension-dropdown-option",
                                 selectedValue === option && "selected"
                             )}
+                            style={{
+                                display: 'block',
+                                width: '100%',
+                                padding: '8px 12px',
+                                fontSize: '13px',
+                                color: 'rgba(255, 255, 255, 0.9)',
+                                background: selectedValue === option ? 'rgba(99, 102, 241, 0.25)' : 'transparent',
+                                border: 'none',
+                                borderRadius: '6px',
+                                textAlign: 'left',
+                                cursor: 'pointer',
+                                whiteSpace: 'normal',
+                                wordWrap: 'break-word',
+                            }}
                         >
                             {option}
                         </button>
                     ))}
                 </div>
             )}
-        </div>
+        </span>
     );
 };

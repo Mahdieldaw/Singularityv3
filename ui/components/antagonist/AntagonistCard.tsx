@@ -143,24 +143,6 @@ export const AntagonistCard: React.FC<AntagonistCardProps> = ({
                 )}
             </div>
 
-            {/* Dimension Dropdowns */}
-            {output.the_prompt.dimensions.length > 0 && (
-                <div className="dimension-dropdown-container">
-                    {output.the_prompt.dimensions.map((dim, idx) => {
-                        const options = dim.options.split("/").map(o => o.trim());
-                        return (
-                            <DimensionDropdown
-                                key={idx}
-                                variable={dim.variable}
-                                options={options}
-                                selectedValue={selections[dim.variable] || null}
-                                onSelect={(value) => handleDimensionSelect(dim.variable, value)}
-                            />
-                        );
-                    })}
-                </div>
-            )}
-
             {/* Actions */}
             <div className="antagonist-actions">
                 <button
