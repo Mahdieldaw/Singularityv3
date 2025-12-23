@@ -288,38 +288,40 @@ export class GeminiSessionApi {
     // Replace Image Placeholders with Markdown Images
     // Use shared ArtifactProcessor for consistent handling
     const processor = new ArtifactProcessor();
-    if (images.length > 0 && u?.text) {
-      u.text = processor.injectImages(u.text, images);
+    /** @type {{text: string, cursor: any[]} | undefined} */
+    const u_typed = u;
+    if (images.length > 0 && u_typed?.text) {
+      u_typed.text = processor.injectImages(u_typed.text, images);
     }
 
     // Append extracted content as Claude-style artifacts
-    if (immersiveContent.length > 0 && u) {
+    if (immersiveContent.length > 0 && u_typed) {
       immersiveContent.forEach((item) => {
         // Avoid duplicates if multiple chunks contain the same item
-        if (u.text && !u.text.includes(`identifier="${item.identifier}"`)) {
-          u.text += processor.formatArtifact(item);
+        if (u_typed.text && !u_typed.text.includes(`identifier="${item.identifier}"`)) {
+          u_typed.text += processor.formatArtifact(item);
         }
       });
     }
 
     if (GEMINI_DEBUG)
       console.info("[Gemini] Response received:", {
-        hasText: !!u?.text,
-        textLength: u?.text?.length || 0,
+        hasText: !!u_typed?.text,
+        textLength: u_typed?.text?.length || 0,
         immersiveItems: immersiveContent.length,
         images: images.length,
         status: response?.status || "unknown",
         model: modelConfig.name,
       });
 
-    if (!u) {
+    if (!u_typed) {
       this._throw("failedToReadResponse", { step: "answer", error: "No payload extracted" });
-      return { text: "", cursor: [], token: token!, modelName: modelConfig.name }; // Should not reach here
+      return { text: "", cursor: [], token: token, modelName: modelConfig.name }; // Should not reach here
     }
 
     return {
-      text: u.text || "",
-      cursor: u.cursor || [],
+      text: u_typed.text || "",
+      cursor: u_typed.cursor || [],
       token,
       modelName: modelConfig.name, // Include model name in response
     };

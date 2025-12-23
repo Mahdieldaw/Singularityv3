@@ -16,7 +16,8 @@ const DEFAULT_LOCKS: ProviderLocks = { synthesis: false, mapping: false, antagon
 export async function getProviderLocks(): Promise<ProviderLocks> {
     try {
         const data = await chrome.storage.local.get(STORAGE_KEY);
-        return { ...DEFAULT_LOCKS, ...(data[STORAGE_KEY] || {}) };
+        const stored = data[STORAGE_KEY] as Record<string, any> | undefined;
+        return { ...DEFAULT_LOCKS, ...(stored || {}) };
     } catch {
         return DEFAULT_LOCKS;
     }

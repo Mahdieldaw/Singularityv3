@@ -155,12 +155,12 @@
         this.mutex = Promise.resolve();
       }
       lock() {
-        let A = (_val) => {};
+        let A_resolve = (_val) => {};
         this.mutex = this.mutex.then(() => new Promise((resolve) => {
-          A = resolve;
+          A_resolve = resolve;
         }));
         return new Promise((e) => {
-          A = e;
+          A_resolve(e);
         });
       }
       dispatch(A) {
@@ -318,7 +318,7 @@
             return h(g, r, t);
           }
         };
-        const E = (A) =>
+        const E = (A, _e = null) =>
           typeof A == "string" ? A.length < 4096 : A.byteLength < u;
         let f = E;
         switch (A.name) {
@@ -559,7 +559,7 @@
         }
         const r = URL.createObjectURL(A);
         if (i) {
-          const A_delay = e.is.number(i) ? i : 60000;
+          const A_delay = typeof i === "number" ? i : 60000;
           setTimeout(() => URL.revokeObjectURL(r), A_delay);
         }
         return r;

@@ -659,6 +659,11 @@ export class ChatGPTSessionApi {
       payload.body = JSON.stringify(payload.body);
 
     // Ensure cookies are sent for endpoints that rely on session cookies
+    /** @type {RequestCredentials} */
+    const credentials = (payload["credentials"] === "omit" || payload["credentials"] === "same-origin" || payload["credentials"] === "include")
+      ? payload["credentials"]
+      : "include";
+
     const fetchOptions = {
       ...payload,
       headers: {
@@ -667,7 +672,7 @@ export class ChatGPTSessionApi {
           ? { Authorization: `Bearer ${this._accessToken}` }
           : {}),
       },
-      credentials: payload["credentials"] || "include",
+      credentials,
     };
 
     let res;

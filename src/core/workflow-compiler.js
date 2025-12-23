@@ -95,8 +95,6 @@ export class WorkflowCompiler {
         { batchStepId },
       );
       steps.push(synthesisStep);
-      // Track for potential future linkage or diagnostics
-      synthesisStepId = synthesisStep.stepId;
     }
 
     // Mapping step after synthesis (so it can reference synthesis step IDs)
@@ -108,7 +106,6 @@ export class WorkflowCompiler {
         synthesisStepId: lastSynthesisStep?.stepId,
       });
       steps.push(mappingStep);
-      mappingStepId = mappingStep.stepId;
     }
 
     // Refiner step (if requested and dependencies exist)
