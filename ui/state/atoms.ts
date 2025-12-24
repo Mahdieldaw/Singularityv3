@@ -488,6 +488,19 @@ export interface ProviderWorkflowState {
 // ProviderId -> { stage, progress }
 export const workflowProgressAtom = atom<Record<string, ProviderWorkflowState>>({});
 
+const idleWorkflowProgress: Record<string, ProviderWorkflowState> = {};
+
+export const workflowProgressForTurnFamily = atomFamily(
+  (turnId: string) =>
+    atom((get) => {
+      const activeId = get(activeStreamingTurnIdAtom);
+      const isLoading = get(isLoadingAtom);
+      if (activeId === turnId && isLoading) return get(workflowProgressAtom);
+      return idleWorkflowProgress;
+    }),
+  (a, b) => a === b,
+);
+
 // =============================================================================
 // Error resilience state (per-current turn)
 // =============================================================================
@@ -498,6 +511,18 @@ import type { ProviderError } from "@shared/contract";
  */
 export const providerErrorsAtom = atom<Record<string, ProviderError>>({});
 
+const idleProviderErrors: Record<string, ProviderError> = {};
+
+export const providerErrorsForTurnFamily = atomFamily(
+  (turnId: string) =>
+    atom((get) => {
+      const activeId = get(activeStreamingTurnIdAtom);
+      if (activeId === turnId) return get(providerErrorsAtom);
+      return idleProviderErrors;
+    }),
+  (a, b) => a === b,
+);
+
 /**
  * Track which providers can be retried based on error classification
  */
@@ -507,6 +532,18 @@ export const retryableProvidersAtom = atom<string[]>((get) => {
     .filter(([, err]) => !!err && !!err.retryable)
     .map(([pid]) => pid);
 });
+
+const idleRetryableProviders: string[] = [];
+
+export const retryableProvidersForTurnFamily = atomFamily(
+  (turnId: string) =>
+    atom((get) => {
+      const activeId = get(activeStreamingTurnIdAtom);
+      if (activeId === turnId) return get(retryableProvidersAtom);
+      return idleRetryableProviders;
+    }),
+  (a, b) => a === b,
+);
 
 /**
  * Current workflow degradation status
@@ -554,4 +591,3 @@ export const hasAutoWidenedForSynthesisAtom = atom<string | null>(null);
  * Used by ChatView to sync with react-resizable-panels
  */
 export const splitPaneRatioAtom = atom<number>(60);
-

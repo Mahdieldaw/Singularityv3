@@ -9,7 +9,8 @@ import {
   activeSplitPanelAtom,
   isDecisionMapOpenAtom,
   splitPaneRatioAtom,
-  chatInputHeightAtom
+  chatInputHeightAtom,
+  isRoundActiveAtom,
 } from "../state/atoms";
 import { ResizableSplitLayout } from "../components/ResizableSplitLayout";
 import clsx from "clsx";
@@ -45,6 +46,7 @@ export default function ChatView() {
   const splitPaneRatio = useAtomValue(splitPaneRatioAtom);
   const setSplitPaneRatio = useSetAtom(splitPaneRatioAtom);
   const chatInputHeight = useAtomValue(chatInputHeightAtom);
+  const isRoundActive = useAtomValue(isRoundActiveAtom);
 
   // Smart Defaults
   useSmartProviderDefaults();
@@ -211,9 +213,10 @@ export default function ChatView() {
             <Virtuoso
               className="h-full"
               data={turnIds}
-              followOutput={(isAtBottom: boolean) =>
-                isAtBottom ? "smooth" : false
-              }
+              followOutput={(isAtBottom: boolean) => {
+                if (!isAtBottom) return false;
+                return isRoundActive ? "auto" : "smooth";
+              }}
               increaseViewportBy={{ top: 300, bottom: 200 }}
               components={{
                 Scroller: ScrollerComponent as unknown as React.ComponentType<any>,

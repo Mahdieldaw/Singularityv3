@@ -279,6 +279,141 @@ export class WorkflowEngine {
     this.healthTracker = getHealthTracker();
   }
 
+  _buildPersistenceResultFromStepResults(steps, stepResults) {
+    const out = {
+      batchOutputs: {},
+      synthesisOutputs: {},
+      mappingOutputs: {},
+      refinerOutputs: {},
+      antagonistOutputs: {},
+    };
+
+    const stepById = new Map((steps || []).map((s) => [s.stepId, s]));
+    stepResults.forEach((value, stepId) => {
+      const step = stepById.get(stepId);
+      if (!step || !value) return;
+
+      if (value.status === "completed") {
+        const result = value.result;
+        if (step.type === "prompt") {
+          const resultsObj = result && result.results ? result.results : {};
+          Object.entries(resultsObj).forEach(([providerId, r]) => {
+            out.batchOutputs[providerId] = {
+              text: r?.text || "",
+              status: r?.status || "completed",
+              meta: r?.meta || {},
+            };
+          });
+          return;
+        }
+        if (step.type === "synthesis") {
+          const providerId = result?.providerId || step?.payload?.synthesisProvider;
+          if (!providerId) return;
+          out.synthesisOutputs[providerId] = {
+            providerId,
+            text: result?.text || "",
+            status: result?.status || "completed",
+            meta: result?.meta || {},
+          };
+          return;
+        }
+        if (step.type === "mapping") {
+          const providerId = result?.providerId || step?.payload?.mappingProvider;
+          if (!providerId) return;
+          out.mappingOutputs[providerId] = {
+            providerId,
+            text: result?.text || "",
+            status: result?.status || "completed",
+            meta: result?.meta || {},
+          };
+          return;
+        }
+        if (step.type === "refiner") {
+          const providerId = result?.providerId || step?.payload?.refinerProvider;
+          if (!providerId) return;
+          out.refinerOutputs[providerId] = {
+            providerId,
+            text: result?.text || "",
+            status: result?.status || "completed",
+            meta: result?.meta || {},
+          };
+          return;
+        }
+        if (step.type === "antagonist") {
+          const providerId = result?.providerId || step?.payload?.antagonistProvider;
+          if (!providerId) return;
+          out.antagonistOutputs[providerId] = {
+            providerId,
+            text: result?.text || "",
+            status: result?.status || "completed",
+            meta: result?.meta || {},
+          };
+        }
+        return;
+      }
+
+      if (value.status === "failed") {
+        const errorText = value.error || "Unknown error";
+        if (step.type === "prompt") {
+          const providers = step?.payload?.providers || [];
+          (providers || []).forEach((providerId) => {
+            out.batchOutputs[providerId] = {
+              text: "",
+              status: "error",
+              meta: { error: errorText },
+            };
+          });
+          return;
+        }
+        if (step.type === "synthesis") {
+          const providerId = step?.payload?.synthesisProvider;
+          if (!providerId) return;
+          out.synthesisOutputs[providerId] = {
+            providerId,
+            text: "",
+            status: "error",
+            meta: { error: errorText },
+          };
+          return;
+        }
+        if (step.type === "mapping") {
+          const providerId = step?.payload?.mappingProvider;
+          if (!providerId) return;
+          out.mappingOutputs[providerId] = {
+            providerId,
+            text: "",
+            status: "error",
+            meta: { error: errorText },
+          };
+          return;
+        }
+        if (step.type === "refiner") {
+          const providerId = step?.payload?.refinerProvider;
+          if (!providerId) return;
+          out.refinerOutputs[providerId] = {
+            providerId,
+            text: "",
+            status: "error",
+            meta: { error: errorText },
+          };
+          return;
+        }
+        if (step.type === "antagonist") {
+          const providerId = step?.payload?.antagonistProvider;
+          if (!providerId) return;
+          out.antagonistOutputs[providerId] = {
+            providerId,
+            text: "",
+            status: "error",
+            meta: { error: errorText },
+          };
+        }
+      }
+    });
+
+    return out;
+  }
+
   /**
    * Dispatch a non-empty streaming delta to the UI port.
    * Consolidates duplicate onPartial logic across step executors.
@@ -450,7 +585,7 @@ export class WorkflowEngine {
 
             // Still persist what we have before halting
             try {
-              const result = { batchOutputs: resultsObj, synthesisOutputs: {}, mappingOutputs: {} };
+              const result = this._buildPersistenceResultFromStepResults(steps, stepResults);
               await this.sessionManager.persist({
                 type: resolvedContext?.type || "initialize",
                 sessionId: context.sessionId,
@@ -491,6 +626,19 @@ export class WorkflowEngine {
             isRecompute: resolvedContext?.type === "recompute",
             sourceTurnId: resolvedContext?.sourceTurnId,
           });
+
+          try {
+            if (resolvedContext?.type !== "recompute") {
+              const persistResult = this._buildPersistenceResultFromStepResults(steps, stepResults);
+              await this.sessionManager.persist({
+                type: resolvedContext?.type || "initialize",
+                sessionId: context.sessionId,
+                userMessage: context?.userMessage || this.currentUserMessage || "",
+                canonicalUserTurnId: context?.canonicalUserTurnId,
+                canonicalAiTurnId: context?.canonicalAiTurnId,
+              }, resolvedContext, persistResult);
+            }
+          } catch (_) { }
 
           this._emitTurnFinalized(context, steps, stepResults, resolvedContext);
           this.port.postMessage({
@@ -553,6 +701,19 @@ export class WorkflowEngine {
             });
 
             // HALT PIPELINE: Mapping failure stops synthesis and beyond
+            try {
+              if (resolvedContext?.type !== "recompute") {
+                const persistResult = this._buildPersistenceResultFromStepResults(steps, stepResults);
+                await this.sessionManager.persist({
+                  type: resolvedContext?.type || "initialize",
+                  sessionId: context.sessionId,
+                  userMessage: context?.userMessage || this.currentUserMessage || "",
+                  canonicalUserTurnId: context?.canonicalUserTurnId,
+                  canonicalAiTurnId: context?.canonicalAiTurnId,
+                }, resolvedContext, persistResult);
+              }
+            } catch (_) { }
+
             this._emitTurnFinalized(context, steps, stepResults, resolvedContext);
             this.port.postMessage({
               type: "WORKFLOW_COMPLETE",
@@ -626,6 +787,19 @@ export class WorkflowEngine {
           });
 
           // HALT PIPELINE: Synthesis failure stops refiner and beyond
+          try {
+            if (resolvedContext?.type !== "recompute") {
+              const persistResult = this._buildPersistenceResultFromStepResults(steps, stepResults);
+              await this.sessionManager.persist({
+                type: resolvedContext?.type || "initialize",
+                sessionId: context.sessionId,
+                userMessage: context?.userMessage || this.currentUserMessage || "",
+                canonicalUserTurnId: context?.canonicalUserTurnId,
+                canonicalAiTurnId: context?.canonicalAiTurnId,
+              }, resolvedContext, persistResult);
+            }
+          } catch (_) { }
+
           this._emitTurnFinalized(context, steps, stepResults, resolvedContext);
           this.port.postMessage({
             type: "WORKFLOW_COMPLETE",
@@ -925,87 +1099,170 @@ export class WorkflowEngine {
       const stepById = new Map((steps || []).map((s) => [s.stepId, s]));
       stepResults.forEach((value, stepId) => {
         const step = stepById.get(stepId);
-        if (!step || value?.status !== "completed") return;
-        const result = value.result;
+        if (!step || !value) return;
 
-        switch (step.type) {
-          case "prompt": {
-            const resultsObj = result?.results || {};
-            Object.entries(resultsObj).forEach(([providerId, r]) => {
-              batchResponses[providerId] = [{
+        if (value.status === "completed") {
+          const result = value.result;
+          switch (step.type) {
+            case "prompt": {
+              const resultsObj = result?.results || {};
+              Object.entries(resultsObj).forEach(([providerId, r]) => {
+                batchResponses[providerId] = [{
+                  providerId,
+                  text: r.text || "",
+                  status: r.status || "completed",
+                  createdAt: timestamp,
+                  updatedAt: timestamp,
+                  meta: r.meta || {},
+                }];
+              });
+              break;
+            }
+            case "synthesis": {
+              const providerId = result?.providerId || step?.payload?.synthesisProvider;
+              if (!providerId) return;
+              if (!synthesisResponses[providerId])
+                synthesisResponses[providerId] = [];
+              synthesisResponses[providerId].push({
                 providerId,
-                text: r.text || "",
-                status: r.status || "completed",
+                text: result?.text || "",
+                status: result?.status || "completed",
                 createdAt: timestamp,
                 updatedAt: timestamp,
-                meta: r.meta || {},
-              }];
-            });
-            break;
+                meta: result?.meta || {},
+              });
+              primarySynthesizer = providerId;
+              break;
+            }
+            case "mapping": {
+              const providerId = result?.providerId || step?.payload?.mappingProvider;
+              if (!providerId) return;
+              if (!mappingResponses[providerId])
+                mappingResponses[providerId] = [];
+              mappingResponses[providerId].push({
+                providerId,
+                text: result?.text || "",
+                status: result?.status || "completed",
+                createdAt: timestamp,
+                updatedAt: timestamp,
+                meta: result?.meta || {},
+              });
+              primaryMapper = providerId;
+              break;
+            }
+            case "refiner": {
+              const providerId = result?.providerId || step?.payload?.refinerProvider;
+              if (!providerId) return;
+              if (!refinerResponses[providerId])
+                refinerResponses[providerId] = [];
+              refinerResponses[providerId].push({
+                providerId,
+                text: result?.text || "",
+                status: result?.status || "completed",
+                createdAt: timestamp,
+                updatedAt: timestamp,
+                meta: result?.meta || {},
+              });
+              break;
+            }
+            case "antagonist": {
+              const providerId = result?.providerId || step?.payload?.antagonistProvider;
+              if (!providerId) return;
+              if (!antagonistResponses[providerId])
+                antagonistResponses[providerId] = [];
+              antagonistResponses[providerId].push({
+                providerId,
+                text: result?.text || "",
+                status: result?.status || "completed",
+                createdAt: timestamp,
+                updatedAt: timestamp,
+                meta: result?.meta || {},
+              });
+              break;
+            }
           }
-          case "synthesis": {
-            const providerId = result?.providerId;
-            if (!providerId) return;
-            if (!synthesisResponses[providerId])
-              synthesisResponses[providerId] = [];
-            synthesisResponses[providerId].push({
-              providerId,
-              text: result?.text || "",
-              status: result?.status || "completed",
-              createdAt: timestamp,
-              updatedAt: timestamp,
-              meta: result?.meta || {},
-            });
-            // Set the primary synthesizer for this turn
-            primarySynthesizer = providerId;
-            break;
-          }
-          case "mapping": {
-            const providerId = result?.providerId;
-            if (!providerId) return;
-            if (!mappingResponses[providerId])
-              mappingResponses[providerId] = [];
-            mappingResponses[providerId].push({
-              providerId,
-              text: result?.text || "",
-              status: result?.status || "completed",
-              createdAt: timestamp,
-              updatedAt: timestamp,
-              meta: result?.meta || {},
-            });
-            // Set the primary mapper for this turn
-            primaryMapper = providerId;
-            break;
-          }
-          case "refiner": {
-            const providerId = result?.providerId;
-            if (!providerId) return;
-            if (!refinerResponses[providerId])
-              refinerResponses[providerId] = [];
-            refinerResponses[providerId].push({
-              providerId,
-              text: result?.text || "",
-              status: result?.status || "completed",
-              createdAt: timestamp,
-              updatedAt: timestamp,
-              meta: result?.meta || {},
-            });
-            break;
-          }
-          case "antagonist": {
-            const providerId = result?.providerId;
-            if (!providerId) return;
-            if (!antagonistResponses[providerId])
-              antagonistResponses[providerId] = [];
-            antagonistResponses[providerId].push({
-              providerId,
-              text: result?.text || "",
-              status: result?.status || "completed",
-              createdAt: timestamp,
-              updatedAt: timestamp,
-              meta: result?.meta || {},
-            });
-            break;
+          return;
+        }
+
+        if (value.status === "failed") {
+          const errorText = value.error || "Unknown error";
+          switch (step.type) {
+            case "prompt": {
+              const providers = step?.payload?.providers || [];
+              (providers || []).forEach((providerId) => {
+                batchResponses[providerId] = [{
+                  providerId,
+                  text: "",
+                  status: "error",
+                  createdAt: timestamp,
+                  updatedAt: timestamp,
+                  meta: { error: errorText },
+                }];
+              });
+              break;
+            }
+            case "synthesis": {
+              const providerId = step?.payload?.synthesisProvider;
+              if (!providerId) return;
+              if (!synthesisResponses[providerId])
+                synthesisResponses[providerId] = [];
+              synthesisResponses[providerId].push({
+                providerId,
+                text: errorText || "",
+                status: "error",
+                createdAt: timestamp,
+                updatedAt: timestamp,
+                meta: { error: errorText },
+              });
+              if (!primarySynthesizer) primarySynthesizer = providerId;
+              break;
+            }
+            case "mapping": {
+              const providerId = step?.payload?.mappingProvider;
+              if (!providerId) return;
+              if (!mappingResponses[providerId])
+                mappingResponses[providerId] = [];
+              mappingResponses[providerId].push({
+                providerId,
+                text: errorText || "",
+                status: "error",
+                createdAt: timestamp,
+                updatedAt: timestamp,
+                meta: { error: errorText },
+              });
+              if (!primaryMapper) primaryMapper = providerId;
+              break;
+            }
+            case "refiner": {
+              const providerId = step?.payload?.refinerProvider;
+              if (!providerId) return;
+              if (!refinerResponses[providerId])
+                refinerResponses[providerId] = [];
+              refinerResponses[providerId].push({
+                providerId,
+                text: errorText || "",
+                status: "error",
+                createdAt: timestamp,
+                updatedAt: timestamp,
+                meta: { error: errorText },
+              });
+              break;
+            }
+            case "antagonist": {
+              const providerId = step?.payload?.antagonistProvider;
+              if (!providerId) return;
+              if (!antagonistResponses[providerId])
+                antagonistResponses[providerId] = [];
+              antagonistResponses[providerId].push({
+                providerId,
+                text: errorText || "",
+                status: "error",
+                createdAt: timestamp,
+                updatedAt: timestamp,
+                meta: { error: errorText },
+              });
+              break;
+            }
           }
         }
       });
@@ -2236,8 +2493,22 @@ Answer the user's message directly. Use context only to disambiguate.
             onError: (error) => {
               reject(error);
             },
-            onAllComplete: (results) => {
-              const finalResult = results.get(providerId);
+            onAllComplete: (results, errors) => {
+              let finalResult = results.get(providerId);
+              const providerError = errors?.get?.(providerId);
+
+              if ((!finalResult || !finalResult.text) && providerError) {
+                const recovered = lastStreamState.get(
+                  `${context.sessionId}:${step.stepId}:${providerId}`,
+                );
+                if (recovered && recovered.trim().length > 0) {
+                  finalResult = finalResult || { providerId, meta: {} };
+                  finalResult.text = recovered;
+                  finalResult.softError = finalResult.softError || {
+                    message: providerError?.message || String(providerError),
+                  };
+                }
+              }
 
               // ✅ Extract artifacts from synthesis response
               if (finalResult?.text) {
@@ -2259,11 +2530,15 @@ Answer the user's message directly. Use context only to disambiguate.
               }
 
               if (!finalResult || !finalResult.text) {
-                reject(
-                  new Error(
-                    `Synthesis provider ${providerId} returned empty response`,
-                  ),
-                );
+                if (providerError) {
+                  reject(providerError);
+                } else {
+                  reject(
+                    new Error(
+                      `Synthesis provider ${providerId} returned empty response`,
+                    ),
+                  );
+                }
                 return;
               }
 
@@ -2288,6 +2563,7 @@ Answer the user's message directly. Use context only to disambiguate.
                 status: "completed",
                 meta: finalResult.meta || {},
                 artifacts: finalResult.artifacts || [],
+                ...(finalResult.softError ? { softError: finalResult.softError } : {}),
               });
             },
           },
@@ -2410,8 +2686,22 @@ Answer the user's message directly. Use context only to disambiguate.
               "Mapping",
             );
           },
-          onAllComplete: (results) => {
-            const finalResult = results.get(payload.mappingProvider);
+          onAllComplete: (results, errors) => {
+            let finalResult = results.get(payload.mappingProvider);
+            const providerError = errors?.get?.(payload.mappingProvider);
+
+            if ((!finalResult || !finalResult.text) && providerError) {
+              const recovered = lastStreamState.get(
+                `${context.sessionId}:${step.stepId}:${payload.mappingProvider}`,
+              );
+              if (recovered && recovered.trim().length > 0) {
+                finalResult = finalResult || { providerId: payload.mappingProvider, meta: {} };
+                finalResult.text = recovered;
+                finalResult.softError = finalResult.softError || {
+                  message: providerError?.message || String(providerError),
+                };
+              }
+            }
 
             let graphTopology = null;
             let allOptions = null;
@@ -2452,11 +2742,15 @@ Answer the user's message directly. Use context only to disambiguate.
             }
 
             if (!finalResult || !finalResult.text) {
-              reject(
-                new Error(
-                  `Mapping provider ${payload.mappingProvider} returned empty response`,
-                ),
-              );
+              if (providerError) {
+                reject(providerError);
+              } else {
+                reject(
+                  new Error(
+                    `Mapping provider ${payload.mappingProvider} returned empty response`,
+                  ),
+                );
+              }
               return;
             }
 
@@ -2497,6 +2791,7 @@ Answer the user's message directly. Use context only to disambiguate.
               status: "completed",
               meta: finalResultWithMeta.meta || {},
               artifacts: finalResult.artifacts || [],
+              ...(finalResult.softError ? { softError: finalResult.softError } : {}),
             });
           },
         },

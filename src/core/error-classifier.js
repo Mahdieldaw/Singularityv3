@@ -4,16 +4,31 @@
  * Classify errors for user-facing messaging and retry logic
  */
 export function classifyError(error) {
+  if (error && error.code === "RATE_LIMITED") {
+    const retryAfterMs =
+      parseRetryAfter(error) || parseRateLimitResetMsFromMessage(error) || 60000;
+    return {
+      type: "rate_limit",
+      message:
+        error.message ||
+        "Rate limit reached. Please wait before retrying.",
+      retryable: true,
+      retryAfterMs,
+    };
+  }
+
   // HTTP status-based classification
   if (error && (error.status || error.statusCode)) {
     const status = error.status || error.statusCode;
 
     if (status === 429) {
+      const retryAfterMs =
+        parseRetryAfter(error) || parseRateLimitResetMsFromMessage(error) || 60000;
       return {
-        type: 'rate_limit',
-        message: 'Rate limit reached. Please wait before retrying.',
+        type: "rate_limit",
+        message: "Rate limit reached. Please wait before retrying.",
         retryable: true,
-        retryAfterMs: parseRetryAfter(error) || 60000
+        retryAfterMs,
       };
     }
 
@@ -33,6 +48,38 @@ export function classifyError(error) {
         retryable: true
       };
     }
+  }
+
+  const errorType = error && (error.type || error.code);
+  const message =
+    typeof error?.message === "string" ? error.message : "";
+  const nestedErrorType =
+    (error && error.error && error.error.type) ||
+    (error &&
+      error.details &&
+      error.details.error &&
+      error.details.error.type) ||
+    (error &&
+      error.context &&
+      error.context.originalError &&
+      error.context.originalError.error &&
+      error.context.originalError.error.type) ||
+    null;
+
+  if (
+    errorType === "rate_limit_error" ||
+    errorType === "RATE_LIMITED" ||
+    nestedErrorType === "rate_limit_error" ||
+    /rate[_\s-]?limit/i.test(message)
+  ) {
+    const retryAfterMs =
+      parseRetryAfter(error) || parseRateLimitResetMsFromMessage(error) || 60000;
+    return {
+      type: "rate_limit",
+      message: "Rate limit reached. Please wait before retrying.",
+      retryable: true,
+      retryAfterMs,
+    };
   }
 
   // Timeout detection
@@ -92,6 +139,54 @@ function parseRetryAfter(error) {
     const seconds = parseInt(String(retryAfter), 10);
     if (!isNaN(seconds)) {
       return seconds * 1000;
+    }
+  }
+  return null;
+}
+
+function parseRateLimitResetMsFromMessage(error) {
+  const candidates = [];
+  if (error && typeof error.message === "string") {
+    candidates.push(error.message);
+  }
+  const ctx = error && error.context;
+  const original = ctx && ctx.originalError;
+  if (original && typeof original.message === "string") {
+    candidates.push(original.message);
+  }
+  if (error && error.error && typeof error.error.message === "string") {
+    candidates.push(error.error.message);
+  }
+  if (error && error.details && typeof error.details.message === "string") {
+    candidates.push(error.details.message);
+  }
+  if (
+    original &&
+    original.error &&
+    typeof original.error.message === "string"
+  ) {
+    candidates.push(original.error.message);
+  }
+
+  for (const raw of candidates) {
+    if (!raw) continue;
+    const trimmed = String(raw).trim();
+    if (!trimmed.startsWith("{")) continue;
+    try {
+      const parsed = JSON.parse(trimmed);
+      const direct = parsed.resetsAt || parsed.resets_at;
+      if (typeof direct === "number" && isFinite(direct)) {
+        const ms = direct * 1000 - Date.now();
+        if (ms > 0) return ms;
+      }
+      const win = parsed.windows && (parsed.windows["5h"] || parsed.windows["1h"]);
+      const winReset =
+        win && (win.resets_at || win.resetsAt);
+      if (typeof winReset === "number" && isFinite(winReset)) {
+        const ms = winReset * 1000 - Date.now();
+        if (ms > 0) return ms;
+      }
+    } catch {
     }
   }
   return null;

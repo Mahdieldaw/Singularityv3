@@ -26,6 +26,7 @@ export class QwenProviderError extends Error {
     return {
       login: this.type === "login",
       csrf: this.type === "csrf",
+      aborted: this.type === "aborted",
       network: this.type === "network",
       unknown: this.type === "unknown",
     };
@@ -373,6 +374,18 @@ export class QwenSessionApi {
           }
         }
       }
+    } catch (e) {
+      const msg = String(e || "");
+      if (msg.includes("aborted")) {
+        throw e;
+      }
+      if (!fullText) {
+        throw e;
+      }
+      console.warn(
+        "[QwenProvider] SSE stream error after partial text:",
+        e,
+      );
     } finally {
       try {
         reader.releaseLock();
@@ -391,9 +404,13 @@ export class QwenSessionApi {
       try {
         return await fn.call(this, ...args);
       } catch (e) {
-        const err = this.isOwnError(e)
-          ? e
-          : this._createError("unknown", e.message);
+        let err;
+        if (this.isOwnError(e)) err = e;
+        else if (String(e) === "TypeError: Failed to fetch")
+          err = this._createError("network", e.message);
+        else if (String(e)?.includes("aborted"))
+          err = this._createError("aborted", e.message);
+        else err = this._createError("unknown", e.message);
         this._logError(err.message, err.details);
         throw err;
       }

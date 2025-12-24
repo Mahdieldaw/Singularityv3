@@ -658,6 +658,8 @@ const Orb: React.FC<OrbProps> = ({
     const prevStageRef = useRef<WorkflowStage>(workflowStage);
     const [animationClass, setAnimationClass] = useState<string>('');
 
+    const rotation = useMemo(() => Math.random() * 360, []);
+
     useEffect(() => {
         const prevStage = prevStageRef.current;
 
@@ -757,7 +759,7 @@ const Orb: React.FC<OrbProps> = ({
                     '--model-color': primaryColor,
                     '--orb-color': primaryColor,
                     '--orb-accent': accentColor,
-                    '--rotation': `${Math.random() * 360}deg`,
+                    '--rotation': `${rotation}deg`,
                     '--logo-src': logoSrc ? `url('${logoSrc}')` : 'none'
                 } as React.CSSProperties}
                 onMouseEnter={() => onHover(pid)}

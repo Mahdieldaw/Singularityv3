@@ -12,6 +12,7 @@ import { PipelineErrorBanner } from '../PipelineErrorBanner';
 
 interface TrustSignalsPanelProps {
   refiner: RefinerOutput | null;
+  isLoading?: boolean;
   isError?: boolean;
   providerId?: string | null;
   onRetry?: (pid: string) => void;
@@ -47,6 +48,7 @@ function parseAttributions(text: string, onModelClick: (modelName: string) => vo
 
 export function TrustSignalsPanel({
   refiner,
+  isLoading,
   isError,
   providerId,
   onRetry,
@@ -193,7 +195,12 @@ export function TrustSignalsPanel({
               {parseAttributions(refiner.synthesisPlus, handleModelClick)}
             </div>
           </div>
-        ) : !isError && (
+        ) : isLoading ? (
+          <div className="flex items-center justify-center gap-2 text-text-muted py-8">
+            <span className="italic">Generating Synthesis+...</span>
+            <span className="streaming-dots" />
+          </div>
+        ) : !isError && !refiner?.gem && (
           <div className="text-text-muted italic text-center py-8">
             No enhanced synthesis available.
           </div>

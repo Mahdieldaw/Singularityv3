@@ -9,7 +9,8 @@ import { authManager } from '../core/auth-manager.js';
 import {
   errorHandler,
   isProviderAuthError,
-  createProviderAuthError
+  createProviderAuthError,
+  isNetworkError
 } from '../utils/ErrorHandler.js';
 
 // Provider-specific adapter debug flag (off by default)
@@ -121,12 +122,36 @@ export class ClaudeAdapter {
         },
       };
     } catch (error) {
-      // Use central error handler for provider errors
+      if (!isProviderAuthError(error) && isNetworkError(error)) {
+        const details = error?.details || {};
+        const chatId = details.chatId || req.meta?.chatId;
+        const orgId = details.orgId;
+        if (chatId) {
+          try {
+            const recoveredText = await this.controller.claudeSession.fetchLatestAssistantText(chatId, orgId);
+            if (recoveredText && recoveredText.trim().length > 0) {
+              aggregatedText = recoveredText;
+              return {
+                providerId: this.id,
+                ok: true,
+                id: chatId,
+                text: aggregatedText,
+                partial: false,
+                latencyMs: Date.now() - startTime,
+                meta: {
+                  orgId,
+                  chatId,
+                  recoveredFrom: "network_error",
+                },
+              };
+            }
+          } catch (_) {}
+        }
+      }
       if (isProviderAuthError(error)) {
         try {
           return await this._handleAuthError(error, req, onChunk, signal, _isRetry);
         } catch (authError) {
-          // If auth recovery fails, return error response
           return {
             providerId: this.id,
             ok: false,
@@ -235,6 +260,34 @@ export class ClaudeAdapter {
         },
       };
     } catch (error) {
+      if (!isProviderAuthError(error) && isNetworkError(error)) {
+        const details = error?.details || {};
+        const errMeta = providerContext?.meta || providerContext || {};
+        const chatId = providerContext?.chatId ?? errMeta.chatId ?? providerContext?.threadUrl ?? errMeta.threadUrl;
+        const orgId = details.orgId;
+        if (chatId) {
+          try {
+            const recoveredText = await this.controller.claudeSession.fetchLatestAssistantText(chatId, orgId);
+            if (recoveredText && recoveredText.trim().length > 0) {
+              aggregatedText = recoveredText;
+              return {
+                providerId: this.id,
+                ok: true,
+                id: chatId,
+                text: aggregatedText,
+                partial: false,
+                latencyMs: Date.now() - startTime,
+                meta: {
+                  orgId,
+                  chatId,
+                  threadUrl: chatId,
+                  recoveredFrom: "network_error",
+                },
+              };
+            }
+          } catch (_) {}
+        }
+      }
       if (isProviderAuthError(error)) {
         try {
           return await this._handleAuthError(error, { originalPrompt: prompt, meta: providerContext }, onChunk, signal, _isRetry, true);
@@ -248,7 +301,7 @@ export class ClaudeAdapter {
             meta: {
               error: authError.toString(),
               details: authError.details,
-              chatId: providerContext?.chatId ?? meta.chatId, // Preserve context even on error
+              chatId: providerContext?.chatId ?? meta.chatId,
             },
           };
         }

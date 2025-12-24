@@ -319,7 +319,7 @@ export const SynthesisBubble = React.memo<SynthesisBubbleProps>(
                         const { shortAnswer, longAnswer } = splitSynthesisAnswer(cleanText);
 
                         return (
-                            <div className="animate-in fade-in duration-300 relative z-10">
+                            <div className="relative z-10">
                                 <div className="text-base leading-relaxed text-text-primary">
                                     <MarkdownDisplay
                                         content={cleanAntagonistResponse(String(shortAnswer || cleanText || take.text || ""))}

@@ -154,6 +154,136 @@ export class ClaudeSessionApi {
       },
     );
   }
+
+  async fetchLatestAssistantText(chatId, orgId) {
+    if (!chatId) return "";
+    if (!orgId) {
+      if (!this._orgId) this._orgId = await this.fetchOrgId();
+      orgId = this._orgId;
+    }
+    if (!orgId) {
+      this._throw("badOrgId");
+    }
+
+    const candidates = [
+      `/api/organizations/${orgId}/chat_conversations/${chatId}`,
+      `/api/organizations/${orgId}/chat_conversations/${chatId}?include=chat_messages`,
+      `/api/organizations/${orgId}/chat_conversations/${chatId}/messages`,
+    ];
+
+    const extractTextFromMessage = (msg) => {
+      if (!msg) return "";
+      const direct =
+        (typeof msg.text === "string" && msg.text) ||
+        (typeof msg.content === "string" && msg.content) ||
+        (typeof msg.completion === "string" && msg.completion) ||
+        (typeof msg.completion_delta === "string" && msg.completion_delta) ||
+        (typeof msg.delta === "string" && msg.delta) ||
+        "";
+      if (direct && direct.trim().length > 0) return direct;
+
+      const parts = msg.content?.parts;
+      if (Array.isArray(parts)) {
+        const joined = parts
+          .map((p) => (typeof p === "string" ? p : typeof p?.text === "string" ? p.text : ""))
+          .join("");
+        if (joined.trim().length > 0) return joined;
+      }
+
+      if (Array.isArray(msg.content)) {
+        const joined = msg.content
+          .map((p) => (typeof p === "string" ? p : typeof p?.text === "string" ? p.text : typeof p?.content === "string" ? p.content : ""))
+          .join("");
+        if (joined.trim().length > 0) return joined;
+      }
+
+      const nested = msg.message || msg.data || msg.payload;
+      if (nested && typeof nested === "object") {
+        const nestedText = extractTextFromMessage(nested);
+        if (nestedText.trim().length > 0) return nestedText;
+      }
+
+      return "";
+    };
+
+    const isAssistantMessage = (msg) => {
+      const role =
+        msg?.sender ||
+        msg?.role ||
+        msg?.author?.role ||
+        msg?.message?.author?.role ||
+        msg?.author ||
+        "";
+      const r = String(role).toLowerCase();
+      return r === "assistant" || r === "ai" || r === "bot";
+    };
+
+    const findMessageArray = (root) => {
+      const queue = [root];
+      const seen = new Set();
+      while (queue.length > 0) {
+        const cur = queue.shift();
+        if (!cur || typeof cur !== "object") continue;
+        if (seen.has(cur)) continue;
+        seen.add(cur);
+
+        if (Array.isArray(cur)) {
+          const arr = cur;
+          if (arr.length > 0 && typeof arr[0] === "object") {
+            const hasRoleKey = arr.some((m) => m && (m.role || m.sender || m.author || m.message?.author));
+            if (hasRoleKey) return arr;
+          }
+          arr.forEach((v) => queue.push(v));
+          continue;
+        }
+
+        const maybeArrays = [
+          cur.chat_messages,
+          cur.messages,
+          cur.chatMessages,
+          cur.items,
+          cur.data?.chat_messages,
+          cur.data?.messages,
+        ].filter((v) => Array.isArray(v));
+        for (const arr of maybeArrays) {
+          if (arr.length > 0) return arr;
+        }
+
+        Object.values(cur).forEach((v) => {
+          if (v && typeof v === "object") queue.push(v);
+        });
+      }
+      return null;
+    };
+
+    for (const path of candidates) {
+      try {
+        const resp = await this._fetchAuth(path, {
+          method: "GET",
+          headers: { Accept: "application/json" },
+        });
+        if (!resp?.ok) continue;
+        const data = await resp.json();
+        const arr = findMessageArray(data);
+        if (!Array.isArray(arr) || arr.length === 0) continue;
+
+        for (let i = arr.length - 1; i >= 0; i--) {
+          const msg = arr[i];
+          if (!isAssistantMessage(msg)) continue;
+          const text = extractTextFromMessage(msg);
+          if (text && text.trim().length > 0) return text;
+        }
+
+        for (let i = arr.length - 1; i >= 0; i--) {
+          const msg = arr[i];
+          const text = extractTextFromMessage(msg);
+          if (text && text.trim().length > 0) return text;
+        }
+      } catch (_) { }
+    }
+
+    return "";
+  }
   /**
    * Send prompt to Claude AI and handle streaming response
    * @param {string} prompt
@@ -177,116 +307,120 @@ export class ClaudeSessionApi {
     if (!orgId) {
       this._throw("badOrgId");
     }
-    // Create chat if needed
-    chatId || (chatId = await this._createChat(orgId, emoji));
-    // Handle large prompts by using attachments
-    let attachments = [];
-    let text = prompt;
-    if (prompt.length > 5000) {
-      attachments.push({
-        extracted_content: prompt,
-        file_name: "paste.txt",
-        file_size: prompt.length,
-        file_type: "txt",
-      });
-      text = "";
-    }
-    const url = `/api/organizations/${orgId}/chat_conversations/${chatId}/completion`;
-    const payload = {
-      method: "POST",
-      headers: {
-        Accept: "text/event-stream, text/event-stream",
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        attachments,
-        files: [],
-        prompt: text,
-        model: this._model === "auto" ? undefined : this._model,
-        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-      }),
-      signal,
-    };
-    const response = await this._fetchAuth(url, payload);
-    // Handle HTTP errors
-    if (response.status !== 200) {
-      let parsedJson = null;
-      try {
-        parsedJson = await response.json();
-      } catch { }
-      const code = parsedJson?.error?.code;
-      if (code === "too_many_completions")
-        this._throw("tooManyRequests", parsedJson);
-      if (code === "model_not_allowed") this._throw("badModel", parsedJson);
-      if (response.status === 429) this._throw("tooManyRequests", parsedJson);
-      this._throw("unknown", parsedJson);
-    }
-    // Process streaming response
-    // Process streaming response
-    let fullText = "";
-    let isFirstChunk = true;
-    let softError = null; // Track non-fatal errors
-    const reader = response.body.getReader();
-    const carry = { carryOver: "" };
-
     try {
-      let chunkCount = 0;
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
+      chatId || (chatId = await this._createChat(orgId, emoji));
 
-        chunkCount++;
-        // Debug: Log chunk frequency for synthesis streaming investigation
+      let attachments = [];
+      let text = prompt;
+      if (prompt.length > 5000) {
+        attachments.push({
+          extracted_content: prompt,
+          file_name: "paste.txt",
+          file_size: prompt.length,
+          file_type: "txt",
+        });
+        text = "";
+      }
+
+      const url = `/api/organizations/${orgId}/chat_conversations/${chatId}/completion`;
+      const payload = {
+        method: "POST",
+        headers: {
+          Accept: "text/event-stream, text/event-stream",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          attachments,
+          files: [],
+          prompt: text,
+          model: this._model === "auto" ? undefined : this._model,
+          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        }),
+        signal,
+      };
+      const response = await this._fetchAuth(url, payload);
+
+      if (response.status !== 200) {
+        let parsedJson = null;
+        try {
+          parsedJson = await response.json();
+        } catch { }
+        const code = parsedJson?.error?.code;
+        if (code === "too_many_completions")
+          this._throw("tooManyRequests", parsedJson);
+        if (code === "model_not_allowed") this._throw("badModel", parsedJson);
+        if (response.status === 429) this._throw("tooManyRequests", parsedJson);
+        this._throw("unknown", parsedJson);
+      }
+
+      let fullText = "";
+      let isFirstChunk = true;
+      let softError = null;
+      const reader = response.body.getReader();
+      const carry = { carryOver: "" };
+
+      try {
+        let chunkCount = 0;
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          chunkCount++;
+          if (CLAUDE_DEBUG) {
+            console.log(`[Claude SSE] chunk=${chunkCount} bytes=${value?.length || 0}`);
+          }
+
+          const result = this._parseChunk(value, carry, fullText.length > 0);
+
+          if (result.error) {
+            softError = result.error;
+          }
+
+          if (result.text) {
+            fullText = fullText + result.text;
+            onChunk({ text: fullText, chatId, orgId }, isFirstChunk);
+            isFirstChunk = false;
+          }
+        }
         if (CLAUDE_DEBUG) {
-          console.log(`[Claude SSE] chunk=${chunkCount} bytes=${value?.length || 0}`);
+          console.log(`[Claude SSE] Stream ended. Total chunks: ${chunkCount}`);
         }
 
-        // ✅ _parseChunk now returns {text, error}
-        const result = this._parseChunk(value, carry, fullText.length > 0);
-
-        if (result.error) {
-          softError = result.error;
-          // Continue processing - don't break
+        if (fullText.length > 0) {
+          await new Promise((resolve) => setTimeout(resolve, 200));
         }
-
-        if (result.text) {
-          // Preserve leading whitespace/newlines so code fences and markdown structure are kept intact.
-          fullText = fullText + result.text;
-          onChunk({ text: fullText, chatId, orgId }, isFirstChunk);
-          isFirstChunk = false;
+      } catch (err) {
+        if (fullText.length > 0) {
+          console.warn("[Claude] Stream interrupted but partial text recovered:", err);
+          softError = { error: err };
+        } else {
+          throw err;
         }
-      }
-      if (CLAUDE_DEBUG) {
-        console.log(`[Claude SSE] Stream ended. Total chunks: ${chunkCount}`);
+      } finally {
+        reader.releaseLock();
       }
 
-      // ✅ Grace period for late error frames
-      if (fullText.length > 0) {
-        await new Promise((resolve) => setTimeout(resolve, 200));
+      const result = { orgId, chatId, text: fullText };
+      if (softError) {
+        result.softError = softError;
+        if (CLAUDE_DEBUG)
+          console.info(
+            "[Claude] Completed with soft-error:",
+            softError.error?.message || "unknown",
+          );
       }
-    } catch (err) {
-      // If we have partial text, treat as soft error and return what we have
-      if (fullText.length > 0) {
-        console.warn("[Claude] Stream interrupted but partial text recovered:", err);
-        softError = { error: err };
-      } else {
-        throw err;
-      }
-    } finally {
-      reader.releaseLock();
+      return result;
+    } catch (e) {
+      const existingType = this.isOwnError(e) ? e.type : "unknown";
+      const existingDetails = this.isOwnError(e) ? e.details : e?.message;
+      const detailsObj =
+        existingDetails && typeof existingDetails === "object"
+          ? { ...existingDetails }
+          : { message: existingDetails };
+      if (!detailsObj.orgId) detailsObj.orgId = orgId;
+      if (!detailsObj.chatId) detailsObj.chatId = chatId;
+      throw new ClaudeProviderError(existingType, detailsObj);
     }
-
-    // ✅ Return with soft-error metadata
-    const result = { orgId, chatId, text: fullText };
-    if (softError) {
-      result.softError = softError;
-      if (CLAUDE_DEBUG)
-        console.info(
-          "[Claude] Completed with soft-error:",
-          softError.error?.message || "unknown",
-        );
-    }
-    return result;
   }
   /**
    * Update available models for the provider

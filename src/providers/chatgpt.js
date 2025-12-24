@@ -509,6 +509,7 @@ export class ChatGPTSessionApi {
       let aggText = "";
       let done = false;
       let chunkCount = 0;
+      let softError = null;
 
       try {
         while (!done) {
@@ -525,7 +526,7 @@ export class ChatGPTSessionApi {
               if (!parsed) continue;
               const { text, id, finishDetails, conversationId } = parsed;
               if (text) {
-                aggText = text; // parsed.text is cumulative
+                aggText = text;
 
                 onChunk({
                   id,
@@ -544,7 +545,13 @@ export class ChatGPTSessionApi {
         );
       } catch (e) {
         console.error("[ChatGPT Session] SSE stream error:", e);
-        if (!String(e).includes("aborted")) {
+        const msg = String(e || "");
+        if (msg.includes("aborted")) {
+          throw e;
+        }
+        if (aggText && aggText.length > 0) {
+          softError = this._safeString(e);
+        } else {
           this._throw("failedToReadResponse", this._safeString(e));
         }
       } finally {
@@ -552,7 +559,11 @@ export class ChatGPTSessionApi {
           reader.releaseLock();
         } catch { }
       }
-      return { text: aggText, model: selectedModel };
+      const result = { text: aggText, model: selectedModel };
+      if (softError) {
+        result.softError = { message: softError };
+      }
+      return result;
     }
 
     // If server responds JSON (WSS bootstrap), we don't support WSS here.

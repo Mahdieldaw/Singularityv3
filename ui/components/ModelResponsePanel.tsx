@@ -70,7 +70,13 @@ export const ModelResponsePanel: React.FC<ModelResponsePanelProps> = React.memo(
         return { status, text, hasText, isStreaming, isError, artifacts };
     }, [latestResponse, streamingState.activeProviderId, providerId]);
 
-    const { output: refinerOutput, isError: isRefinerError, providerId: refinerPid, rawText: refinerRawText } = useRefinerOutput(turnId);
+    const {
+        output: refinerOutput,
+        isLoading: isRefinerLoading,
+        isError: isRefinerError,
+        providerId: refinerPid,
+        rawText: refinerRawText
+    } = useRefinerOutput(turnId);
     const chatInputHeight = useAtomValue(chatInputHeightAtom);
 
     // Branch send handler (hook before conditional return)
@@ -82,11 +88,12 @@ export const ModelResponsePanel: React.FC<ModelResponsePanelProps> = React.memo(
 
 
     // Trust mode via sentinel providerId - simplified for new structure
-    if (providerId === '__trust__' && (refinerOutput || isRefinerError)) {
+    if (providerId === '__trust__') {
         return (
             <div className="h-full w-full min-w-0 flex flex-col bg-surface-raised border border-border-subtle rounded-2xl shadow-lg overflow-hidden">
                 <TrustSignalsPanel
                     refiner={refinerOutput}
+                    isLoading={isRefinerLoading}
                     isError={isRefinerError}
                     providerId={refinerPid}
                     onRetry={(pid) => handleClipClick(turnId, "refiner", pid)}

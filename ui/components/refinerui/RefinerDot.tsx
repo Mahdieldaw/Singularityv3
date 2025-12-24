@@ -15,10 +15,9 @@ interface RefinerDotProps {
 type DotState = 'pending' | 'loading' | 'complete_no_gem' | 'active';
 
 function getDotState(isLoading: boolean | undefined, refiner: RefinerOutput | null): DotState {
-    if (isLoading && !refiner) return 'loading';
+    if (isLoading) return refiner?.gem ? 'active' : 'loading';
     if (refiner?.gem) return 'active';
     if (refiner) return 'complete_no_gem';
-    if (isLoading) return 'loading';
     return 'pending';
 }
 

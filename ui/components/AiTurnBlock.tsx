@@ -30,12 +30,11 @@ import {
 } from "../utils/turn-helpers";
 import { useRetryProvider } from "../hooks/providers/useRetryProvider";
 import {
-  providerErrorsAtom,
-  retryableProvidersAtom,
-  activeAiTurnIdAtom,
-  isLoadingAtom,
-  workflowProgressAtom,
+  providerErrorsForTurnFamily,
+  retryableProvidersForTurnFamily,
   antagonistProviderAtom,
+  turnStreamingStateFamily,
+  workflowProgressForTurnFamily,
 } from "../state/atoms";
 import { useRefinerOutput } from "../hooks/useRefinerOutput";
 import { parseMappingResponse } from "../../shared/parsing-utils";
@@ -52,29 +51,21 @@ interface AiTurnBlockProps {
 const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
   aiTurn,
 }) => {
-  const renderCount = useRef(0);
-  renderCount.current += 1;
-
-  useEffect(() => {
-    console.log(`[AiTurnBlock] Rendered ${renderCount.current} times. ID: ${aiTurn.id}`);
-  });
-
   // --- CONNECTED STATE LOGIC ---
 
   const synthesisProvider = useAtomValue(synthesisProviderAtom);
   const mappingProvider = useAtomValue(mappingProviderAtom);
   const { handleClipClick } = useClipActions();
   const [globalActiveRecomputeState] = useAtom(activeRecomputeStateAtom);
-  const providerErrors = useAtomValue(providerErrorsAtom);
-  const retryableProviders = useAtomValue(retryableProvidersAtom);
+  const providerErrors = useAtomValue(providerErrorsForTurnFamily(aiTurn.id));
+  const retryableProviders = useAtomValue(retryableProvidersForTurnFamily(aiTurn.id));
   const { retryProviders } = useRetryProvider();
 
   // Streaming UX: determine if this is the active running turn
   const activeAntagonistPid = useAtomValue(antagonistProviderAtom);
-  const activeAiTurnId = useAtomValue(activeAiTurnIdAtom);
-  const globalIsLoading = useAtomValue(isLoadingAtom);
-  const workflowProgress = useAtomValue(workflowProgressAtom);
-  const isThisTurnActive = activeAiTurnId === aiTurn.id && globalIsLoading;
+  const turnStreamingState = useAtomValue(turnStreamingStateFamily(aiTurn.id));
+  const isThisTurnActive = turnStreamingState.isLoading;
+  const workflowProgress = useAtomValue(workflowProgressForTurnFamily(aiTurn.id));
 
   const { output: refinerOutput, isLoading: isRefinerLoading } = useRefinerOutput(aiTurn.id);
 
@@ -267,7 +258,7 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
 
 
   const synthesisResponses = useMemo(() => {
-    if (!aiTurn.synthesisResponses) aiTurn.synthesisResponses = {};
+    const synthesis = aiTurn.synthesisResponses || {};
     const out = LLM_PROVIDERS_CONFIG.reduce<Record<string, ProviderResponse[]>>(
       (acc, p) => {
         acc[String(p.id)] = [];
@@ -275,7 +266,7 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
       },
       {}
     );
-    Object.entries(aiTurn.synthesisResponses).forEach(([pid, resp]) => {
+    Object.entries(synthesis).forEach(([pid, resp]) => {
       out[pid] = normalizeResponseArray(resp);
     });
     return out;
