@@ -161,6 +161,15 @@ class ExtensionAPI {
     }
   }
 
+  async sendPortMessage(message: { type: string; payload?: any;[key: string]: any }): Promise<void> {
+    try {
+      const port = await this.ensurePort();
+      port.postMessage(message);
+    } catch (error) {
+      console.error("[ExtensionAPI] Failed to send port message:", error);
+    }
+  }
+
   async queryBackend<T = any>(message: {
     type: string;
     [key: string]: any;

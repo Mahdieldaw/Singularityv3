@@ -290,6 +290,16 @@ export const includePromptInCopyAtom = atomWithStorage<boolean>(
   true,
 );
 
+/**
+ * Feature flag for the new Cognitive Pipeline (v2)
+ * Backend reads this from chrome.storage.local (synced via side effect)
+ * Default: false until ready for user testing
+ */
+export const useCognitivePipelineAtom = atomWithStorage<boolean>(
+  "htos_cognitive_pipeline",
+  true
+);
+
 // Provider Contexts
 export const providerContextsAtom = atomWithImmer<Record<string, any>>({});
 
@@ -590,4 +600,57 @@ export const hasAutoWidenedForSynthesisAtom = atom<string | null>(null);
  * Split pane ratio (left pane percentage) for programmatic control
  * Used by ChatView to sync with react-resizable-panels
  */
-export const splitPaneRatioAtom = atom<number>(60);
+
+/**
+ * Selected Cognitive Mode (e.g. "auto", "explore", "understand", "decide")
+ * Persisted in local storage.
+ */
+import { CognitiveMode } from "@shared/contract";
+
+export const selectedModeAtom = atomWithStorage<CognitiveMode>(
+  "htos_selected_mode",
+  "auto"
+);
+
+
+// -----------------------------
+// Artifact Selection
+// -----------------------------
+export const selectedArtifactsAtom = atomWithImmer<Set<string>>(new Set());
+
+/**
+ * Derived atom to estimate token count of selected artifacts.
+ * Assume ~4 chars per token average plus some overhead.
+ */
+export const selectedArtifactTokenCountAtom = atom((get) => {
+  const selected = get(selectedArtifactsAtom);
+  // Rough estimation: each selected item is ~200 chars (~50 tokens) on average
+  // In a real impl, we would lookup the actual text content length
+  return selected.size * 50;
+});
+// -----------------------------
+// Cognitive Pipeline UI State
+// -----------------------------
+import { CognitiveViewMode } from "../types";
+
+/**
+ * Tracks the active view for each cognitive turn.
+ * Key: aiTurnId, Value: 'artifact' | 'understand' | 'gauntlet'
+ */
+export const cognitiveModeMapAtom = atomWithImmer<Record<string, CognitiveViewMode>>({});
+
+/**
+ * Family to access/update mode for a specific turn
+ */
+export const turnCognitiveModeFamily = atomFamily(
+  (turnId: string) =>
+    atom(
+      (get) => get(cognitiveModeMapAtom)[turnId] || 'artifact',
+      (get, set, newMode: CognitiveViewMode) => {
+        set(cognitiveModeMapAtom, (draft) => {
+          draft[turnId] = newMode;
+        });
+      }
+    ),
+  (a, b) => a === b
+);

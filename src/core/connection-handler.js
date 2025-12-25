@@ -232,6 +232,11 @@ export class ConnectionHandler {
           case "abort":
             await this._handleAbort(message);
             break;
+          case "CONTINUE_COGNITIVE_WORKFLOW":
+            if (this.workflowEngine) {
+              await this.workflowEngine.handleContinueCognitiveRequest(message.payload);
+            }
+            break;
 
           default:
             console.warn(

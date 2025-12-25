@@ -8,7 +8,6 @@ import {
   isSplitOpenAtom,
   activeSplitPanelAtom,
   isDecisionMapOpenAtom,
-  splitPaneRatioAtom,
   chatInputHeightAtom,
   isRoundActiveAtom,
 } from "../state/atoms";
@@ -22,6 +21,7 @@ import { useChat } from "../hooks/chat/useChat";
 import { SplitPaneRightPanel } from "../components/SplitPaneRightPanel";
 import { CouncilOrbsVertical } from "../components/CouncilOrbsVertical";
 import { useSmartProviderDefaults } from "../hooks/providers/useSmartProviderDefaults";
+import { useExperimentalFlagSync } from "../hooks/cognitive/useExperimentalFlagSync";
 
 import { safeLazy } from "../utils/safeLazy";
 // Lazy load DecisionMapSheet (named export adapter)
@@ -43,13 +43,14 @@ export default function ChatView() {
   const setActiveSplitPanel = useSetAtom(activeSplitPanelAtom);
   const isDecisionMapOpen = useAtomValue(isDecisionMapOpenAtom);
   const setDecisionMapOpen = useSetAtom(isDecisionMapOpenAtom);
-  const splitPaneRatio = useAtomValue(splitPaneRatioAtom);
-  const setSplitPaneRatio = useSetAtom(splitPaneRatioAtom);
   const chatInputHeight = useAtomValue(chatInputHeightAtom);
   const isRoundActive = useAtomValue(isRoundActiveAtom);
 
   // Smart Defaults
   useSmartProviderDefaults();
+
+  // Experimental Features Sync
+  useExperimentalFlagSync();
 
   const virtuosoRef = useRef<VirtuosoHandle | null>(null);
   const { selectChat } = useChat();
@@ -207,8 +208,6 @@ export default function ChatView() {
           className="flex-1 h-full"
           style={{ paddingBottom: (chatInputHeight || 80) + 12 }}
           isSplitOpen={!!isSplitOpen}
-          ratio={splitPaneRatio}
-          onRatioChange={setSplitPaneRatio}
           leftPane={
             <Virtuoso
               className="h-full"

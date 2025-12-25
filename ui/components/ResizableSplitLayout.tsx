@@ -5,8 +5,8 @@ interface ResizableSplitLayoutProps {
     leftPane: React.ReactNode;
     rightPane: React.ReactNode;
     isSplitOpen: boolean;
-    ratio: number; // Percentage (0-100)
-    onRatioChange: (ratio: number) => void;
+    ratio?: number; // Optional: Initial or controlled percentage (0-100)
+    onRatioChange?: (ratio: number) => void;
     minRatio?: number;
     maxRatio?: number;
     dividerContent?: React.ReactNode;
@@ -18,7 +18,7 @@ export const ResizableSplitLayout: React.FC<ResizableSplitLayoutProps> = ({
     leftPane,
     rightPane,
     isSplitOpen,
-    ratio,
+    ratio: controlledRatio,
     onRatioChange,
     minRatio = 20,
     maxRatio = 80,
@@ -27,7 +27,11 @@ export const ResizableSplitLayout: React.FC<ResizableSplitLayoutProps> = ({
     style
 }) => {
     const containerRef = useRef<HTMLDivElement>(null);
+    const [internalRatio, setInternalRatio] = useState(controlledRatio ?? 70);
     const [isDragging, setIsDragging] = useState(false);
+
+    // Use controlled ratio if provided, otherwise internal
+    const ratio = controlledRatio ?? internalRatio;
 
     // Calculate effective ratio - if split is closed, left is 100%
     // But we keep the 'ratio' prop as the "target" for when it opens
@@ -58,7 +62,11 @@ export const ResizableSplitLayout: React.FC<ResizableSplitLayoutProps> = ({
         // Clamp ratio
         newRatio = Math.max(minRatio, Math.min(maxRatio, newRatio));
 
-        onRatioChange(newRatio);
+        if (onRatioChange) {
+            onRatioChange(newRatio);
+        } else {
+            setInternalRatio(newRatio);
+        }
     }, [isDragging, minRatio, maxRatio, onRatioChange]);
 
     const handlePointerUp = useCallback((e: React.PointerEvent) => {

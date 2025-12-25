@@ -1,5 +1,7 @@
 // src/core/workflow-engine.js - FIXED VERSION
 import { ArtifactProcessor } from '../../shared/artifact-processor';
+import { parseMapperArtifact, parseExploreOutput, parseGauntletOutput, parseUnderstandOutput } from '../../shared/parsing-utils';
+import { computeExplore } from './cognitive/explore-computer';
 import { PromptService } from './PromptService';
 import { ResponseProcessor } from './ResponseProcessor';
 import { getHealthTracker } from './provider-health-tracker.js';
@@ -286,6 +288,7 @@ export class WorkflowEngine {
       mappingOutputs: {},
       refinerOutputs: {},
       antagonistOutputs: {},
+      gauntletOutputs: {},
     };
 
     const stepById = new Map((steps || []).map((s) => [s.stepId, s]));
@@ -349,6 +352,16 @@ export class WorkflowEngine {
             meta: result?.meta || {},
           };
         }
+        if (step.type === "gauntlet") {
+          const providerId = result?.providerId || step?.payload?.gauntletProvider;
+          if (!providerId) return;
+          out.gauntletOutputs[providerId] = {
+            providerId,
+            text: result?.text || "",
+            status: result?.status || "completed",
+            meta: result?.meta || {},
+          };
+        }
         return;
       }
 
@@ -402,6 +415,16 @@ export class WorkflowEngine {
           const providerId = step?.payload?.antagonistProvider;
           if (!providerId) return;
           out.antagonistOutputs[providerId] = {
+            providerId,
+            text: "",
+            status: "error",
+            meta: { error: errorText },
+          };
+        }
+        if (step.type === "gauntlet") {
+          const providerId = step?.payload?.gauntletProvider;
+          if (!providerId) return;
+          out.gauntletOutputs[providerId] = {
             providerId,
             text: "",
             status: "error",
@@ -491,6 +514,17 @@ export class WorkflowEngine {
     }
 
     try {
+      // Check feature flag for Cognitive Pipeline
+      if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+        try {
+          const storage = await chrome.storage.local.get("USE_COGNITIVE_PIPELINE");
+          context.useCognitivePipeline = !!storage.USE_COGNITIVE_PIPELINE;
+          if (context.useCognitivePipeline) console.log("[WorkflowEngine] Cognitive Pipeline Enabled");
+        } catch (e) {
+          console.warn("[WorkflowEngine] Failed to read settings:", e);
+        }
+      }
+
       // ========================================================================
       // Seed contexts from ResolvedContext (extend/recompute)
       // ========================================================================
@@ -656,13 +690,25 @@ export class WorkflowEngine {
       const mappingLoop = async () => {
         for (const step of mappingSteps) {
           try {
-            const result = await this.executeMappingStep(
-              step,
-              context,
-              stepResults,
-              workflowContexts,
-              resolvedContext,
-            );
+            let result;
+            if (context.useCognitivePipeline) {
+              console.log("[WorkflowEngine] Using Cognitive Pipeline for Mapping Step");
+              result = await this.executeMappingV2Step(
+                step,
+                context,
+                stepResults,
+                workflowContexts,
+                resolvedContext
+              );
+            } else {
+              result = await this.executeMappingStep(
+                step,
+                context,
+                stepResults,
+                workflowContexts,
+                resolvedContext,
+              );
+            }
             stepResults.set(step.stepId, { status: "completed", result });
             this.port.postMessage({
               type: "WORKFLOW_STEP_UPDATE",
@@ -729,6 +775,53 @@ export class WorkflowEngine {
 
       // 2. Execute mapping steps first (Sequential)
       await mappingLoop();
+
+      // ========================================================================
+      // Cognitive Pipeline: Compute Explore Analysis after Mapper
+      // ========================================================================
+      if (context.useCognitivePipeline) {
+        try {
+          // Find the mapping result to get the artifact
+          const mappingResult = [...stepResults.entries()].find(([_, v]) =>
+            v.status === 'completed' && v.result?.mapperArtifact
+          )?.[1]?.result;
+
+          if (mappingResult?.mapperArtifact) {
+            const mapperArtifact = mappingResult.mapperArtifact;
+            const exploreAnalysis = computeExplore(context.userMessage || '', mapperArtifact);
+
+            // Emit artifact ready message to UI
+            this.port.postMessage({
+              type: 'MAPPER_ARTIFACT_READY',
+              sessionId: context.sessionId,
+              aiTurnId: context.canonicalAiTurnId,
+              artifact: mapperArtifact,
+              analysis: exploreAnalysis,
+            });
+
+            console.log('[WorkflowEngine] computeExplore complete:', {
+              queryType: exploreAnalysis.queryType,
+              container: exploreAnalysis.containerType,
+              escapeVelocity: exploreAnalysis.escapeVelocity,
+            });
+
+            // EXIT EARLY: In Cognitive Mode, we stop here to let the user 
+            // choose between Understand (Synthesis) or Decide (Gauntlet).
+            this._emitTurnFinalized(context, steps, stepResults, resolvedContext);
+            this.port.postMessage({
+              type: "WORKFLOW_COMPLETE",
+              sessionId: context.sessionId,
+              workflowId: request.workflowId,
+              finalResults: Object.fromEntries(stepResults),
+              haltReason: "cognitive_exploration_ready"
+            });
+            console.log('[WorkflowEngine] Cognitive Halt: Waiting for user mode selection.');
+            return;
+          }
+        } catch (e) {
+          console.error('[WorkflowEngine] computeExplore failed:', e);
+        }
+      }
 
       const consensusGate =
         resolvedContext?.type === "recompute"
@@ -941,6 +1034,127 @@ export class WorkflowEngine {
         }
       }
 
+      const understandSteps = steps.filter((step) => step.type === "understand");
+      for (const step of understandSteps) {
+        try {
+          const result = await this.executeUnderstandStep(
+            step,
+            context,
+            stepResults
+          );
+          stepResults.set(step.stepId, { status: "completed", result });
+          this.port.postMessage({
+            type: "WORKFLOW_STEP_UPDATE",
+            sessionId: context.sessionId,
+            stepId: step.stepId,
+            status: "completed",
+            result,
+            isRecompute: resolvedContext?.type === "recompute",
+            sourceTurnId: resolvedContext?.sourceTurnId,
+          });
+          // Persistence
+          try {
+            if (resolvedContext?.type !== "recompute") {
+              const aiTurnId = context?.canonicalAiTurnId;
+              const providerId = step?.payload?.understandProvider;
+              if (aiTurnId && providerId) {
+                this.sessionManager.upsertProviderResponse(
+                  context.sessionId,
+                  aiTurnId,
+                  providerId,
+                  "understand",
+                  0,
+                  {
+                    text: result?.text || "",
+                    status: result?.status || "completed",
+                    meta: result?.meta || {},
+                  }
+                ).catch(() => { });
+              }
+            }
+          } catch (_) { }
+        } catch (error) {
+          console.error(
+            `[WorkflowEngine] Understand step ${step.stepId} failed:`,
+            error
+          );
+          stepResults.set(step.stepId, {
+            status: "failed",
+            error: error.message
+          });
+          this.port.postMessage({
+            type: "WORKFLOW_STEP_UPDATE",
+            sessionId: context.sessionId,
+            stepId: step.stepId,
+            status: "failed",
+            error: error.message,
+            isRecompute: resolvedContext?.type === "recompute",
+            sourceTurnId: resolvedContext?.sourceTurnId,
+          });
+        }
+      }
+
+      const gauntletSteps = steps.filter((step) => step.type === "gauntlet");
+      for (const step of gauntletSteps) {
+        try {
+          const result = await this.executeGauntletStep(
+            step,
+            context,
+            stepResults
+          );
+          stepResults.set(step.stepId, { status: "completed", result });
+          this.port.postMessage({
+            type: "WORKFLOW_STEP_UPDATE",
+            sessionId: context.sessionId,
+            stepId: step.stepId,
+            status: "completed",
+            result,
+            isRecompute: resolvedContext?.type === "recompute",
+            sourceTurnId: resolvedContext?.sourceTurnId,
+          });
+          // Immediate idempotent persistence
+          try {
+            if (resolvedContext?.type !== "recompute") {
+              const aiTurnId = context?.canonicalAiTurnId;
+              const providerId = step?.payload?.gauntletProvider;
+              if (aiTurnId && providerId) {
+                this.sessionManager.upsertProviderResponse(
+                  context.sessionId,
+                  aiTurnId,
+                  providerId,
+                  "gauntlet",
+                  0,
+                  {
+                    text: result?.text || "",
+                    status: result?.status || "completed",
+                    meta: result?.meta || {},
+                  }
+                ).catch(() => { });
+              }
+            }
+          } catch (_) { }
+        } catch (error) {
+          console.error(
+            `[WorkflowEngine] Gauntlet step ${step.stepId} failed:`,
+            error
+          );
+          stepResults.set(step.stepId, {
+            status: "failed",
+            error: error.message
+          });
+          this.port.postMessage({
+            type: "WORKFLOW_STEP_UPDATE",
+            sessionId: context.sessionId,
+            stepId: step.stepId,
+            status: "failed",
+            error: error.message,
+            isRecompute: resolvedContext?.type === "recompute",
+            sourceTurnId: resolvedContext?.sourceTurnId,
+          });
+        }
+      }
+
+
       // ========================================================================
       // Persistence: Consolidated single call with complete results
       // ========================================================================
@@ -951,6 +1165,7 @@ export class WorkflowEngine {
           mappingOutputs: {},
           refinerOutputs: {},
           antagonistOutputs: {},
+          gauntletOutputs: {},
         };
         const stepById = new Map((steps || []).map((s) => [s.stepId, s]));
         stepResults.forEach((stepResult, stepId) => {
@@ -1093,6 +1308,9 @@ export class WorkflowEngine {
       const mappingResponses = {};
       const refinerResponses = {};
       const antagonistResponses = {};
+      const exploreResponses = {};
+      const understandResponses = {};
+      const gauntletResponses = {};
       let primarySynthesizer = null;
       let primaryMapper = null;
 
@@ -1156,6 +1374,21 @@ export class WorkflowEngine {
               if (!refinerResponses[providerId])
                 refinerResponses[providerId] = [];
               refinerResponses[providerId].push({
+                providerId,
+                text: result?.text || "",
+                status: result?.status || "completed",
+                createdAt: timestamp,
+                updatedAt: timestamp,
+                meta: result?.meta || {},
+              });
+              break;
+            }
+            case "explore": {
+              const providerId = result?.providerId || step?.payload?.exploreProvider;
+              if (!providerId) return;
+              if (!exploreResponses[providerId])
+                exploreResponses[providerId] = [];
+              exploreResponses[providerId].push({
                 providerId,
                 text: result?.text || "",
                 status: result?.status || "completed",
@@ -1248,6 +1481,21 @@ export class WorkflowEngine {
               });
               break;
             }
+            case "explore": {
+              const providerId = step?.payload?.exploreProvider;
+              if (!providerId) return;
+              if (!exploreResponses[providerId])
+                exploreResponses[providerId] = [];
+              exploreResponses[providerId].push({
+                providerId,
+                text: errorText || "",
+                status: "error",
+                createdAt: timestamp,
+                updatedAt: timestamp,
+                meta: { error: errorText },
+              });
+              break;
+            }
             case "antagonist": {
               const providerId = step?.payload?.antagonistProvider;
               if (!providerId) return;
@@ -1272,7 +1520,10 @@ export class WorkflowEngine {
         Object.keys(synthesisResponses).length > 0 ||
         Object.keys(mappingResponses).length > 0 ||
         Object.keys(refinerResponses).length > 0 ||
-        Object.keys(antagonistResponses).length > 0;
+        Object.keys(antagonistResponses).length > 0 ||
+        Object.keys(exploreResponses).length > 0 ||
+        Object.keys(understandResponses).length > 0 ||
+        Object.keys(gauntletResponses).length > 0;
 
       if (!hasData) {
         console.log("[WorkflowEngine] No AI responses to finalize");
@@ -1291,6 +1542,9 @@ export class WorkflowEngine {
         mappingResponses,
         refinerResponses,
         antagonistResponses,
+        exploreResponses,
+        understandResponses,
+        gauntletResponses,
         meta: {
           synthesizer: primarySynthesizer,
           mapper: primaryMapper,
@@ -1299,6 +1553,9 @@ export class WorkflowEngine {
             mapping: steps.some((s) => s.type === "mapping"),
             refiner: !!(steps.some((s) => s.type === "refiner") && !context?.workflowControl?.consensusOnly),
             antagonist: !!(steps.some((s) => s.type === "antagonist") && !context?.workflowControl?.consensusOnly),
+            explore: !!(steps.some((s) => s.type === "explore")),
+            understand: !!(steps.some((s) => s.type === "understand")),
+            gauntlet: !!(steps.some((s) => s.type === "gauntlet")),
           },
           ...(context?.workflowControl ? { workflowControl: context.workflowControl } : {}),
         },
@@ -1786,6 +2043,80 @@ export class WorkflowEngine {
       providerId: antagonistProvider,
       text: String(rawAntagonistText || ""), // Store raw for persistence
       meta: {},
+      status: "completed"
+    };
+  }
+
+  // ==========================================================================
+  // EXPLORE STEP EXECUTOR
+  // ==========================================================================
+
+  async executeExploreStep(step, context, stepResults) {
+    const {
+      exploreProvider,
+      sourceStepIds, // usually points to a mapping step
+      mappingStepIds,
+      originalPrompt,
+      sourceHistorical
+    } = step.payload;
+
+    let mapperArtifact = null;
+
+    // 1. Resolve Mapper Artifact (Dynamic: New or Historical)
+    if (sourceHistorical) {
+      const mappingPayload = { sourceHistorical: { turnId: sourceHistorical.turnId, responseType: 'mapping' } };
+      const data = await this.resolveSourceData(mappingPayload, context, stepResults);
+      const rawMapping = data[0]?.text || "";
+      if (rawMapping) {
+        mapperArtifact = parseMapperArtifact(rawMapping);
+      }
+    } else {
+      // Standard flow: get from stepResults
+      const mapStepId = mappingStepIds?.[0] || sourceStepIds?.[0];
+      if (mapStepId) {
+        const res = stepResults.get(mapStepId);
+        if (res?.status === "completed" && res.result?.text) {
+          mapperArtifact = parseMapperArtifact(res.result.text);
+        }
+      }
+    }
+
+    if (!mapperArtifact) {
+      console.warn("[WorkflowEngine] Explore step missing mapper artifact, using empty default.");
+      mapperArtifact = { consensus: { claims: [] }, outliers: [], topology: "high_confidence", query: originalPrompt };
+    }
+
+    // 2. Build Prompt
+    const explorePrompt = this.promptService.buildExplorePrompt(originalPrompt, mapperArtifact);
+
+    console.log(`[WorkflowEngine] Running Explore Analysis (${exploreProvider})...`);
+
+    // 3. Execute via Orchestrator
+    const result = await this.orchestrator.executeSingle(
+      explorePrompt,
+      exploreProvider,
+      {
+        sessionId: context.sessionId,
+        timeout: 60000,
+        onPartial: (pid, chunk) => {
+          // Optional: stream partial
+        }
+      }
+    );
+
+    // 4. Parse Output
+    const rawText = result.text || "";
+    const parsedOutput = parseExploreOutput(rawText);
+
+    return {
+      providerId: exploreProvider,
+      output: parsedOutput,
+      text: rawText, // Store raw
+      type: "explore",
+      meta: {
+        container: parsedOutput.container,
+        artifactId: parsedOutput.artifact_id
+      },
       status: "completed"
     };
   }
@@ -2803,6 +3134,265 @@ Answer the user's message directly. Use context only to disambiguate.
    * Handle retry requests from frontend: reset circuit, emit queued status.
    * Actual re-execution should be triggered by orchestration layer with original context.
    */
+  async executeMappingV2Step(
+    step,
+    context,
+    previousResults,
+    workflowContexts = {},
+    resolvedContext,
+  ) {
+    const payload = step.payload;
+    const sourceData = await this.resolveSourceData(
+      payload,
+      context,
+      previousResults,
+    );
+
+    if (sourceData.length < 2) {
+      throw new Error(
+        `Mapping V2 requires at least 2 valid sources, but found ${sourceData.length}.`,
+      );
+    }
+
+    const mappingPrompt = this.promptService.buildMapperV2Prompt(
+      payload.originalPrompt,
+      sourceData
+    );
+
+    const providerContexts = this._resolveProviderContext(
+      payload.mappingProvider,
+      context,
+      payload,
+      workflowContexts,
+      previousResults,
+      resolvedContext,
+      "MappingV2",
+    );
+
+    console.log(
+      `[WorkflowEngine] Mapping V2 prompt for ${payload.mappingProvider}: ${mappingPrompt.length} chars`,
+    );
+
+    return new Promise((resolve, reject) => {
+      this.orchestrator.executeParallelFanout(
+        mappingPrompt,
+        [payload.mappingProvider],
+        {
+          sessionId: context.sessionId,
+          useThinking: payload.useThinking,
+          providerContexts: Object.keys(providerContexts).length
+            ? providerContexts
+            : undefined,
+          providerMeta: step?.payload?.providerMeta,
+          onPartial: (providerId, chunk) => {
+            this._dispatchPartialDelta(
+              context.sessionId,
+              step.stepId,
+              providerId,
+              chunk.text,
+              "MappingV2",
+            );
+          },
+          onAllComplete: (results, errors) => {
+            const finalResult = results.get(payload.mappingProvider);
+            const providerError = errors?.get?.(payload.mappingProvider);
+
+            if ((!finalResult || !finalResult.text) && providerError) {
+              reject(providerError);
+              return;
+            }
+
+            if (finalResult?.text) {
+              const mapperArtifact = parseMapperArtifact(finalResult.text);
+
+              this._dispatchPartialDelta(
+                context.sessionId,
+                step.stepId,
+                payload.mappingProvider,
+                finalResult.text,
+                "MappingV2",
+                true,
+              );
+
+              // Defer persistence
+              this._persistProviderContextsAsync(context.sessionId, {
+                [payload.mappingProvider]: finalResult,
+              });
+
+              resolve({
+                providerId: payload.mappingProvider,
+                text: finalResult.text,
+                status: "completed",
+                meta: finalResult.meta || {},
+                mapperArtifact: mapperArtifact,
+              });
+            } else {
+              reject(new Error("Empty response from Mapping V2 provider"));
+            }
+          },
+        },
+      );
+    });
+  }
+
+  async executeUnderstandStep(step, context, previousResults) {
+    const payload = step.payload;
+
+    if (!payload.mapperArtifact || !payload.exploreAnalysis) {
+      throw new Error("Understand mode requires MapperArtifact and ExploreAnalysis.");
+    }
+
+    const understandPrompt = this.promptService.buildUnderstandPrompt(
+      payload.originalPrompt,
+      payload.mapperArtifact,
+      payload.exploreAnalysis
+    );
+
+    console.log(
+      `[WorkflowEngine] Understand prompt for ${payload.understandProvider}: ${understandPrompt.length} chars`,
+    );
+
+    return new Promise((resolve, reject) => {
+      this.orchestrator.executeParallelFanout(
+        understandPrompt,
+        [payload.understandProvider],
+        {
+          sessionId: context.sessionId,
+          useThinking: payload.useThinking || false,
+          onPartial: (providerId, chunk) => {
+            this._dispatchPartialDelta(
+              context.sessionId,
+              step.stepId,
+              providerId,
+              chunk.text,
+              "Understand"
+            );
+          },
+          onAllComplete: (results, errors) => {
+            const finalResult = results.get(payload.understandProvider);
+            const providerError = errors?.get?.(payload.understandProvider);
+
+            if ((!finalResult || !finalResult.text) && providerError) {
+              reject(providerError);
+              return;
+            }
+
+            if (finalResult?.text) {
+              const understandOutput = parseUnderstandOutput(finalResult.text);
+
+              this._dispatchPartialDelta(
+                context.sessionId,
+                step.stepId,
+                payload.understandProvider,
+                finalResult.text,
+                "Understand",
+                true
+              );
+
+              // Defer persistence
+              this._persistProviderContextsAsync(context.sessionId, {
+                [payload.understandProvider]: finalResult,
+              });
+
+              resolve({
+                providerId: payload.understandProvider,
+                text: finalResult.text,
+                status: "completed",
+                meta: {
+                  ...finalResult.meta,
+                  understandOutput
+                } || { understandOutput },
+              });
+            } else {
+              reject(new Error("Empty response from Understand provider"));
+            }
+          }
+        }
+      );
+    });
+  }
+
+  async executeGauntletStep(step, context, previousResults) {
+    const payload = step.payload;
+
+    if (!payload.mapperArtifact) {
+      // Fallback: try to find mapper artifact from previous results if not explicitly passed
+      // This might happen if payload construction didn't include it
+      throw new Error("Gauntlet requires a MapperArtifact but none was provided.");
+    }
+
+    const gauntletPrompt = this.promptService.buildGauntletPrompt(
+      payload.originalPrompt,
+      payload.mapperArtifact
+    );
+
+    console.log(
+      `[WorkflowEngine] Gauntlet prompt for ${payload.gauntletProvider}: ${gauntletPrompt.length} chars`,
+    );
+
+    return new Promise((resolve, reject) => {
+      this.orchestrator.executeParallelFanout(
+        gauntletPrompt,
+        [payload.gauntletProvider],
+        {
+          sessionId: context.sessionId,
+          // Gauntlet can optionally use thinking if specified in payload or context, assumed false default
+          useThinking: false,
+          onPartial: (providerId, chunk) => {
+            this._dispatchPartialDelta(
+              context.sessionId,
+              step.stepId,
+              providerId,
+              chunk.text,
+              "Gauntlet"
+            );
+          },
+          onAllComplete: (results, errors) => {
+            const finalResult = results.get(payload.gauntletProvider);
+            const providerError = errors?.get?.(payload.gauntletProvider);
+
+            if ((!finalResult || !finalResult.text) && providerError) {
+              reject(providerError);
+              return;
+            }
+
+            if (finalResult?.text) {
+              const gauntletOutput = parseGauntletOutput(finalResult.text);
+
+              // Dispatch final partial with full text (optionally could dispatch parsed structure if UI supports it via a specialized message, but here we stick to text stream)
+              this._dispatchPartialDelta(
+                context.sessionId,
+                step.stepId,
+                payload.gauntletProvider,
+                finalResult.text,
+                "Gauntlet",
+                true
+              );
+
+              // Defer persistence
+              this._persistProviderContextsAsync(context.sessionId, {
+                [payload.gauntletProvider]: finalResult,
+              });
+
+              resolve({
+                providerId: payload.gauntletProvider,
+                text: finalResult.text,
+                status: "completed",
+                meta: {
+                  ...finalResult.meta,
+                  gauntletOutput // Attach parsed object to meta for UI/Persistence
+                } || { gauntletOutput },
+              });
+
+            } else {
+              reject(new Error("Empty response from Gauntlet provider"));
+            }
+          }
+        }
+      );
+    });
+  }
+
   async handleRetryRequest(message) {
     try {
       const { sessionId, aiTurnId, providerIds, retryScope } = message || {};
@@ -2825,6 +3415,101 @@ Answer the user's message directly. Use context only to disambiguate.
       } catch (_) { }
     } catch (e) {
       console.warn('[WorkflowEngine] handleRetryRequest failed:', e);
+    }
+  }
+
+  async handleContinueCognitiveRequest(payload) {
+    const { sessionId, aiTurnId, mode } = payload;
+    console.log(`[WorkflowEngine] Continuing cognitive workflow for turn ${aiTurnId} with mode ${mode}`);
+
+    try {
+      // 1. Rehydrate turn from persistence
+      const adapter = this.sessionManager.adapter;
+      const aiTurn = await adapter.get("turns", aiTurnId);
+      if (!aiTurn) throw new Error(`AI turn ${aiTurnId} not found in persistence.`);
+
+      const mapperArtifact = aiTurn.mapperArtifact;
+      const exploreAnalysis = aiTurn.exploreAnalysis;
+
+      if (!mapperArtifact) {
+        throw new Error(`MapperArtifact missing for turn ${aiTurnId}. Cannot continue cognitive mode.`);
+      }
+
+      // 2. Prepare Context & Step
+      const context = {
+        sessionId,
+        canonicalAiTurnId: aiTurnId,
+        canonicalUserTurnId: aiTurn.userTurnId
+      };
+
+      // Use Mapper provider as default for continuation steps
+      const preferredProvider = aiTurn.meta?.mapper || aiTurn.meta?.mappingProvider || "gemini";
+
+      let result;
+      if (mode === 'understand') {
+        const step = {
+          stepId: `understand-${preferredProvider}-${Date.now()}`,
+          type: 'understand',
+          payload: {
+            understandProvider: preferredProvider,
+            mapperArtifact,
+            exploreAnalysis,
+            originalPrompt: aiTurn.meta?.originalPrompt || "...",
+            useThinking: false
+          }
+        };
+        result = await this.executeUnderstandStep(step, context, {});
+      } else if (mode === 'gauntlet') {
+        const step = {
+          stepId: `gauntlet-${preferredProvider}-${Date.now()}`,
+          type: 'gauntlet',
+          payload: {
+            gauntletProvider: preferredProvider,
+            mapperArtifact,
+            originalPrompt: aiTurn.meta?.originalPrompt || "...",
+            useThinking: false
+          }
+        };
+        result = await this.executeGauntletStep(step, context, {});
+      } else {
+        throw new Error(`Unknown cognitive mode: ${mode}`);
+      }
+
+      // 3. Persist and Emit Finalized
+      // result contains { text, status, meta } where meta has understandOutput/gauntletOutput
+      const responseType = mode; // matches step type
+      const responseEntry = {
+        sessionId,
+        aiTurnId,
+        providerId: preferredProvider,
+        responseType,
+        text: result.text,
+        status: "completed",
+        meta: result.meta,
+        createdAt: Date.now(),
+        updatedAt: Date.now()
+      };
+
+      await adapter.addResponse(responseEntry);
+
+      // Emit finalized to UI to update state
+      const steps = [{ stepId: `cognitive-${mode}`, type: mode }];
+      const stepResults = { [`cognitive-${mode}`]: { status: 'fulfilled', value: result } };
+
+      // Re-emit TURN_FINALIZED which will now include the new specialized output
+      await this._emitTurnFinalized(context, steps, stepResults);
+
+    } catch (error) {
+      console.error(`[WorkflowEngine] handleContinueCognitiveRequest failed:`, error);
+      try {
+        this.port.postMessage({
+          type: "WORKFLOW_STEP_UPDATE",
+          sessionId: sessionId || "unknown",
+          stepId: `continue-${mode}-error`,
+          status: "failed",
+          error: error.message || String(error),
+        });
+      } catch (_) { }
     }
   }
 }

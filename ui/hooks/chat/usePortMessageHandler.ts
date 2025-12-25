@@ -23,7 +23,6 @@ import {
   isSplitOpenAtom,
   hasAutoOpenedPaneAtom,
   hasAutoWidenedForSynthesisAtom,
-  splitPaneRatioAtom,
 } from "../../state/atoms";
 import { activeRecomputeStateAtom, lastStreamingProviderAtom } from "../../state/atoms";
 import { StreamingBuffer } from "../../utils/streamingBuffer";
@@ -42,7 +41,7 @@ const PORT_DEBUG_UI = false;
  * CRITICAL: Step type detection must match backend stepId patterns
  * Backend generates: 'batch-<timestamp>', 'synthesis-<provider>-<timestamp>', 'mapping-<provider>-<timestamp>'
  */
-function getStepType(stepId: string): "batch" | "synthesis" | "mapping" | "refiner" | "antagonist" | null {
+function getStepType(stepId: string): "batch" | "synthesis" | "mapping" | "refiner" | "antagonist" | "understand" | "gauntlet" | null {
   if (!stepId || typeof stepId !== "string") return null;
 
   // Match backend patterns exactly
@@ -55,6 +54,9 @@ function getStepType(stepId: string): "batch" | "synthesis" | "mapping" | "refin
   if (stepId.startsWith("antagonist-") || stepId.includes("-antagonist-"))
     return "antagonist";
   if (stepId.startsWith("batch-") || stepId.includes("prompt")) return "batch";
+  if (stepId.startsWith("understand-")) return "understand";
+  if (stepId.startsWith("gauntlet-")) return "gauntlet";
+  if (stepId.startsWith("explore-")) return "batch"; // Explore currently uses batch-like routing
 
   console.warn(`[Port] Unknown stepId pattern: ${stepId}`);
   return null;
@@ -66,7 +68,7 @@ function getStepType(stepId: string): "batch" | "synthesis" | "mapping" | "refin
  */
 function extractProviderFromStepId(
   stepId: string,
-  stepType: "synthesis" | "mapping" | "refiner" | "antagonist",
+  stepType: "synthesis" | "mapping" | "refiner" | "antagonist" | "understand" | "gauntlet",
 ): string | null {
   // Support provider IDs with hyphens/dots/etc., assuming last segment is numeric timestamp
   const re = new RegExp(`^${stepType}-(.+)-(\\d+)$`);
@@ -103,7 +105,6 @@ export function usePortMessageHandler() {
   const setHasAutoOpenedPane = useSetAtom(hasAutoOpenedPaneAtom);
   const hasAutoWidened = useAtomValue(hasAutoWidenedForSynthesisAtom);
   const setHasAutoWidened = useSetAtom(hasAutoWidenedForSynthesisAtom);
-  const setSplitPaneRatio = useSetAtom(splitPaneRatioAtom);
   // Note: We rely on Jotai's per-atom update serialization; no manual pending cache
 
   // Refs to avoid stale closure values during streaming updates
@@ -116,7 +117,7 @@ export function usePortMessageHandler() {
   const activeAiTurnIdRef = useRef<string | null>(null);
   const activeRecomputeRef = useRef<{
     aiTurnId: string;
-    stepType: "synthesis" | "mapping" | "batch" | "refiner" | "antagonist";
+    stepType: "synthesis" | "mapping" | "batch" | "refiner" | "antagonist" | "understand" | "gauntlet";
     providerId: string;
   } | null>(null);
   // Track whether we've already logged the first PARTIAL_RESULT for a given
@@ -613,6 +614,32 @@ export function usePortMessageHandler() {
                       ),
                     };
                     aiTurn.antagonistVersion = (aiTurn.antagonistVersion ?? 0) + 1;
+                  } else if (stepType === "understand") {
+                    aiTurn.understandResponses = {
+                      ...(aiTurn.understandResponses || {}),
+                      [normalizedId]: updateResponseList(
+                        aiTurn.understandResponses?.[normalizedId],
+                        baseEntry,
+                      ),
+                    };
+                    // Extract structured output from meta if available
+                    if (data?.meta?.understandOutput) {
+                      aiTurn.understandOutput = data.meta.understandOutput;
+                    }
+                    aiTurn.understandVersion = (aiTurn.understandVersion ?? 0) + 1;
+                  } else if (stepType === "gauntlet") {
+                    aiTurn.gauntletResponses = {
+                      ...(aiTurn.gauntletResponses || {}),
+                      [normalizedId]: updateResponseList(
+                        aiTurn.gauntletResponses?.[normalizedId],
+                        baseEntry,
+                      ),
+                    };
+                    // Extract structured output from meta if available
+                    if (data?.meta?.gauntletOutput) {
+                      aiTurn.gauntletOutput = data.meta.gauntletOutput;
+                    }
+                    aiTurn.gauntletVersion = (aiTurn.gauntletVersion ?? 0) + 1;
                   }
 
                   // CRITICAL: ensure the Map entry is observed as changed
@@ -884,7 +911,6 @@ export function usePortMessageHandler() {
                     turnId: activeId,
                     providerId: String(firstStreaming.providerId)
                   });
-                  setSplitPaneRatio(70); // Left pane 70%, right pane 30%
                   setHasAutoOpenedPane(activeId);
                 }
               }
@@ -895,7 +921,6 @@ export function usePortMessageHandler() {
                 phase === 'synthesis' &&
                 hasAutoWidened !== activeId
               ) {
-                setSplitPaneRatio(75); // Widen left pane to 75%
                 setHasAutoWidened(activeId);
               }
             }
@@ -941,6 +966,25 @@ export function usePortMessageHandler() {
           // Do NOT clear activeAiTurnId here; wait for TURN_FINALIZED
           break;
         }
+
+        case "MAPPER_ARTIFACT_READY": {
+          const { aiTurnId, artifact, analysis } = message as any;
+          if (!aiTurnId) return;
+
+          setTurnsMap((draft: Map<string, TurnMessage>) => {
+            const existing = draft.get(aiTurnId);
+            if (!existing || existing.type !== "ai") return;
+            const aiTurn = existing as AiTurn;
+
+            // Update with cognitive artifacts
+            draft.set(aiTurnId, {
+              ...aiTurn,
+              mapperArtifact: artifact,
+              exploreAnalysis: analysis,
+            });
+          });
+          break;
+        }
       }
     },
     [
@@ -964,7 +1008,6 @@ export function usePortMessageHandler() {
       setHasAutoOpenedPane,
       hasAutoWidened,
       setHasAutoWidened,
-      setSplitPaneRatio,
     ],
   );
 

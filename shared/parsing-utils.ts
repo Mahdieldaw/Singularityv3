@@ -1,3 +1,5 @@
+import { MapperArtifact, ExploreOutput, GauntletOutput, UnderstandOutput } from './contract';
+
 /**
  * Shared Parsing Utilities for ALL_AVAILABLE_OPTIONS and GRAPH_TOPOLOGY
  * 
@@ -523,6 +525,141 @@ function normalizeRefinerObject(parsed: any): Omit<RefinerOutput, 'rawText'> | n
 
 
 // ============================================================================
+// MAPPER ARTIFACT PARSING
+// ============================================================================
+
+/**
+ * Create empty MapperArtifact
+ */
+export function createEmptyMapperArtifact(): MapperArtifact {
+    return {
+        consensus: {
+            claims: [],
+            quality: "conventional",
+            strength: 0
+        },
+        outliers: [],
+        topology: "high_confidence",
+        ghost: null,
+        query: "",
+        turn: 0,
+        timestamp: new Date().toISOString(),
+        model_count: 0,
+        souvenir: ""
+    };
+}
+
+/**
+ * Parse MapperArtifact from text.
+ * Expects sections: ===CONSENSUS===, ===OUTLIERS===, ===METADATA===
+ */
+export function parseMapperArtifact(text: string): MapperArtifact {
+    if (!text) return createEmptyMapperArtifact();
+
+    const normalized = normalizeText(text);
+    const artifact = createEmptyMapperArtifact();
+
+    // 1. Try JSON parsing first
+    try {
+        const jsonMatch = normalized.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/) || normalized.match(/^\{[\s\S]*\}$/);
+        if (jsonMatch) {
+            const jsonText = jsonMatch[1] || jsonMatch[0];
+            const parsed = JSON.parse(jsonText);
+            if (parsed && typeof parsed === 'object') {
+                return {
+                    ...artifact,
+                    ...parsed,
+                    consensus: { ...artifact.consensus, ...(parsed.consensus || {}) },
+                };
+            }
+        }
+    } catch (e) {
+        // Fallback to regex
+    }
+
+    // Helper for Mapper sections with === headers
+    const extractMapperSection = (name: string) => {
+        // Match === NAME === or ## NAME or **NAME**
+        // We prioritize the === format as per prompt
+        const pattern = new RegExp(`={3,}\\s*${name}\\s*={3,}\\n([\\s\\S]*?)(?=\\n={3,}|$)`, 'i');
+        const match = normalized.match(pattern);
+        return match ? match[1].trim() : extractSection(normalized, name);
+    };
+
+    const consensusText = extractMapperSection('CONSENSUS');
+    const outliersText = extractMapperSection('OUTLIERS');
+    const metadataText = extractMapperSection('METADATA');
+
+    // Parse Consensus
+    if (consensusText) {
+        // Extract claims (lines starting with - or *)
+        const claims: Array<{ text: string; supporters: number[]; support_count: number }> = [];
+        const lines = consensusText.split('\n');
+        for (const line of lines) {
+            const match = line.match(/^[-*•]\s*(.+)$/);
+            if (match) {
+                // Simplified: entire line is text. 
+                // In a real implementation, we'd parse supporters from the text if present e.g. "(Models 1,2)"
+                claims.push({
+                    text: match[1].trim(),
+                    supporters: [],
+                    support_count: 0
+                });
+            }
+        }
+        if (claims.length > 0) artifact.consensus.claims = claims;
+
+        const quality = extractLabeledValue(consensusText, 'quality');
+        if (quality) artifact.consensus.quality = quality.toLowerCase() as any;
+
+        const strength = extractLabeledValue(consensusText, 'strength');
+        if (strength) artifact.consensus.strength = parseFloat(strength);
+    }
+
+    // Parse Outliers
+    if (outliersText) {
+        // Flexible parsing for outliers
+        const outlierBlocks = outliersText.split(/\n\s*[-*•]\s+/).filter(Boolean);
+        for (const block of outlierBlocks) {
+            // Very basic heuristic for now
+            const parts = block.split('\n');
+            if (parts.length > 0) {
+                artifact.outliers.push({
+                    insight: parts[0].trim(),
+                    source: "unknown",
+                    source_index: -1,
+                    type: "supplemental",
+                    raw_context: parts.slice(1).join(' ').trim()
+                });
+            }
+        }
+    }
+
+    // Parse Metadata
+    if (metadataText) {
+        const topology = extractLabeledValue(metadataText, 'topology');
+        if (topology) artifact.topology = topology.toLowerCase() as any; // Ensure case matches
+
+        const ghost = extractLabeledValue(metadataText, 'ghost');
+        if (ghost && ghost.toLowerCase() !== 'none') artifact.ghost = ghost;
+
+        const query = extractLabeledValue(metadataText, 'query');
+        if (query) artifact.query = query;
+    }
+
+    // Parse Souvenir (can be its own section or in metadata)
+    const souvenirText = extractMapperSection('SOUVENIR');
+    if (souvenirText) {
+        artifact.souvenir = souvenirText;
+    } else if (metadataText) {
+        const souvenir = extractLabeledValue(metadataText, 'souvenir');
+        if (souvenir) artifact.souvenir = souvenir;
+    }
+
+    return artifact;
+}
+
+// ============================================================================
 // CORE HELPERS
 // ============================================================================
 
@@ -946,3 +1083,233 @@ export function cleanAntagonistResponse(text: string): string {
     return text;
 }
 
+// ============================================================================
+// EXPLORE OUTPUT PARSING
+// ============================================================================
+
+
+export function createEmptyExploreOutput(): ExploreOutput {
+    return {
+        container: "direct_answer",
+        content: { answer: "", additional_context: [] },
+        souvenir: "",
+        alternatives: [],
+        artifact_id: ""
+    };
+}
+
+export function parseExploreOutput(text: string): ExploreOutput {
+    if (!text) return createEmptyExploreOutput();
+
+    const normalized = normalizeText(text);
+
+    // 1. Try JSON parsing first (primary method)
+    try {
+        const jsonMatch = normalized.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/) || normalized.match(/^\{[\s\S]*\}$/);
+        if (jsonMatch) {
+            const jsonText = jsonMatch[1] || jsonMatch[0];
+            const parsed = JSON.parse(jsonText);
+            if (parsed && typeof parsed === 'object' && parsed.container && parsed.content) {
+                return {
+                    container: parsed.container,
+                    content: parsed.content,
+                    souvenir: parsed.souvenir || "",
+                    alternatives: parsed.alternatives || [],
+                    artifact_id: parsed.artifact_id || `explore-${Date.now()}`
+                } as ExploreOutput;
+            }
+        }
+    } catch (e) {
+        // JSON parsing failed
+    }
+
+    // 2. Fallback: Parse markdown if JSON fails (implementing a basic graceful degradation)
+    // For now, if JSON parsing fails, we default to a direct answer with the raw text
+    return {
+        container: "direct_answer",
+        content: {
+            answer: text, // Fallback: treat the whole text as the answer
+            additional_context: []
+        },
+        souvenir: "Exploration provided as raw text",
+        alternatives: [],
+        artifact_id: `explore-fallback-${Date.now()}`
+    };
+}
+
+// ============================================================================
+// GAUNTLET OUTPUT PARSING
+// ============================================================================
+
+export function createEmptyGauntletOutput(): GauntletOutput {
+    return {
+        the_answer: { statement: "", reasoning: "", next_step: "" },
+        survivors: {
+            primary: { claim: "", survived_because: "" },
+            supporting: [],
+            conditional: []
+        },
+        eliminated: {
+            from_consensus: [],
+            from_outliers: [],
+            ghost: null
+        },
+        confidence: { score: 0, display: "", notes: [] },
+        souvenir: "",
+        artifact_id: ""
+    };
+}
+
+export function parseGauntletOutput(text: string): GauntletOutput {
+    if (!text) return createEmptyGauntletOutput();
+
+    const normalized = normalizeText(text);
+
+    // 1. Try JSON First
+    try {
+        const jsonMatch = normalized.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/) || normalized.match(/^\{[\s\S]*\}$/);
+        if (jsonMatch) {
+            const jsonText = jsonMatch[1] || jsonMatch[0];
+            const parsed = JSON.parse(jsonText);
+            if (parsed && typeof parsed === 'object' && parsed.the_answer) {
+                // Calculate display dots derived from score if missing
+                const score = parsed.confidence?.score || 0;
+                const display = parsed.confidence?.display || "•".repeat(Math.round(score * 5)) || "•";
+
+                return {
+                    ...createEmptyGauntletOutput(),
+                    ...parsed,
+                    confidence: {
+                        ...parsed.confidence,
+                        display
+                    },
+                    artifact_id: parsed.artifact_id || `gauntlet-${Date.now()}`
+                };
+            }
+        }
+    } catch (e) {
+        console.warn("[parsing-utils] Gauntlet JSON parse failed, falling back to heuristics", e);
+    }
+
+    // 2. Fallback: Detailed Heuristics
+    const output = createEmptyGauntletOutput();
+
+    const extractSectionFlexible = (names: string[]): string => {
+        for (const name of names) {
+            const pattern = new RegExp(`(?:={3,}|#{1,6}|\\*\\*)\\s*${name}\\s*(?:={3,}|\\*\\*)?:?\\n([\\s\\S]*?)(?=\\n(?:={3,}|#{1,6}|\\*\\*)|$)`, 'i');
+            const match = normalized.match(pattern);
+            if (match && match[1]) return match[1].trim();
+        }
+        return '';
+    };
+
+    // THE ANSWER
+    const answerText = extractSectionFlexible(['THE_ANSWER', 'THE ANSWER', 'VERDICT', 'DECISION']);
+    if (answerText) {
+        const lines = answerText.split('\n').filter(l => l.trim());
+        if (lines.length > 0) {
+            output.the_answer.statement = lines[0].replace(/^[-*•]\s*/, '').trim();
+            output.the_answer.reasoning = lines.slice(1).join(' ').trim();
+        }
+    }
+
+    // SURVIVORS
+    const survivorsText = extractSectionFlexible(['SURVIVORS', 'SURVIVING CLAIMS', 'THE SURVIVORS']);
+    if (survivorsText) {
+        const lines = survivorsText.split('\n').filter(l => l.trim().match(/^[-*•]/));
+        if (lines.length > 0) {
+            output.survivors.primary.claim = lines[0].replace(/^[-*•]\s*/, '').trim();
+            output.survivors.primary.survived_because = "Highest confidence claim.";
+
+            output.survivors.supporting = lines.slice(1).map(l => ({
+                claim: l.replace(/^[-*•]\s*/, '').trim(),
+                relationship: "Corroborates"
+            }));
+        }
+    }
+
+    // ELIMINATED
+    const eliminatedText = extractSectionFlexible(['ELIMINATED', 'KILLED', 'THE CULL', 'DISCARDED']);
+    if (eliminatedText) {
+        const lines = eliminatedText.split('\n').filter(l => l.trim().match(/^[-*•]/));
+        output.eliminated.from_consensus = lines.map(l => {
+            const line = l.replace(/^[-*•]\s*/, '').trim();
+            const parts = line.split(/[:—]|\bbecause\b/i);
+            return {
+                claim: parts[0].trim(),
+                killed_because: parts.length > 1 ? parts.slice(1).join(' ').trim() : "Failed stress-test."
+            };
+        });
+    }
+
+    // CONFIDENCE
+    const confidenceText = extractSectionFlexible(['CONFIDENCE', 'SCORE', 'RELIABILITY']);
+    if (confidenceText) {
+        const scoreMatch = confidenceText.match(/([\d.]+(?:\/\d+)?)/);
+        if (scoreMatch) {
+            let val = parseFloat(scoreMatch[1]);
+            if (scoreMatch[1].includes('/')) {
+                const parts = scoreMatch[1].split('/');
+                val = parseFloat(parts[0]) / parseFloat(parts[1]);
+            }
+            if (!isNaN(val)) {
+                if (val > 1) val = val / 10;
+                output.confidence.score = Math.min(Math.max(val, 0), 1);
+            }
+        }
+    }
+
+    // Normalize display
+    output.confidence.display = "•".repeat(Math.round(output.confidence.score * 5)) || "•••";
+    output.souvenir = extractSectionFlexible(['SOUVENIR', 'TAKEAWAY', 'MANTRA']) || "The gauntlet has been run.";
+    output.artifact_id = `gauntlet-heuristic-${Date.now()}`;
+
+    return output;
+}
+
+// ============================================================================
+// UNDERSTAND OUTPUT PARSING
+// ============================================================================
+
+export function createEmptyUnderstandOutput(): UnderstandOutput {
+    return {
+        short_answer: "",
+        long_answer: "",
+        the_one: null,
+        the_echo: null,
+        souvenir: "",
+        artifact_id: ""
+    };
+}
+
+export function parseUnderstandOutput(text: string): UnderstandOutput {
+    if (!text) return createEmptyUnderstandOutput();
+
+    const normalized = normalizeText(text);
+
+    // 1. Try JSON parsing first
+    try {
+        const jsonMatch = normalized.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/) || normalized.match(/^\{[\s\S]*\}$/);
+        if (jsonMatch) {
+            const jsonText = jsonMatch[1] || jsonMatch[0];
+            const parsed = JSON.parse(jsonText);
+            if (parsed && typeof parsed === 'object') {
+                return {
+                    ...createEmptyUnderstandOutput(),
+                    ...parsed,
+                    artifact_id: parsed.artifact_id || `understand-${Date.now()}`
+                };
+            }
+        }
+    } catch (e) {
+        // JSON parsing failed
+    }
+
+    // 2. Fallback: Parse markdown (minimal placeholder for now)
+    return {
+        ...createEmptyUnderstandOutput(),
+        short_answer: text,
+        souvenir: "Understand output provided as raw text",
+        artifact_id: `understand-fallback-${Date.now()}`
+    };
+}

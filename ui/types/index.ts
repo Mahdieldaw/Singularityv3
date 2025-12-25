@@ -97,6 +97,9 @@ export interface AiTurn extends Omit<ContractAiTurn, "type"> {
   mappingVersion?: number;
   refinerVersion?: number;
   antagonistVersion?: number;
+  exploreVersion?: number;
+  understandVersion?: number;
+  gauntletVersion?: number;
 }
 
 /** The union type for any message in the chat timeline. This is the main type for the `messages` state array. */
@@ -154,6 +157,8 @@ export interface LaunchpadDraftSection {
   title: string;
   text: string;
 }
+
+export type CognitiveViewMode = 'artifact' | 'understand' | 'gauntlet';
 
 export interface LaunchpadDraft {
   id: string;

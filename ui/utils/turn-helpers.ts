@@ -127,6 +127,8 @@ export function createOptimisticAiTurn(
     mappingResponses,
     refinerResponses,
     antagonistResponses,
+    understandResponses: {},
+    gauntletResponses: {},
     meta: {
       isOptimistic: true,
       expectedProviders: activeProviders, // ✅ STORE expected providers
@@ -150,7 +152,7 @@ export function applyStreamingUpdates(
     providerId: string;
     text: string;
     status: string;
-    responseType: "batch" | "synthesis" | "mapping" | "refiner" | "antagonist";
+    responseType: "batch" | "synthesis" | "mapping" | "refiner" | "antagonist" | "understand" | "gauntlet";
   }>,
 ) {
   let batchChanged = false;
@@ -158,6 +160,8 @@ export function applyStreamingUpdates(
   let mappingChanged = false;
   let refinerChanged = false;
   let antagonistChanged = false;
+  let understandChanged = false;
+  let gauntletChanged = false;
 
   updates.forEach(({ providerId, text: delta, status, responseType }) => {
     if (responseType === "batch") {
@@ -294,6 +298,52 @@ export function applyStreamingUpdates(
       }
 
       aiTurn.antagonistResponses[providerId] = arr;
+    } else if (responseType === "understand") {
+      understandChanged = true;
+      if (!aiTurn.understandResponses) aiTurn.understandResponses = {};
+      const arr = normalizeResponseArray(aiTurn.understandResponses[providerId]);
+      const latest = arr.length > 0 ? arr[arr.length - 1] : undefined;
+      const isLatestTerminal = latest && (latest.status === "completed" || latest.status === "error");
+
+      if (latest && !isLatestTerminal) {
+        arr[arr.length - 1] = {
+          ...latest,
+          text: (latest.text || "") + delta,
+          status: status as any,
+          updatedAt: Date.now(),
+        };
+      } else {
+        arr.push({
+          providerId: providerId as ProviderKey,
+          text: delta,
+          status: status as any,
+          createdAt: Date.now(),
+        });
+      }
+      aiTurn.understandResponses[providerId] = arr;
+    } else if (responseType === "gauntlet") {
+      gauntletChanged = true;
+      if (!aiTurn.gauntletResponses) aiTurn.gauntletResponses = {};
+      const arr = normalizeResponseArray(aiTurn.gauntletResponses[providerId]);
+      const latest = arr.length > 0 ? arr[arr.length - 1] : undefined;
+      const isLatestTerminal = latest && (latest.status === "completed" || latest.status === "error");
+
+      if (latest && !isLatestTerminal) {
+        arr[arr.length - 1] = {
+          ...latest,
+          text: (latest.text || "") + delta,
+          status: status as any,
+          updatedAt: Date.now(),
+        };
+      } else {
+        arr.push({
+          providerId: providerId as ProviderKey,
+          text: delta,
+          status: status as any,
+          createdAt: Date.now(),
+        });
+      }
+      aiTurn.gauntletResponses[providerId] = arr;
     }
   });
 
@@ -303,6 +353,8 @@ export function applyStreamingUpdates(
   if (mappingChanged) aiTurn.mappingVersion = (aiTurn.mappingVersion ?? 0) + 1;
   if (refinerChanged) aiTurn.refinerVersion = (aiTurn.refinerVersion ?? 0) + 1;
   if (antagonistChanged) aiTurn.antagonistVersion = (aiTurn.antagonistVersion ?? 0) + 1;
+  if (understandChanged) aiTurn.understandVersion = (aiTurn.understandVersion ?? 0) + 1;
+  if (gauntletChanged) aiTurn.gauntletVersion = (aiTurn.gauntletVersion ?? 0) + 1;
 }
 
 /**
@@ -382,6 +434,8 @@ export function normalizeBackendRoundsToTurns(
         mappingResponses: normalizeSynthMap(round.mappingResponses),
         refinerResponses: normalizeSynthMap(round.refinerResponses),
         antagonistResponses: normalizeSynthMap(round.antagonistResponses),
+        understandResponses: normalizeSynthMap(round.understandResponses),
+        gauntletResponses: normalizeSynthMap(round.gauntletResponses),
         meta: round.meta || {},
       };
       normalized.push(aiTurn);

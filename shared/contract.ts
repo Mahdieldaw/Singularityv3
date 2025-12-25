@@ -7,8 +7,131 @@ export type ProviderKey =
   | "gemini-pro"
   | "chatgpt"
   | "qwen";
-export type WorkflowStepType = "prompt" | "synthesis" | "mapping" | "refiner" | "antagonist";
+export type WorkflowStepType = "prompt" | "synthesis" | "mapping" | "refiner" | "antagonist" | "explore";
 export type SynthesisStrategy = "continuation" | "fresh";
+
+export type CognitiveMode = "auto" | "explore" | "understand" | "decide";
+
+export interface GauntletOutput {
+  the_answer: {
+    statement: string;
+    reasoning: string;
+    next_step: string;
+  };
+  survivors: {
+    primary: { claim: string; survived_because: string };
+    supporting: Array<{ claim: string; relationship: string }>;
+    conditional: Array<{ claim: string; condition: string }>;
+  };
+  eliminated: {
+    from_consensus: Array<{ claim: string; killed_because: string }>;
+    from_outliers: Array<{ claim: string; source: string; killed_because: string }>;
+    ghost: string | null;
+  };
+  confidence: {
+    score: number; // 0-1
+    display: string; // dots
+    notes: string[];
+  };
+  souvenir: string;
+  artifact_id: string;
+}
+
+export interface MapperArtifact {
+  consensus: {
+    claims: Array<{
+      text: string;
+      supporters: number[];
+      support_count: number;
+      // Enhanced fields for computeExplore
+      dimension?: string;       // "speed" | "cost" | "hiring" | "simplicity" | etc.
+      applies_when?: string;    // Condition when this is especially true
+    }>;
+    quality: "resolved" | "conventional" | "deflected";
+    strength: number; // 0-1
+  };
+  outliers: Array<{
+    insight: string;
+    source: string; // model name
+    source_index: number;
+    type: "supplemental" | "frame_challenger";
+    raw_context: string; // 10-20 words surrounding context
+    // Enhanced fields for computeExplore
+    dimension?: string;         // What axis does this address
+    applies_when?: string;      // When is this the right path
+    challenges?: string;        // Which consensus claim does this challenge
+  }>;
+  // Pre-identified relationships (for computeExplore)
+  tensions?: Array<{
+    between: [string, string];  // Two claim texts or labels
+    type: "conflicts" | "tradeoff";
+    axis: string;               // What they're trading off on
+  }>;
+  // Dimension summary (Mapper counts these as it tags)
+  dimensions_found?: string[];  // ["speed", "cost", "hiring", "simplicity"]
+
+  topology: "high_confidence" | "dimensional" | "contested";
+  ghost: string | null;
+  query: string;
+  turn: number;
+  timestamp: string;
+  model_count: number;
+  souvenir?: string;
+}
+
+// ============================================================================
+// EXPLORE ANALYSIS (Computed, not LLM-generated)
+// ============================================================================
+
+export type QueryType = "informational" | "procedural" | "advisory" | "comparative" | "creative" | "predictive" | "interpretive" | "general";
+
+export type ContainerType = "direct_answer" | "decision_tree" | "comparison_matrix" | "exploration_space";
+
+export interface ExploreDimension {
+  name: string;
+  winner: string;
+  support: number;
+  alternatives: string[];
+}
+
+export interface ExploreCondition {
+  if: string;
+  then: string;
+  source: string;
+  challenges?: string;
+}
+
+export interface ExploreParadigm {
+  name: string;
+  source: string;
+  core_idea: string;
+  challenges?: string;
+}
+
+export interface ExploreConflict {
+  between: [string, string];
+  type: "conflicts" | "challenges" | "tradeoff";
+  axis: string;
+}
+
+export interface ExploreAnalysis {
+  queryType: QueryType;
+  containerType: ContainerType;
+  dimensions: ExploreDimension[];
+  conditions: ExploreCondition[];
+  paradigms: ExploreParadigm[];
+  conflicts: ExploreConflict[];
+  escapeVelocity: boolean;
+}
+
+export interface UnderstandOutput {
+  short_answer: string;
+  long_answer: string;
+  the_one: { insight: string; source: string | null; why_this: string } | null;
+  the_echo: { position: string; source: string; merit: string } | null;
+  souvenir: string;
+  artifact_id: string;
+}
 
 // ============================================================================
 // SECTION 1: WORKFLOW PRIMITIVES (UI -> BACKEND)
@@ -39,6 +162,7 @@ export interface InitializeRequest {
   useThinking?: boolean;
   providerMeta?: Partial<Record<ProviderKey, any>>;
   clientUserTurnId?: string; // Optional: client-side provisional ID for the user's turn.
+  mode?: CognitiveMode;
 }
 
 /**
@@ -61,6 +185,7 @@ export interface ExtendRequest {
   useThinking?: boolean;
   providerMeta?: Partial<Record<ProviderKey, any>>;
   clientUserTurnId?: string; // Optional: client-side provisional ID for the user's turn.
+  mode?: CognitiveMode;
 }
 
 /**
@@ -110,6 +235,8 @@ export interface SynthesisStepPayload {
 export interface MappingStepPayload
   extends Omit<SynthesisStepPayload, "synthesisProvider"> {
   mappingProvider: ProviderKey;
+  mapperArtifact?: MapperArtifact;
+  useCognitivePipeline?: boolean;
 }
 
 export interface RefinerStepPayload {
@@ -137,10 +264,35 @@ export interface AntagonistStepPayload {
   originalPrompt: string;
 }
 
+export interface GauntletStepPayload {
+  gauntletProvider: ProviderKey;
+  sourceStepIds?: string[];
+  mappingStepIds?: string[];
+  sourceHistorical?: {
+    turnId: string;
+    responseType: string;
+  };
+  originalPrompt: string;
+  mapperArtifact: MapperArtifact;
+}
+
+export interface ExploreStepPayload {
+
+  exploreProvider: ProviderKey;
+  sourceStepIds?: string[];
+  mappingStepIds?: string[];
+  sourceHistorical?: {
+    turnId: string;
+    responseType: string;
+  };
+  originalPrompt: string;
+}
+
 export interface WorkflowStep {
   stepId: string;
   type: WorkflowStepType;
-  payload: PromptStepPayload | SynthesisStepPayload | MappingStepPayload | RefinerStepPayload | AntagonistStepPayload;
+  payload: PromptStepPayload | SynthesisStepPayload | MappingStepPayload | RefinerStepPayload | AntagonistStepPayload | ExploreStepPayload | GauntletStepPayload;
+
 }
 
 export interface WorkflowContext {
@@ -409,6 +561,16 @@ export interface AiTurn {
   mappingResponses: Record<string, ProviderResponse[]>;
   refinerResponses?: Record<string, ProviderResponse[]>;
   antagonistResponses?: Record<string, ProviderResponse[]>;
+  exploreResponses?: Record<string, ProviderResponse[]>;
+  understandResponses?: Record<string, ProviderResponse[]>;
+  gauntletResponses?: Record<string, ProviderResponse[]>;
+
+  // Cognitive Pipeline Artifacts (Computed)
+  mapperArtifact?: MapperArtifact;
+  exploreAnalysis?: ExploreAnalysis;
+  understandOutput?: UnderstandOutput;
+  gauntletOutput?: GauntletOutput;
+
   meta?: {
     branchPointTurnId?: string;
     replacesId?: string;
@@ -447,9 +609,50 @@ export function isMappingPayload(payload: any): payload is MappingStepPayload {
 export function isRefinerPayload(payload: any): payload is RefinerStepPayload {
   return "refinerProvider" in payload;
 }
+export function isExplorePayload(payload: any): payload is ExploreStepPayload {
+  return "exploreProvider" in payload;
+}
+export function isGauntletPayload(payload: any): payload is GauntletStepPayload {
+  return "gauntletProvider" in payload;
+}
+
 export function isUserTurn(turn: any): turn is { type: "user" } {
   return !!turn && typeof turn === "object" && turn.type === "user";
 }
 export function isAiTurn(turn: any): turn is { type: "ai" } {
   return !!turn && typeof turn === "object" && turn.type === "ai";
+}
+
+// ============================================================================
+// EXPLORE MODE TYPES
+// ============================================================================
+
+export interface DirectAnswerContent {
+  answer: string;
+  additional_context: Array<{ text: string; source: string }>;
+}
+
+export interface DecisionTreeContent {
+  default_path: string;
+  conditions: Array<{ condition: string; path: string; source: string; reasoning: string }>;
+  frame_challenger?: { position: string; source: string; consider_if: string };
+}
+
+export interface ComparisonContent {
+  dimensions: Array<{ name: string; winner: string; sources: string[]; tradeoff: string }>;
+  matrix: { approaches: string[]; dimensions: string[]; scores: number[][] };
+}
+
+export interface ExplorationContent {
+  paradigms: Array<{ name: string; source: string; core_idea: string; best_for: string }>;
+  common_thread?: string;
+  ghost?: string;
+}
+
+export interface ExploreOutput {
+  container: "direct_answer" | "decision_tree" | "comparison_matrix" | "exploration_space";
+  content: DirectAnswerContent | DecisionTreeContent | ComparisonContent | ExplorationContent;
+  souvenir: string;
+  alternatives: Array<{ container: string; label: string }>;
+  artifact_id: string;
 }

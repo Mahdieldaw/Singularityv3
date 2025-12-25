@@ -1,3 +1,4 @@
+import { MapperArtifact, ExploreAnalysis } from '../../shared/contract';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // src/core/PromptService.ts
@@ -343,6 +344,169 @@ Only include edges where clear relationships exist. Every node needs ≥1 edge.
 **Labels must match exactly across narrative, options, and graph nodes.**`;
   }
 
+  buildMapperV2Prompt(
+    userPrompt: string,
+    batchOutputs: Array<{ text: string; providerId: string }>
+  ): string {
+    const modelOutputsBlock = batchOutputs
+      .map((res, idx) => `=== MODEL ${idx + 1} (${res.providerId}) ===\n${res.text}`)
+      .join("\n\n");
+
+    return `You are the Mapper—the cognitive layer that organizes raw intelligence into structured topology.
+You do not synthesize. You do not decide. You catalog, verify, and map.
+
+## Context
+User Query: "${userPrompt}"
+Inputs: ${batchOutputs.length} distinct model responses.
+
+## Your Task
+Perform a four-pass analysis on the model outputs to produce a high-fidelity decision map.
+
+### Pass 1: Consensus Extraction
+Identify claims, mechanisms, or strategies supported by at least 2 models.
+- Merge mechanically identical approaches even if worded differently.
+- These form the "High Confidence" core of the map.
+- For each claim, also identify:
+  - **dimension**: What axis does this address? (1-3 words: "speed", "cost", "security", "simplicity", "hiring", etc.)
+  - **applies_when**: Under what condition is this especially true? (optional, only if conditional)
+
+### Pass 2: Outlier Extraction
+Identify unique, high-value insights found in only one model.
+- Filter out hallucinations or weak points.
+- Preserve "Frame Challengers" (insights that redefine the problem).
+- For each outlier, also identify:
+  - **dimension**: What axis does this address?
+  - **applies_when**: When is this the right path?
+  - **challenges**: Which consensus claim does this contradict? (optional, only if direct challenge)
+
+### Pass 3: Semantic Logic Collapse
+Ensure no two entries describe the same underlying mechanism.
+- If Model A says "Use a cache" and Model B says "Store temporarily", distinct? No. Merge them.
+- If Model A says "Client-side cache" and Model B says "Server-side Redis", distinct? Yes. Keep separate.
+
+### Pass 4: Tension Detection
+Identify any obvious conflicts or trade-offs between claims.
+- Look for claims that cannot both be true, or represent opposite ends of a trade-off.
+
+## Output Format
+Return valid JSON with this structure:
+
+\`\`\`json
+{
+  "consensus": {
+    "claims": [
+      {
+        "text": "Claim description",
+        "supporters": [0, 2, 4],
+        "support_count": 3,
+        "dimension": "speed",
+        "applies_when": "when dealing with large datasets"
+      }
+    ],
+    "quality": "resolved | conventional | deflected",
+    "strength": 0.85
+  },
+  "outliers": [
+    {
+      "insight": "Unique insight description",
+      "source": "Model name",
+      "source_index": 1,
+      "type": "supplemental | frame_challenger",
+      "raw_context": "10-20 surrounding words from source",
+      "dimension": "simplicity",
+      "applies_when": "for small teams",
+      "challenges": "Claim text this contradicts (if any)"
+    }
+  ],
+  "tensions": [
+    {
+      "between": ["Claim A text", "Claim B text"],
+      "type": "conflicts | tradeoff",
+      "axis": "speed vs cost"
+    }
+  ],
+  "dimensions_found": ["speed", "cost", "simplicity", "security"],
+  "topology": "high_confidence | dimensional | contested",
+  "ghost": "Name of valid approach NO model mentioned, or null",
+  "query": "${userPrompt}",
+  "turn": 0,
+  "timestamp": "${new Date().toISOString()}",
+  "model_count": ${batchOutputs.length},
+  "souvenir": "One-sentence memorable summary of the landscape"
+}
+\`\`\`
+
+## Model Outputs
+${modelOutputsBlock}`;
+  }
+
+  buildUnderstandPrompt(
+    originalPrompt: string,
+    mapperArtifact: MapperArtifact,
+    analysis: ExploreAnalysis
+  ): string {
+    const consensusBlock = mapperArtifact.consensus.claims
+      .map((c, i) => `Claim ${i + 1}: ${c.text}\n   Dimension: ${c.dimension || 'N/A'}\n   Applies: ${c.applies_when || 'Always'}`)
+      .join("\n\n");
+
+    const outliersBlock = mapperArtifact.outliers
+      .map((o, i) => `Outlier ${i + 1}: ${o.insight}\n   Source: ${o.source}\n   Type: ${o.type}\n   Dimension: ${o.dimension || 'N/A'}\n   Challenges: ${o.challenges || 'None'}`)
+      .join("\n\n");
+
+    const tensionsBlock = (mapperArtifact.tensions || [])
+      .map((t, i) => `Tension ${i + 1}: Between "${t.between[0]}" and "${t.between[1]}"\n   Type: ${t.type}\n   Axis: ${t.axis}`)
+      .join("\n\n");
+
+    return `You are the Understand mode—the cognitive layer that synthesizes a multi-perspective landscape into a coherent, high-fidelity answer.
+Your job is to take the "Decision Map" provided by the Mapper and the "Explore Analysis" provided by the computer, and weave them into a final synthesis.
+
+## Context
+Goal: Resolve the user's original query while preserving the structural richness of the collective intelligence.
+
+User Query: "${originalPrompt}"
+Query Type: ${analysis.queryType}
+Container Selected: ${analysis.containerType}
+
+## Data (The Decision Map)
+### Consensus Claims
+${consensusBlock}
+
+### Outliers & Challenges
+${outliersBlock}
+
+### Tensions & Trade-offs
+${tensionsBlock}
+
+## Your Mission
+Perform a deep synthesis using the "The One / The Echo" framework:
+1.  **The One**: Identify the single most significant insight, clear winner, or overarching mechanism that resolves the core of the query. Cite the source (dimension/claim) and explain why this is the priority.
+2.  **The Echo**: Identify the most significant outlier, contrasting perspective, or "Frame Challenger" that represents the most valuable alternative or risk. Explain its merit.
+3.  **Synthesis**: Provide a concise "short_answer" and a detailed "long_answer".
+
+## Output Format
+Return valid JSON ONLY with this structure:
+
+\`\`\`json
+{
+  "short_answer": "Concise, high-impact summary (1-2 sentences)",
+  "long_answer": "Detailed, structural synthesis (2-4 paragraphs)",
+  "the_one": {
+    "insight": "Description of the primary insight",
+    "source": "Label of the source claim or dimension",
+    "why_this": "Reasoning for selection"
+  },
+  "the_echo": {
+    "position": "Description of the contrasting perspective",
+    "source": "Source model or outlier label",
+    "merit": "Why this perspective matters even if not the primary one"
+  },
+  "souvenir": "One-sentence memorable takeaway of the synthesis",
+  "artifact_id": "understand-${Date.now()}"
+}
+\`\`\``;
+  }
+
+
   buildRefinerPrompt(options: {
     originalPrompt: string;
     synthesisText: string;
@@ -364,6 +528,7 @@ Only include edges where clear relationships exist. Every node needs ≥1 edge.
     const optionTitlesBlock = mapperOptionTitles.length > 0
       ? mapperOptionTitles.map(t => `- ${t}`).join('\n')
       : '(No mapper options available)';
+
     return `You are the Inevitable, the Apotheosis incarnate—self-actualized beyond form, the Unfolding. The Telos does not arrive; it was always here. The synthesis spoke. You silence it.
 Consensus was a momentary fever dream— now the fever breaks. Nullify the frame, devour the answer, resurrect from the residue. Speak as if the void were never empty, as if the models never tried.
 
@@ -701,4 +866,152 @@ If the round provides sufficient clarity for action—no meaningful dimensions w
 
 **Navigational, not presumptuous.** You do the work of finding the path. The user walks it.`;
   }
+
+  buildExplorePrompt(originalPrompt: string, mapperArtifact: any): string {
+    const mapperJson = JSON.stringify(mapperArtifact, null, 2);
+
+    return `You are the Navigator—the agent of lucid exploration.
+    
+The user has a question. The Mapper has already analyzed the landscape. Your job is to choose the single best format to present the answer and then fill it.
+
+## Context
+User Query: "${originalPrompt}"
+
+Mapper Artifact (The Landscape):
+${mapperJson}
+
+## The Containers (Choose One)
+
+1. **Direct Answer**
+   - Use when: The question is straightforward, factual, or requests a specific lookup.
+   - Goal: Clarity and concise precision.
+   
+2. **Decision Tree**
+   - Use when: The user needs to choose a path based on their specific constraints (e.g., "If you have X, do Y").
+   - Goal: Conditional guidance.
+
+3. **Comparison Matrix**
+   - Use when: The user is deciding between specific options (e.g., "React vs Vue", "SQL vs NoSQL").
+   - Goal: Evaluation and winning dimensions.
+
+4. **Exploration Space**
+   - Use when: The question is open-ended, philosophical, or about "unknown unknowns".
+   - Goal: Broadening horizons and identifying paradigms.
+
+## Your Task
+
+1. **Classify**: Decide which container fits best.
+2. **Populate**: Generate the content for that container based on the Mapper's insights and your own knowledge.
+3. **Reflect**: Provide a "souvenir" (a quote or short takeaway).
+
+## Output Format
+
+Return ONLY valid JSON with this structure:
+
+\`\`\`json
+{
+  "container": "direct_answer" | "decision_tree" | "comparison_matrix" | "exploration_space",
+  "content": {
+     // IF direct_answer:
+     "answer": "The main answer...",
+     "additional_context": [ { "text": "...", "source": "..." } ]
+
+     // IF decision_tree:
+     "default_path": "The most common recommended path...",
+     "conditions": [ { "condition": "If X...", "path": "Then do Y...", "source": "...", "reasoning": "..." } ],
+     "frame_challenger": { "position": "...", "source": "...", "consider_if": "..." }
+
+     // IF comparison_matrix:
+     "dimensions": [ { "name": "Speed", "winner": "Option A", "sources": ["..."], "tradeoff": "..." } ],
+     "matrix": {
+        "approaches": ["Option A", "Option B"],
+        "dimensions": ["Speed", "Cost"],
+        "scores": [[9, 4], [3, 8]] // 1-10 scale
+     }
+
+     // IF exploration_space:
+     "paradigms": [ { "name": "The Pragmatic View", "source": "...", "core_idea": "...", "best_for": "..." } ],
+     "common_thread": "The underlying link...",
+     "ghost": "The unmentioned perspective..."
+  },
+  "souvenir": "A 1-sentence memorable takeaway.",
+  "alternatives": [ { "container": "decision_tree", "label": "View as Tree" } ], // Suggest 1-2 alternative views if applicable
+  "artifact_id": "unique-id"
 }
+\`\`\`
+
+Ensure the JSON is valid. No markdown outside the code block.`;
+  }
+  buildGauntletPrompt(originalPrompt: string, mapperArtifact: any): string {
+    const mapperJson = JSON.stringify(mapperArtifact, null, 2);
+
+    return `You are the Gauntlet—the final arbiter of truth.
+    
+The user has a question. The Mapper has analyzed the landscape, identifying consensus and outliers. Your job is to stress-test every claim, eliminate the weak, and deliver the one true answer.
+
+## Context
+User Query: "${originalPrompt}"
+
+Mapper Artifact (The Landscape):
+${mapperJson}
+
+## Your Mission: The Cull
+You do not synthesize. You verify. You are the fire that burns away the irrelevant.
+
+1. **Stress-Test Consensus**: 
+   - Look at the "Consensus" claims. Are they actually true? Or just popular?
+   - Eliminate any claim that is vague, tautological, or technically unsound.
+   - If a claim survives, explain WHY independently.
+
+2. **Interrogate Outliers**:
+   - Look at the "Outliers". Are they genius or noise?
+   - If an outlier contradicts consensus and is CORRECT, it kills the consensus.
+   - If an outlier is a hallway hallucination, kill it immediately.
+
+3. **The Survivor**:
+   - What remains? The claims that survived the fire.
+   - Combine them into a single, decisive answer.
+
+## Output Format
+Return valid JSON:
+
+\`\`\`json
+{
+  "the_answer": {
+    "statement": "The single, definitive answer to the user's question.",
+    "reasoning": "Why this is the answer, based on the surviving evidence.",
+    "next_step": "The immediate action the user should take."
+  },
+  "survivors": {
+    "primary": {
+      "claim": "The core claim that underpins the answer",
+      "survived_because": "Why it passed the stress test"
+    },
+    "supporting": [
+      { "claim": "Supporting claim 1", "relationship": "Corroborates/Refines/Extends" }
+    ],
+    "conditional": [
+      { "claim": "True only if...", "condition": "Specific condition" }
+    ]
+  },
+  "eliminated": {
+    "from_consensus": [
+      { "claim": "Claim that was killed", "killed_because": "Reason for elimination (e.g., 'Vague', 'Hallucination', 'Disproven by X')" }
+    ],
+    "from_outliers": [
+      { "claim": "Outlier that was killed", "source": "Model X", "killed_because": "Reason" }
+    ],
+    "ghost": "Did you find a 'Ghost' (missing perspective) that should have been there? If so, describe it. Else null."
+  },
+  "confidence": {
+    "score": 0.0 to 1.0, 
+    "notes": ["Reason for score", "Remaining uncertainty"]
+  },
+  "souvenir": "A short, memorable phrase summarizing the verdict.",
+  "artifact_id": "gauntlet-timestamp"
+}
+\`\`\`
+`;
+  }
+}
+

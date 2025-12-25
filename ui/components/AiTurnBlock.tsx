@@ -40,6 +40,7 @@ import { useRefinerOutput } from "../hooks/useRefinerOutput";
 import { parseMappingResponse } from "../../shared/parsing-utils";
 
 import { SynthesisBubble } from "./SynthesisBubble";
+import { CognitiveOutputRenderer } from "./cognitive";
 
 // --- Helper Functions ---
 
@@ -249,6 +250,7 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
     prevTabsLengthRef.current = synthesisTabs.length;
   }, [synthesisTabs, activeRecomputeState, aiTurn.id]); // activeSynthTabId excluded to allow manual switch
 
+
   // Derive the effectively active tab (for orbs and display)
   const effectiveActiveSynthTab = useMemo(() => {
     if (synthesisTabs.length === 0) return null;
@@ -423,12 +425,14 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
     effectiveActiveSynthTab?.response?.text,
     effectiveActiveSynthTab?.providerId,
     hasMapping,
-    activeMappingPid,
     displayedMappingText,
     getOptions,
     graphTopology,
     allSources,
-    includePromptInCopy
+    includePromptInCopy,
+    aiTurn.understandVersion,
+    aiTurn.gauntletVersion,
+    aiTurn.exploreVersion
   ]);
 
   // --- NEW: Crown Move Handler (Recompute) - REMOVED for historical turns ---
@@ -454,49 +458,54 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
             <div className="w-full max-w-7xl">
               <div className="flex-1 flex flex-col relative min-w-0" style={{ maxWidth: '820px', margin: '0 auto' }}>
 
-                <SynthesisBubble
-                  aiTurn={aiTurn}
-                  effectiveActiveSynthTab={effectiveActiveSynthTab}
-                  synthesisTabs={synthesisTabs}
-                  activeSynthTabId={activeSynthTabId}
-                  onTabChange={setActiveSynthTabId}
-                  refinerOutput={refinerOutput}
-                  isRefinerLoading={isRefinerLoading}
-                  showEcho={showEcho}
-                  setShowEcho={setShowEcho}
-                  onDecisionMapOpen={() => setIsDecisionMapOpen({ turnId: aiTurn.id })}
-                  onTrustPanelOpen={() => setActiveSplitPanel({ turnId: aiTurn.id, providerId: '__trust__' })}
-                  onGemActionClick={(action) => {
-                    setChatInput(action);
-                    setTrustPanelFocus({ turnId: aiTurn.id, section: 'context' });
-                  }}
-                  wasSynthRequested={wasSynthRequested}
-                  isSynthesisTarget={isSynthesisTarget}
-                  isMappingError={isMappingError}
-                  isMappingLoading={isMappingLoading}
-                  activeMappingClipProviderId={activeMappingClipProviderId}
-                  onClipClick={onClipClick}
-                  latestSynthResponseFallback={activeSynthPid ? getLatestResponse(synthesisResponses[activeSynthPid]) : undefined}
-                  displayedVoicePid={displayedVoicePid}
-                  visibleProviderIds={visibleProviderIds}
-                  isThisTurnActive={isThisTurnActive}
-                  workflowProgress={workflowProgress as any}
-                  onOrbClick={(pid) => setActiveSplitPanel({ turnId: aiTurn.id, providerId: pid })}
-                  isDecisionMapOpen={isDecisionMapOpen?.turnId === aiTurn.id}
-                  onCopyFullTurn={handleCopyFullTurn}
-                  includePromptInCopy={includePromptInCopy}
-                  onToggleIncludePrompt={() => setIncludePromptInCopy(!includePromptInCopy)}
-                  activeAntagonistPid={activeAntagonistPid}
-                  providersConfig={LLM_PROVIDERS_CONFIG}
-                  onArtifactClick={(artifact) => setSelectedArtifact(artifact)}
-                  providerErrors={providerErrors}
-                  retryableProviders={retryableProviders}
-                  onRetryAll={() => aiTurn.sessionId && retryProviders(aiTurn.sessionId as string, aiTurn.id, retryableProviders)}
-                  getProviderName={getProviderName}
-                  onRetryProvider={(pid) => aiTurn.sessionId && retryProviders(aiTurn.sessionId as string, aiTurn.id, [pid])}
-                  CouncilOrbs={CouncilOrbs}
-                />
+                {(aiTurn.mapperArtifact && aiTurn.exploreAnalysis) && (
+                  <CognitiveOutputRenderer aiTurn={aiTurn} />
+                )}
 
+                {!aiTurn.understandOutput && !aiTurn.gauntletOutput && (
+                  <SynthesisBubble
+                    aiTurn={aiTurn}
+                    effectiveActiveSynthTab={effectiveActiveSynthTab}
+                    synthesisTabs={synthesisTabs}
+                    activeSynthTabId={activeSynthTabId}
+                    onTabChange={setActiveSynthTabId}
+                    refinerOutput={refinerOutput}
+                    isRefinerLoading={isRefinerLoading}
+                    showEcho={showEcho}
+                    setShowEcho={setShowEcho}
+                    onDecisionMapOpen={() => setIsDecisionMapOpen({ turnId: aiTurn.id })}
+                    onTrustPanelOpen={() => setActiveSplitPanel({ turnId: aiTurn.id, providerId: '__trust__' })}
+                    onGemActionClick={(action) => {
+                      setChatInput(action);
+                      setTrustPanelFocus({ turnId: aiTurn.id, section: 'context' });
+                    }}
+                    wasSynthRequested={wasSynthRequested}
+                    isSynthesisTarget={isSynthesisTarget}
+                    isMappingError={isMappingError}
+                    isMappingLoading={isMappingLoading}
+                    activeMappingClipProviderId={activeMappingClipProviderId}
+                    onClipClick={onClipClick}
+                    latestSynthResponseFallback={activeSynthPid ? getLatestResponse(synthesisResponses[activeSynthPid]) : undefined}
+                    displayedVoicePid={displayedVoicePid}
+                    visibleProviderIds={visibleProviderIds}
+                    isThisTurnActive={isThisTurnActive}
+                    workflowProgress={workflowProgress as any}
+                    onOrbClick={(pid) => setActiveSplitPanel({ turnId: aiTurn.id, providerId: pid })}
+                    isDecisionMapOpen={isDecisionMapOpen?.turnId === aiTurn.id}
+                    onCopyFullTurn={handleCopyFullTurn}
+                    includePromptInCopy={includePromptInCopy}
+                    onToggleIncludePrompt={() => setIncludePromptInCopy(!includePromptInCopy)}
+                    activeAntagonistPid={activeAntagonistPid}
+                    providersConfig={LLM_PROVIDERS_CONFIG}
+                    onArtifactClick={(artifact) => setSelectedArtifact(artifact)}
+                    providerErrors={providerErrors}
+                    retryableProviders={retryableProviders}
+                    onRetryAll={() => aiTurn.sessionId && retryProviders(aiTurn.sessionId as string, aiTurn.id, retryableProviders)}
+                    getProviderName={getProviderName}
+                    onRetryProvider={(pid) => aiTurn.sessionId && retryProviders(aiTurn.sessionId as string, aiTurn.id, [pid])}
+                    CouncilOrbs={CouncilOrbs}
+                  />
+                )}
               </div>
             </div>
           </div>

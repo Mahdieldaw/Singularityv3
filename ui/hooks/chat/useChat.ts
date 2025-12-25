@@ -28,6 +28,8 @@ import {
   activeProviderTargetAtom,
   launchpadDraftsAtom, // Import launchpad atom
   launchpadOpenAtom,
+  selectedModeAtom,
+  selectedArtifactsAtom, // Added
 } from "../../state/atoms";
 // Optimistic AI turn creation is now handled upon TURN_CREATED from backend
 import type {
@@ -58,6 +60,7 @@ export function useChat() {
   const turnIds = useAtomValue(turnIdsAtom);
   const refinerProvider = useAtomValue(refinerProviderAtom);
   const antagonistProvider = useAtomValue(antagonistProviderAtom);
+  const selectedMode = useAtomValue(selectedModeAtom);
 
 
 
@@ -79,6 +82,11 @@ export function useChat() {
   const setLaunchpadDrafts = useSetAtom(launchpadDraftsAtom);
   const setLaunchpadOpen = useSetAtom(launchpadOpenAtom);
 
+  // Artifact Selection
+  const selectedArtifacts = useAtomValue(selectedArtifactsAtom); // READ
+  const setSelectedArtifacts = useSetAtom(selectedArtifactsAtom); // WRITE
+
+
   const sendMessage = useCallback(
     async (prompt: string, mode: "new" | "continuation") => {
       if (!prompt || !prompt.trim()) return;
@@ -95,10 +103,22 @@ export function useChat() {
 
       const ts = Date.now();
       const userTurnId = `user-${ts}-${Math.random().toString(36).slice(2, 8)}`;
+
+      // Check for selected artifacts to inject
+      let finalUserMessage = prompt;
+
+      if (selectedArtifacts.size > 0) {
+        const injectionBlock = `\n\n<context_injection>\n<!-- ${selectedArtifacts.size} artifacts selected by user -->\n</context_injection>`;
+        finalUserMessage += injectionBlock;
+
+        // Clear selection after sending
+        setSelectedArtifacts((draft) => { draft.clear(); });
+      }
+
       const userTurn: UserTurn = {
         type: "user",
         id: userTurnId,
-        text: prompt,
+        text: finalUserMessage,
         createdAt: ts,
         sessionId: currentSessionId || null,
       };
@@ -177,7 +197,7 @@ export function useChat() {
           ? {
             type: "initialize",
             sessionId: null, // backend is authoritative; do not generate in UI
-            userMessage: prompt,
+            userMessage: finalUserMessage,
             providers: activeProviders,
             includeMapping: shouldUseMapping,
             includeSynthesis: shouldUseSynthesis,
@@ -201,11 +221,12 @@ export function useChat() {
             }),
             providerMeta: {},
             clientUserTurnId: userTurnId,
+            mode: selectedMode,
           }
           : {
             type: "extend",
             sessionId: currentSessionId as string,
-            userMessage: prompt,
+            userMessage: finalUserMessage,
             providers: activeProviders,
             includeMapping: shouldUseMapping,
             includeSynthesis: shouldUseSynthesis,
@@ -229,6 +250,7 @@ export function useChat() {
             }),
             providerMeta: {},
             clientUserTurnId: userTurnId,
+            mode: selectedMode,
           };
 
         // AI turn will be created upon TURN_CREATED from backend
@@ -257,6 +279,9 @@ export function useChat() {
       thinkOnChatGPT,
       powerUserMode,
       turnIds.length,
+      selectedArtifacts,
+      setSelectedArtifacts,
+      selectedMode,
     ],
   );
 

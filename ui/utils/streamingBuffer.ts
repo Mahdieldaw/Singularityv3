@@ -1,5 +1,5 @@
 // src/ui/utils/streamingBuffer.ts
-type ResponseType = "batch" | "synthesis" | "mapping" | "refiner" | "antagonist";
+type ResponseType = "batch" | "synthesis" | "mapping" | "refiner" | "antagonist" | "understand" | "gauntlet";
 
 interface BatchUpdate {
   providerId: string;
@@ -60,7 +60,7 @@ export class StreamingBuffer {
     // ⭐ DOUBLE-RAF PATTERN: First RAF schedules, second RAF executes after layout
     this.flushTimer = window.requestAnimationFrame(() => {
       window.requestAnimationFrame(() => {
-      this.flushAll();
+        this.flushAll();
         this.flushTimer = null;
       });
     });

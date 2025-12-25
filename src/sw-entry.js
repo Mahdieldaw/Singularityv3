@@ -75,9 +75,13 @@ async function handleStartup(reason) {
     prefs = await chrome.storage.local.get([
       "htos_mapping_provider",
       "htos_last_synthesis_model",
-      "htos_last_refiner_model"
+      "htos_last_refiner_model",
+      "USE_COGNITIVE_PIPELINE"
     ]);
     console.log("[SW] User preferences loaded:", prefs);
+    if (prefs.USE_COGNITIVE_PIPELINE) {
+      console.log("[SW] 🧠 Cognitive Pipeline V3 active (Ready for next run)");
+    }
   } catch (e) {
     console.warn("[SW] Failed to load preferences:", e);
   }
