@@ -54,8 +54,8 @@ function getStepType(stepId: string): "batch" | "synthesis" | "mapping" | "refin
   if (stepId.startsWith("antagonist-") || stepId.includes("-antagonist-"))
     return "antagonist";
   if (stepId.startsWith("batch-") || stepId.includes("prompt")) return "batch";
-  if (stepId.startsWith("understand-")) return "understand";
-  if (stepId.startsWith("gauntlet-")) return "gauntlet";
+  if (stepId.startsWith("understand-") || stepId.includes("understand")) return "understand";
+  if (stepId.startsWith("gauntlet-") || stepId.includes("gauntlet")) return "gauntlet";
   if (stepId.startsWith("explore-")) return "batch"; // Explore currently uses batch-like routing
 
   console.warn(`[Port] Unknown stepId pattern: ${stepId}`);
@@ -840,9 +840,16 @@ export function usePortMessageHandler() {
                         [providerId!]: arr as any,
                       } as any;
                       aiTurn.antagonistVersion = (aiTurn.antagonistVersion ?? 0) + 1;
+                    } else if (stepType === "understand") {
+                      aiTurn.understandVersion = (aiTurn.understandVersion ?? 0) + 1;
+                    } else if (stepType === "gauntlet") {
+                      aiTurn.gauntletVersion = (aiTurn.gauntletVersion ?? 0) + 1;
                     }
                   });
                 }
+                // ✅ CRITICAL: Always clear loading state on step failure to unlock UI
+                setIsLoading(false);
+                setUiPhase("awaiting_action");
               }
             } catch (e) {
               console.warn(

@@ -1,14 +1,20 @@
 import { useCallback, useState } from "react";
 import { useAtomValue } from "jotai";
-import { currentSessionIdAtom } from "../../state/atoms";
+import { isLoadingAtom, currentSessionIdAtom } from "../../state/atoms";
 import api from "../../services/extension-api";
 
 export type CognitiveMode = 'understand' | 'gauntlet';
 
 export function useCognitiveMode() {
     const sessionId = useAtomValue(currentSessionIdAtom);
-    const [isTransitioning, setIsTransitioning] = useState<boolean>(false);
+    const globalIsLoading = useAtomValue(isLoadingAtom);
+    const [localIsTransitioning, setLocalIsTransitioning] = useState<boolean>(false);
     const [error, setError] = useState<string | null>(null);
+
+    // Derived loading state: true if either local trigger is active OR global loading is active
+    // But we only want to be "isTransitioning" if we were the one who started it.
+    // Simplifying: if global loading stops, we stop.
+    const isTransitioning = localIsTransitioning && globalIsLoading;
 
     const transitionToMode = useCallback(async (aiTurnId: string, mode: CognitiveMode) => {
         if (!sessionId) {
@@ -16,7 +22,7 @@ export function useCognitiveMode() {
             return;
         }
 
-        setIsTransitioning(true);
+        setLocalIsTransitioning(true);
         setError(null);
 
         try {
@@ -39,14 +45,14 @@ export function useCognitiveMode() {
         } catch (err: any) {
             console.error(`[useCognitiveMode] Transition failed:`, err);
             setError(err.message || String(err));
-            setIsTransitioning(false);
+            setLocalIsTransitioning(false);
         }
     }, [sessionId]);
 
     return {
         transitionToMode,
         isTransitioning,
-        setIsTransitioning, // Allow resetting if needed
+        setLocalIsTransitioning, // Allow resetting if needed
         error
     };
 }

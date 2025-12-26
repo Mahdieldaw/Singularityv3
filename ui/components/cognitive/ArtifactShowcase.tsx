@@ -1,6 +1,7 @@
-import React, { useEffect } from "react";
+import React from "react";
 import { useAtom } from "jotai";
-import { MapperArtifact, AiTurn } from "../../../shared/contract";
+import { SetStateAction } from "jotai"; // For draft typing if needed
+import { MapperArtifact, AiTurn, ExploreAnalysis } from "../../../shared/contract";
 import { selectedArtifactsAtom } from "../../state/atoms";
 import { SouvenirCard } from "./cards/SouvenirCard";
 import { ConsensusCard } from "./cards/ConsensusCard";
@@ -8,22 +9,31 @@ import { OutlierCard } from "./cards/OutlierCard";
 import { GhostCard } from "./cards/GhostCard";
 import { RawResponseCard } from "./cards/RawResponseCard";
 import { SelectionBar } from "./SelectionBar";
+import {
+    buildComparisonContent,
+    buildExplorationContent,
+    buildDecisionTreeContent,
+    buildDirectAnswerContent
+} from "./content-builders";
+import { ComparisonMatrixContainer } from "./containers/ComparisonMatrixContainer";
+import { ExplorationSpaceContainer } from "./containers/ExplorationSpaceContainer";
+import { DecisionTreeContainer } from "./containers/DecisionTreeContainer";
+import { DirectAnswerContainer } from "./containers/DirectAnswerContainer";
 
 interface ArtifactShowcaseProps {
     mapperArtifact: MapperArtifact;
+    analysis: ExploreAnalysis;
     turn: AiTurn; // Needed for raw responses
 }
 
 export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
     mapperArtifact,
+    analysis,
     turn,
 }) => {
     const [selectedIds, setSelectedIds] = useAtom(selectedArtifactsAtom);
 
-    // Auto-select everything by default if it's a fresh render? 
-    // For now, let's keep it manual to avoid context bloat, or maybe auto-select high-confidence items later.
-
-    const toggleSelection = (id: string, textContext?: string) => {
+    const toggleSelection = (id: string) => {
         setSelectedIds((draft) => {
             if (draft.has(id)) {
                 draft.delete(id);
@@ -33,28 +43,44 @@ export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
         });
     };
 
+    const renderContent = () => {
+        switch (analysis.containerType) {
+            case 'comparison_matrix':
+                return <ComparisonMatrixContainer content={buildComparisonContent(mapperArtifact, analysis)} />;
+            case 'exploration_space':
+                return <ExplorationSpaceContainer content={buildExplorationContent(mapperArtifact, analysis)} />;
+            case 'decision_tree':
+                return <DecisionTreeContainer content={buildDecisionTreeContent(mapperArtifact, analysis)} />;
+            case 'direct_answer':
+                return <DirectAnswerContainer content={buildDirectAnswerContent(mapperArtifact, analysis)} />;
+            default:
+                return (
+                    <>
+                        <ConsensusCard
+                            consensus={mapperArtifact.consensus}
+                            selectedIds={selectedIds}
+                            onToggle={toggleSelection}
+                        />
+                        {(mapperArtifact.outliers?.length > 0) && (
+                            <OutlierCard
+                                outliers={mapperArtifact.outliers}
+                                selectedIds={selectedIds}
+                                onToggle={toggleSelection}
+                            />
+                        )}
+                    </>
+                );
+        }
+    };
+
     return (
         <div className="w-full max-w-3xl mx-auto space-y-4 pb-12 animate-in fade-in duration-500">
-
-            {/* Header / Intro could go here if needed, but Souvenir serves as the summary */}
-
             {mapperArtifact.souvenir && (
                 <SouvenirCard content={mapperArtifact.souvenir} />
             )}
 
-            <ConsensusCard
-                consensus={mapperArtifact.consensus}
-                selectedIds={selectedIds}
-                onToggle={toggleSelection}
-            />
-
-            {(mapperArtifact.outliers?.length > 0) && (
-                <OutlierCard
-                    outliers={mapperArtifact.outliers}
-                    selectedIds={selectedIds}
-                    onToggle={toggleSelection}
-                />
-            )}
+            {/* ORGANIZED content based on analysis */}
+            {renderContent()}
 
             {mapperArtifact.ghost && (
                 <GhostCard ghost={mapperArtifact.ghost} />
@@ -65,7 +91,6 @@ export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
 
             {/* Floating Selection Bar */}
             <SelectionBar />
-
         </div>
     );
 };

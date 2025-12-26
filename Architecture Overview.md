@@ -2,8 +2,8 @@
 
 # Singularity System Architecture Overview
 
-**Version:** 2.0  
-**Last Updated:** 2025-01-XX  
+**Version:** 3.0  
+**Last Updated:** 2025-12-27  
 **Purpose:** Complete architectural blueprint for contributors working on any layer of the system
 
 ---
@@ -40,214 +40,57 @@ The UI renders immediately using optimistic IDs and placeholder data. The backen
 **Streaming-First**  
 Every AI response streams character-by-character via `PARTIAL_RESULT` messages. The UI uses a `StreamingBuffer` to batch DOM updates, achieving 60fps rendering even during multi-provider fan-out.
 
+**Cognitive Halt, User-Selected Lenses**  
+When the Cognitive Pipeline feature flag is enabled, the backend intentionally halts after mapping once it has produced a stable `MapperArtifact` and computed `ExploreAnalysis`. At that point it emits `MAPPER_ARTIFACT_READY` and `WORKFLOW_COMPLETE` with a `haltReason`, and waits for the user to select a lens (Explore containers, Understand synthesis, or Decide/Gauntlet). Continuations run via the `CONTINUE_COGNITIVE_WORKFLOW` protocol and reuse the same artifact rather than re-running batch or mapping.
+
 ---
 
 ## 2. Data Contracts: The Language of the System
 
 ### 2.1 Request Primitives (`shared/contract.ts`)
 
-These are the only three message shapes the backend accepts:
+These are the only three message shapes the backend accepts. Full definitions live in `shared/contract.ts` (`shared/contract.ts:139`):
 
-```typescript
-// Start a new conversation
-interface InitializeRequest {
-  type: "initialize";
-  sessionId?: string | null; // Backend generates if null
-  userMessage: string;
-  providers: ProviderKey[];
-  includeMapping: boolean;
-  includeSynthesis: boolean;
-  synthesizer?: ProviderKey;
-  mapper?: ProviderKey;
-  useThinking?: boolean;
-  clientUserTurnId?: string; // Optimistic ID from UI
-}
-
-// Continue existing conversation
-interface ExtendRequest {
-  type: "extend";
-  sessionId: string; // Required
-  userMessage: string;
-  providers: ProviderKey[];
-  includeMapping: boolean;
-  includeSynthesis: boolean;
-  synthesizer?: ProviderKey;
-  mapper?: ProviderKey;
-  useThinking?: boolean;
-  clientUserTurnId?: string;
-}
-
-// Re-run historical step
-interface RecomputeRequest {
-  type: "recompute";
-  sessionId: string;
-  sourceTurnId: string; // AI turn to recompute
-  stepType: "synthesis" | "mapping";
-  targetProvider: ProviderKey;
-  useThinking?: boolean;
-}
-```
+- `InitializeRequest` — Start a new conversation. Includes:
+  - `userMessage`, `providers`, feature toggles (`includeMapping`, `includeSynthesis`, `includeRefiner`, `includeAntagonist`)
+  - role selection (`synthesizer`, `mapper`, `refiner`, `antagonist`)
+  - cognitive options (`mode?: CognitiveMode`, `providerMeta`)
+  - optimistic identity (`clientUserTurnId`)
+- `ExtendRequest` — Continue an existing conversation. Inherits the same feature flags and cognitive options, plus:
+  - `sessionId` (required)
+  - `forcedContextReset?: ProviderKey[]` for per-provider fresh starts
+- `RecomputeRequest` — Re-run a historical step without advancing the main timeline:
+  - `sourceTurnId`, `stepType: "synthesis" | "mapping" | "batch" | "refiner" | "antagonist"`, `targetProvider`
 
 ### 2.2 Real-Time Messages (Backend → UI)
 
-The backend sends these messages over a persistent `chrome.runtime.Port`:
+The backend sends these messages over a persistent `chrome.runtime.Port`. Full shapes are defined in `shared/contract.ts` (`shared/contract.ts:234`, `shared/contract.ts:430`), but conceptually:
 
-```typescript
-// Workflow lifecycle
-interface TurnCreatedMessage {
-  type: "TURN_CREATED";
-  sessionId: string;
-  userTurnId: string; // Canonical ID
-  aiTurnId: string; // Canonical ID
-}
+- `TURN_CREATED` — Announces canonical IDs and session for a new AI turn.
+- `PARTIAL_RESULT` — Streams text chunks for batch, synthesis, mapping, refiner, antagonist, and cognitive steps.
+- `WORKFLOW_STEP_UPDATE` — Marks individual steps as `completed` or `failed`, with per-step `result.meta` carrying structured outputs (e.g. `understandOutput`, `gauntletOutput`).
+- `WORKFLOW_PARTIAL_COMPLETE` — Signals that a workflow finished with some provider failures.
+- `MAPPER_ARTIFACT_READY` — Cognitive halt signal containing `MapperArtifact` and `ExploreAnalysis` for a given AI turn.
+- `WORKFLOW_PROGRESS` — Aggregate progress across providers.
+- `TURN_FINALIZED` — Delivers the canonical `Turn` (user + ai) snapshot after persistence.
 
-// Streaming updates (sent hundreds of times per turn)
-interface PartialResultMessage {
-  type: "PARTIAL_RESULT";
-  sessionId: string;
-  stepId: string; // e.g., "batch-123", "synthesis-gemini-456"
-  providerId: ProviderKey;
-  chunk: { text: string; meta?: any };
-}
+### 2.3 Core Data Shapes (`ui/types.ts`, `src/persistence/types.ts`)
 
-// Step completion
-interface WorkflowStepUpdateMessage {
-  type: "WORKFLOW_STEP_UPDATE";
-  sessionId: string;
-  stepId: string;
-  status: "completed" | "failed";
-  result?: {
-    results?: Record<string, ProviderResponse>; // For batch
-    providerId?: string; // For synthesis/mapping
-    text?: string;
-    meta?: any;
-  };
-  error?: string;
-}
+This document does not mirror the full type definitions; those live alongside the code:
 
-// Final canonical data
-interface TurnFinalizedMessage {
-  type: "TURN_FINALIZED";
-  sessionId: string;
-  userTurnId: string;
-  aiTurnId: string;
-  turn: {
-    user: UserTurn;
-    ai: AiTurn;
-  };
-}
-```
+- UI turn and response shapes: `ui/types.ts` (`ui/types.ts:1`)
+  - `UserTurn`, `AiTurn`, `ProviderResponse`
+  - Cognitive extensions on `AiTurn`:
+    - `mapperArtifact?: MapperArtifact`
+    - `exploreAnalysis?: ExploreAnalysis`
+    - `understandOutput?: UnderstandOutput`
+    - `gauntletOutput?: GauntletOutput`
+    - per-mode version counters (`understandVersion`, `gauntletVersion`, etc.)
+- Persistence records: `src/persistence/types.ts` (`src/persistence/types.ts:193`)
+  - `SessionRecord`, `TurnRecord`, `AiTurnRecord`
+  - `ProviderResponseRecord`, `ProviderContextRecord`
 
-### 2.3 Core Data Shapes (`ui/types.ts`)
-
-**Turn Types (UI State)**
-
-```typescript
-interface UserTurn {
-  type: "user";
-  id: string;
-  text: string;
-  createdAt: number;
-  sessionId: string | null;
-}
-
-interface AiTurn {
-  type: "ai";
-  id: string;
-  userTurnId: string;
-  sessionId: string;
-  threadId: string;
-  createdAt: number;
-
-  // Response storage (keys are provider IDs)
-  batchResponses: Record<string, ProviderResponse>;
-  synthesisResponses: Record<string, ProviderResponse[]>;
-  mappingResponses: Record<string, ProviderResponse[]>;
-
-  // Metadata
-  meta?: {
-    isOptimistic?: boolean;
-    requestedFeatures?: {
-      synthesis: boolean;
-      mapping: boolean;
-    };
-  };
-}
-
-interface ProviderResponse {
-  providerId: ProviderKey;
-  text: string;
-  status: "pending" | "streaming" | "completed" | "error";
-  createdAt: number;
-  updatedAt?: number;
-  meta?: {
-    conversationId?: string;
-    error?: string;
-  };
-}
-```
-
-**Persistence Records (Database Schema)**
-
-```typescript
-// sessions table
-interface SessionRecord {
-  id: string;
-  title: string;
-  createdAt: number;
-  updatedAt: number;
-  lastTurnId: string | null; // Points to latest AI turn on main timeline
-  turnCount: number;
-}
-
-// turns table (polymorphic)
-type TurnRecord = UserTurnRecord | AiTurnRecord;
-
-interface AiTurnRecord {
-  id: string;
-  type: "ai";
-  role: "assistant";
-  sessionId: string;
-  userTurnId: string;
-  threadId: string;
-  sequence: number;
-  createdAt: number;
-  updatedAt: number;
-
-  // Counts only; actual responses live in provider_responses
-  batchResponseCount: number;
-  synthesisResponseCount: number;
-  mappingResponseCount: number;
-
-  // Snapshot of contexts at this point in time (for recompute)
-  providerContexts?: Record<string, any>;
-}
-
-// provider_responses table (append-only log)
-interface ProviderResponseRecord {
-  id: string;
-  sessionId: string;
-  aiTurnId: string;
-  providerId: string;
-  responseType: "batch" | "synthesis" | "mapping";
-  responseIndex: number;
-  text: string;
-  status: string;
-  createdAt: number;
-  updatedAt: number;
-  meta?: any;
-}
-
-// provider_contexts store (live continuation metadata)
-// Primary Key: [sessionId, providerId]
-// contextData holds provider-specific continuation info used by the 'extend' primitive
-interface ProviderContextRecord {
-  sessionId: string;
-  providerId: string;
-  contextData: any; // e.g., { conversationId, parentMessageId, threadId }
-  updatedAt: number;
-}
-```
+All of these are append-only or versioned to preserve history while enabling fast lookup for hot paths (extend, recompute, and cognitive continuation).
 
 ---
 
@@ -271,17 +114,29 @@ See: [src/core/context-resolver.js](file:///c:/Users/Mahdi/OneDrive/Desktop/Sing
 
 **File:** `src/core/workflow-compiler.js`
 
-**Purpose:** Pure function that converts request + context into imperative steps.
+**Purpose:** Pure function that converts request + context into imperative steps. It is the only place that knows how to translate `InitializeRequest` / `ExtendRequest` / `RecomputeRequest` into low-level workflow steps.
 
 See: [src/core/workflow-compiler.js](file:///c:/Users/Mahdi/OneDrive/Desktop/Singularityv3/src/core/workflow-compiler.js)
+
+Key points:
+
+- Prompt steps (`type: "prompt"`) fan out the user message to all selected providers, passing through `providerMeta` and any continuation contexts resolved in `ContextResolver` (`src/core/context-resolver.js:50`).
+- Mapping steps (`type: "mapping"`) call the Mapper provider and are responsible for generating `MapperArtifact` instances (`shared/contract.ts:40`).
+- Synthesis, refiner, and antagonist steps operate over the batch/mapping outputs but do not know about cognitive modes directly; they just describe which provider and source step IDs to use.
 
 ### 3.4 Workflow Engine: Step Executor
 
 **File:** `src/core/workflow-engine.js`
 
-**Purpose:** Execute steps in sequence, stream results to UI, persist on completion.
+**Purpose:** Execute steps in sequence, stream results to UI, persist on completion, and host the Cognitive Pipeline runtime.
 
 See: [src/core/workflow-engine.js](file:///c:/Users/Mahdi/OneDrive/Desktop/Singularityv3/src/core/workflow-engine.js)
+
+Additional v3 responsibilities:
+
+- Read the `USE_COGNITIVE_PIPELINE` feature flag from `chrome.storage.local` and set `context.useCognitivePipeline` (`src/core/workflow-engine.js:494`).
+- After mapping, compute `ExploreAnalysis` and emit `MAPPER_ARTIFACT_READY`, then halt the workflow with `haltReason: "cognitive_exploration_ready"` (`src/core/workflow-engine.js:776`).
+- Handle `CONTINUE_COGNITIVE_WORKFLOW` messages by rehydrating the stored turn, creating `understand` or `gauntlet` steps, running them, and re-emitting `TURN_FINALIZED` with the new cognitive output (`src/core/workflow-engine.js:3481`).
 
 ### 3.5 System Prompts: Synthesizer and Mapper
 
@@ -372,23 +227,42 @@ Batch Fan-Out
 
 ### 4.1 State Architecture (`ui/state/atoms.ts`)
 
-**Core Principle:** Map-based storage for O(1) lookups, array of IDs for ordering.
+**Core Principle:** Map-based storage for O(1) lookups, array of IDs for ordering, plus feature flags and per-turn cognitive mode state.
 
 See: [ui/state/atoms.ts](file:///c:/Users/Mahdi/OneDrive/Desktop/Singularityv3/ui/state/atoms.ts)
 
+Highlights:
+
+- Conversation state: `turnsMapAtom`, `turnIdsAtom`, `currentSessionIdAtom`, `isLoadingAtom`, `activeAiTurnIdAtom`.
+- Cognitive feature flag: `useCognitivePipelineAtom` (backed by `atomWithStorage`, synchronized to `chrome.storage.local` for backend access).
+- Mode selection: `selectedModeAtom` for the pre-flight picker, and `turnCognitiveModeFamily` for per-turn active view (`artifact` vs `understand` vs `gauntlet`) (`ui/state/atoms.ts:1840`).
+
 ### 4.2 Message Handler: Backend → State Bridge
 
-**File:** `ui/hooks/usePortMessageHandler.ts`
+**File:** `ui/hooks/chat/usePortMessageHandler.ts`
 
 **Purpose:** Translate backend messages into state updates. This is the most critical UI hook.
 
-See: [ui/hooks/usePortMessageHandler.ts](file:///c:/Users/Mahdi/OneDrive/Desktop/Singularityv3/ui/hooks/usePortMessageHandler.ts)
+See: [ui/hooks/chat/usePortMessageHandler.ts](file:///c:/Users/Mahdi/OneDrive/Desktop/Singularityv3/ui/hooks/chat/usePortMessageHandler.ts)
+
+In addition to v2 responsibilities (handling `TURN_CREATED`, `PARTIAL_RESULT`, `WORKFLOW_STEP_UPDATE`, `TURN_FINALIZED`), it now:
+
+- Listens for `MAPPER_ARTIFACT_READY` and stores `mapperArtifact` and `exploreAnalysis` on the relevant `AiTurn` (`ui/hooks/chat/usePortMessageHandler.ts:2021`).
+- Extracts `understandOutput` and `gauntletOutput` from `WORKFLOW_STEP_UPDATE.result.meta` and increments per-mode version counters so cognitive views re-render cheaply (`ui/hooks/chat/usePortMessageHandler.ts:623`).
 
 ### 4.3 Action Hook: User Intent → Backend Messages
 
-**File:** `ui/hooks/useChat.ts`
+**File:** `ui/hooks/chat/useChat.ts`
 
-See: [ui/hooks/useChat.ts](file:///c:/Users/Mahdi/OneDrive/Desktop/Singularityv3/ui/hooks/useChat.ts)
+See: [ui/hooks/chat/useChat.ts](file:///c:/Users/Mahdi/OneDrive/Desktop/Singularityv3/ui/hooks/chat/useChat.ts)
+
+Responsibilities:
+
+- Create optimistic `UserTurn` entries as soon as the user hits Send.
+- Build `PrimitiveWorkflowRequest` objects for `initialize` vs `extend`, including:
+  - Provider configuration and feature toggles (`includeMapping`, `includeSynthesis`, `includeRefiner`, `includeAntagonist`).
+  - Cognitive mode (`mode: selectedMode`) and `providerMeta`.
+- Ensure the port is bound for existing sessions via `api.ensurePort({ sessionId })`, then call `api.executeWorkflow(primitive)` (`ui/hooks/chat/useChat.ts:171`).
 
 ---
 
@@ -404,45 +278,15 @@ See: [ui/views/ChatView.tsx](file:///c:/Users/Mahdi/OneDrive/Desktop/Singularity
 
 ### 5.3 AI Turn Block: Synthesis-Focused Renderer (`ui/components/AiTurnBlock.tsx`)
 
-**Purpose:** Renders synthesis response front-and-center as a conversation bubble, with tabs to switch between multiple synthesis takes.
+**Purpose:** Renders AI turns, including both classic synthesis bubbles and the Cognitive Pipeline’s post-mapper views.
 
-**Current Layout (v2):**
-- Synthesis bubble is the main content (not side-by-side with mapping)
-- Mapping has moved to Decision Map Sheet (bottom sheet)
-- Provider batch responses shown in right split pane via `ModelResponsePanel`
-- Council Orbs strip below each synthesis bubble for model navigation
-
-**Key Props:**
 See: [ui/components/AiTurnBlock.tsx](file:///c:/Users/Mahdi/OneDrive/Desktop/Singularityv3/ui/components/AiTurnBlock.tsx)
 
-**Synthesis Tab System:**
+In v3:
 
-
-**Interaction Flow:**
-1. **Click any orb** → Opens right split pane with that provider's batch response
-2. **Click center orb (crown)** → No-op (crown shows synthesizer)
-3. **Click orb strip background** → Opens Decision Map Sheet
-4. **Click synthesis tab** → Switches to that provider's synthesis
-
-**Visual Structure:**
-```
-┌─────────────────────────────────────┐
-│  User Prompt Card                   │
-└─────────────────────────────────────┘
-┌─────────────────────────────────────┐
-│  Synthesis Bubble                   │
-│  ┌─────────────────────────────────┐│
-│  │ [Tab: Claude] [Tab: Gemini (2)]││
-│  ├─────────────────────────────────┤│
-│  │ The Short Answer...             ││
-│  │ The Long Answer...              ││
-│  │ (Markdown rendered)             ││
-│  └─────────────────────────────────┘│
-│  ┌─────────────────────────────────┐│
-│  │  ○ ○ ● ○ ○  Council Orbs        ││
-│  └─────────────────────────────────┘│
-└─────────────────────────────────────┘
-```
+- Synthesis remains the primary conversational surface.
+- Mapping output and cognitive modes are rendered through dedicated components (Decision Map Sheet, CognitiveOutputRenderer), not inline in the bubble body.
+- Council Orbs and related UI still drive provider-level navigation.
 
 **Right Split Pane (ModelResponsePanel):**
 - Opens when user clicks an orb
@@ -620,9 +464,9 @@ See: [docs/contributing.md](file:///c:/Users/Mahdi/OneDrive/Desktop/Singularityv
 
 **UI State:**
 
-- `ui/state/atoms.ts` - Jotai state definitions (includes Composer, Analyst, Launchpad, Decision Map atoms)
-- `ui/hooks/usePortMessageHandler.ts` - Backend → State bridge
-- `ui/hooks/useChat.ts` - User actions → Backend messages
+- `ui/state/atoms.ts` - Jotai state definitions (includes Composer, Analyst, Launchpad, Decision Map, Cognitive Pipeline atoms)
+- `ui/hooks/chat/usePortMessageHandler.ts` - Backend → State bridge
+- `ui/hooks/chat/useChat.ts` - User actions → Backend messages
 - `ui/hooks/useLaunchpadDrafts.ts` - Launchpad draft management
 
 **UI Components:**

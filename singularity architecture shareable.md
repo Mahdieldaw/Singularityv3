@@ -6,9 +6,9 @@
 
   
 
-**Version:** 2.0  
+**Version:** 3.0  
 
-**Last Updated:** 2025-01-XX  
+**Last Updated:** 2025-12-25  
 
 **Purpose:** Complete architectural blueprint for contributors working on any layer of the system
 
@@ -80,7 +80,14 @@ The UI renders immediately using optimistic IDs and placeholder data. The backen
 
 Every AI response streams character-by-character via `PARTIAL_RESULT` messages. The UI uses a `StreamingBuffer` to batch DOM updates, achieving 60fps rendering even during multi-provider fan-out.
 
-  
+**Cognitive Halt, User-Selected Lenses**  
+When `USE_COGNITIVE_PIPELINE` is enabled, the backend intentionally halts after building a stable “Decision Map” (`MapperArtifact`) and a computed triage (`ExploreAnalysis`). The user then chooses a reasoning lens:
+
+- `Explore` (computed, no extra model call): shows the landscape using a container selected by `computeExplore()`
+- `Understand` (LLM call): produces a high-fidelity synthesis using the **One / Echo** framework
+- `Decide` (LLM call): runs the **Gauntlet** to stress-test and eliminate weak claims
+
+This shift turns the system from a “single synthesis generator” into an **interactive cognitive pipeline** that preserves the raw multi-model landscape while letting the user decide how to collapse it.
 
 ---
 
@@ -94,86 +101,61 @@ Every AI response streams character-by-character via `PARTIAL_RESULT` messages. 
 
   
 
-These are the only three message shapes the backend accepts:
+These are the three workflow primitives the backend compiles and executes:
 
   
 
 ```typescript
-
-// Start a new conversation
+export type CognitiveMode = "auto" | "explore" | "understand" | "decide";
 
 interface InitializeRequest {
-
-  type: "initialize";
-
-  sessionId?: string | null; // Backend generates if null
-
-  userMessage: string;
-
-  providers: ProviderKey[];
-
-  includeMapping: boolean;
-
-  includeSynthesis: boolean;
-
-  synthesizer?: ProviderKey;
-
-  mapper?: ProviderKey;
-
-  useThinking?: boolean;
-
-  clientUserTurnId?: string; // Optimistic ID from UI
-
+  type: "initialize";
+  sessionId?: string | null;
+  userMessage: string;
+  providers: ProviderKey[];
+  includeMapping: boolean;
+  includeSynthesis: boolean;
+  includeRefiner?: boolean;
+  includeAntagonist?: boolean;
+  synthesizer?: ProviderKey;
+  mapper?: ProviderKey;
+  refiner?: ProviderKey;
+  antagonist?: ProviderKey;
+  useThinking?: boolean;
+  providerMeta?: Partial<Record<ProviderKey, any>>;
+  clientUserTurnId?: string;
+  mode?: CognitiveMode;
 }
-
-  
-
-// Continue existing conversation
 
 interface ExtendRequest {
-
-  type: "extend";
-
-  sessionId: string; // Required
-
-  userMessage: string;
-
-  providers: ProviderKey[];
-
-  includeMapping: boolean;
-
-  includeSynthesis: boolean;
-
-  synthesizer?: ProviderKey;
-
-  mapper?: ProviderKey;
-
-  useThinking?: boolean;
-
-  clientUserTurnId?: string;
-
+  type: "extend";
+  sessionId: string;
+  userMessage: string;
+  providers: ProviderKey[];
+  forcedContextReset?: ProviderKey[];
+  includeMapping: boolean;
+  includeSynthesis: boolean;
+  synthesizer?: ProviderKey;
+  mapper?: ProviderKey;
+  refiner?: ProviderKey;
+  antagonist?: ProviderKey;
+  includeRefiner?: boolean;
+  includeAntagonist?: boolean;
+  useThinking?: boolean;
+  providerMeta?: Partial<Record<ProviderKey, any>>;
+  clientUserTurnId?: string;
+  mode?: CognitiveMode;
 }
-
-  
-
-// Re-run historical step
 
 interface RecomputeRequest {
-
-  type: "recompute";
-
-  sessionId: string;
-
-  sourceTurnId: string; // AI turn to recompute
-
-  stepType: "synthesis" | "mapping";
-
-  targetProvider: ProviderKey;
-
-  useThinking?: boolean;
-
+  type: "recompute";
+  sessionId: string;
+  sourceTurnId: string;
+  stepType: "synthesis" | "mapping" | "batch" | "refiner" | "antagonist";
+  targetProvider: ProviderKey;
+  userMessage?: string;
+  useThinking?: boolean;
 }
-
 ```
 
   
@@ -191,15 +173,15 @@ The backend sends these messages over a persistent `chrome.runtime.Port`:
 // Workflow lifecycle
 
 interface TurnCreatedMessage {
-
-  type: "TURN_CREATED";
-
-  sessionId: string;
-
-  userTurnId: string; // Canonical ID
-
-  aiTurnId: string; // Canonical ID
-
+  type: "TURN_CREATED";
+  sessionId: string;
+  userTurnId: string;
+  aiTurnId: string;
+  providers?: ProviderKey[];
+  synthesisProvider?: ProviderKey | null;
+  mappingProvider?: ProviderKey | null;
+  refinerProvider?: ProviderKey | null;
+  antagonistProvider?: ProviderKey | null;
 }
 
   
@@ -207,17 +189,11 @@ interface TurnCreatedMessage {
 // Streaming updates (sent hundreds of times per turn)
 
 interface PartialResultMessage {
-
-  type: "PARTIAL_RESULT";
-
-  sessionId: string;
-
-  stepId: string; // e.g., "batch-123", "synthesis-gemini-456"
-
-  providerId: ProviderKey;
-
-  chunk: { text: string; meta?: any };
-
+  type: "PARTIAL_RESULT";
+  sessionId: string;
+  stepId: string;
+  providerId: ProviderKey;
+  chunk: { text?: string; meta?: any };
 }
 
   
@@ -225,29 +201,63 @@ interface PartialResultMessage {
 // Step completion
 
 interface WorkflowStepUpdateMessage {
+  type: "WORKFLOW_STEP_UPDATE";
+  sessionId: string;
+  stepId: string;
+  status: "completed" | "failed";
+  result?: {
+    results?: Record<string, ProviderResponse>; // Batch steps
+    providerId?: string; // Single-provider steps
+    text?: string;
+    status?: string;
+    meta?: any; // Holds structured outputs (e.g., understandOutput, gauntletOutput)
+  };
+  error?: string;
+}
 
-  type: "WORKFLOW_STEP_UPDATE";
+interface WorkflowProgressMessage {
+  type: "WORKFLOW_PROGRESS";
+  sessionId: string;
+  aiTurnId: string;
+  phase: "batch" | "synthesis" | "mapping";
+  providerStatuses: ProviderStatus[];
+  completedCount: number;
+  totalCount: number;
+  estimatedTimeRemaining?: number;
+}
 
-  sessionId: string;
+interface ProviderStatus {
+  providerId: string;
+  status: "queued" | "active" | "streaming" | "completed" | "failed" | "skipped";
+  progress?: number;
+  error?: ProviderError;
+  skippedReason?: string;
+}
 
-  stepId: string;
+interface ProviderError {
+  type:
+    | "rate_limit"
+    | "auth_expired"
+    | "timeout"
+    | "circuit_open"
+    | "content_filter"
+    | "input_too_long"
+    | "network"
+    | "unknown";
+  message: string;
+  retryable: boolean;
+  retryAfterMs?: number;
+  requiresReauth?: boolean;
+}
 
-  status: "completed" | "failed";
-
-  result?: {
-
-    results?: Record<string, ProviderResponse>; // For batch
-
-    providerId?: string; // For synthesis/mapping
-
-    text?: string;
-
-    meta?: any;
-
-  };
-
-  error?: string;
-
+interface WorkflowPartialCompleteMessage {
+  type: "WORKFLOW_PARTIAL_COMPLETE";
+  sessionId: string;
+  aiTurnId: string;
+  successfulProviders: string[];
+  failedProviders: Array<{ providerId: string; error: ProviderError }>;
+  synthesisCompleted: boolean;
+  mappingCompleted: boolean;
 }
 
   
@@ -305,71 +315,70 @@ interface UserTurn {
   
 
 interface AiTurn {
+  type: "ai";
+  id: string;
+  userTurnId: string;
+  sessionId: string;
+  threadId: string;
+  createdAt: number;
 
-  type: "ai";
+  batchResponses: Record<string, ProviderResponse[]>;
+  synthesisResponses: Record<string, ProviderResponse[]>;
+  mappingResponses: Record<string, ProviderResponse[]>;
+  refinerResponses?: Record<string, ProviderResponse[]>;
+  antagonistResponses?: Record<string, ProviderResponse[]>;
+  exploreResponses?: Record<string, ProviderResponse[]>;
+  understandResponses?: Record<string, ProviderResponse[]>;
+  gauntletResponses?: Record<string, ProviderResponse[]>;
 
-  id: string;
+  // Cognitive Pipeline Artifacts (Computed)
+  mapperArtifact?: MapperArtifact;
+  exploreAnalysis?: ExploreAnalysis;
+  understandOutput?: UnderstandOutput;
+  gauntletOutput?: GauntletOutput;
 
-  userTurnId: string;
+  // Versioning: bump to force reactive UI re-renders per specialized output
+  synthesisVersion?: number;
+  mappingVersion?: number;
+  refinerVersion?: number;
+  antagonistVersion?: number;
+  understandVersion?: number;
+  gauntletVersion?: number;
 
-  sessionId: string;
-
-  threadId: string;
-
-  createdAt: number;
-
-  
-
-  // Response storage (keys are provider IDs)
-
-  batchResponses: Record<string, ProviderResponse>;
-
-  synthesisResponses: Record<string, ProviderResponse[]>;
-
-  mappingResponses: Record<string, ProviderResponse[]>;
-
-  
-
-  // Metadata
-
-  meta?: {
-
-    isOptimistic?: boolean;
-
-    requestedFeatures?: {
-
-      synthesis: boolean;
-
-      mapping: boolean;
-
-    };
-
-  };
-
+  meta?: {
+    branchPointTurnId?: string;
+    replacesId?: string;
+    isHistoricalRerun?: boolean;
+    synthForUserTurnId?: string;
+    isOptimistic?: boolean;
+    requestedFeatures?: { synthesis: boolean; mapping: boolean };
+    [key: string]: any;
+  };
 }
 
   
 
 interface ProviderResponse {
-
-  providerId: ProviderKey;
-
-  text: string;
-
-  status: "pending" | "streaming" | "completed" | "error";
-
-  createdAt: number;
-
-  updatedAt?: number;
-
-  meta?: {
-
-    conversationId?: string;
-
-    error?: string;
-
-  };
-
+  providerId: string;
+  text: string;
+  status: "pending" | "streaming" | "completed" | "error";
+  createdAt: number;
+  updatedAt?: number;
+  attemptNumber?: number;
+  artifacts?: Array<{ title: string; identifier: string; content: string; type: string }>;
+  meta?: {
+    conversationId?: string;
+    parentMessageId?: string;
+    tokenCount?: number;
+    thinkingUsed?: boolean;
+    _rawError?: string;
+    graphTopology?: GraphTopology;
+    allAvailableOptions?: string;
+    citationSourceOrder?: Record<string | number, string>;
+    synthesizer?: string;
+    mapper?: string;
+    [key: string]: any;
+  };
 }
 
 ```
@@ -505,7 +514,35 @@ interface ProviderContextRecord {
   
 
 ## 3. Backend Pipeline: Resolve → Compile → Execute
-
+  
+### 3.X The Cognitive Pipeline (V3): Mapper → Halt → Specialized Lens
+  
+When `USE_COGNITIVE_PIPELINE` is enabled, the core execution model becomes:
+  
+```text
+Batch Fan-Out
+  ↓
+Mapper V2 (produces MapperArtifact)
+  ↓
+Explore Computer (computeExplore → ExploreAnalysis)
+  ↓
+COGNITIVE HALT (UI chooses lens)
+  ↓
+Understand (One/Echo)  OR  Decide (Gauntlet)
+```
+  
+**Key consequence:** the system persists a stable “Decision Map” first, then performs user-selected collapse. This preserves optionality and prevents premature synthesis.
+  
+**Key files:**
+- `shared/contract.ts` — `MapperArtifact`, `ExploreAnalysis`, `UnderstandOutput`, `GauntletOutput`
+- `shared/parsing-utils.ts` — `parseMapperArtifact`, `parseUnderstandOutput`, `parseGauntletOutput`
+- `src/core/PromptService.ts` — `buildMapperV2Prompt`, `buildUnderstandPrompt`, `buildGauntletPrompt`
+- `src/core/cognitive/explore-computer.ts` — `computeExplore()` (pure compute triage)
+- `src/core/workflow-engine.js` — cognitive halt and mode continuation
+- `src/core/connection-handler.js` — handles `CONTINUE_COGNITIVE_WORKFLOW`
+- `ui/hooks/chat/usePortMessageHandler.ts` — handles `MAPPER_ARTIFACT_READY` and specialized step updates
+- `ui/components/cognitive/CognitiveOutputRenderer.tsx` — the UI hub for artifact/showcase vs specialized modes
+  
   
 
 ### 3.1 Entry Point: Connection Handler
@@ -1105,6 +1142,37 @@ async executePromptStep(step, context) {
 }
 
 ```
+  
+#### Cognitive Halt (MapperArtifact Ready)
+  
+When cognitive mode is enabled, the workflow halts immediately after mapping—right after emitting a stable artifact and its computed analysis:
+  
+```javascript
+if (context.useCognitivePipeline) {
+  const mappingResult = [...stepResults.entries()].find(([_, v]) =>
+    v.status === 'completed' && v.result?.mapperArtifact
+  )?.[1]?.result;
+
+  if (mappingResult?.mapperArtifact) {
+    const mapperArtifact = mappingResult.mapperArtifact;
+    const exploreAnalysis = computeExplore(context.userMessage || '', mapperArtifact);
+
+    this.port.postMessage({
+      type: 'MAPPER_ARTIFACT_READY',
+      sessionId: context.sessionId,
+      aiTurnId: context.canonicalAiTurnId,
+      artifact: mapperArtifact,
+      analysis: exploreAnalysis,
+    });
+
+    this._emitTurnFinalized(context, steps, stepResults, resolvedContext);
+    this.port.postMessage({ type: "WORKFLOW_COMPLETE", sessionId: context.sessionId });
+    return;
+  }
+}
+```
+  
+This is the “choice point” in the system: the UI has everything it needs to show the landscape, but nothing has been collapsed into a single answer yet.
 
   
 
@@ -1112,14 +1180,100 @@ async executePromptStep(step, context) {
 
   
 
-**File:** `src/core/workflow-engine.js`
+**File:** `src/core/PromptService.ts`
 
   
 
 **Purpose:** These prompts define how the synthesis and mapping steps transform batch outputs.
 
   
+#### Mapper V2 Prompt (buildMapperV2Prompt)
+  
+The V3 Mapper converts raw batch outputs into a stable artifact (`MapperArtifact`) that all cognitive modes consume:
+  
+```typescript
+// src/core/PromptService.ts (excerpt)
+buildMapperV2Prompt(userPrompt, batchOutputs) {
+  const modelOutputsBlock = batchOutputs
+    .map((res, idx) => `=== MODEL ${idx + 1} (${res.providerId}) ===\n${res.text}`)
+    .join("\n\n");
 
+  return `You are the Mapper—the cognitive layer that organizes raw intelligence into structured topology.
+You do not synthesize. You do not decide. You catalog, verify, and map.
+
+## Your Task
+Perform a four-pass analysis on the model outputs to produce a high-fidelity decision map.
+
+### Pass 1: Consensus Extraction
+Identify claims supported by at least 2 models (merge by meaning, not words).
+
+### Pass 2: Outlier Extraction
+Identify unique high-value insights and preserve "Frame Challengers".
+
+### Pass 3: Semantic Logic Collapse
+Merge true equivalents, keep distinct mechanisms separate.
+
+### Pass 4: Tension Detection
+Identify conflicts or trade-offs between claims.
+
+## Output Format
+Return valid JSON ONLY matching the MapperArtifact schema.
+
+## Model Outputs
+${modelOutputsBlock}`;
+}
+```
+  
+This output becomes the stable “Decision Map” that powers the rest of the pipeline.
+  
+---
+  
+#### Understand Prompt (buildUnderstandPrompt)
+  
+Understand is the controlled collapse: it turns the map into a coherent answer using **The One / The Echo**:
+  
+```typescript
+// src/core/PromptService.ts (excerpt)
+buildUnderstandPrompt(originalPrompt, mapperArtifact, analysis) {
+  return `You are the Understand mode—the cognitive layer that synthesizes a multi-perspective landscape into a coherent, high-fidelity answer.
+
+User Query: "${originalPrompt}"
+Query Type: ${analysis.queryType}
+Container Selected: ${analysis.containerType}
+
+## Your Mission
+1. The One: identify the single most significant insight.
+2. The Echo: identify the strongest contrarian or frame-challenger.
+3. Synthesis: produce short_answer + long_answer.
+
+## Output Format
+Return valid JSON ONLY (UnderstandOutput).`;
+}
+```
+  
+---
+  
+#### Decide Prompt (buildGauntletPrompt)
+  
+Decide is adversarial collapse: it stress-tests claims and eliminates weak ones before issuing a verdict:
+  
+```typescript
+// src/core/PromptService.ts (excerpt)
+buildGauntletPrompt(originalPrompt, mapperArtifact) {
+  return `You are the Gauntlet—the final arbiter of truth.
+
+## Your Mission: The Cull
+1. Stress-test consensus: eliminate weak/vague/unsound claims.
+2. Interrogate outliers: genius vs noise; correct outliers can kill consensus.
+3. The Survivor: deliver the single decisive answer.
+
+## Output Format
+Return valid JSON ONLY (GauntletOutput).`;
+}
+```
+  
+---
+  
 #### Synthesizer Prompt (buildSynthesisPrompt)
 
   
@@ -1130,7 +1284,7 @@ The synthesizer creates a unified response that "could only exist" from seeing a
 
 ```javascript
 
-// Key excerpt from buildSynthesisPrompt (lines 208-281)
+// Key excerpt from buildSynthesisPrompt (src/core/PromptService.ts)
 
 const finalPrompt = `Your task is to create a response to the user's prompt,
 
@@ -1204,7 +1358,7 @@ writing a "The Long Answer" header which contains your actual response.`;
 
   
 
-#### Mapper Prompt (buildMappingPrompt)
+#### Mapper V1 Prompt (buildMappingPrompt, legacy)
 
   
 
@@ -1214,7 +1368,7 @@ The mapper is a "provenance tracker and option cataloger" that reveals consensus
 
 ```javascript
 
-// Key excerpt from buildMappingPrompt (lines 283-387)
+// Key excerpt from buildMappingPrompt (src/core/PromptService.ts)
 
 return `You are not a synthesizer. You are a provenance tracker and option cataloger,
 
@@ -1728,7 +1882,7 @@ export const activeRecomputeStateAtom = atom<{
 
   aiTurnId: string;
 
-  stepType: "synthesis" | "mapping";
+  stepType: "batch" | "synthesis" | "mapping" | "refiner" | "antagonist";
 
   providerId: string;
 
@@ -1768,6 +1922,26 @@ export const synthesisProviderAtom = atomWithStorage<string | null>(
 
   null,
 
+);
+
+// COGNITIVE PIPELINE (feature flag + per-turn view state)
+export const useCognitivePipelineAtom = atomWithStorage<boolean>(
+  "htos_cognitive_pipeline",
+  true
+);
+
+export const cognitiveModeMapAtom = atomWithImmer<Record<string, CognitiveViewMode>>({});
+export const turnCognitiveModeFamily = atomFamily(
+  (turnId: string) =>
+    atom(
+      (get) => get(cognitiveModeMapAtom)[turnId] || "artifact",
+      (get, set, newMode: CognitiveViewMode) => {
+        set(cognitiveModeMapAtom, (draft) => {
+          draft[turnId] = newMode;
+        });
+      }
+    ),
+  (a, b) => a === b
 );
 
   
@@ -1832,7 +2006,7 @@ export const providerAuthStatusAtom = atom<Record<string, boolean>>({});
 
   
 
-**File:** `ui/hooks/usePortMessageHandler.ts`
+**File:** `ui/hooks/chat/usePortMessageHandler.ts`
 
   
 
@@ -2235,164 +2409,115 @@ export function usePortMessageHandler() {
 }
 
 ```
-
   
+#### Cognitive Message Integration
+  
+The cognitive pipeline introduces a dedicated artifact-ready event plus structured outputs embedded in `meta` during specialized steps:
+  
+```typescript
+// ui/hooks/chat/usePortMessageHandler.ts (excerpt)
+case "MAPPER_ARTIFACT_READY": {
+  const { aiTurnId, artifact, analysis } = message as any;
+  if (!aiTurnId) return;
+
+  setTurnsMap((draft: Map<string, TurnMessage>) => {
+    const existing = draft.get(aiTurnId);
+    if (!existing || existing.type !== "ai") return;
+    const aiTurn = existing as AiTurn;
+
+    draft.set(aiTurnId, {
+      ...aiTurn,
+      mapperArtifact: artifact,
+      exploreAnalysis: analysis,
+    });
+  });
+  break;
+}
+
+// In WORKFLOW_STEP_UPDATE handling:
+if (stepType === "understand" && data?.meta?.understandOutput) {
+  aiTurn.understandOutput = data.meta.understandOutput;
+}
+if (stepType === "gauntlet" && data?.meta?.gauntletOutput) {
+  aiTurn.gauntletOutput = data.meta.gauntletOutput;
+}
+```
+  
+This is the bridge from “raw streaming text” into typed cognitive artifacts (`MapperArtifact`, `UnderstandOutput`, `GauntletOutput`) without losing access to the original text streams.
 
 ### 4.3 Action Hook: User Intent → Backend Messages
 
   
 
-**File:** `ui/hooks/useChat.ts`
+**File:** `ui/hooks/chat/useChat.ts`
 
   
 
 ```typescript
 
-export function useChat() {
-
-  const selectedModels = useAtomValue(selectedModelsAtom);
-
-  const currentSessionId = useAtomValue(currentSessionIdAtom);
-
-  const turnIds = useAtomValue(turnIdsAtom);
-
-  const setTurnsMap = useSetAtom(turnsMapAtom);
-
-  const setTurnIds = useSetAtom(turnIdsAtom);
-
-  const setIsLoading = useSetAtom(isLoadingAtom);
-
-  
-
-  const sendMessage = useCallback(
-
-    async (prompt: string, mode: "new" | "continuation") => {
-
-      const ts = Date.now();
-
-      const userTurnId = `user-${ts}-${Math.random().toString(36).slice(2, 8)}`;
-
-  
-
-      const userTurn: UserTurn = {
-
-        type: "user",
-
-        id: userTurnId,
-
-        text: prompt,
-
-        createdAt: ts,
-
-        sessionId: currentSessionId,
-
-      };
-
-  
-
-      // Write optimistic user turn
-
-      setTurnsMap((draft) => {
-
-        draft.set(userTurn.id, userTurn);
-
-      });
-
-      setTurnIds((draft) => {
-
-        draft.push(userTurn.id);
-
-      });
-
-  
-
-      setIsLoading(true);
-
-  
-
-      // Determine active providers
-
-      const activeProviders = LLM_PROVIDERS_CONFIG.filter(
-
-        (p) => selectedModels[p.id],
-
-      ).map((p) => p.id as ProviderKey);
-
-  
-
-      // Build primitive request
-
-      const isInitialize = mode === "new" && !currentSessionId;
-
-  
-
-      const primitive: PrimitiveWorkflowRequest = isInitialize
-
-        ? {
-
-            type: "initialize",
-
-            sessionId: null,
-
-            userMessage: prompt,
-
-            providers: activeProviders,
-
-            includeMapping: mappingEnabled && !!mappingProvider,
-
-            includeSynthesis: !!synthesisProvider,
-
-            synthesizer: synthesisProvider,
-
-            mapper: mappingProvider,
-
-            clientUserTurnId: userTurnId,
-
-          }
-
-        : {
-
-            type: "extend",
-
-            sessionId: currentSessionId!,
-
-            userMessage: prompt,
-
-            providers: activeProviders,
-
-            includeMapping: mappingEnabled && !!mappingProvider,
-
-            includeSynthesis: !!synthesisProvider,
-
-            synthesizer: synthesisProvider,
-
-            mapper: mappingProvider,
-
-            clientUserTurnId: userTurnId,
-
-          };
-
-  
-
-      await api.executeWorkflow(primitive);
-
-    },
-
-    [
-
-      /* deps */
-
-    ],
-
-  );
-
-  
-
-  return { sendMessage };
-
-}
+const primitive: PrimitiveWorkflowRequest = isInitialize
+  ? {
+    type: "initialize",
+    sessionId: null,
+    userMessage: finalUserMessage,
+    providers: activeProviders,
+    includeMapping: shouldUseMapping,
+    includeSynthesis: shouldUseSynthesis,
+    synthesizer: shouldUseSynthesis
+      ? (synthesisProvider as ProviderKey)
+      : undefined,
+    mapper: shouldUseMapping
+      ? (effectiveMappingProvider as ProviderKey)
+      : undefined,
+    refiner: shouldUseSynthesis && effectiveRefinerProvider
+      ? (effectiveRefinerProvider as ProviderKey)
+      : undefined,
+    antagonist: effectiveAntagonistProvider
+      ? (effectiveAntagonistProvider as ProviderKey)
+      : undefined,
+    includeRefiner: !!(shouldUseSynthesis && effectiveRefinerProvider),
+    includeAntagonist: !!effectiveAntagonistProvider,
+    useThinking: computeThinkFlag({
+      modeThinkButtonOn: thinkOnChatGPT,
+      input: prompt,
+    }),
+    providerMeta: {},
+    clientUserTurnId: userTurnId,
+    mode: selectedMode,
+  }
+  : {
+    type: "extend",
+    sessionId: currentSessionId as string,
+    userMessage: finalUserMessage,
+    providers: activeProviders,
+    includeMapping: shouldUseMapping,
+    includeSynthesis: shouldUseSynthesis,
+    synthesizer: shouldUseSynthesis
+      ? (synthesisProvider as ProviderKey)
+      : undefined,
+    mapper: shouldUseMapping
+      ? (effectiveMappingProvider as ProviderKey)
+      : undefined,
+    refiner: shouldUseSynthesis && effectiveRefinerProvider
+      ? (effectiveRefinerProvider as ProviderKey)
+      : undefined,
+    antagonist: effectiveAntagonistProvider
+      ? (effectiveAntagonistProvider as ProviderKey)
+      : undefined,
+    includeRefiner: !!(shouldUseSynthesis && effectiveRefinerProvider),
+    includeAntagonist: !!effectiveAntagonistProvider,
+    useThinking: computeThinkFlag({
+      modeThinkButtonOn: thinkOnChatGPT,
+      input: prompt,
+    }),
+    providerMeta: {},
+    clientUserTurnId: userTurnId,
+    mode: selectedMode,
+  };
 
 ```
+
+For `extend`, the UI also ensures the backend port is bound to the target session via `api.ensurePort({ sessionId })` before sending `executeWorkflow`.
 
   
 
@@ -3868,9 +3993,9 @@ const regenerate = useCallback(async () => {
 
 - `ui/state/atoms.ts` - Jotai state definitions (includes Composer, Analyst, Launchpad, Decision Map atoms)
 
-- `ui/hooks/usePortMessageHandler.ts` - Backend → State bridge
+- `ui/hooks/chat/usePortMessageHandler.ts` - Backend → State bridge
 
-- `ui/hooks/useChat.ts` - User actions → Backend messages
+- `ui/hooks/chat/useChat.ts` - User actions → Backend messages
 
 - `ui/hooks/useLaunchpadDrafts.ts` - Launchpad draft management
 

@@ -61,7 +61,11 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
             <div className="w-full">
                 {activeMode === 'artifact' && (
                     <div className="flex flex-col gap-4">
-                        <ArtifactShowcase mapperArtifact={aiTurn.mapperArtifact!} turn={aiTurn} />
+                        <ArtifactShowcase
+                            mapperArtifact={aiTurn.mapperArtifact!}
+                            analysis={aiTurn.exploreAnalysis!} // Pass the analysis prop
+                            turn={aiTurn}
+                        />
                         {/* Only show PostMapperButtons if we aren't already transitioning or have results */}
                         {!hasSpecializedOutput && (
                             <PostMapperView

@@ -1413,6 +1413,36 @@ export class WorkflowEngine {
               });
               break;
             }
+            case "understand": {
+              const providerId = result?.providerId || step?.payload?.understandProvider;
+              if (!providerId) return;
+              if (!understandResponses[providerId])
+                understandResponses[providerId] = [];
+              understandResponses[providerId].push({
+                providerId,
+                text: result?.text || "",
+                status: result?.status || "completed",
+                createdAt: timestamp,
+                updatedAt: timestamp,
+                meta: result?.meta || {},
+              });
+              break;
+            }
+            case "gauntlet": {
+              const providerId = result?.providerId || step?.payload?.gauntletProvider;
+              if (!providerId) return;
+              if (!gauntletResponses[providerId])
+                gauntletResponses[providerId] = [];
+              gauntletResponses[providerId].push({
+                providerId,
+                text: result?.text || "",
+                status: result?.status || "completed",
+                createdAt: timestamp,
+                updatedAt: timestamp,
+                meta: result?.meta || {},
+              });
+              break;
+            }
           }
           return;
         }
@@ -1502,6 +1532,36 @@ export class WorkflowEngine {
               if (!antagonistResponses[providerId])
                 antagonistResponses[providerId] = [];
               antagonistResponses[providerId].push({
+                providerId,
+                text: errorText || "",
+                status: "error",
+                createdAt: timestamp,
+                updatedAt: timestamp,
+                meta: { error: errorText },
+              });
+              break;
+            }
+            case "understand": {
+              const providerId = step?.payload?.understandProvider;
+              if (!providerId) return;
+              if (!understandResponses[providerId])
+                understandResponses[providerId] = [];
+              understandResponses[providerId].push({
+                providerId,
+                text: errorText || "",
+                status: "error",
+                createdAt: timestamp,
+                updatedAt: timestamp,
+                meta: { error: errorText },
+              });
+              break;
+            }
+            case "gauntlet": {
+              const providerId = step?.payload?.gauntletProvider;
+              if (!providerId) return;
+              if (!gauntletResponses[providerId])
+                gauntletResponses[providerId] = [];
+              gauntletResponses[providerId].push({
                 providerId,
                 text: errorText || "",
                 status: "error",
