@@ -16,8 +16,10 @@ import {
 export function getClaimsForDimension(
     artifact: MapperArtifact,
     dimension: string
-): MapperArtifact['consensus']['claims'] {
-    return artifact.consensus.claims.filter(c => c.dimension === dimension);
+): Array<MapperArtifact['consensus']['claims'][0] & { id: string }> {
+    return artifact.consensus.claims
+        .map((c, i) => ({ ...c, id: `consensus-${i}` }))
+        .filter(c => c.dimension === dimension);
 }
 
 /**

@@ -3,6 +3,10 @@ import { MapperArtifact, AiTurn, ExploreAnalysis } from "../../../shared/contrac
 import { DimensionFirstView } from "./DimensionFirstView";
 import { RawResponseCard } from "./cards/RawResponseCard";
 
+import { selectedArtifactsAtom } from "../../state/atoms";
+import { SelectionBar } from "./SelectionBar";
+import { useAtom } from "jotai";
+
 interface ArtifactShowcaseProps {
     mapperArtifact: MapperArtifact;
     analysis: ExploreAnalysis;
@@ -20,6 +24,18 @@ export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
     onDecide,
     isLoading = false,
 }) => {
+    const [selectedIds, setSelectedIds] = useAtom(selectedArtifactsAtom);
+
+    const toggleSelection = (id: string) => {
+        setSelectedIds((draft) => {
+            if (draft.has(id)) {
+                draft.delete(id);
+            } else {
+                draft.add(id);
+            }
+        });
+    };
+
     return (
         <div className="w-full">
             {/* Primary: Dimension-First View (lossless) */}
@@ -29,7 +45,10 @@ export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
                 onUnderstand={onUnderstand}
                 onDecide={onDecide}
                 isLoading={isLoading}
+                selectedIds={selectedIds}
+                onToggle={toggleSelection}
             />
+            <SelectionBar />
 
             {/* Raw responses at the bottom for verification */}
             <div className="max-w-3xl mx-auto mt-6">

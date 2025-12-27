@@ -103,6 +103,7 @@ export interface EnrichedOutlier {
   challenges?: string;
 
   // Computed scores
+  id: string;                       // Stable ID for selection (outlier-N)
   elevation_score: number;          // 0-10 composite
   covers_consensus_gap: boolean;    // Dimension not in consensus
   specificity: Specificity;

@@ -17,6 +17,8 @@ interface DimensionFirstViewProps {
     onUnderstand?: () => void;
     onDecide?: () => void;
     isLoading?: boolean;
+    selectedIds?: Set<string>;
+    onToggle?: (id: string) => void;
 }
 
 export const DimensionFirstView: React.FC<DimensionFirstViewProps> = ({
@@ -25,6 +27,8 @@ export const DimensionFirstView: React.FC<DimensionFirstViewProps> = ({
     onUnderstand,
     onDecide,
     isLoading = false,
+    selectedIds,
+    onToggle
 }) => {
     const { dimensionCoverage, allOutliers, summaryBar } = analysis;
 
@@ -55,6 +59,8 @@ export const DimensionFirstView: React.FC<DimensionFirstViewProps> = ({
                             claims={getClaimsForDimension(artifact, coverage.dimension)}
                             outliers={getOutliersForDimension(allOutliers, coverage.dimension)}
                             status="gap"
+                            selectedIds={selectedIds}
+                            onToggle={onToggle}
                         />
                     ))}
                 </section>
@@ -77,6 +83,8 @@ export const DimensionFirstView: React.FC<DimensionFirstViewProps> = ({
                             claims={getClaimsForDimension(artifact, coverage.dimension)}
                             outliers={getOutliersForDimension(allOutliers, coverage.dimension)}
                             status="contested"
+                            selectedIds={selectedIds}
+                            onToggle={onToggle}
                         />
                     ))}
                 </section>
@@ -99,6 +107,8 @@ export const DimensionFirstView: React.FC<DimensionFirstViewProps> = ({
                             claims={getClaimsForDimension(artifact, coverage.dimension)}
                             outliers={getOutliersForDimension(allOutliers, coverage.dimension)}
                             status="settled"
+                            selectedIds={selectedIds}
+                            onToggle={onToggle}
                         />
                     ))}
                 </section>
@@ -159,12 +169,13 @@ export const DimensionFirstView: React.FC<DimensionFirstViewProps> = ({
                 <button
                     onClick={onDecide}
                     disabled={isLoading}
-                    className="flex-1 px-4 py-3 bg-gradient-to-r from-amber-600 to-orange-600 
-                               hover:from-amber-500 hover:to-orange-500
-                               text-white rounded-lg font-medium transition-all
-                               disabled:opacity-50 disabled:cursor-not-allowed"
+                    className={`flex-1 px-4 py-3 text-white rounded-lg font-medium transition-all
+                               disabled:opacity-50 disabled:cursor-not-allowed
+                               ${analysis.escapeVelocity
+                            ? 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 border border-emerald-400/30'
+                            : 'bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500'}`}
                 >
-                    ⚡ Decide
+                    {analysis.escapeVelocity ? '🚀 Ready to Decide' : '⚡ Decide'}
                 </button>
             </div>
         </div>

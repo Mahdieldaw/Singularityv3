@@ -40,8 +40,8 @@ export function computeExplore(query: string, artifact: MapperArtifact): Explore
     const consensusDimensions = new Set(
         artifact.consensus.claims.map(c => c.dimension).filter(Boolean) as string[]
     );
-    const allOutliers = artifact.outliers.map(o =>
-        computeOutlierElevation(o, consensusDimensions, artifact.outliers)
+    const allOutliers = artifact.outliers.map((o, index) =>
+        computeOutlierElevation(o, consensusDimensions, artifact.outliers, index)
     );
 
     // Sort by elevation score and mark top 3 as recommended
@@ -372,7 +372,8 @@ export function computeSpecificity(text: string): Specificity {
 export function computeOutlierElevation(
     outlier: MapperArtifact['outliers'][0],
     consensusDimensions: Set<string>,
-    allOutliers: MapperArtifact['outliers']
+    allOutliers: MapperArtifact['outliers'],
+    index: number
 ): EnrichedOutlier {
     let score = 0;
 
@@ -410,6 +411,7 @@ export function computeOutlierElevation(
 
     return {
         ...outlier,
+        id: `outlier-${index}`,
         elevation_score: Math.min(score, 10),
         covers_consensus_gap: coversGap,
         specificity,
@@ -495,7 +497,7 @@ export function sortDimensions(coverage: DimensionCoverage[]): DimensionCoverage
 export function computeSummaryBar(
     artifact: MapperArtifact,
     dimensionCoverage: DimensionCoverage[],
-    queryType: string,
+    queryType: QueryType,
     escapeVelocity: boolean
 ): SummaryBarData {
     const gaps = dimensionCoverage.filter(d => d.status === 'gap').length;
