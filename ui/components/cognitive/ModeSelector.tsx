@@ -7,7 +7,6 @@ import { useAtomValue } from "jotai";
 
 const MODES: { id: CognitiveMode; label: string; icon: string; description: string }[] = [
     { id: "auto", label: "Auto", icon: "✨", description: "System decides based on query" },
-    { id: "explore", label: "Explore", icon: "🔍", description: "Show me what exists" },
     { id: "understand", label: "Understand", icon: "🧠", description: "Help me make sense of this" },
     { id: "decide", label: "Decide", icon: "⚡", description: "Just tell me what to do" },
 ];
@@ -18,11 +17,20 @@ const ModeSelector: React.FC = () => {
 
     if (!useCognitivePipeline) return null;
 
+    const safeSelectedMode: CognitiveMode =
+        MODES.some((m) => m.id === selectedMode) ? selectedMode : "auto";
+
+    React.useEffect(() => {
+        if (safeSelectedMode !== selectedMode) {
+            setSelectedMode(safeSelectedMode);
+        }
+    }, [safeSelectedMode, selectedMode, setSelectedMode]);
+
     return (
         <div className="flex justify-center w-full mb-2 animate-in fade-in slide-in-from-bottom-2 duration-300">
             <div className="flex bg-surface-base/80 backdrop-blur-md border border-border-subtle rounded-full p-1 shadow-sm">
                 {MODES.map((mode) => {
-                    const isActive = selectedMode === mode.id;
+                    const isActive = safeSelectedMode === mode.id;
                     return (
                         <button
                             key={mode.id}

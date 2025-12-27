@@ -2,6 +2,7 @@
 // Supports both legacy chrome.storage and new persistence layer via feature flag
 
 import { SimpleIndexedDBAdapter } from "./SimpleIndexedDBAdapter.js";
+import { formatArtifactAsOptions } from "../../shared/parsing-utils";
 
 
 
@@ -164,8 +165,7 @@ export class SessionManager {
     }
     const now = Date.now();
 
-    const shouldBuildContextSummary = !request?.mapperArtifact && !request?.exploreAnalysis;
-    const contextSummary = shouldBuildContextSummary ? this._buildContextSummary(result) : "";
+    const contextSummary = this._buildContextSummary(result, request);
 
     // 1) Create session
     const sessionRecord = {
@@ -268,8 +268,7 @@ export class SessionManager {
     const { sessionId } = request;
     const now = Date.now();
 
-    const shouldBuildContextSummary = !request?.mapperArtifact && !request?.exploreAnalysis;
-    const contextSummary = shouldBuildContextSummary ? this._buildContextSummary(result) : "";
+    const contextSummary = this._buildContextSummary(result, request);
 
     // Validate last turn
     if (!context?.lastTurnId) {
@@ -1207,31 +1206,38 @@ export class SessionManager {
   /**
    * Combine synthesis + mapping extracts into context blob
    */
-  _buildContextSummary(result) {
+  _buildContextSummary(result, request) {
     let summary = "";
 
-    // 1. Synthesis (Preferred)
-    const synthesisOutputs = result?.synthesisOutputs || {};
-    const synthProvider = Object.keys(synthesisOutputs)[0];
-    if (synthProvider && synthesisOutputs[synthProvider]?.text) {
-      const synthText = synthesisOutputs[synthProvider].text;
-      const extracted = this._extractContextFromSynthesis(synthText);
-      if (extracted) {
-        summary += `<previous_synthesis>\n${extracted}\n</previous_synthesis>\n\n`;
+    if (request?.understandOutput?.short_answer) {
+      summary += `<previous_synthesis>\n${request.understandOutput.short_answer}\n</previous_synthesis>\n\n`;
+    } else if (request?.gauntletOutput?.the_answer?.statement) {
+      summary += `<previous_synthesis>\n${request.gauntletOutput.the_answer.statement}\n</previous_synthesis>\n\n`;
+    } else {
+      const synthesisOutputs = result?.synthesisOutputs || {};
+      const synthProvider = Object.keys(synthesisOutputs)[0];
+      if (synthProvider && synthesisOutputs[synthProvider]?.text) {
+        const synthText = synthesisOutputs[synthProvider].text;
+        const extracted = this._extractContextFromSynthesis(synthText);
+        if (extracted) {
+          summary += `<previous_synthesis>\n${extracted}\n</previous_synthesis>\n\n`;
+        }
       }
     }
 
-    // 2. Mapping (Narrative)
-    const mappingOutputs = result?.mappingOutputs || {};
-    const mapProvider = Object.keys(mappingOutputs)[0];
-    if (mapProvider && mappingOutputs[mapProvider]?.text) {
-      const mapText = mappingOutputs[mapProvider].text;
-      const parts = mapText.split("===ALL_AVAILABLE_OPTIONS===");
-      const narrative = parts[0] || "";
-
-      const extracted = this._extractContextFromMapping(narrative);
-      if (extracted) {
-        summary += `<council_views>\n${extracted}\n</council_views>`;
+    if (request?.mapperArtifact) {
+      const optionsText = formatArtifactAsOptions(request.mapperArtifact);
+      if (optionsText) summary += `<council_views>\n${optionsText}\n</council_views>`;
+    } else {
+      const mappingOutputs = result?.mappingOutputs || {};
+      const mapProvider = Object.keys(mappingOutputs)[0];
+      if (mapProvider && mappingOutputs[mapProvider]?.text) {
+        const mapText = mappingOutputs[mapProvider].text;
+        const narrative = String(mapText).split("===ALL_AVAILABLE_OPTIONS===")[0].trim();
+        const extracted = this._extractContextFromMapping(narrative);
+        if (extracted) {
+          summary += `<council_views>\n${extracted}\n</council_views>`;
+        }
       }
     }
 

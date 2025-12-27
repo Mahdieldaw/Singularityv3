@@ -20,6 +20,7 @@ import {
   currentAppStepAtom,
   uiPhaseAtom,
   isHistoryPanelOpenAtom,
+  useCognitivePipelineAtom,
 
   iscomposingAtom, // Import new atom
   composerModelAtom, // Import new atom
@@ -28,7 +29,6 @@ import {
   activeProviderTargetAtom,
   launchpadDraftsAtom, // Import launchpad atom
   launchpadOpenAtom,
-  selectedModeAtom,
   selectedArtifactsAtom, // Added
 } from "../../state/atoms";
 // Optimistic AI turn creation is now handled upon TURN_CREATED from backend
@@ -60,7 +60,7 @@ export function useChat() {
   const turnIds = useAtomValue(turnIdsAtom);
   const refinerProvider = useAtomValue(refinerProviderAtom);
   const antagonistProvider = useAtomValue(antagonistProviderAtom);
-  const selectedMode = useAtomValue(selectedModeAtom);
+  const isGuidedMode = useAtomValue(useCognitivePipelineAtom);
 
 
 
@@ -133,7 +133,7 @@ export function useChat() {
       // No pending cache: rely on Jotai atom serialization across updaters
 
       try {
-        const shouldUseSynthesis = !!synthesisProvider;
+        const shouldUseSynthesis = !isGuidedMode && !!synthesisProvider;
 
         const fallbackMapping = (() => {
           try {
@@ -142,11 +142,15 @@ export function useChat() {
             return null;
           }
         })();
-        const effectiveMappingProvider =
-          mappingProvider || fallbackMapping || null;
+        const effectiveMappingProvider = (() => {
+          const fromSettings = mappingProvider || fallbackMapping || null;
+          if (fromSettings) return fromSettings;
+          if (activeProviders && activeProviders.length > 0) return activeProviders[0];
+          return null;
+        })();
         // Uniform behavior: allow Map to run even if its provider is not in the witness selection
         const shouldUseMapping = !!(
-          mappingEnabled &&
+          (isGuidedMode || mappingEnabled) &&
           effectiveMappingProvider
         );
 
@@ -207,21 +211,20 @@ export function useChat() {
             mapper: shouldUseMapping
               ? (effectiveMappingProvider as ProviderKey)
               : undefined,
-            refiner: shouldUseSynthesis && effectiveRefinerProvider // Only run refiner if synthesis acts (it audits synthesis)
+            refiner: !isGuidedMode && shouldUseSynthesis && effectiveRefinerProvider // Only run refiner if synthesis acts (it audits synthesis)
               ? (effectiveRefinerProvider as ProviderKey)
               : undefined,
-            antagonist: effectiveAntagonistProvider
+            antagonist: !isGuidedMode && effectiveAntagonistProvider
               ? (effectiveAntagonistProvider as ProviderKey)
               : undefined,
-            includeRefiner: !!(shouldUseSynthesis && effectiveRefinerProvider),
-            includeAntagonist: !!effectiveAntagonistProvider,
+            includeRefiner: !!(!isGuidedMode && shouldUseSynthesis && effectiveRefinerProvider),
+            includeAntagonist: !!(!isGuidedMode && effectiveAntagonistProvider),
             useThinking: computeThinkFlag({
               modeThinkButtonOn: thinkOnChatGPT,
               input: prompt,
             }),
             providerMeta: {},
             clientUserTurnId: userTurnId,
-            mode: selectedMode,
           }
           : {
             type: "extend",
@@ -236,21 +239,20 @@ export function useChat() {
             mapper: shouldUseMapping
               ? (effectiveMappingProvider as ProviderKey)
               : undefined,
-            refiner: shouldUseSynthesis && effectiveRefinerProvider
+            refiner: !isGuidedMode && shouldUseSynthesis && effectiveRefinerProvider
               ? (effectiveRefinerProvider as ProviderKey)
               : undefined,
-            antagonist: effectiveAntagonistProvider
+            antagonist: !isGuidedMode && effectiveAntagonistProvider
               ? (effectiveAntagonistProvider as ProviderKey)
               : undefined,
-            includeRefiner: !!(shouldUseSynthesis && effectiveRefinerProvider),
-            includeAntagonist: !!effectiveAntagonistProvider,
+            includeRefiner: !!(!isGuidedMode && shouldUseSynthesis && effectiveRefinerProvider),
+            includeAntagonist: !!(!isGuidedMode && effectiveAntagonistProvider),
             useThinking: computeThinkFlag({
               modeThinkButtonOn: thinkOnChatGPT,
               input: prompt,
             }),
             providerMeta: {},
             clientUserTurnId: userTurnId,
-            mode: selectedMode,
           };
 
         // AI turn will be created upon TURN_CREATED from backend
@@ -281,7 +283,7 @@ export function useChat() {
       turnIds.length,
       selectedArtifacts,
       setSelectedArtifacts,
-      selectedMode,
+      isGuidedMode,
     ],
   );
 

@@ -19,6 +19,7 @@ import {
   synthesisProviderAtom,
   workflowProgressAtom,
   isRoundActiveAtom,
+  useCognitivePipelineAtom,
 } from "../state/atoms";
 import { useChat } from "../hooks/chat/useChat";
 import api from "../services/extension-api";
@@ -49,6 +50,7 @@ const ChatInput = ({
   const [isVisibleMode] = useAtom(isVisibleModeAtom as any) as [boolean, any];
   const [isReducedMotion] = useAtom(isReducedMotionAtom as any) as [boolean, any];
   const [, setChatInputHeight] = useAtom(chatInputHeightAtom);
+  const [useCognitivePipeline, setUseCognitivePipeline] = useAtom(useCognitivePipelineAtom);
 
 
 
@@ -412,6 +414,27 @@ const ChatInput = ({
 
   return (
     <div className="flex justify-center flex-col items-center pointer-events-auto">
+      <div className="w-full max-w-[min(900px,calc(100%-24px))] flex justify-end mb-2">
+        <div className="flex items-center gap-3 px-3 py-1.5 bg-surface-highlight/20 border border-border-subtle rounded-xl">
+          <span className={`text-xs font-medium ${useCognitivePipeline ? "text-text-tertiary" : "text-text-primary"}`}>
+            Classic
+          </span>
+          <button
+            type="button"
+            onClick={() => setUseCognitivePipeline(!useCognitivePipeline)}
+            disabled={isLoading || mappingActive}
+            className={`relative w-10 h-5 rounded-full transition-all duration-200 ${useCognitivePipeline ? "bg-brand-500" : "bg-border-strong"} ${isLoading || mappingActive ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
+            title={useCognitivePipeline ? "Guided" : "Classic"}
+          >
+            <div
+              className={`absolute top-0.5 w-4 h-4 bg-white rounded-full transition-all duration-200 ${useCognitivePipeline ? "left-[22px]" : "left-0.5"}`}
+            />
+          </button>
+          <span className={`text-xs font-medium ${useCognitivePipeline ? "text-text-primary" : "text-text-tertiary"}`}>
+            Guided
+          </span>
+        </div>
+      </div>
 
       {/* Config Orbs - Float above input, hugging the top edge */}
       {!isRoundActive && (
@@ -421,6 +444,7 @@ const ChatInput = ({
             voiceProviderId={synthesisProvider}
             variant="active"
             workflowProgress={workflowProgress as any}
+            guidedMode={useCognitivePipeline}
             onCrownMove={(pid) => {
               setSynthesisProvider(pid);
               setProviderLock('synthesis', true);

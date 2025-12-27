@@ -1,6 +1,6 @@
 // src/core/workflow-engine.js - FIXED VERSION
 import { ArtifactProcessor } from '../../shared/artifact-processor';
-import { parseMapperArtifact, parseExploreOutput, parseGauntletOutput, parseUnderstandOutput } from '../../shared/parsing-utils';
+import { formatArtifactAsOptions, parseMapperArtifact, parseExploreOutput, parseGauntletOutput, parseUnderstandOutput, parseV1MapperToArtifact } from '../../shared/parsing-utils';
 import { computeExplore } from './cognitive/explore-computer';
 import { PromptService } from './PromptService';
 import { ResponseProcessor } from './ResponseProcessor';
@@ -262,7 +262,29 @@ export class WorkflowEngine {
         v.status === "completed" && v.result?.mapperArtifact,
       )?.[1]?.result;
 
-      if (!mappingResult?.mapperArtifact) {
+      const userMessageForExplore =
+        context?.userMessage || this.currentUserMessage || "";
+
+      let mapperArtifact = mappingResult?.mapperArtifact || null;
+      if (!mapperArtifact) {
+        try {
+          const mappingSteps = Array.isArray(steps)
+            ? steps.filter((s) => s && s.type === "mapping")
+            : [];
+          for (const step of mappingSteps) {
+            const take = stepResults.get(step.stepId);
+            const result = take?.status === "completed" ? take.result : null;
+            if (!result?.text) continue;
+            mapperArtifact = parseV1MapperToArtifact(result.text, {
+              graphTopology: result?.meta?.graphTopology,
+              query: userMessageForExplore,
+            });
+            if (mapperArtifact) break;
+          }
+        } catch (_) { }
+      }
+
+      if (!mapperArtifact) {
         console.error("[WorkflowEngine] Cognitive pipeline missing mapperArtifact");
         try {
           if (resolvedContext?.type !== "recompute") {
@@ -296,9 +318,8 @@ export class WorkflowEngine {
         return true;
       }
 
-      const mapperArtifact = mappingResult.mapperArtifact;
       const exploreAnalysis = computeExplore(
-        context?.userMessage || this.currentUserMessage || "",
+        userMessageForExplore,
         mapperArtifact,
       );
 
@@ -3086,7 +3107,10 @@ Answer the user's message directly. Use context only to disambiguate.
 
     // Helper to execute synthesis with a specific provider
     const runSynthesis = async (providerId) => {
-      const extractedOptions = mappingResult?.meta?.allAvailableOptions || null;
+      const extractedOptions =
+        mappingResult?.meta?.allAvailableOptions ||
+        (payload?.mapperArtifact ? formatArtifactAsOptions(payload.mapperArtifact) : null) ||
+        null;
       // 🔍 DIAGNOSTIC LOGGING
       console.log('[DEBUG] Synthesis options check:', {
         hasMappingResult: !!mappingResult,
@@ -3563,14 +3587,27 @@ Answer the user's message directly. Use context only to disambiguate.
   async executeUnderstandStep(step, context, _previousResults) {
     const payload = step.payload;
 
-    if (!payload.mapperArtifact || !payload.exploreAnalysis) {
-      throw new Error("Understand mode requires MapperArtifact and ExploreAnalysis.");
+    const mapperArtifact =
+      payload.mapperArtifact ||
+      (payload.mappingText
+        ? parseV1MapperToArtifact(payload.mappingText, {
+          graphTopology: payload?.mappingMeta?.graphTopology,
+          query: payload.originalPrompt,
+        })
+        : null);
+
+    const exploreAnalysis =
+      payload.exploreAnalysis ||
+      (mapperArtifact ? computeExplore(payload.originalPrompt, mapperArtifact) : null);
+
+    if (!mapperArtifact || !exploreAnalysis) {
+      throw new Error("Understand mode requires a MapperArtifact and ExploreAnalysis.");
     }
 
     let understandPrompt = this.promptService.buildUnderstandPrompt(
       payload.originalPrompt,
-      payload.mapperArtifact,
-      payload.exploreAnalysis,
+      mapperArtifact,
+      exploreAnalysis,
       payload.userNotes
     );
 
@@ -3659,16 +3696,27 @@ Answer the user's message directly. Use context only to disambiguate.
   async executeGauntletStep(step, context, _previousResults) {
     const payload = step.payload;
 
-    if (!payload.mapperArtifact) {
-      // Fallback: try to find mapper artifact from previous results if not explicitly passed
-      // This might happen if payload construction didn't include it
+    const mapperArtifact =
+      payload.mapperArtifact ||
+      (payload.mappingText
+        ? parseV1MapperToArtifact(payload.mappingText, {
+          graphTopology: payload?.mappingMeta?.graphTopology,
+          query: payload.originalPrompt,
+        })
+        : null);
+
+    const exploreAnalysis =
+      payload.exploreAnalysis ||
+      (mapperArtifact ? computeExplore(payload.originalPrompt, mapperArtifact) : null);
+
+    if (!mapperArtifact) {
       throw new Error("Gauntlet requires a MapperArtifact but none was provided.");
     }
 
     let gauntletPrompt = this.promptService.buildGauntletPrompt(
       payload.originalPrompt,
-      payload.mapperArtifact,
-      payload.exploreAnalysis,
+      mapperArtifact,
+      exploreAnalysis,
       payload.userNotes
     );
 
@@ -3800,12 +3848,8 @@ Answer the user's message directly. Use context only to disambiguate.
 
       const originalPrompt = extractUserMessage(userTurn);
 
-      const mapperArtifact = payload.mapperArtifact || aiTurn.mapperArtifact;
-      const exploreAnalysis = aiTurn.exploreAnalysis;
-
-      if (!mapperArtifact) {
-        throw new Error(`MapperArtifact missing for turn ${aiTurnId}. Cannot continue cognitive mode.`);
-      }
+      let mapperArtifact = payload.mapperArtifact || aiTurn.mapperArtifact || null;
+      let exploreAnalysis = payload.exploreAnalysis || aiTurn.exploreAnalysis || null;
 
       if (mode !== "understand" && mode !== "gauntlet") {
         throw new Error(`Unknown cognitive mode: ${mode}`);
@@ -3817,6 +3861,21 @@ Answer the user's message directly. Use context only to disambiguate.
         .sort((a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0))
       const mappingProviders = mappingResponses.map((r) => r.providerId);
       const latestMappingText = mappingResponses?.[0]?.text || "";
+      const latestMappingMeta = mappingResponses?.[0]?.meta || {};
+
+      if (!mapperArtifact && mappingResponses?.[0]) {
+        mapperArtifact = parseV1MapperToArtifact(latestMappingText, {
+          graphTopology: latestMappingMeta?.graphTopology,
+          query: originalPrompt,
+        });
+      }
+      if (!exploreAnalysis && mapperArtifact) {
+        exploreAnalysis = computeExplore(originalPrompt, mapperArtifact);
+      }
+
+      if (!mapperArtifact) {
+        throw new Error(`MapperArtifact missing for turn ${aiTurnId}. Cannot continue cognitive mode.`);
+      }
 
       const preferredProvider = providerId ||
         mappingProviders[0] ||
@@ -3843,6 +3902,7 @@ Answer the user's message directly. Use context only to disambiguate.
               exploreAnalysis,
               originalPrompt,
               mappingText: latestMappingText,
+              mappingMeta: latestMappingMeta,
               selectedArtifacts: Array.isArray(selectedArtifacts) ? selectedArtifacts : [],
               useThinking: false,
             },
@@ -3856,6 +3916,7 @@ Answer the user's message directly. Use context only to disambiguate.
               exploreAnalysis,
               originalPrompt,
               mappingText: latestMappingText,
+              mappingMeta: latestMappingMeta,
               selectedArtifacts: Array.isArray(selectedArtifacts) ? selectedArtifacts : [],
               useThinking: false,
             },

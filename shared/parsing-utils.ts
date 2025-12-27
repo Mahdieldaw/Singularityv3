@@ -659,6 +659,151 @@ export function parseMapperArtifact(text: string): MapperArtifact {
     return artifact;
 }
 
+export function formatArtifactAsOptions(artifact: MapperArtifact): string {
+    const safe = artifact || createEmptyMapperArtifact();
+    const lines: string[] = [];
+
+    const claims = Array.isArray(safe?.consensus?.claims) ? safe.consensus.claims : [];
+    const outliers = Array.isArray(safe?.outliers) ? safe.outliers : [];
+    const modelCount = typeof safe?.model_count === "number" ? safe.model_count : 0;
+
+    if (claims.length > 0) {
+        lines.push("### Consensus Claims");
+        for (const c of claims) {
+            const supportCount = typeof (c as any)?.support_count === "number" ? (c as any).support_count : 0;
+            const denom = modelCount > 0 ? modelCount : (supportCount > 0 ? supportCount : 1);
+            lines.push(`- **${String((c as any)?.text || "").trim()}** [${supportCount}/${denom}]`);
+            if ((c as any)?.dimension) lines.push(`  Dimension: ${String((c as any).dimension)}`);
+            if ((c as any)?.applies_when) lines.push(`  Applies when: ${String((c as any).applies_when)}`);
+        }
+    }
+
+    if (outliers.length > 0) {
+        if (lines.length > 0) lines.push("");
+        lines.push("### Outliers");
+        for (const o of outliers) {
+            const type = String((o as any)?.type || "supplemental");
+            const typeLabel = type === "frame_challenger" ? "[frame_challenger]" : "[supplemental]";
+            const insight = String((o as any)?.insight || "").trim();
+            const source = String((o as any)?.source || "").trim();
+            const dim = (o as any)?.dimension ? ` (${String((o as any).dimension)})` : "";
+            lines.push(`- ${typeLabel} **${insight}**${dim}${source ? ` — ${source}` : ""}`);
+            if ((o as any)?.applies_when) lines.push(`  Applies when: ${String((o as any).applies_when)}`);
+        }
+    }
+
+    return lines.join("\n").trim();
+}
+
+export function parseV1MapperToArtifact(
+    v1Output: string,
+    options: { graphTopology?: any; query?: string; turn?: number; timestamp?: string } = {},
+): MapperArtifact {
+    const artifact = createEmptyMapperArtifact();
+    const query = typeof options.query === "string" ? options.query : "";
+    const turn = typeof options.turn === "number" ? options.turn : 0;
+    const timestamp = typeof options.timestamp === "string" ? options.timestamp : new Date().toISOString();
+
+    let topology: any | null = options.graphTopology ?? null;
+    if (!topology) {
+        try {
+            const parsed = parseMappingResponse(v1Output || "");
+            topology = parsed.graphTopology || null;
+        } catch { }
+    }
+
+    const nodes = Array.isArray(topology?.nodes) ? topology.nodes : [];
+    const edges = Array.isArray(topology?.edges) ? topology.edges : [];
+
+    const normalizedNodes = nodes
+        .filter((n: any) => n && typeof n === "object")
+        .map((n: any) => {
+            const supportersRaw = Array.isArray(n.supporters) ? n.supporters : [];
+            const supporters = supportersRaw
+                .map((s: any) => {
+                    const num = typeof s === "number" ? s : Number.NaN;
+                    return Number.isFinite(num) ? num : null;
+                })
+                .filter((x: any) => typeof x === "number") as number[];
+
+            const supportCount =
+                typeof n.support_count === "number"
+                    ? n.support_count
+                    : supporters.length;
+
+            return {
+                label: String(n.label || n.id || "").trim(),
+                theme: n.theme ? String(n.theme) : "",
+                supporters,
+                support_count: supportCount,
+            };
+        })
+        .filter((n: any) => n.label.length > 0);
+
+    const modelCount =
+        normalizedNodes.length > 0
+            ? Math.max(
+                ...normalizedNodes.map((n: any) =>
+                    Math.max(n.support_count || 0, Array.isArray(n.supporters) ? n.supporters.length : 0),
+                ),
+            )
+            : 0;
+
+    const claims = normalizedNodes
+        .filter((n: any) => (n.support_count || 0) >= 2)
+        .map((n: any) => ({
+            text: n.label,
+            supporters: n.supporters,
+            support_count: n.support_count,
+        }));
+
+    const outliers = normalizedNodes
+        .filter((n: any) => (n.support_count || 0) < 2)
+        .map((n: any) => {
+            const first = Array.isArray(n.supporters) && n.supporters.length > 0 ? n.supporters[0] : null;
+            const sourceIndex = typeof first === "number" ? first : -1;
+            const source = sourceIndex >= 0 ? `Model ${sourceIndex + 1}` : "Model";
+            const type = String(n.theme || "").toLowerCase().includes("frame") ? "frame_challenger" : "supplemental";
+            return {
+                insight: n.label,
+                source,
+                source_index: sourceIndex,
+                type: type as any,
+                raw_context: "",
+            };
+        });
+
+    const strength = claims.length / Math.max(1, normalizedNodes.length);
+    const quality = strength > 0.9 ? "resolved" : "conventional";
+    const derivedTopology = strength > 0.7 ? "high_confidence" : "dimensional";
+
+    const tensions = edges
+        .filter((e: any) => e && typeof e === "object")
+        .filter((e: any) => String(e.type || "").toLowerCase() === "conflicts")
+        .map((e: any) => ({
+            between: [String(e.source || ""), String(e.target || "")],
+            type: "conflicts",
+            axis: String(e.reason || "approach"),
+        }))
+        .filter((t: any) => t.between[0] && t.between[1]);
+
+    return {
+        ...artifact,
+        query,
+        turn,
+        timestamp,
+        model_count: modelCount,
+        consensus: {
+            claims,
+            quality: quality as any,
+            strength,
+        },
+        outliers,
+        tensions,
+        topology: derivedTopology as any,
+    };
+}
+
 // ============================================================================
 // CORE HELPERS
 // ============================================================================

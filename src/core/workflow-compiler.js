@@ -372,10 +372,7 @@ export class WorkflowCompiler {
       return context.stepType === "refiner";
     }
     // Check primitive property: Refiner requires synthesis
-    return (
-      !!request.includeSynthesis &&
-      !!request.includeRefiner
-    );
+    return !!request.includeSynthesis && !!request.includeRefiner;
   }
 
   _needsAntagonistStep(request, context) {
