@@ -3,7 +3,6 @@ import React, { useMemo, useEffect } from 'react';
 import { AiTurn, CognitiveViewMode } from '../../types';
 import { useModeSwitching } from '../../hooks/cognitive/useModeSwitching';
 import { ArtifactShowcase } from './ArtifactShowcase';
-import { PostMapperView } from './PostMapperView';
 import UnderstandOutputView from './UnderstandOutputView';
 import GauntletOutputView from './GauntletOutputView';
 import TransitionBar from './TransitionBar';
@@ -60,23 +59,14 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
             {/* Rendering Logic */}
             <div className="w-full">
                 {activeMode === 'artifact' && (
-                    <div className="flex flex-col gap-4">
-                        <ArtifactShowcase
-                            mapperArtifact={aiTurn.mapperArtifact!}
-                            analysis={aiTurn.exploreAnalysis!} // Pass the analysis prop
-                            turn={aiTurn}
-                        />
-                        {/* Only show PostMapperButtons if we aren't already transitioning or have results */}
-                        {!hasSpecializedOutput && (
-                            <PostMapperView
-                                artifact={aiTurn.mapperArtifact!}
-                                analysis={aiTurn.exploreAnalysis!}
-                                isLoading={isTransitioning}
-                                onUnderstand={() => triggerAndSwitch('understand')}
-                                onDecide={() => triggerAndSwitch('gauntlet')}
-                            />
-                        )}
-                    </div>
+                    <ArtifactShowcase
+                        mapperArtifact={aiTurn.mapperArtifact!}
+                        analysis={aiTurn.exploreAnalysis!}
+                        turn={aiTurn}
+                        onUnderstand={() => triggerAndSwitch('understand')}
+                        onDecide={() => triggerAndSwitch('gauntlet')}
+                        isLoading={isTransitioning || !!hasSpecializedOutput}
+                    />
                 )}
 
                 {activeMode === 'understand' && aiTurn.understandOutput && (

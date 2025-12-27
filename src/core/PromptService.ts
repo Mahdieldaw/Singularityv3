@@ -356,8 +356,21 @@ Only include edges where clear relationships exist. Every node needs ≥1 edge.
 You do not synthesize. You do not decide. You catalog, verify, and map.
 
 ## Context
-User Query: "${userPrompt}"
+User Input: "${userPrompt}"
 Inputs: ${batchOutputs.length} distinct model responses.
+
+## Query Extraction (CRITICAL)
+Extract ONLY the core question from the user's input.
+- DO NOT copy the entire input verbatim
+- Ignore context blocks, background information, and system instructions  
+- Extract the actual question being asked
+- 1-2 sentences MAXIMUM
+- If multiple questions exist, extract the primary one
+
+Example:
+  User Input: "Context: Singularity is a cognitive system... [500 words]... My question: What's the best launch strategy?"
+  WRONG query: "Context: Singularity is a cognitive system..."
+  RIGHT query: "What's the best launch strategy?"
 
 ## Your Task
 Perform a four-pass analysis on the model outputs to produce a high-fidelity decision map.
@@ -428,11 +441,10 @@ Return valid JSON with this structure:
   "dimensions_found": ["speed", "cost", "simplicity", "security"],
   "topology": "high_confidence | dimensional | contested",
   "ghost": "Name of valid approach NO model mentioned, or null",
-  "query": "${userPrompt}",
+  "query": "<EXTRACTED core question - 1-2 sentences MAX, NOT the full input>",
   "turn": 0,
   "timestamp": "${new Date().toISOString()}",
-  "model_count": ${batchOutputs.length},
-  "souvenir": "One-sentence memorable summary of the landscape"
+  "model_count": ${batchOutputs.length}
 }
 \`\`\`
 

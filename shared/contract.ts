@@ -87,6 +87,69 @@ export type QueryType = "informational" | "procedural" | "advisory" | "comparati
 
 export type ContainerType = "direct_answer" | "decision_tree" | "comparison_matrix" | "exploration_space";
 
+// Specificity levels for claims/outliers
+export type Specificity = "vague" | "moderate" | "specific" | "actionable";
+
+// Enriched outlier with computed scores (extends MapperArtifact.outliers)
+export interface EnrichedOutlier {
+  // Original fields from MapperArtifact.outliers
+  insight: string;
+  source: string;
+  source_index: number;
+  type: "supplemental" | "frame_challenger";
+  raw_context: string;
+  dimension?: string;
+  applies_when?: string;
+  challenges?: string;
+
+  // Computed scores
+  elevation_score: number;          // 0-10 composite
+  covers_consensus_gap: boolean;    // Dimension not in consensus
+  specificity: Specificity;
+  is_recommended: boolean;          // Top 3 by elevation_score
+}
+
+// Coverage analysis per dimension
+export interface DimensionCoverage {
+  dimension: string;
+  consensus_claims: number;         // Count of consensus claims
+  outlier_claims: number;           // Count of outliers
+  is_gap: boolean;                  // Outliers only, no consensus
+  is_contested: boolean;            // Has frame_challenger or both present
+  status: "gap" | "contested" | "settled";
+  leader: string | null;            // Top claim text
+  leader_source: string | null;     // Who said it
+  support_bar: number | null;       // e.g., 6/6 = 6
+}
+
+// Universal summary bar data
+export interface SummaryBarData {
+  lead: {
+    text: string;
+    support: number | null;
+    type: "consensus" | "contested" | "exploration";
+  };
+  coverage: {
+    gaps: number;
+    contested: number;
+    settled: number;
+    total: number;
+  };
+  signals: {
+    challengers: number;
+    conditions: number;
+    tensions: number;
+    ghost: string | null;
+  };
+  meta: {
+    modelCount: number;
+    strength: number; // 0-100
+    queryType: string;
+    escapeVelocity: boolean;
+    topology: string;
+  };
+}
+
 export interface ExploreDimension {
   name: string;
   winner: string;
@@ -116,12 +179,18 @@ export interface ExploreConflict {
 
 export interface ExploreAnalysis {
   queryType: QueryType;
-  containerType: ContainerType;
+  containerType: ContainerType;      // Keep for backward compat
   dimensions: ExploreDimension[];
   conditions: ExploreCondition[];
   paradigms: ExploreParadigm[];
   conflicts: ExploreConflict[];
   escapeVelocity: boolean;
+
+  // NEW: Dimension-first analysis
+  dimensionCoverage: DimensionCoverage[];
+  recommendedOutliers: EnrichedOutlier[];
+  allOutliers: EnrichedOutlier[];
+  summaryBar: SummaryBarData;
 }
 
 export interface UnderstandOutput {
