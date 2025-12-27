@@ -146,6 +146,11 @@ const OutlierChip: React.FC<OutlierChipProps> = ({ outlier }) => (
         {outlier.is_recommended && (
             <span className="text-amber-400 text-xs ml-2">⭐</span>
         )}
+        {outlier.applies_when && (
+            <div className="text-blue-400/60 text-xs mt-1">
+                When: {outlier.applies_when}
+            </div>
+        )}
         {outlier.challenges && (
             <div className="text-red-400/60 text-xs mt-1">
                 Challenges: {outlier.challenges}

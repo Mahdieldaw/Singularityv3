@@ -646,7 +646,7 @@ export const turnCognitiveModeFamily = atomFamily(
   (turnId: string) =>
     atom(
       (get) => get(cognitiveModeMapAtom)[turnId] || 'artifact',
-      (get, set, newMode: CognitiveViewMode) => {
+      (_get, set, newMode: CognitiveViewMode) => {
         set(cognitiveModeMapAtom, (draft) => {
           draft[turnId] = newMode;
         });

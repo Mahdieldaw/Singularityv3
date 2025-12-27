@@ -1,5 +1,5 @@
 import React from "react";
-import { CopyButton } from "../../CopyButton"; // Assuming this might be needed, though standard copy is often enough
+// import { CopyButton } from "../../CopyButton"; // Assuming this might be needed, though standard copy is often enough
 
 interface GhostCardProps {
     ghost: string;

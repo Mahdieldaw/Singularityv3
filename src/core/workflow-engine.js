@@ -782,7 +782,7 @@ export class WorkflowEngine {
       if (context.useCognitivePipeline) {
         try {
           // Find the mapping result to get the artifact
-          const mappingResult = [...stepResults.entries()].find(([_, v]) =>
+          const mappingResult = Array.from(stepResults.entries()).find(([_, v]) =>
             v.status === 'completed' && v.result?.mapperArtifact
           )?.[1]?.result;
 
@@ -2158,7 +2158,7 @@ export class WorkflowEngine {
       {
         sessionId: context.sessionId,
         timeout: 60000,
-        onPartial: (pid, chunk) => {
+        onPartial: (_pid, _chunk) => {
           // Optional: stream partial
         }
       }
@@ -3295,7 +3295,7 @@ Answer the user's message directly. Use context only to disambiguate.
     });
   }
 
-  async executeUnderstandStep(step, context, previousResults) {
+  async executeUnderstandStep(step, context, _previousResults) {
     const payload = step.payload;
 
     if (!payload.mapperArtifact || !payload.exploreAnalysis) {
@@ -3361,7 +3361,7 @@ Answer the user's message directly. Use context only to disambiguate.
                 meta: {
                   ...finalResult.meta,
                   understandOutput
-                } || { understandOutput },
+                },
               });
             } else {
               reject(new Error("Empty response from Understand provider"));
@@ -3372,7 +3372,7 @@ Answer the user's message directly. Use context only to disambiguate.
     });
   }
 
-  async executeGauntletStep(step, context, previousResults) {
+  async executeGauntletStep(step, context, _previousResults) {
     const payload = step.payload;
 
     if (!payload.mapperArtifact) {
@@ -3441,7 +3441,7 @@ Answer the user's message directly. Use context only to disambiguate.
                 meta: {
                   ...finalResult.meta,
                   gauntletOutput // Attach parsed object to meta for UI/Persistence
-                } || { gauntletOutput },
+                },
               });
 
             } else {

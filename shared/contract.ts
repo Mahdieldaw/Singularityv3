@@ -144,9 +144,9 @@ export interface SummaryBarData {
   meta: {
     modelCount: number;
     strength: number; // 0-100
-    queryType: string;
+    queryType: QueryType;
     escapeVelocity: boolean;
-    topology: string;
+    topology: "high_confidence" | "dimensional" | "contested";
   };
 }
 
@@ -179,7 +179,8 @@ export interface ExploreConflict {
 
 export interface ExploreAnalysis {
   queryType: QueryType;
-  containerType: ContainerType;      // Keep for backward compat
+  /** @deprecated - Legacy container routing. Kept for debugging. */
+  containerType: ContainerType;
   dimensions: ExploreDimension[];
   conditions: ExploreCondition[];
   paradigms: ExploreParadigm[];

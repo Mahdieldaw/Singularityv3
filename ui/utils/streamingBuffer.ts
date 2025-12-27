@@ -22,7 +22,7 @@ export class StreamingBuffer {
 
   private flushTimer: number | null = null;
   private onFlushCallback: (updates: BatchUpdate[]) => void;
-  private pendingFlushRaf: number | null = null;
+
 
   constructor(onFlush: (updates: BatchUpdate[]) => void) {
     this.onFlushCallback = onFlush;
