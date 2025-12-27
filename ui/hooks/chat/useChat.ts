@@ -402,6 +402,13 @@ export function useChat() {
               mappingResponses: normalizeSynthMap(round.mappingResponses),
               refinerResponses: normalizeSynthMap(round.refinerResponses),
               antagonistResponses: normalizeSynthMap(round.antagonistResponses),
+              understandResponses: normalizeSynthMap(round.understandResponses),
+              gauntletResponses: normalizeSynthMap(round.gauntletResponses),
+              // Cognitive pipeline structured outputs
+              mapperArtifact: round.mapperArtifact || undefined,
+              exploreAnalysis: round.exploreAnalysis || undefined,
+              understandOutput: round.understandOutput || undefined,
+              gauntletOutput: round.gauntletOutput || undefined,
             };
             newIds.push(aiTurn.id);
             newMap.set(aiTurn.id, aiTurn);

@@ -661,11 +661,31 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
               else if (r.responseType === "gauntlet") (gauntletResponses[r.providerId] ||= []).push(base);
             }
 
+
+            // Extract structured outputs from response meta if available
+            let extractedUnderstandOutput = primaryAi.understandOutput || null;
+            let extractedGauntletOutput = primaryAi.gauntletOutput || null;
+
+            // Check responses for structured outputs if not on turn record
+            for (const r of responses) {
+              if (!extractedUnderstandOutput && r.responseType === "understand" && r.meta?.understandOutput) {
+                extractedUnderstandOutput = r.meta.understandOutput;
+              }
+              if (!extractedGauntletOutput && r.responseType === "gauntlet" && r.meta?.gauntletOutput) {
+                extractedGauntletOutput = r.meta.gauntletOutput;
+              }
+            }
+
             rounds.push({
               userTurnId: user.id, aiTurnId: primaryAi.id,
               user: { id: user.id, text: user.text || user.content || "", createdAt: user.createdAt || 0 },
               providers, synthesisResponses, mappingResponses,
               refinerResponses, antagonistResponses, understandResponses, gauntletResponses,
+              // Include cognitive pipeline data for proper restoration
+              mapperArtifact: primaryAi.mapperArtifact || null,
+              exploreAnalysis: primaryAi.exploreAnalysis || null,
+              understandOutput: extractedUnderstandOutput,
+              gauntletOutput: extractedGauntletOutput,
               createdAt: user.createdAt || 0, completedAt: primaryAi.updatedAt || 0
             });
           }
