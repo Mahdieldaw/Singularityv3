@@ -164,7 +164,8 @@ export class SessionManager {
     }
     const now = Date.now();
 
-    const contextSummary = this._buildContextSummary(result);
+    const shouldBuildContextSummary = !request?.mapperArtifact && !request?.exploreAnalysis;
+    const contextSummary = shouldBuildContextSummary ? this._buildContextSummary(result) : "";
 
     // 1) Create session
     const sessionRecord = {
@@ -267,7 +268,8 @@ export class SessionManager {
     const { sessionId } = request;
     const now = Date.now();
 
-    const contextSummary = this._buildContextSummary(result);
+    const shouldBuildContextSummary = !request?.mapperArtifact && !request?.exploreAnalysis;
+    const contextSummary = shouldBuildContextSummary ? this._buildContextSummary(result) : "";
 
     // Validate last turn
     if (!context?.lastTurnId) {

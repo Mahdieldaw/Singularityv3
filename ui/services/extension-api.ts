@@ -167,6 +167,7 @@ class ExtensionAPI {
       port.postMessage(message);
     } catch (error) {
       console.error("[ExtensionAPI] Failed to send port message:", error);
+      throw error;
     }
   }
 

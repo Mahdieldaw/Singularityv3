@@ -63,8 +63,8 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
                         mapperArtifact={aiTurn.mapperArtifact!}
                         analysis={aiTurn.exploreAnalysis!}
                         turn={aiTurn}
-                        onUnderstand={() => triggerAndSwitch('understand')}
-                        onDecide={() => triggerAndSwitch('gauntlet')}
+                        onUnderstand={(options) => triggerAndSwitch('understand', options)}
+                        onDecide={(options) => triggerAndSwitch('gauntlet', options)}
                         isLoading={isTransitioning || !!hasSpecializedOutput}
                     />
                 )}

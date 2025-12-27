@@ -1,10 +1,10 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { MapperArtifact, AiTurn, ExploreAnalysis } from "../../../shared/contract";
 import { RawResponseCard } from "./cards/RawResponseCard";
 
-import { selectedArtifactsAtom } from "../../state/atoms";
+import { selectedArtifactsAtom, selectedModelsAtom } from "../../state/atoms";
 import { SelectionBar } from "./SelectionBar";
-import { useAtom } from "jotai";
+import { useAtom, useAtomValue } from "jotai";
 import { SouvenirCard } from "./cards/SouvenirCard";
 import { ConsensusCard } from "./cards/ConsensusCard";
 import { OutlierCard } from "./cards/OutlierCard";
@@ -21,13 +21,15 @@ import { DecisionTreeContainer } from "./containers/DecisionTreeContainer";
 import { DirectAnswerContainer } from "./containers/DirectAnswerContainer";
 import { ExplorationSpaceContainer } from "./containers/ExplorationSpaceContainer";
 import { DimensionFirstView } from "./DimensionFirstView";
+import { LLM_PROVIDERS_CONFIG } from "../../constants";
+import type { CognitiveTransitionOptions, SelectedArtifact } from "../../hooks/cognitive/useCognitiveMode";
 
 interface ArtifactShowcaseProps {
     mapperArtifact: MapperArtifact;
     analysis: ExploreAnalysis;
     turn: AiTurn;
-    onUnderstand?: () => void;
-    onDecide?: () => void;
+    onUnderstand?: (options?: CognitiveTransitionOptions) => void;
+    onDecide?: (options?: CognitiveTransitionOptions) => void;
     isLoading?: boolean;
 }
 
@@ -41,6 +43,65 @@ export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
 }) => {
     const [selectedIds, setSelectedIds] = useAtom(selectedArtifactsAtom);
     const [dimensionViewOpen, setDimensionViewOpen] = useState(false);
+    const selectedModels = useAtomValue(selectedModelsAtom);
+
+    const availableProviders = useMemo(() => {
+        const enabled = LLM_PROVIDERS_CONFIG.filter((p) => !!selectedModels?.[p.id]);
+        return enabled.length > 0 ? enabled : LLM_PROVIDERS_CONFIG;
+    }, [selectedModels]);
+
+    const [nextProviderId, setNextProviderId] = useState<string>(() => availableProviders[0]?.id || "gemini");
+
+    useEffect(() => {
+        if (!availableProviders.some((p) => p.id === nextProviderId)) {
+            setNextProviderId(availableProviders[0]?.id || "gemini");
+        }
+    }, [availableProviders, nextProviderId]);
+
+    const selectedArtifacts = useMemo(() => {
+        const out: SelectedArtifact[] = [];
+        const ids = Array.from(selectedIds);
+        ids.sort();
+        for (const id of ids) {
+            if (id.startsWith("consensus-")) {
+                const idx = Number(id.slice("consensus-".length));
+                const claim = mapperArtifact?.consensus?.claims?.[idx];
+                if (!claim) continue;
+                out.push({
+                    id,
+                    kind: "consensus_claim",
+                    text: claim.text,
+                    dimension: claim.dimension,
+                    meta: {
+                        applies_when: claim.applies_when,
+                        support_count: claim.support_count,
+                        supporters: claim.supporters,
+                    },
+                });
+                continue;
+            }
+            if (id.startsWith("outlier-")) {
+                const idx = Number(id.slice("outlier-".length));
+                const o = mapperArtifact?.outliers?.[idx];
+                if (!o) continue;
+                out.push({
+                    id,
+                    kind: "outlier",
+                    text: o.insight,
+                    dimension: o.dimension,
+                    source: o.source,
+                    meta: {
+                        type: o.type,
+                        raw_context: o.raw_context,
+                        applies_when: o.applies_when,
+                        source_index: o.source_index,
+                    },
+                });
+                continue;
+            }
+        }
+        return out;
+    }, [mapperArtifact, selectedIds]);
 
     const toggleSelection = (id: string) => {
         setSelectedIds((draft) => {
@@ -158,9 +219,28 @@ export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
                 </div>
             )}
 
+            <div className="flex items-center gap-3 bg-surface-raised border border-border-subtle rounded-xl px-3 py-2">
+                <div className="text-xs text-text-secondary">Model</div>
+                <select
+                    value={nextProviderId}
+                    onChange={(e) => setNextProviderId(e.target.value)}
+                    disabled={isLoading}
+                    className="flex-1 bg-surface-base border border-border-subtle rounded px-2 py-1 text-sm text-text-primary focus:outline-none focus:border-brand-500 disabled:opacity-50"
+                >
+                    {availableProviders.map((p) => (
+                        <option key={p.id} value={p.id}>
+                            {p.name}
+                        </option>
+                    ))}
+                </select>
+                <div className="text-xs text-text-muted tabular-nums">
+                    {selectedArtifacts.length > 0 ? `${selectedArtifacts.length} selected` : "None selected"}
+                </div>
+            </div>
+
             <div className="flex gap-3 mt-6 pt-2">
                 <button
-                    onClick={onUnderstand}
+                    onClick={() => onUnderstand?.({ providerId: nextProviderId, selectedArtifacts })}
                     disabled={isLoading}
                     className="flex-1 px-4 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 
                                hover:from-blue-500 hover:to-indigo-500 
@@ -170,7 +250,7 @@ export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
                     🧠 Understand
                 </button>
                 <button
-                    onClick={onDecide}
+                    onClick={() => onDecide?.({ providerId: nextProviderId, selectedArtifacts })}
                     disabled={isLoading}
                     className={`flex-1 px-4 py-3 text-white rounded-lg font-medium transition-all
                                disabled:opacity-50 disabled:cursor-not-allowed

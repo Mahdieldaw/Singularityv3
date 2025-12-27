@@ -3567,11 +3567,29 @@ Answer the user's message directly. Use context only to disambiguate.
       throw new Error("Understand mode requires MapperArtifact and ExploreAnalysis.");
     }
 
-    const understandPrompt = this.promptService.buildUnderstandPrompt(
+    let understandPrompt = this.promptService.buildUnderstandPrompt(
       payload.originalPrompt,
       payload.mapperArtifact,
       payload.exploreAnalysis
     );
+
+    if (payload.mappingText) {
+      understandPrompt += `\n\n<RAW_DECISION_MAP>\n${payload.mappingText}\n</RAW_DECISION_MAP>`;
+    }
+
+    if (Array.isArray(payload.selectedArtifacts) && payload.selectedArtifacts.length > 0) {
+      const selectionLines = payload.selectedArtifacts.map((a, index) => {
+        const header = `Selection ${index + 1} [${a.kind || "artifact"}]`;
+        const source = a.source ? `Source: ${a.source}` : "";
+        const dim = a.dimension ? `Dimension: ${a.dimension}` : "";
+        const metaLines = [];
+        const meta = a.meta || {};
+        if (meta.applies_when) metaLines.push(`Applies when: ${meta.applies_when}`);
+        if (typeof meta.support_count === "number") metaLines.push(`Support count: ${meta.support_count}`);
+        return `${header}\n${source}${source && dim ? " • " : ""}${dim}\nText: ${a.text}\n${metaLines.join("\n")}`.trim();
+      });
+      understandPrompt += `\n\n<USER_SELECTED_ARTIFACTS>\n${selectionLines.join("\n\n")}\n</USER_SELECTED_ARTIFACTS>`;
+    }
 
     console.log(
       `[WorkflowEngine] Understand prompt for ${payload.understandProvider}: ${understandPrompt.length} chars`,
@@ -3646,10 +3664,28 @@ Answer the user's message directly. Use context only to disambiguate.
       throw new Error("Gauntlet requires a MapperArtifact but none was provided.");
     }
 
-    const gauntletPrompt = this.promptService.buildGauntletPrompt(
+    let gauntletPrompt = this.promptService.buildGauntletPrompt(
       payload.originalPrompt,
       payload.mapperArtifact
     );
+
+    if (payload.mappingText) {
+      gauntletPrompt += `\n\n<RAW_DECISION_MAP>\n${payload.mappingText}\n</RAW_DECISION_MAP>`;
+    }
+
+    if (Array.isArray(payload.selectedArtifacts) && payload.selectedArtifacts.length > 0) {
+      const selectionLines = payload.selectedArtifacts.map((a, index) => {
+        const header = `Selection ${index + 1} [${a.kind || "artifact"}]`;
+        const source = a.source ? `Source: ${a.source}` : "";
+        const dim = a.dimension ? `Dimension: ${a.dimension}` : "";
+        const metaLines = [];
+        const meta = a.meta || {};
+        if (meta.applies_when) metaLines.push(`Applies when: ${meta.applies_when}`);
+        if (typeof meta.support_count === "number") metaLines.push(`Support count: ${meta.support_count}`);
+        return `${header}\n${source}${source && dim ? " • " : ""}${dim}\nText: ${a.text}\n${metaLines.join("\n")}`.trim();
+      });
+      gauntletPrompt += `\n\n<USER_SELECTED_ARTIFACTS>\n${selectionLines.join("\n\n")}\n</USER_SELECTED_ARTIFACTS>`;
+    }
 
     console.log(
       `[WorkflowEngine] Gauntlet prompt for ${payload.gauntletProvider}: ${gauntletPrompt.length} chars`,
@@ -3744,7 +3780,7 @@ Answer the user's message directly. Use context only to disambiguate.
   }
 
   async handleContinueCognitiveRequest(payload) {
-    const { sessionId, aiTurnId, mode } = payload;
+    const { sessionId, aiTurnId, mode, providerId, selectedArtifacts } = payload || {};
     console.log(`[WorkflowEngine] Continuing cognitive workflow for turn ${aiTurnId} with mode ${mode}`);
 
     try {
@@ -3773,12 +3809,13 @@ Answer the user's message directly. Use context only to disambiguate.
       }
 
       const priorResponses = await adapter.getResponsesByTurnId(aiTurnId);
-      const mappingProviders = (priorResponses || [])
+      const mappingResponses = (priorResponses || [])
         .filter((r) => r && r.responseType === "mapping" && r.providerId)
         .sort((a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0))
-        .map((r) => r.providerId);
+      const mappingProviders = mappingResponses.map((r) => r.providerId);
+      const latestMappingText = mappingResponses?.[0]?.text || "";
 
-      const preferredProvider =
+      const preferredProvider = providerId ||
         mappingProviders[0] ||
         aiTurn.meta?.mapper ||
         aiTurn.meta?.mappingProvider ||
@@ -3802,6 +3839,8 @@ Answer the user's message directly. Use context only to disambiguate.
                 mapperArtifact,
                 exploreAnalysis,
                 originalPrompt,
+                mappingText: latestMappingText,
+                selectedArtifacts: Array.isArray(selectedArtifacts) ? selectedArtifacts : [],
                 useThinking: false,
               },
             }
@@ -3812,6 +3851,8 @@ Answer the user's message directly. Use context only to disambiguate.
                 gauntletProvider: preferredProvider,
                 mapperArtifact,
                 originalPrompt,
+                mappingText: latestMappingText,
+                selectedArtifacts: Array.isArray(selectedArtifacts) ? selectedArtifacts : [],
                 useThinking: false,
               },
             };
