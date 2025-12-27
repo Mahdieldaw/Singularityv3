@@ -1,22 +1,46 @@
 import { useCallback, useState } from "react";
-import { useAtomValue } from "jotai";
-import { isLoadingAtom, currentSessionIdAtom } from "../../state/atoms";
+import { useAtomValue, useSetAtom } from "jotai";
+import {
+    activeAiTurnIdAtom,
+    currentSessionIdAtom,
+    isLoadingAtom,
+    uiPhaseAtom,
+} from "../../state/atoms";
 import api from "../../services/extension-api";
 
 export type CognitiveMode = 'understand' | 'gauntlet';
 
-export function useCognitiveMode() {
+export type SelectedArtifact = {
+    id: string;
+    kind: string;
+    text: string;
+    dimension?: string;
+    source?: string;
+    meta?: any;
+};
+
+export type CognitiveTransitionOptions = {
+    providerId?: string;
+    selectedArtifacts?: SelectedArtifact[];
+};
+
+export function useCognitiveMode(trackedAiTurnId?: string) {
     const sessionId = useAtomValue(currentSessionIdAtom);
     const globalIsLoading = useAtomValue(isLoadingAtom);
+    const activeAiTurnId = useAtomValue(activeAiTurnIdAtom);
+    const setGlobalIsLoading = useSetAtom(isLoadingAtom);
+    const setUiPhase = useSetAtom(uiPhaseAtom);
+    const setActiveAiTurnId = useSetAtom(activeAiTurnIdAtom);
     const [localIsTransitioning, setLocalIsTransitioning] = useState<boolean>(false);
     const [error, setError] = useState<string | null>(null);
 
-    // Derived loading state: true if either local trigger is active OR global loading is active
-    // But we only want to be "isTransitioning" if we were the one who started it.
-    // Simplifying: if global loading stops, we stop.
-    const isTransitioning = localIsTransitioning && globalIsLoading;
+    const isTransitioning = !!trackedAiTurnId && globalIsLoading && activeAiTurnId === trackedAiTurnId;
 
-    const transitionToMode = useCallback(async (aiTurnId: string, mode: CognitiveMode) => {
+    const transitionToMode = useCallback(async (
+        aiTurnId: string,
+        mode: CognitiveMode,
+        options: CognitiveTransitionOptions = {},
+    ) => {
         if (!sessionId) {
             setError("No active session found.");
             return;
@@ -26,28 +50,29 @@ export function useCognitiveMode() {
         setError(null);
 
         try {
-            // Send message to background via extension-api (which wraps chrome.runtime.sendMessage or port.postMessage)
-            // Since our ConnectionHandler listens to the port, we should use the port if possible.
-            // However, extension-api.ts usually handles the generic messaging.
+            setActiveAiTurnId(aiTurnId);
+            setUiPhase("streaming");
+            setGlobalIsLoading(true);
 
-            // Let's verify how extension-api sends messages.
             await api.sendPortMessage({
                 type: "CONTINUE_COGNITIVE_WORKFLOW",
                 payload: {
                     sessionId,
                     aiTurnId,
-                    mode
-                }
+                    mode,
+                    providerId: options.providerId,
+                    selectedArtifacts: options.selectedArtifacts || [],
+                },
             });
-
-            // We don't await the full result here because it might stream back through the port
-            // which usePortMessageHandler handles.
         } catch (err: any) {
             console.error(`[useCognitiveMode] Transition failed:`, err);
             setError(err.message || String(err));
             setLocalIsTransitioning(false);
+            setGlobalIsLoading(false);
+            setUiPhase("awaiting_action");
+            setActiveAiTurnId(null);
         }
-    }, [sessionId]);
+    }, [sessionId, setActiveAiTurnId, setGlobalIsLoading, setUiPhase]);
 
     return {
         transitionToMode,

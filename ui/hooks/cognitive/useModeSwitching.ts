@@ -1,7 +1,7 @@
 import { useAtom } from "jotai";
 import { turnCognitiveModeFamily } from "../../state/atoms";
 import { CognitiveViewMode } from "../../types";
-import { useCognitiveMode } from "./useCognitiveMode";
+import { CognitiveTransitionOptions, useCognitiveMode } from "./useCognitiveMode";
 import { useCallback } from "react";
 
 /**
@@ -10,7 +10,7 @@ import { useCallback } from "react";
  */
 export function useModeSwitching(aiTurnId: string) {
     const [activeMode, setActiveMode] = useAtom(turnCognitiveModeFamily(aiTurnId));
-    const { transitionToMode, isTransitioning, error } = useCognitiveMode();
+    const { transitionToMode, isTransitioning, error } = useCognitiveMode(aiTurnId);
 
     const switchToMode = useCallback(async (mode: CognitiveViewMode) => {
         // If switching to a mode that needs a backend run (understand/gauntlet),
@@ -20,11 +20,14 @@ export function useModeSwitching(aiTurnId: string) {
         setActiveMode(mode);
     }, [setActiveMode]);
 
-    const triggerAndSwitch = useCallback(async (mode: 'understand' | 'gauntlet') => {
+    const triggerAndSwitch = useCallback(async (
+        mode: 'understand' | 'gauntlet',
+        options: CognitiveTransitionOptions = {},
+    ) => {
         // Change UI mode immediately to show loading if needed
         setActiveMode(mode);
         // Trigger backend
-        await transitionToMode(aiTurnId, mode);
+        await transitionToMode(aiTurnId, mode, options);
     }, [aiTurnId, setActiveMode, transitionToMode]);
 
     return {

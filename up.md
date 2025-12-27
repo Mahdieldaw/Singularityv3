@@ -1,901 +1,658 @@
-these are solutions i was given but i also explained i dont want to bring back raf throttling, then they gave me this hyrid solution Strategic Fix: Surgical State Isolation
-Solution 1: Separate Version Counters for Each Response Type ✨
-Instead of replacing the entire object, increment granular version counters so React knows what actually changed:
-typescript// In turn-helpers.ts - applyStreamingUpdates
-export function applyStreamingUpdates(
-aiTurn: AiTurn,
-updates: Array<{
-providerId: string;
-text: string;
-status: string;
-responseType: "batch" | "synthesis" | "mapping" | "refiner" | "antagonist";
-}>,
-) {
-let batchChanged = false;
-let synthesisChanged = false;
-let mappingChanged = false;
-let refinerChanged = false;
-let antagonistChanged = false;
+Refactored WorkflowEngine.execute()
+javascriptasync execute(request, resolvedContext) {
+  const { context, steps } = request;
+  const stepResults = new Map();
+  const workflowContexts = {};
 
-updates.forEach(({ providerId, text: delta, status, responseType }) => {
-if (responseType === "batch") {
-batchChanged = true;
-// ... existing batch update logic
-} else if (responseType === "synthesis") {
-synthesisChanged = true;
-// ... existing synthesis update logic
-}
-// ... etc
-});
-
-// ✅ Only bump versions for what actually changed
-if (batchChanged) aiTurn.batchVersion = (aiTurn.batchVersion ?? 0) + 1;
-if (synthesisChanged) aiTurn.synthesisVersion = (aiTurn.synthesisVersion ?? 0) + 1;
-if (mappingChanged) aiTurn.mappingVersion = (aiTurn.mappingVersion ?? 0) + 1;
-if (refinerChanged) aiTurn.refinerVersion = (aiTurn.refinerVersion ?? 0) + 1;
-if (antagonistChanged) aiTurn.antagonistVersion = (aiTurn.antagonistVersion ?? 0) + 1;
-}
-Then update your memos to subscribe only to relevant versions:
-typescript// In AiTurnBlock.tsx
-const synthesisTabs = useMemo(() => {
-if (!aiTurn.synthesisResponses) return [];
-// ... synthesis tab logic
-}, [aiTurn.synthesisResponses, aiTurn.synthesisVersion]); // ✅ Granular dependency
-
-const displayedMappingText = useMemo(() => {
-// ... mapping logic
-}, [displayedMappingTake, aiTurn.mappingVersion]); // ✅ Only re-runs on mapping changes
-Why This Works: Memos now have precise invalidation — batch streaming won't touch synthesis versions.
-
-Solution 2: Add React.memo Barriers Around Synthesis Bubble 🛡️
-Wrap the synthesis rendering in a memoized component to completely isolate it from parent re-renders:
-typescript// New file: SynthesisBubble.tsx
-const SynthesisBubble = React.memo<{
-aiTurn: AiTurn;
-effectiveActiveSynthTab: any;
-refinerOutput: any;
-// ... other props
-}>(({ aiTurn, effectiveActiveSynthTab, refinerOutput, ... }) => {
-return (
-<div className="synthesis-bubble ...">
-{/* All your existing synthesis UI */}
-</div>
-);
-}, (prev, next) => {
-// ✅ Custom equality: Only re-render if synthesis data changed
-return (
-prev.aiTurn.synthesisVersion === next.aiTurn.synthesisVersion &&
-prev.effectiveActiveSynthTab?.id === next.effectiveActiveSynthTab?.id &&
-prev.refinerOutput === next.refinerOutput
-);
-});
-
-// In AiTurnBlock.tsx
-return (
-
-  <div className="turn-block">
-    <SynthesisBubble
-      aiTurn={aiTurn}
-      effectiveActiveSynthTab={effectiveActiveSynthTab}
-      refinerOutput={refinerOutput}
-      // ...
-    />
-    {/* Rest of turn block */}
-  </div>
-);
-Why This Works: The synthesis bubble cannot re-render unless its specific props change, even if the parent AiTurnBlock re-renders 60 times/second during streaming.
-
-
-Solution 3: Debounce Rapid Turn Updates with useTransition ⏱️
-React 18's automatic batching doesn't always work with Jotai + Immer. Add explicit scheduling:
-typescript// In usePortMessageHandler.ts
-import { useTransition } from 'react';
-
-export function usePortMessageHandler() {
-const [isPending, startTransition] = useTransition();
-
-// In PARTIAL_RESULT handler:
-streamingBufferRef.current.addDelta(
-pid,
-chunk.text,
-"streaming",
-stepType,
-);
-
-// ✅ Wrap the flush in a transition to deprioritize it
-startTransition(() => {
-streamingBufferRef.current?.flushImmediate();
-});
-}
-Alternatively, throttle flushes at 60fps instead of immediate:
-typescript// In StreamingBuffer.ts
-private lastFlushTime = 0;
-private readonly FLUSH_INTERVAL = 16; // ~60fps
-
-addDelta(...) {
-// ... existing logic
-
-const now = performance.now();
-if (now - this.lastFlushTime >= this.FLUSH_INTERVAL) {
-this.flushAll();
-this.lastFlushTime = now;
-} else {
-// Schedule flush for next frame
-if (!this.pendingFlush) {
-this.pendingFlush = requestAnimationFrame(() => {
-this.flushAll();
-this.lastFlushTime = performance.now();
-this.pendingFlush = null;
-});
-}
-}
-}
-
-Solution 4: Use Atom Families for Batch vs Synthesis Isolation 🔬
-Create separate atom families so components subscribe to only what they need:
-typescript// In atoms.ts
-export const batchResponsesForTurnFamily = atomFamily(
-(turnId: string) => atom((get) => {
-const turn = get(turnsMapAtom).get(turnId);
-if (!turn || turn.type !== 'ai') return {};
-return (turn as AiTurn).batchResponses || {};
-}),
-(a, b) => a === b
-);
-
-export const synthesisResponsesForTurnFamily = atomFamily(
-(turnId: string) => atom((get) => {
-const turn = get(turnsMapAtom).get(turnId);
-if (!turn || turn.type !== 'ai') return {};
-return (turn as AiTurn).synthesisResponses || {};
-}),
-(a, b) => a === b
-);
-Then in components:
-typescript// ModelResponsePanel (right pane) subscribes only to batch
-const batchResponses = useAtomValue(batchResponsesForTurnFamily(turnId));
-
-// AiTurnBlock synthesis UI subscribes only to synthesis
-const synthesisResponses = useAtomValue(synthesisResponsesForTurnFamily(turnId));
-Why This Works: Jotai will not trigger synthesis subscribers when batch responses change.
-
-Recommended Implementation Plan
-Phase 1 (Immediate - 10 min):
-
-Add batchVersion to AiTurn type
-Update applyStreamingUpdates to set batchVersion only for batch updates
-Wrap synthesis bubble in React.memo with custom equality
-
-Phase 2 (15 min):
-4. Add RAF throttling to StreamingBuffer (16ms interval)
-5. Test - this should eliminate 90% of flashes
-Phase 3 (If needed - 30 min):
-6. Create atom families for batch/synthesis/mapping isolation
-7. Refactor subscriptions to use granular atoms
-
-Why It Worked Before
-Your previous double RAF pattern in StreamingBuffer was accidentally solving this by:
-
-Delaying updates enough for React to batch properly
-Giving the browser time to paint between updates
-Creating natural throttling
-
-When you removed it for "immediate feedback," you created a synchronous update storm that overwhelms React's reconciliation.
-
-Next Steps: Start with Phase 1 (memo barriers + version counters). If flashes persist, add Phase 2 (RAF throttling). Let me know which approach you'd like me to implement first, and I'll provide the complete code changes! 🎯
-
-hybrid solution:
-// ui/utils/turn-helpers.ts - ADD BATCH VERSION TRACKING
-
-export function applyStreamingUpdates(
-aiTurn: AiTurn,
-updates: Array<{
-providerId: string;
-text: string;
-status: string;
-responseType: "batch" | "synthesis" | "mapping" | "refiner" | "antagonist";
-}>,
-) {
-// ✅ Track what changed for granular version bumps
-let batchChanged = false;
-let synthesisChanged = false;
-let mappingChanged = false;
-let refinerChanged = false;
-let antagonistChanged = false;
-
-updates.forEach(({ providerId, text: delta, status, responseType }) => {
-if (responseType === "batch") {
-batchChanged = true; // ✅ Mark batch as changed
-
-code
-Code
-download
-content_copy
-expand_less
-if (!aiTurn.batchResponses) aiTurn.batchResponses = {};
-  const arr = normalizeResponseArray(aiTurn.batchResponses[providerId]);
-
-  const latest = arr.length > 0 ? arr[arr.length - 1] : undefined;
-  const isLatestTerminal = latest && (latest.status === "completed" || latest.status === "error");
-  const isNewStream = status === "streaming" || status === "pending";
-
-  if (latest && !isLatestTerminal) {
-    arr[arr.length - 1] = {
-      ...latest,
-      text: (latest.text || "") + delta,
-      status: status as any,
-      updatedAt: Date.now(),
-    };
-  } else if (isLatestTerminal && !isNewStream) {
-    arr[arr.length - 1] = {
-      ...latest,
-      text: (latest.text || "") + delta,
-      status: status as any,
-      updatedAt: Date.now(),
-    };
-  } else {
-    arr.push({
-      providerId: providerId as ProviderKey,
-      text: delta,
-      status: status as any,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    });
+  // Cache user message with validation
+  this.currentUserMessage = context?.userMessage || request?.context?.userMessage || "";
+  if (!this.currentUserMessage?.trim()) {
+    console.error('[WorkflowEngine] CRITICAL: execute() with empty userMessage!');
+    return;
   }
 
-  aiTurn.batchResponses[providerId] = arr;
-  
-} else if (responseType === "synthesis") {
-  synthesisChanged = true; // ✅ Mark synthesis as changed
-  
-  if (!aiTurn.synthesisResponses) aiTurn.synthesisResponses = {};
-  const arr = normalizeResponseArray(aiTurn.synthesisResponses[providerId]);
+  try {
+    // Check which pipeline to use
+    const useCognitivePipeline = await this._checkCognitivePipeline();
+    context.useCognitivePipeline = useCognitivePipeline;
 
-  const latest = arr.length > 0 ? arr[arr.length - 1] : undefined;
-  const isLatestTerminal = latest && (latest.status === "completed" || latest.status === "error");
+    // Seed contexts for extend/recompute
+    this._seedContexts(resolvedContext, stepResults, workflowContexts);
 
-  if (latest && !isLatestTerminal) {
-    arr[arr.length - 1] = {
-      ...latest,
-      text: (latest.text || "") + delta,
-      status: status as any,
-      updatedAt: Date.now(),
-    };
-  } else {
-    arr.push({
-      providerId: providerId as ProviderKey,
-      text: delta,
-      status: status as any,
-      createdAt: Date.now(),
-    });
+    // === PIPELINE FORK ===
+    if (useCognitivePipeline) {
+      await this._executeCognitivePipeline(context, steps, stepResults, workflowContexts, resolvedContext);
+    } else {
+      await this._executeClassicPipeline(context, steps, stepResults, workflowContexts, resolvedContext);
+    }
+
+  } catch (error) {
+    console.error('[WorkflowEngine] Workflow failed:', error);
+    this._handleWorkflowError(error, context, resolvedContext);
+  } finally {
+    this.streamingManager.clearCache(context.sessionId);
+  }
+}
+
+// ============================================================================
+// CLASSIC PIPELINE (Original)
+// ============================================================================
+async _executeClassicPipeline(context, steps, stepResults, workflowContexts, resolvedContext) {
+  console.log('[WorkflowEngine] Running CLASSIC pipeline');
+
+  // 1. Batch Phase
+  await this._executeBatchPhase(steps, context, stepResults, resolvedContext);
+  
+  // Validate batch success (need 2+ models)
+  const batchSuccess = this._validateBatchPhase(stepResults, resolvedContext);
+  if (!batchSuccess) {
+    await this._persistAndExit(context, steps, stepResults, resolvedContext, "insufficient_witnesses");
+    return;
   }
 
-  aiTurn.synthesisResponses[providerId] = arr;
-  // Synthesis version is already being bumped below
+  // 2. Mapping Phase (old mapper)
+  await this._executeMappingPhase(steps, context, stepResults, workflowContexts, resolvedContext);
   
-} else if (responseType === "mapping") {
-  mappingChanged = true; // ✅ Mark mapping as changed
-  
-  if (!aiTurn.mappingResponses) aiTurn.mappingResponses = {};
-  const arr = normalizeResponseArray(aiTurn.mappingResponses[providerId]);
-
-  const latest = arr.length > 0 ? arr[arr.length - 1] : undefined;
-  const isLatestTerminal = latest && (latest.status === "completed" || latest.status === "error");
-
-  if (latest && !isLatestTerminal) {
-    arr[arr.length - 1] = {
-      ...latest,
-      text: (latest.text || "") + delta,
-      status: status as any,
-      updatedAt: Date.now(),
-    };
-  } else {
-    arr.push({
-      providerId: providerId as ProviderKey,
-      text: delta,
-      status: status as any,
-      createdAt: Date.now(),
-    });
+  if (this._hasMappingError(stepResults)) {
+    await this._persistAndExit(context, steps, stepResults, resolvedContext, "mapping_failed");
+    return;
   }
 
-  aiTurn.mappingResponses[providerId] = arr;
-  
-} else if (responseType === "refiner") {
-  refinerChanged = true; // ✅ Mark refiner as changed
-  
-  if (!aiTurn.refinerResponses) aiTurn.refinerResponses = {};
-  const arr = normalizeResponseArray(aiTurn.refinerResponses[providerId]);
-
-  const latest = arr.length > 0 ? arr[arr.length - 1] : undefined;
-  const isLatestTerminal = latest && (latest.status === "completed" || latest.status === "error");
-
-  if (latest && !isLatestTerminal) {
-    arr[arr.length - 1] = {
-      ...latest,
-      text: (latest.text || "") + delta,
-      status: status as any,
-      updatedAt: Date.now(),
-    };
-  } else {
-    arr.push({
-      providerId: providerId as ProviderKey,
-      text: delta,
-      status: status as any,
-      createdAt: Date.now(),
-    });
+  // 3. Consensus Gate Check (skip refiner/antagonist if monoculture)
+  const consensusGate = this._computeConsensusGate(stepResults, steps);
+  if (consensusGate) {
+    context.workflowControl = consensusGate;
   }
 
-  aiTurn.refinerResponses[providerId] = arr;
+  // 4. Synthesis Phase
+  await this._executeSynthesisPhase(steps, context, stepResults, workflowContexts, resolvedContext);
   
-} else if (responseType === "antagonist") {
-  antagonistChanged = true; // ✅ Mark antagonist as changed
+  if (this._hasSynthesisError(stepResults)) {
+    await this._persistAndExit(context, steps, stepResults, resolvedContext, "synthesis_failed");
+    return;
+  }
+
+  // 5. Refiner Phase (if not consensus-only)
+  if (!context.workflowControl?.consensusOnly) {
+    await this._executeRefinerPhase(steps, context, stepResults, resolvedContext);
+  }
+
+  // 6. Antagonist Phase (if not consensus-only)
+  if (!context.workflowControl?.consensusOnly) {
+    await this._executeAntagonistPhase(steps, context, stepResults, resolvedContext);
+  }
+
+  // 7. Persist and Finalize
+  await this._persistAndFinalize(context, steps, stepResults, resolvedContext);
+}
+
+// ============================================================================
+// COGNITIVE PIPELINE (New)
+// ============================================================================
+async _executeCognitivePipeline(context, steps, stepResults, workflowContexts, resolvedContext) {
+  console.log('[WorkflowEngine] Running COGNITIVE pipeline');
+
+  // 1. Batch Phase (same as classic)
+  await this._executeBatchPhase(steps, context, stepResults, resolvedContext);
   
-  if (!aiTurn.antagonistResponses) aiTurn.antagonistResponses = {};
-  const arr = normalizeResponseArray(aiTurn.antagonistResponses[providerId]);
-
-  const latest = arr.length > 0 ? arr[arr.length - 1] : undefined;
-  const isLatestTerminal = latest && (latest.status === "completed" || latest.status === "error");
-
-  if (latest && !isLatestTerminal) {
-    arr[arr.length - 1] = {
-      ...latest,
-      text: (latest.text || "") + delta,
-      status: status as any,
-      updatedAt: Date.now(),
-    };
-  } else {
-    arr.push({
-      providerId: providerId as ProviderKey,
-      text: delta,
-      status: status as any,
-      createdAt: Date.now(),
-    });
+  const batchSuccess = this._validateBatchPhase(stepResults, resolvedContext);
+  if (!batchSuccess) {
+    await this._persistAndExit(context, steps, stepResults, resolvedContext, "insufficient_witnesses");
+    return;
   }
 
-  aiTurn.antagonistResponses[providerId] = arr;
-}
-
-});
-
-// ✅ GRANULAR VERSION BUMPS: Only update versions for what changed
-if (batchChanged) {
-aiTurn.batchVersion = (aiTurn.batchVersion ?? 0) + 1;
-}
-if (synthesisChanged) {
-aiTurn.synthesisVersion = (aiTurn.synthesisVersion ?? 0) + 1;
-}
-if (mappingChanged) {
-aiTurn.mappingVersion = (aiTurn.mappingVersion ?? 0) + 1;
-}
-if (refinerChanged) {
-aiTurn.refinerVersion = (aiTurn.refinerVersion ?? 0) + 1;
-}
-if (antagonistChanged) {
-aiTurn.antagonistVersion = (aiTurn.antagonistVersion ?? 0) + 1;
-}
-}
-
-// ui/components/SynthesisBubble.tsx - ISOLATED RENDERING
-import React, { useState, useEffect, useRef } from "react";
-import { AiTurn } from "../types";
-import MarkdownDisplay from "./MarkdownDisplay";
-import { RefinerDot } from "./refinerui/RefinerDot";
-import { cleanAntagonistResponse } from "../../shared/parsing-utils";
-import clsx from "clsx";
-
-interface SynthesisBubbleProps {
-aiTurn: AiTurn;
-effectiveActiveSynthTab: any;
-synthesisTabs: any[];
-activeSynthTabId: string | null;
-onTabChange: (tabId: string) => void;
-refinerOutput: any;
-isRefinerLoading: boolean;
-showEcho: boolean;
-setShowEcho: (show: boolean) => void;
-onDecisionMapOpen: () => void;
-onTrustPanelOpen: () => void;
-onGemActionClick: (action: string) => void;
-wasSynthRequested: boolean;
-isSynthesisTarget: boolean;
-isMappingError: boolean;
-isMappingLoading: boolean;
-}
-
-/**
-
-✅ ISOLATED SYNTHESIS BUBBLE
-
-This component ONLY re-renders when synthesis data changes.
-
-Batch streaming updates will NOT trigger re-renders here.
-*/
-export const SynthesisBubble = React.memo<SynthesisBubbleProps>(
-({
-aiTurn,
-effectiveActiveSynthTab,
-synthesisTabs,
-activeSynthTabId,
-onTabChange,
-refinerOutput,
-isRefinerLoading,
-showEcho,
-setShowEcho,
-onDecisionMapOpen,
-onTrustPanelOpen,
-onGemActionClick,
-wasSynthRequested,
-isSynthesisTarget,
-isMappingError,
-isMappingLoading,
-}) => {
-// All synthesis rendering logic here (copied from AiTurnBlock)
-
-if (!wasSynthRequested) {
-return (
-<div className="text-text-muted/70 italic text-center relative z-10">
-Synthesis not enabled for this turn.
-</div>
-);
-}
-
-// Handle errors/loading states
-if (isMappingError) {
-return (
-<div className="py-4">
-{/* Error UI */}
-</div>
-);
-}
-
-const activeTab = effectiveActiveSynthTab;
-const latest = activeTab?.response;
-const isGenerating = latest && (latest.status === "streaming" || latest.status === "pending");
-
-if (isGenerating && !latest?.text) {
-return (
-<div className="flex items-center justify-center gap-2 text-text-muted relative z-10">
-<span className="italic">
-{isSynthesisTarget ? "Starting synthesis..." : "Synthesis generating"}
-</span>
-<span className="streaming-dots" />
-</div>
-);
-}
-
-if (activeTab && activeTab.response.status === "error") {
-return (
-<div className="py-4">
-{/* Error banner */}
-</div>
-);
-}
-
-if (activeTab) {
-const take = activeTab.response;
-const cleanText = take.text || '';
-const { shortAnswer, longAnswer } = splitSynthesisAnswer(cleanText);
-
-return (
-<div className="animate-in fade-in duration-300 relative z-10">
-<div className="text-base leading-relaxed text-text-primary">
-<MarkdownDisplay
-content={cleanAntagonistResponse(String(shortAnswer || cleanText || take.text || ""))}
-/>
-</div>
-
-code
-Code
-download
-content_copy
-expand_less
-{/* Refiner controls */}
-   <div className="my-6 flex items-center justify-center gap-6 border-y border-border-subtle/60 py-3">
-     {refinerOutput?.outlier && (
-       <button
-         onClick={() => setShowEcho((prev) => !prev)}
-         className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-surface-raised hover:bg-surface-highlight border border-border-subtle text-xs text-text-secondary"
-       >
-         <span className="text-sm">📢</span>
-         <span>Echo</span>
-       </button>
-     )}
-
-     <button
-       onClick={onDecisionMapOpen}
-       className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-surface-raised hover:bg-surface-highlight border border-border-subtle text-xs text-text-secondary"
-     >
-       <span className="text-sm">📊</span>
-       <span>Map</span>
-     </button>
-
-     {(refinerOutput || isRefinerLoading) && (
-       <RefinerDot
-         refiner={refinerOutput || null}
-         onClick={onTrustPanelOpen}
-         isLoading={isRefinerLoading}
-       />
-     )}
-   </div>
-
-   {/* Echo display */}
-   {refinerOutput?.outlier && showEcho && (
-     <div className="mt-3 mx-auto max-w-2xl rounded-xl border border-border-subtle bg-surface-raised px-4 py-3 text-sm text-text-primary">
-       <div className="flex items-center gap-2 mb-1">
-         <span className="text-xs uppercase tracking-wide text-text-muted">Echo</span>
-         {refinerOutput.outlier.source && (
-           <span className="inline-flex items-center px-1.5 py-0.5 rounded-full bg-chip text-[11px] text-text-secondary">
-             [{refinerOutput.outlier.source}]
-           </span>
-         )}
-       </div>
-       <div>{refinerOutput.outlier.position}</div>
-     </div>
-   )}
-
-   {/* Gem action */}
-   {refinerOutput?.gem?.action && (
-     <div className="mt-4 flex flex-col items-center">
-       <button
-         onClick={() => onGemActionClick(refinerOutput.gem.action)}
-         className="px-4 py-2 bg-brand-500/10 hover:bg-brand-500/20 border border-brand-500/30 rounded-full text-brand-400 text-sm font-medium transition-all"
-       >
-         <span className="flex items-center gap-2">
-           <span className="text-xs">✨</span>
-           {refinerOutput.gem.action}
-         </span>
-       </button>
-     </div>
-   )}
-
-   {/* Long answer */}
-   {longAnswer && (
-     <div className="text-base leading-relaxed text-text-primary">
-       <MarkdownDisplay
-         content={cleanAntagonistResponse(String(longAnswer))}
-       />
-     </div>
-   )}
-
-   {/* Leap */}
-   {refinerOutput?.leap?.action && (
-     <div className="mt-6 pt-4 border-t border-border-subtle/40">
-       <div className="text-base font-semibold text-text-primary mb-1">
-         {refinerOutput.leap.action}
-       </div>
-     </div>
-   )}
- </div>
-
-);
-}
-
-return (
-
-   <div className="flex items-center justify-center h-full text-text-muted italic relative z-10">
-     {isMappingLoading ? (
-       <div className="flex items-center gap-2">
-         <span>Analyzing sources...</span>
-         <span className="streaming-dots" />
-       </div>
-     ) : "Synthesis unavailable."}
-   </div>
- );
-
-
-},
-(prev, next) => {
-// ✅ CRITICAL: Custom equality check - only re-render if synthesis data changed
-return (
-prev.aiTurn.synthesisVersion === next.aiTurn.synthesisVersion &&
-prev.effectiveActiveSynthTab?.id === next.effectiveActiveSynthTab?.id &&
-prev.activeSynthTabId === next.activeSynthTabId &&
-prev.refinerOutput === next.refinerOutput &&
-prev.isRefinerLoading === next.isRefinerLoading &&
-prev.showEcho === next.showEcho &&
-prev.isSynthesisTarget === next.isSynthesisTarget &&
-prev.isMappingError === next.isMappingError &&
-prev.isMappingLoading === next.isMappingLoading
-);
-}
-);
-
-// Helper from AiTurnBlock
-function splitSynthesisAnswer(text: string): { shortAnswer: string; longAnswer: string | null } {
-const input = String(text || '').replace(/\r\n/g, '\n');
-if (!input.trim()) return { shortAnswer: '', longAnswer: null };
-
-const patterns: RegExp[] = [
-/(?:^|\n)\s*#{1,6}\sthe\s+long\s+answer\s:?\s*(?:\n|
-)/i,
-/(?:^|\n)\s***\sthe\s+long\s+answer\s**\s*:?\s*(?:\n|
-)/i,
-/(?:^|\n)\sthe\s+long\s+answer\s:?\s*(?:\n|
-)/i,
-];
-
-let best: { index: number; length: number } | null = null;
-for (const re of patterns) {
-const match = input.match(re);
-if (match && typeof match.index === 'number') {
-const idx = match.index;
-if (!best || idx < best.index) {
-best = { index: idx, length: match[0].length };
-}
-}
-}
-
-if (!best) return { shortAnswer: input.trim(), longAnswer: null };
-
-const shortAnswer = input.slice(0, best.index).trim();
-const longAnswer = input.slice(best.index + best.length).trim();
-
-return {
-shortAnswer,
-longAnswer: longAnswer ? longAnswer : null,
-};
-}
-
-// src/ui/utils/streamingBuffer.ts - ADAPTIVE THROTTLING
-type ResponseType = "batch" | "synthesis" | "mapping" | "refiner" | "antagonist";
-
-interface BatchUpdate {
-providerId: string;
-text: string;
-status: string;
-responseType: ResponseType;
-createdAt: number;
-}
-
-export class StreamingBuffer {
-private pendingDeltas: Map<
-string,
-{
-deltas: { text: string; ts: number }[];
-status: string;
-responseType: ResponseType;
-}
-
-= new Map();
-
-private onFlushCallback: (updates: BatchUpdate[]) => void;
-private pendingFlushRaf: number | null = null;
-private lastFlushTime = 0;
-
-constructor(onFlush: (updates: BatchUpdate[]) => void) {
-this.onFlushCallback = onFlush;
-}
-
-addDelta(
-providerId: string,
-delta: string,
-status: string,
-responseType: ResponseType,
-) {
-const key = ${responseType}:${providerId};
-if (!this.pendingDeltas.has(key)) {
-this.pendingDeltas.set(key, {
-deltas: [],
-status,
-responseType,
-});
-}
-
-code
-Code
-download
-content_copy
-expand_less
-const entry = this.pendingDeltas.get(key)!;
-entry.deltas.push({ text: delta, ts: Date.now() });
-entry.status = status;
-entry.responseType = responseType;
-
-// ✅ ADAPTIVE THROTTLING: Immediate if 1 provider, batched if 2+
-this.scheduleFlush();
-
-}
-
-private scheduleFlush() {
-const activeProviderCount = this.getActiveProviderCount();
-
-code
-Code
-download
-content_copy
-expand_less
-// ✅ ZERO LATENCY: Single provider streams immediately (Claude scenario)
-if (activeProviderCount === 1) {
-  if (this.pendingFlushRaf) {
-    cancelAnimationFrame(this.pendingFlushRaf);
-    this.pendingFlushRaf = null;
+  // 2. MapperV2 Phase (cognitive-specific mapper)
+  await this._executeMappingV2Phase(steps, context, stepResults, workflowContexts, resolvedContext);
+  
+  if (this._hasMappingError(stepResults)) {
+    await this._persistAndExit(context, steps, stepResults, resolvedContext, "mapping_failed");
+    return;
   }
-  this.flushAll();
-  return;
-}
 
-// ✅ SMART BATCHING: Multiple providers → throttle at 60fps
-const now = performance.now();
-const timeSinceLastFlush = now - this.lastFlushTime;
-const BATCH_INTERVAL = 16; // ~60fps
+  // 3. Extract MapperArtifact and Compute Explore Analysis
+  const mappingResult = Array.from(stepResults.entries()).find(([_, v]) =>
+    v.status === 'completed' && v.result?.mapperArtifact
+  )?.[1]?.result;
 
-if (timeSinceLastFlush >= BATCH_INTERVAL) {
-  // Enough time passed, flush immediately
-  if (this.pendingFlushRaf) {
-    cancelAnimationFrame(this.pendingFlushRaf);
-    this.pendingFlushRaf = null;
+  if (!mappingResult?.mapperArtifact) {
+    console.error('[WorkflowEngine] Cognitive pipeline missing mapperArtifact');
+    await this._persistAndExit(context, steps, stepResults, resolvedContext, "mapping_artifact_missing");
+    return;
   }
-  this.flushAll();
-} else if (!this.pendingFlushRaf) {
-  // Schedule flush for next frame
-  this.pendingFlushRaf = requestAnimationFrame(() => {
-    this.pendingFlushRaf = null;
-    this.flushAll();
+
+  const mapperArtifact = mappingResult.mapperArtifact;
+  const exploreAnalysis = computeExplore(context.userMessage, mapperArtifact);
+
+  // 4. Emit Mapper Artifact Ready (UI displays options)
+  this.port.postMessage({
+    type: 'MAPPER_ARTIFACT_READY',
+    sessionId: context.sessionId,
+    aiTurnId: context.canonicalAiTurnId,
+    artifact: mapperArtifact,
+    analysis: exploreAnalysis,
   });
-}
 
-}
-
-private getActiveProviderCount(): number {
-// Count unique providers currently streaming (status = "streaming")
-const activeProviders = new Set<string>();
-this.pendingDeltas.forEach((entry, compositeKey) => {
-if (entry.status === "streaming") {
-const idx = compositeKey.indexOf(":");
-const providerId = idx >= 0 ? compositeKey.slice(idx + 1) : compositeKey;
-activeProviders.add(providerId);
-}
-});
-return activeProviders.size;
-}
-
-private flushAll() {
-const updates: BatchUpdate[] = [];
-
-code
-Code
-download
-content_copy
-expand_less
-this.pendingDeltas.forEach((entry, compositeKey) => {
-  const idx = compositeKey.indexOf(":");
-  const providerId = idx >= 0 ? compositeKey.slice(idx + 1) : compositeKey;
-  const concatenatedText = entry.deltas.map((d) => d.text).join("");
-  const lastTs = entry.deltas.length
-    ? entry.deltas[entry.deltas.length - 1].ts
-    : Date.now();
-  updates.push({
-    providerId,
-    text: concatenatedText,
-    status: entry.status,
-    responseType: entry.responseType,
-    createdAt: lastTs,
+  console.log('[WorkflowEngine] Cognitive Explore complete:', {
+    queryType: exploreAnalysis.queryType,
+    container: exploreAnalysis.containerType,
+    escapeVelocity: exploreAnalysis.escapeVelocity,
   });
-});
 
-this.pendingDeltas.clear();
+  // 5. Persist State Before Halt
+  await this._persistCognitiveHalt(context, steps, stepResults, resolvedContext);
 
-if (updates.length > 0) {
-  updates.sort((a, b) => a.createdAt - b.createdAt);
-  this.onFlushCallback(updates);
-  this.lastFlushTime = performance.now();
+  // 6. Emit Workflow Complete with Halt Reason
+  this.turnEmitter.emitTurnFinalized(context, steps, stepResults, resolvedContext);
+  this.port.postMessage({
+    type: "WORKFLOW_COMPLETE",
+    sessionId: context.sessionId,
+    workflowId: request.workflowId,
+    finalResults: Object.fromEntries(stepResults),
+    haltReason: "cognitive_exploration_ready"
+  });
+
+  console.log('[WorkflowEngine] Cognitive HALT: Waiting for user mode selection (Understand or Decide).');
 }
 
+// ============================================================================
+// COGNITIVE CONTINUATION (User picks Understand or Decide)
+// ============================================================================
+async handleContinueCognitiveRequest(payload) {
+  const { sessionId, aiTurnId, mode } = payload;
+  console.log(`[WorkflowEngine] Continuing cognitive workflow: ${mode} mode`);
+
+  try {
+    // 1. Rehydrate turn from persistence
+    const adapter = this.sessionManager.adapter;
+    const aiTurn = await adapter.get("turns", aiTurnId);
+    if (!aiTurn) throw new Error(`AI turn ${aiTurnId} not found`);
+
+    const mapperArtifact = aiTurn.mapperArtifact;
+    const exploreAnalysis = aiTurn.exploreAnalysis;
+
+    if (!mapperArtifact) {
+      throw new Error(`MapperArtifact missing for turn ${aiTurnId}`);
+    }
+
+    const context = {
+      sessionId,
+      canonicalAiTurnId: aiTurnId,
+      canonicalUserTurnId: aiTurn.userTurnId
+    };
+
+    // Use mapper provider as default for continuation
+    const preferredProvider = aiTurn.meta?.mapper || "gemini";
+
+    let result;
+
+    // === MODE FORK ===
+    if (mode === 'understand') {
+      // Understand Mode: Synthesis-like with new prompt
+      const step = {
+        stepId: `understand-${preferredProvider}-${Date.now()}`,
+        type: 'understand',
+        payload: {
+          understandProvider: preferredProvider,
+          mapperArtifact,
+          exploreAnalysis,
+          originalPrompt: aiTurn.meta?.originalPrompt || "...",
+          useThinking: false
+        }
+      };
+      result = await this.executeUnderstandStep(step, context, {});
+
+    } else if (mode === 'gauntlet') {
+      // Decide Mode: Gauntlet for decision-ready output
+      const step = {
+        stepId: `gauntlet-${preferredProvider}-${Date.now()}`,
+        type: 'gauntlet',
+        payload: {
+          gauntletProvider: preferredProvider,
+          mapperArtifact,
+          originalPrompt: aiTurn.meta?.originalPrompt || "...",
+          useThinking: false
+        }
+      };
+      result = await this.executeGauntletStep(step, context, {});
+
+    } else {
+      throw new Error(`Unknown cognitive mode: ${mode}`);
+    }
+
+    // 2. Persist the new response
+    await this.sessionManager.upsertProviderResponse(
+      sessionId,
+      aiTurnId,
+      preferredProvider,
+      mode, // 'understand' or 'gauntlet' as responseType
+      0,
+      {
+        text: result.text,
+        status: "completed",
+        meta: result.meta,
+      }
+    );
+
+    // 3. Emit completion (UI updates with new response)
+    this.port.postMessage({
+      type: "COGNITIVE_CONTINUATION_COMPLETE",
+      sessionId,
+      aiTurnId,
+      mode,
+      providerId: preferredProvider,
+      result,
+    });
+
+  } catch (error) {
+    console.error('[WorkflowEngine] Cognitive continuation failed:', error);
+    this.port.postMessage({
+      type: "WORKFLOW_STEP_UPDATE",
+      sessionId: sessionId || "unknown",
+      stepId: `continue-${mode}-error`,
+      status: "failed",
+      error: error.message,
+    });
+  }
 }
 
-flushImmediate() {
-if (this.pendingFlushRaf) {
-cancelAnimationFrame(this.pendingFlushRaf);
-this.pendingFlushRaf = null;
-}
-this.flushAll();
-}
+// ============================================================================
+// HELPER: Persist Cognitive Halt State
+// ============================================================================
+async _persistCognitiveHalt(context, steps, stepResults, resolvedContext) {
+  if (resolvedContext?.type === "recompute") return; // No persist for recomputes
 
-clear() {
-if (this.pendingFlushRaf) {
-cancelAnimationFrame(this.pendingFlushRaf);
-this.pendingFlushRaf = null;
-}
-this.pendingDeltas.clear();
-}
-}
-Smart Adaptive StreamingBufferCode // src/ui/utils/streamingBuffer.ts - ADAPTIVE THROTTLING
-type ResponseType = "batch" | "synthesis" | "mapping" | "refiner" | "antagonist";
+  const persistResult = this._buildPersistenceResultFromStepResults(steps, stepResults);
+  
+  const userMessage = context?.userMessage || this.currentUserMessage || "";
+  
+  // VALIDATION: Refuse to persist empty userMessage
+  if (!userMessage || userMessage.trim() === "") {
+    console.error('[WorkflowEngine] HALT: Cannot persist with empty userMessage!', {
+      contextUserMessage: context?.userMessage,
+      cachedUserMessage: this.currentUserMessage,
+      sessionId: context.sessionId,
+    });
+    throw new Error("Cannot persist cognitive halt with empty user message");
+  }
 
-interface BatchUpdate {
-providerId: string;
-text: string;
-status: string;
-responseType: ResponseType;
+  const persistRequest = {
+    type: resolvedContext?.type || "initialize",
+    sessionId: context.sessionId,
+    userMessage,
+    canonicalUserTurnId: context?.canonicalUserTurnId,
+    canonicalAiTurnId: context?.canonicalAiTurnId,
+  };
 
-React.memo Barrier: Isolate Synthesis BubbleIsolated SynthesisBubble ComponentCode // ui/components/SynthesisBubble.tsx - ISOLATED RENDERING
-import React, { useState, useEffect, useRef } from "react";
-import { AiTurn } from "../types";
-import MarkdownDisplay from "./MarkdownDisplay";
-import { RefinerDot } from "./refinerui/RefinerD
-Version Counter UpdatesGranular Version Tracking in turn-helpersCode // ui/utils/turn-helpers.ts - ADD BATCH VERSION TRACKING
+  console.log('[WorkflowEngine] Persisting cognitive halt state:', {
+    sessionId: persistRequest.sessionId,
+    userMessageLength: persistRequest.userMessage.length,
+  });
 
-export function applyStreamingUpdates(
-aiTurn: AiTurn,
-updates: Array<{
-providerId: string;
-text: string;
-status: string;
-responseType: "batch" | "synthesis" | "mapping" |
-Type Definitions Update
-Add batchVersion to your AiTurn type:
-typescript// ui/types.ts (or wherever AiTurn is defined)
-export interface AiTurn {
-type: "ai";
-id: string;
-userTurnId: string;
-sessionId: string | null;
-threadId: string;
-createdAt: number;
-batchResponses?: Record<string, ProviderResponse[]>;
-synthesisResponses?: Record<string, ProviderResponse[]>;
-mappingResponses?: Record<string, ProviderResponse[]>;
-refinerResponses?: Record<string, ProviderResponse[]>;
-antagonistResponses?: Record<string, ProviderResponse[]>;
-
-// ✅ ADD VERSION COUNTERS
-batchVersion?: number;
-synthesisVersion?: number;
-mappingVersion?: number;
-refinerVersion?: number;
-antagonistVersion?: number;
-
-meta?: any;
+  await this.sessionManager.persist(persistRequest, resolvedContext, persistResult);
 }
 
-Integration into AiTurnBlock
-Update your AiTurnBlock to use the isolated component:
-typescript// In AiTurnBlock.tsx - Replace synthesis bubble rendering with:
+// ============================================================================
+// HELPER: MapperV2 Phase (Cognitive-specific)
+// ============================================================================
+async _executeMappingV2Phase(steps, context, stepResults, workflowContexts, resolvedContext) {
+  const mappingSteps = steps.filter(s => s.type === "mapping"); // Compiler should create MapperV2 step
+  
+  for (const step of mappingSteps) {
+    try {
+      const result = await this.executeMappingV2Step(
+        step,
+        context,
+        stepResults,
+        workflowContexts,
+        resolvedContext
+      );
+      stepResults.set(step.stepId, { status: "completed", result });
+      
+      this.port.postMessage({
+        type: "WORKFLOW_STEP_UPDATE",
+        sessionId: context.sessionId,
+        stepId: step.stepId,
+        status: "completed",
+        result,
+      });
+      
+      // Immediate persistence
+      await this._persistMappingResult(context, step, result, resolvedContext);
+      
+    } catch (error) {
+      console.error('[WorkflowEngine] MapperV2 failed:', error);
+      stepResults.set(step.stepId, { status: "failed", error: error.message });
+      
+      this.port.postMessage({
+        type: "WORKFLOW_STEP_UPDATE",
+        sessionId: context.sessionId,
+        stepId: step.stepId,
+        status: "failed",
+        error: error.message,
+      });
+      
+      throw error; // Halt pipeline on mapping failure
+    }
+  }
+}
+Key Changes
 
-return (
+Separate Pipeline Methods: _executeClassicPipeline() vs _executeCognitivePipeline()
+No Mixing: Classic pipeline never sees MapperV2, cognitive never sees old synthesis/refiner/antagonist
+Clear Continuation: handleContinueCognitiveRequest() only runs Understand OR Gauntlet, not both
+Explicit Halt: Cognitive pipeline always halts after MapperV2, never continues automatically
+Mode Fork: User picks Understand or Decide after halt, these are separate execution paths
 
-  <div className="turn-block pb-32 mt-4">
-    {/* ... user prompt ... */}
+This makes it crystal clear that these are two different workflows, not feature flags on one workflow.
 
-code
-Code
-download
-content_copy
-expand_less
-<div className="ai-turn-block relative group/turn">
-  <div className="ai-turn-content flex flex-col gap-3">
-    <div className="flex justify-center w-full transition-all duration-300 px-4">
-      <div className="w-full max-w-7xl">
-        <div className="flex-1 flex flex-col relative min-w-0" style={{ maxWidth: '820px', margin: '0 auto' }}>
-          
-          {/* ✅ USE ISOLATED COMPONENT */}
-          <SynthesisBubble
-            aiTurn={aiTurn}
-            effectiveActiveSynthTab={effectiveActiveSynthTab}
-            synthesisTabs={synthesisTabs}
-            activeSynthTabId={activeSynthTabId}
-            onTabChange={setActiveSynthTabId}
-            refinerOutput={refinerOutput}
-            isRefinerLoading={isRefinerLoading}
-            showEcho={showEcho}
-            setShowEcho={setShowEcho}
-            onDecisionMapOpen={() => setIsDecisionMapOpen({ turnId: aiTurn.id })}
-            onTrustPanelOpen={() => setActiveSplitPanel({ turnId: aiTurn.id, providerId: '__trust__' })}
-            onGemActionClick={(action) => {
-              setChatInput(action);
-              setTrustPanelFocus({ turnId: aiTurn.id, section: 'context' });
-            }}
-            wasSynthRequested={wasSynthRequested}
-            isSynthesisTarget={isSynthesisTarget}
-            isMappingError={isMappingError}
-            isMappingLoading={isMappingLoading}
-          />
-          
-          {/* ... rest of your turn block ... */}
-        </div>
-      </div>
-    </div>
-  </div>
-</div>
-  </div>
-);
+
+
+
+Proposed Architecture: Extract Specialized Services
+1. StepExecutor (handles individual step execution)
+javascript// src/core/execution/StepExecutor.js
+export class StepExecutor {
+  constructor(orchestrator, promptService, responseProcessor) {
+    this.orchestrator = orchestrator;
+    this.promptService = promptService;
+    this.responseProcessor = responseProcessor;
+  }
+
+  async executePromptStep(step, context, options) {
+    // Extract all batch execution logic here
+  }
+
+  async executeSynthesisStep(step, context, previousResults, options) {
+    // Extract synthesis logic
+  }
+
+  async executeMappingStep(step, context, previousResults, options) {
+    // Extract mapping logic
+  }
+
+  async executeRefinerStep(step, context, stepResults) {
+    // Extract refiner logic
+  }
+
+  async executeAntagonistStep(step, context, stepResults) {
+    // Extract antagonist logic
+  }
+
+  async executeUnderstandStep(step, context, previousResults) {
+    // Cognitive mode
+  }
+
+  async executeGauntletStep(step, context, previousResults) {
+    // Cognitive mode
+  }
+}
+2. StreamingManager (handles delta streaming)
+javascript// src/core/execution/StreamingManager.js
+export class StreamingManager {
+  constructor(port) {
+    this.port = port;
+    this.lastStreamState = new Map();
+  }
+
+  makeDelta(sessionId, stepId, providerId, fullText) {
+    // Extract makeDelta logic
+  }
+
+  dispatchPartialDelta(sessionId, stepId, providerId, text, label, isFinal) {
+    // Extract _dispatchPartialDelta logic
+  }
+
+  clearCache(sessionId) {
+    // Extract clearDeltaCache logic
+  }
+}
+3. ContextManager (handles provider context resolution)
+javascript// src/core/execution/ContextManager.js
+export class ContextManager {
+  constructor(sessionManager) {
+    this.sessionManager = sessionManager;
+  }
+
+  resolveProviderContext(providerId, context, payload, workflowContexts, previousResults, resolvedContext, stepType) {
+    // Extract _resolveProviderContext logic
+  }
+
+  extractContextsFromResult(result) {
+    // Extract from SessionManager
+  }
+
+  buildContextSummary(result) {
+    // Extract from SessionManager
+  }
+}
+4. PersistenceCoordinator (handles persistence operations)
+javascript// src/core/execution/PersistenceCoordinator.js
+export class PersistenceCoordinator {
+  constructor(sessionManager) {
+    this.sessionManager = sessionManager;
+  }
+
+  buildPersistenceResult(steps, stepResults) {
+    // Extract _buildPersistenceResultFromStepResults
+  }
+
+  async persistWorkflowResult(request, resolvedContext, result) {
+    // Wrapper for sessionManager.persist with validation
+  }
+
+  async upsertProviderResponse(sessionId, aiTurnId, providerId, responseType, responseIndex, payload) {
+    // Delegate to sessionManager
+  }
+}
+5. TurnEmitter (handles turn finalization messages)
+javascript// src/core/execution/TurnEmitter.js
+export class TurnEmitter {
+  constructor(port) {
+    this.port = port;
+  }
+
+  emitTurnCreated(sessionId, userTurnId, aiTurnId, providers, synthesisProvider, mappingProvider) {
+    // Extract TURN_CREATED logic
+  }
+
+  emitTurnFinalized(context, steps, stepResults, resolvedContext) {
+    // Extract _emitTurnFinalized logic
+  }
+
+  emitWorkflowProgress(sessionId, aiTurnId, phase, providerStatuses) {
+    // Extract progress emission
+  }
+}
+6. CognitivePipelineHandler (handles cognitive mode logic)
+javascript// src/core/execution/CognitivePipelineHandler.js
+export class CognitivePipelineHandler {
+  constructor(port, persistenceCoordinator) {
+    this.port = port;
+    this.persistenceCoordinator = persistenceCoordinator;
+  }
+
+  async handleCognitiveHalt(context, stepResults, steps, resolvedContext) {
+    // Extract cognitive halt logic (lines 808-840)
+  }
+
+  async handleContinueRequest(payload, stepExecutor) {
+    // Extract handleContinueCognitiveRequest
+  }
+
+  computeExplore(userMessage, mapperArtifact) {
+    // Wrapper for computeExplore
+  }
+}
+7. Refactored WorkflowEngine (orchestration only)
+javascript// src/core/workflow-engine.js - REFACTORED
+export class WorkflowEngine {
+  constructor(orchestrator, sessionManager, port, options = {}) {
+    this.orchestrator = orchestrator;
+    this.sessionManager = sessionManager;
+    this.port = port;
+
+    // Inject specialized services
+    this.stepExecutor = new StepExecutor(
+      orchestrator,
+      options.promptService || new PromptService(),
+      options.responseProcessor || new ResponseProcessor()
+    );
+    
+    this.streamingManager = new StreamingManager(port);
+    this.contextManager = new ContextManager(sessionManager);
+    this.persistenceCoordinator = new PersistenceCoordinator(sessionManager);
+    this.turnEmitter = new TurnEmitter(port);
+    this.cognitiveHandler = new CognitivePipelineHandler(port, this.persistenceCoordinator);
+    
+    this.healthTracker = getHealthTracker();
+  }
+
+  async execute(request, resolvedContext) {
+    const { context, steps } = request;
+    const stepResults = new Map();
+    const workflowContexts = {};
+
+    // Cache user message
+    this.currentUserMessage = context?.userMessage || request?.context?.userMessage || "";
+
+    // Validate user message
+    if (!this.currentUserMessage || this.currentUserMessage.trim() === "") {
+      console.error('[WorkflowEngine] CRITICAL: execute() with empty userMessage!');
+      return;
+    }
+
+    try {
+      // Check cognitive pipeline feature flag
+      context.useCognitivePipeline = await this._checkCognitivePipeline();
+
+      // Seed contexts for extend/recompute
+      this._seedContexts(resolvedContext, stepResults, workflowContexts);
+
+      // Execute steps in phases
+      await this._executeBatchPhase(steps, context, stepResults, resolvedContext);
+      await this._executeMappingPhase(steps, context, stepResults, workflowContexts, resolvedContext);
+
+      // Check for cognitive halt
+      if (context.useCognitivePipeline) {
+        const shouldHalt = await this.cognitiveHandler.handleCognitiveHalt(
+          context,
+          stepResults,
+          steps,
+          resolvedContext
+        );
+        if (shouldHalt) return;
+      }
+
+      // Continue with remaining phases
+      await this._executeSynthesisPhase(steps, context, stepResults, workflowContexts, resolvedContext);
+      await this._executeRefinerPhase(steps, context, stepResults, resolvedContext);
+      await this._executeAntagonistPhase(steps, context, stepResults, resolvedContext);
+
+      // Persist and finalize
+      await this._persistAndFinalize(request, context, steps, stepResults, resolvedContext);
+
+    } catch (error) {
+      console.error('[WorkflowEngine] Workflow failed:', error);
+      this._handleWorkflowError(error, context, resolvedContext);
+    } finally {
+      this.streamingManager.clearCache(context.sessionId);
+    }
+  }
+
+  async _executeBatchPhase(steps, context, stepResults, resolvedContext) {
+    const promptSteps = steps.filter(s => s.type === "prompt");
+    for (const step of promptSteps) {
+      try {
+        const result = await this.stepExecutor.executePromptStep(step, context, {
+          sessionManager: this.sessionManager,
+          streamingManager: this.streamingManager,
+          turnEmitter: this.turnEmitter,
+        });
+        stepResults.set(step.stepId, { status: "completed", result });
+        this._emitStepUpdate(step, context, result, resolvedContext);
+      } catch (error) {
+        this._handleStepError(step, error, context, stepResults, resolvedContext);
+      }
+    }
+  }
+
+  async _executeMappingPhase(steps, context, stepResults, workflowContexts, resolvedContext) {
+    const mappingSteps = steps.filter(s => s.type === "mapping");
+    for (const step of mappingSteps) {
+      try {
+        const result = await this.stepExecutor.executeMappingStep(
+          step,
+          context,
+          stepResults,
+          workflowContexts,
+          resolvedContext,
+          {
+            streamingManager: this.streamingManager,
+            contextManager: this.contextManager,
+          }
+        );
+        stepResults.set(step.stepId, { status: "completed", result });
+        this._emitStepUpdate(step, context, result, resolvedContext);
+      } catch (error) {
+        this._handleStepError(step, error, context, stepResults, resolvedContext);
+      }
+    }
+  }
+
+  // ... similar phase methods for synthesis, refiner, antagonist
+
+  async _persistAndFinalize(request, context, steps, stepResults, resolvedContext) {
+    const persistResult = this.persistenceCoordinator.buildPersistenceResult(steps, stepResults);
+    
+    await this.persistenceCoordinator.persistWorkflowResult(
+      {
+        type: resolvedContext?.type || "initialize",
+        sessionId: context.sessionId,
+        userMessage: this.currentUserMessage,
+        canonicalUserTurnId: context?.canonicalUserTurnId,
+        canonicalAiTurnId: context?.canonicalAiTurnId,
+      },
+      resolvedContext,
+      persistResult
+    );
+
+    this.turnEmitter.emitTurnFinalized(context, steps, stepResults, resolvedContext);
+    this.port.postMessage({
+      type: "WORKFLOW_COMPLETE",
+      sessionId: context.sessionId,
+      finalResults: Object.fromEntries(stepResults),
+    });
+  }
+
+  _handleStepError(step, error, context, stepResults, resolvedContext) {
+    console.error(`[WorkflowEngine] Step ${step.stepId} failed:`, error);
+    stepResults.set(step.stepId, { status: "failed", error: error.message });
+    this._emitStepUpdate(step, context, { error: error.message }, resolvedContext, "failed");
+  }
+
+  async handleRetryRequest(message) {
+    // Delegate to healthTracker
+  }
+
+  async handleContinueCognitiveRequest(payload) {
+    return this.cognitiveHandler.handleContinueRequest(payload, this.stepExecutor);
+  }
+}
+Benefits of This Refactoring
+
+Single Responsibility: Each class has one clear purpose
+Testability: Easy to unit test individual components
+Maintainability: Changes to streaming logic don't affect persistence
+Reusability: Components can be used independently
+Readability: ~200 lines per file instead of 1500+
+Dependency Injection: Easy to swap implementations
+Parallel Development: Multiple devs can work on different services
+
+Migration Strategy
+
+Start with StreamingManager (low risk, self-contained)
+Extract StepExecutor next (most code volume reduction)
+Move ContextManager (medium complexity)
+Extract PersistenceCoordinator (touches SessionManager)
+Create CognitivePipelineHandler (newest feature, easiest to isolate)
+Refactor TurnEmitter last (touches UI contract)

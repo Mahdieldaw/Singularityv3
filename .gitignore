@@ -13,6 +13,7 @@ stats.html
 # Data and large files
 digest.txt
 dm-mono-main/
+old ui/
 
 # Assets (Root level only, source assets in ui/assets/ are tracked)
 /*.svg

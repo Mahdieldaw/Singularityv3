@@ -115,6 +115,8 @@ export class ConnectionHandler {
         mappingResponses: {},
         refinerResponses: {},
         antagonistResponses: {},
+        understandResponses: {},
+        gauntletResponses: {},
       };
       for (const r of resps || []) {
         if (!r) continue;
@@ -125,6 +127,7 @@ export class ConnectionHandler {
           createdAt: r.createdAt || Date.now(),
           updatedAt: r.updatedAt || r.createdAt || Date.now(),
           meta: r.meta || {},
+          responseIndex: r.responseIndex ?? 0,
         };
         if (r.responseType === "batch") {
           (buckets.batchResponses[r.providerId] ||= []).push(entry);
@@ -136,6 +139,16 @@ export class ConnectionHandler {
           (buckets.refinerResponses[r.providerId] ||= []).push(entry);
         } else if (r.responseType === "antagonist") {
           (buckets.antagonistResponses[r.providerId] ||= []).push(entry);
+        } else if (r.responseType === "understand") {
+          (buckets.understandResponses[r.providerId] ||= []).push(entry);
+        } else if (r.responseType === "gauntlet") {
+          (buckets.gauntletResponses[r.providerId] ||= []).push(entry);
+        }
+      }
+
+      for (const group of Object.values(buckets)) {
+        for (const pid of Object.keys(group)) {
+          group[pid].sort((a, b) => (a.responseIndex ?? 0) - (b.responseIndex ?? 0));
         }
       }
 
@@ -145,7 +158,9 @@ export class ConnectionHandler {
         Object.keys(buckets.synthesisResponses).length > 0 ||
         Object.keys(buckets.mappingResponses).length > 0 ||
         Object.keys(buckets.refinerResponses).length > 0 ||
-        Object.keys(buckets.antagonistResponses).length > 0;
+        Object.keys(buckets.antagonistResponses).length > 0 ||
+        Object.keys(buckets.understandResponses).length > 0 ||
+        Object.keys(buckets.gauntletResponses).length > 0;
       if (!hasAny) return;
 
       this.port?.postMessage({
@@ -158,7 +173,7 @@ export class ConnectionHandler {
             ? {
               id: userTurn.id,
               type: "user",
-              text: userTurn.content || "",
+              text: userTurn.text || userTurn.content || "",
               createdAt: userTurn.createdAt || Date.now(),
               sessionId,
             }
@@ -181,6 +196,8 @@ export class ConnectionHandler {
             mappingResponses: buckets.mappingResponses,
             refinerResponses: buckets.refinerResponses,
             antagonistResponses: buckets.antagonistResponses,
+            understandResponses: buckets.understandResponses,
+            gauntletResponses: buckets.gauntletResponses,
             meta: aiTurn.meta || {},
           },
         },

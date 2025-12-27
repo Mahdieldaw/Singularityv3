@@ -1,11 +1,26 @@
-import React from "react";
+import React, { useMemo, useState } from "react";
 import { MapperArtifact, AiTurn, ExploreAnalysis } from "../../../shared/contract";
-import { DimensionFirstView } from "./DimensionFirstView";
 import { RawResponseCard } from "./cards/RawResponseCard";
 
 import { selectedArtifactsAtom } from "../../state/atoms";
 import { SelectionBar } from "./SelectionBar";
 import { useAtom } from "jotai";
+import { SouvenirCard } from "./cards/SouvenirCard";
+import { ConsensusCard } from "./cards/ConsensusCard";
+import { OutlierCard } from "./cards/OutlierCard";
+import { GhostCard } from "./cards/GhostCard";
+import { GapsCard } from "./cards/GapsCard";
+import {
+    buildComparisonContent,
+    buildDecisionTreeContent,
+    buildDirectAnswerContent,
+    buildExplorationContent
+} from "./content-builders";
+import { ComparisonMatrixContainer } from "./containers/ComparisonMatrixContainer";
+import { DecisionTreeContainer } from "./containers/DecisionTreeContainer";
+import { DirectAnswerContainer } from "./containers/DirectAnswerContainer";
+import { ExplorationSpaceContainer } from "./containers/ExplorationSpaceContainer";
+import { DimensionFirstView } from "./DimensionFirstView";
 
 interface ArtifactShowcaseProps {
     mapperArtifact: MapperArtifact;
@@ -25,6 +40,7 @@ export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
     isLoading = false,
 }) => {
     const [selectedIds, setSelectedIds] = useAtom(selectedArtifactsAtom);
+    const [dimensionViewOpen, setDimensionViewOpen] = useState(false);
 
     const toggleSelection = (id: string) => {
         setSelectedIds((draft) => {
@@ -36,24 +52,141 @@ export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
         });
     };
 
-    return (
-        <div className="w-full">
-            {/* Primary: Dimension-First View (lossless) */}
-            <DimensionFirstView
-                artifact={mapperArtifact}
-                analysis={analysis}
-                onUnderstand={onUnderstand}
-                onDecide={onDecide}
-                isLoading={isLoading}
-                selectedIds={selectedIds}
-                onToggle={toggleSelection}
-            />
-            <SelectionBar />
+    const dimensionCoverage = analysis.dimensionCoverage || [];
 
-            {/* Raw responses at the bottom for verification */}
-            <div className="max-w-3xl mx-auto mt-6">
-                <RawResponseCard turn={turn} />
+    const gaps = useMemo(() => dimensionCoverage.filter((d) => d.is_gap), [dimensionCoverage]);
+
+    const gapsCount = gaps.length;
+    const contestedCount = useMemo(
+        () => dimensionCoverage.filter((d) => d.is_contested).length,
+        [dimensionCoverage]
+    );
+    const totalDims = dimensionCoverage.length;
+    const settledCount = Math.max(0, totalDims - gapsCount - contestedCount);
+    const ghostPresent = Boolean(mapperArtifact.ghost);
+    const dimsFoundCount = mapperArtifact.dimensions_found?.length ?? totalDims;
+
+    const isKnownContainerType =
+        analysis.containerType === "comparison_matrix" ||
+        analysis.containerType === "exploration_space" ||
+        analysis.containerType === "decision_tree" ||
+        analysis.containerType === "direct_answer";
+
+    const renderContent = () => {
+        switch (analysis.containerType) {
+            case "comparison_matrix":
+                return <ComparisonMatrixContainer content={buildComparisonContent(mapperArtifact, analysis)} />;
+            case "exploration_space":
+                return <ExplorationSpaceContainer content={buildExplorationContent(mapperArtifact, analysis)} />;
+            case "decision_tree":
+                return <DecisionTreeContainer content={buildDecisionTreeContent(mapperArtifact, analysis)} />;
+            case "direct_answer":
+                return <DirectAnswerContainer content={buildDirectAnswerContent(mapperArtifact, analysis)} />;
+            default:
+                return (
+                    <>
+                        <ConsensusCard consensus={mapperArtifact.consensus} selectedIds={selectedIds} onToggle={toggleSelection} />
+                        <OutlierCard
+                            outliers={mapperArtifact.outliers}
+                            selectedIds={selectedIds}
+                            onToggle={(id) => toggleSelection(id)}
+                        />
+                    </>
+                );
+        }
+    };
+
+    return (
+        <div className="w-full max-w-3xl mx-auto space-y-4 pb-12 animate-in fade-in duration-500">
+            <div className="flex flex-wrap gap-2 items-center">
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-surface-highlight/30 border border-border-subtle text-xs text-text-secondary">
+                    🔶 Gaps: {gapsCount}
+                </span>
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-surface-highlight/30 border border-border-subtle text-xs text-text-secondary">
+                    ⚔️ Contested: {contestedCount}
+                </span>
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-surface-highlight/30 border border-border-subtle text-xs text-text-secondary">
+                    ✅ Settled: {settledCount}
+                </span>
+                {ghostPresent && (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-surface-highlight/30 border border-border-subtle text-xs text-text-secondary">
+                        👻 Ghost present
+                    </span>
+                )}
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-surface-highlight/30 border border-border-subtle text-xs text-text-secondary">
+                    Models: {mapperArtifact.model_count}
+                </span>
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-surface-highlight/30 border border-border-subtle text-xs text-text-secondary">
+                    Dims: {dimsFoundCount}
+                </span>
             </div>
+
+            {mapperArtifact.souvenir && <SouvenirCard content={mapperArtifact.souvenir} />}
+
+            <GapsCard artifact={mapperArtifact} gaps={gaps} />
+
+            {renderContent()}
+
+            {isKnownContainerType && (
+                <div className="space-y-3 opacity-95">
+                    <ConsensusCard consensus={mapperArtifact.consensus} selectedIds={selectedIds} onToggle={toggleSelection} />
+                    <OutlierCard
+                        outliers={mapperArtifact.outliers}
+                        selectedIds={selectedIds}
+                        onToggle={(id) => toggleSelection(id)}
+                    />
+                </div>
+            )}
+
+            {dimensionCoverage.length > 0 && (
+                <div className="bg-surface-raised border border-border-subtle rounded-xl overflow-hidden">
+                    <button
+                        onClick={() => setDimensionViewOpen((v) => !v)}
+                        className="w-full flex items-center justify-between p-3 hover:bg-surface-highlight transition-colors text-left"
+                    >
+                        <span className="text-xs text-text-secondary">
+                            {dimensionViewOpen
+                                ? "▾ Hide dimension breakdown"
+                                : `▸ View by dimension (${dimensionCoverage.length})`}
+                        </span>
+                    </button>
+                    {dimensionViewOpen && (
+                        <div className="px-3 pb-3">
+                            <DimensionFirstView artifact={mapperArtifact} analysis={analysis} />
+                        </div>
+                    )}
+                </div>
+            )}
+
+            <div className="flex gap-3 mt-6 pt-2">
+                <button
+                    onClick={onUnderstand}
+                    disabled={isLoading}
+                    className="flex-1 px-4 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 
+                               hover:from-blue-500 hover:to-indigo-500 
+                               text-white rounded-lg font-medium transition-all
+                               disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                    🧠 Understand
+                </button>
+                <button
+                    onClick={onDecide}
+                    disabled={isLoading}
+                    className={`flex-1 px-4 py-3 text-white rounded-lg font-medium transition-all
+                               disabled:opacity-50 disabled:cursor-not-allowed
+                               ${analysis.escapeVelocity
+                            ? "bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 border border-emerald-400/30"
+                            : "bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500"}`}
+                >
+                    {analysis.escapeVelocity ? "🚀 Ready to Decide" : "⚡ Decide"}
+                </button>
+            </div>
+
+            {mapperArtifact.ghost && <GhostCard ghost={mapperArtifact.ghost} />}
+
+            <RawResponseCard turn={turn} />
+
+            <SelectionBar />
         </div>
     );
 };

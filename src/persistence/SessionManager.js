@@ -14,6 +14,66 @@ export class SessionManager {
     this.isInitialized = false;
   }
 
+  _toJsonSafe(value, opts = {}, _seen = new WeakSet(), _depth = 0) {
+    const maxDepth = typeof opts.maxDepth === "number" ? opts.maxDepth : 6;
+    const maxStringLength =
+      typeof opts.maxStringLength === "number" ? opts.maxStringLength : 20000;
+
+    if (value === null || value === undefined) return value;
+
+    const t = typeof value;
+    if (t === "string") {
+      return value.length > maxStringLength
+        ? value.slice(0, maxStringLength)
+        : value;
+    }
+    if (t === "number" || t === "boolean") return value;
+    if (t === "bigint") return String(value);
+    if (t === "function" || t === "symbol") return undefined;
+
+    if (_depth >= maxDepth) return undefined;
+
+    if (Array.isArray(value)) {
+      const arr = [];
+      for (const item of value) {
+        const safe = this._toJsonSafe(item, opts, _seen, _depth + 1);
+        if (safe !== undefined) arr.push(safe);
+      }
+      return arr;
+    }
+
+    if (t === "object") {
+      try {
+        if (_seen.has(value)) return "[Circular]";
+        _seen.add(value);
+      } catch (_) {
+        return String(value);
+      }
+
+      if (value instanceof Date) return value.toISOString();
+
+      const out = {};
+      for (const [k, v] of Object.entries(value)) {
+        const safe = this._toJsonSafe(v, opts, _seen, _depth + 1);
+        if (safe !== undefined) out[k] = safe;
+      }
+      return out;
+    }
+
+    try {
+      return String(value);
+    } catch (_) {
+      return undefined;
+    }
+  }
+
+  _safeMeta(meta) {
+    const safe = this._toJsonSafe(meta);
+    if (safe && typeof safe === "object") return safe;
+    if (safe === null || safe === undefined) return {};
+    return { value: safe };
+  }
+
   /**
    * Upsert a single provider response by compound key. Used for immediate
    * persistence on step completion so we don't lose results if later phases fail.
@@ -56,7 +116,7 @@ export class SessionManager {
         responseIndex,
         text: payload.text || (existing?.[0]?.text || ""),
         status: payload.status || (existing?.[0]?.status || "streaming"),
-        meta: payload.meta || (existing?.[0]?.meta || {}),
+        meta: this._safeMeta(payload.meta ?? existing?.[0]?.meta ?? {}),
         createdAt: existing?.[0]?.createdAt || payload.createdAt || now,
         updatedAt: now,
       };
@@ -141,6 +201,7 @@ export class SessionManager {
 
     // 3) User turn
     const userTurnId = request.canonicalUserTurnId || `user-${now}`;
+    const userText = request.userMessage || "";
     const userTurnRecord = {
       id: userTurnId,
       type: "user",
@@ -149,7 +210,8 @@ export class SessionManager {
       threadId: "default-thread",
       createdAt: now,
       updatedAt: now,
-      content: request.userMessage || "",
+      text: userText,
+      content: userText,
       sequence: 0,
     };
     await this.adapter.put("turns", userTurnRecord);
@@ -157,6 +219,12 @@ export class SessionManager {
     // 4) AI turn with contexts
     const aiTurnId = request.canonicalAiTurnId || `ai-${now}`;
     const providerContexts = this._extractContextsFromResult(result);
+    const mapperArtifact = request?.mapperArtifact
+      ? this._toJsonSafe(request.mapperArtifact)
+      : undefined;
+    const exploreAnalysis = request?.exploreAnalysis
+      ? this._toJsonSafe(request.exploreAnalysis)
+      : undefined;
     const aiTurnRecord = {
       id: aiTurnId,
       type: "ai",
@@ -174,6 +242,8 @@ export class SessionManager {
       mappingResponseCount: this.countResponses(result.mappingOutputs),
       refinerResponseCount: this.countResponses(result.refinerOutputs),
       antagonistResponseCount: this.countResponses(result.antagonistOutputs),
+      ...(mapperArtifact ? { mapperArtifact } : {}),
+      ...(exploreAnalysis ? { exploreAnalysis } : {}),
       lastContextSummary: contextSummary,
       meta: await this._attachRunIdMeta(aiTurnId),
     };
@@ -232,6 +302,7 @@ export class SessionManager {
 
     // 1) User turn
     const userTurnId = request.canonicalUserTurnId || `user-${now}`;
+    const userText = request.userMessage || "";
     const userTurnRecord = {
       id: userTurnId,
       type: "user",
@@ -240,7 +311,8 @@ export class SessionManager {
       threadId: "default-thread",
       createdAt: now,
       updatedAt: now,
-      content: request.userMessage || "",
+      text: userText,
+      content: userText,
       sequence: nextSequence,
     };
     await this.adapter.put("turns", userTurnRecord);
@@ -254,6 +326,12 @@ export class SessionManager {
 
     // 3) AI turn
     const aiTurnId = request.canonicalAiTurnId || `ai-${now}`;
+    const mapperArtifact = request?.mapperArtifact
+      ? this._toJsonSafe(request.mapperArtifact)
+      : undefined;
+    const exploreAnalysis = request?.exploreAnalysis
+      ? this._toJsonSafe(request.exploreAnalysis)
+      : undefined;
     const aiTurnRecord = {
       id: aiTurnId,
       type: "ai",
@@ -271,6 +349,8 @@ export class SessionManager {
       mappingResponseCount: this.countResponses(result.mappingOutputs),
       refinerResponseCount: this.countResponses(result.refinerOutputs),
       antagonistResponseCount: this.countResponses(result.antagonistOutputs),
+      ...(mapperArtifact ? { mapperArtifact } : {}),
+      ...(exploreAnalysis ? { exploreAnalysis } : {}),
       lastContextSummary: contextSummary,
       meta: await this._attachRunIdMeta(aiTurnId),
     };
@@ -357,7 +437,7 @@ export class SessionManager {
       text: output.text || "",
       status: output.status || "completed",
       meta: {
-        ...output.meta,
+        ...this._safeMeta(output?.meta || {}),
         isRecompute: true,
         recomputeDate: now,
       },
@@ -394,7 +474,7 @@ export class SessionManager {
           const existingCtx = contexts[targetProvider] || {};
           contexts[targetProvider] = {
             ...existingCtx,
-            ...(output.meta || {}),
+            ...this._safeMeta(output?.meta || {}),
           };
           freshTurn.providerContexts = contexts;
         }
@@ -414,25 +494,25 @@ export class SessionManager {
     try {
       Object.entries(result?.batchOutputs || {}).forEach(([pid, output]) => {
         if (output?.meta && Object.keys(output.meta).length > 0)
-          contexts[pid] = output.meta;
+          contexts[pid] = this._safeMeta(output.meta);
       });
       Object.entries(result?.synthesisOutputs || {}).forEach(
         ([pid, output]) => {
           if (output?.meta && Object.keys(output.meta).length > 0)
-            contexts[pid] = output.meta;
+            contexts[pid] = this._safeMeta(output.meta);
         },
       );
       Object.entries(result?.mappingOutputs || {}).forEach(([pid, output]) => {
         if (output?.meta && Object.keys(output.meta).length > 0)
-          contexts[pid] = output.meta;
+          contexts[pid] = this._safeMeta(output.meta);
       });
       Object.entries(result?.refinerOutputs || {}).forEach(([pid, output]) => {
         if (output?.meta && Object.keys(output.meta).length > 0)
-          contexts[pid] = output.meta;
+          contexts[pid] = this._safeMeta(output.meta);
       });
       Object.entries(result?.antagonistOutputs || {}).forEach(([pid, output]) => {
         if (output?.meta && Object.keys(output.meta).length > 0)
-          contexts[pid] = output.meta;
+          contexts[pid] = this._safeMeta(output.meta);
       });
     } catch (_) { }
     return contexts;
@@ -491,7 +571,7 @@ export class SessionManager {
         responseIndex: nextIndex,
         text: output?.text || "",
         status: output?.status || "completed",
-        meta: output?.meta || {},
+        meta: this._safeMeta(output?.meta || {}),
         createdAt: now,
         updatedAt: now,
         completedAt: now,
@@ -517,7 +597,7 @@ export class SessionManager {
         responseIndex: 0,
         text: output?.text || existing?.text || "",
         status: output?.status || existing?.status || "completed",
-        meta: output?.meta || existing?.meta || {},
+        meta: this._safeMeta(output?.meta ?? existing?.meta ?? {}),
         createdAt: createdAtKeep,
         updatedAt: now,
         completedAt: now,
@@ -542,7 +622,7 @@ export class SessionManager {
         responseIndex: 0,
         text: output?.text || existing?.text || "",
         status: output?.status || existing?.status || "completed",
-        meta: output?.meta || existing?.meta || {},
+        meta: this._safeMeta(output?.meta ?? existing?.meta ?? {}),
         createdAt: createdAtKeep,
         updatedAt: now,
         completedAt: now,
@@ -567,7 +647,7 @@ export class SessionManager {
         responseIndex: 0,
         text: output?.text || existing?.text || "",
         status: output?.status || existing?.status || "completed",
-        meta: output?.meta || existing?.meta || {},
+        meta: this._safeMeta(output?.meta ?? existing?.meta ?? {}),
         createdAt: createdAtKeep,
         updatedAt: now,
         completedAt: now,
@@ -592,7 +672,7 @@ export class SessionManager {
         responseIndex: 0,
         text: output?.text || existing?.text || "",
         status: output?.status || existing?.status || "completed",
-        meta: output?.meta || existing?.meta || {},
+        meta: this._safeMeta(output?.meta ?? existing?.meta ?? {}),
         createdAt: createdAtKeep,
         updatedAt: now,
         completedAt: now,
@@ -920,7 +1000,10 @@ export class SessionManager {
       contextRecord.contextData = {
         ...existingContext,
         text: result?.text || existingContext.text || "",
-        meta: { ...(existingContext.meta || {}), ...(result?.meta || {}) },
+        meta: {
+          ...this._safeMeta(existingContext.meta || {}),
+          ...this._safeMeta(result?.meta || {}),
+        },
         lastUpdated: Date.now(),
       };
       contextRecord.updatedAt = Date.now();
@@ -996,7 +1079,10 @@ export class SessionManager {
         contextRecord.contextData = {
           ...existingData,
           text: result?.text || existingData.text || "",
-          meta: { ...(existingData.meta || {}), ...(result?.meta || {}) },
+          meta: {
+            ...this._safeMeta(existingData.meta || {}),
+            ...this._safeMeta(result?.meta || {}),
+          },
           lastUpdated: now,
         };
         contextRecord.updatedAt = now;
