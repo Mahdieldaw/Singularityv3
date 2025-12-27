@@ -19,7 +19,7 @@ import {
   synthesisProviderAtom,
   workflowProgressAtom,
   isRoundActiveAtom,
-  useCognitivePipelineAtom,
+  selectedModeAtom,
 } from "../state/atoms";
 import { useChat } from "../hooks/chat/useChat";
 import api from "../services/extension-api";
@@ -50,9 +50,9 @@ const ChatInput = ({
   const [isVisibleMode] = useAtom(isVisibleModeAtom as any) as [boolean, any];
   const [isReducedMotion] = useAtom(isReducedMotionAtom as any) as [boolean, any];
   const [, setChatInputHeight] = useAtom(chatInputHeightAtom);
-  const [useCognitivePipeline, setUseCognitivePipeline] = useAtom(useCognitivePipelineAtom);
+  const [selectedMode, setSelectedMode] = useAtom(selectedModeAtom as any) as [string, any];
 
-
+  const isCognitiveMode = selectedMode !== "standard"; // auto, understand, decide are all cognitive flow
 
   // Streaming UX: hide config orbs during active round
   const isRoundActive = useAtomValue(isRoundActiveAtom);
@@ -416,21 +416,21 @@ const ChatInput = ({
     <div className="flex justify-center flex-col items-center pointer-events-auto">
       <div className="w-full max-w-[min(900px,calc(100%-24px))] flex justify-end mb-2">
         <div className="flex items-center gap-3 px-3 py-1.5 bg-surface-highlight/20 border border-border-subtle rounded-xl">
-          <span className={`text-xs font-medium ${useCognitivePipeline ? "text-text-tertiary" : "text-text-primary"}`}>
+          <span className={`text-xs font-medium ${isCognitiveMode ? "text-text-tertiary" : "text-text-primary"}`}>
             Classic
           </span>
           <button
             type="button"
-            onClick={() => setUseCognitivePipeline(!useCognitivePipeline)}
+            onClick={() => setSelectedMode(isCognitiveMode ? "standard" : "auto")}
             disabled={isLoading || mappingActive}
-            className={`relative w-10 h-5 rounded-full transition-all duration-200 ${useCognitivePipeline ? "bg-brand-500" : "bg-border-strong"} ${isLoading || mappingActive ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
-            title={useCognitivePipeline ? "Guided" : "Classic"}
+            className={`relative w-10 h-5 rounded-full transition-all duration-200 ${isCognitiveMode ? "bg-brand-500" : "bg-border-strong"} ${isLoading || mappingActive ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
+            title={isCognitiveMode ? "Guided" : "Classic"}
           >
             <div
-              className={`absolute top-0.5 w-4 h-4 bg-white rounded-full transition-all duration-200 ${useCognitivePipeline ? "left-[22px]" : "left-0.5"}`}
+              className={`absolute top-0.5 w-4 h-4 bg-white rounded-full transition-all duration-200 ${isCognitiveMode ? "left-[22px]" : "left-0.5"}`}
             />
           </button>
-          <span className={`text-xs font-medium ${useCognitivePipeline ? "text-text-primary" : "text-text-tertiary"}`}>
+          <span className={`text-xs font-medium ${isCognitiveMode ? "text-text-primary" : "text-text-tertiary"}`}>
             Guided
           </span>
         </div>
@@ -444,7 +444,7 @@ const ChatInput = ({
             voiceProviderId={synthesisProvider}
             variant="active"
             workflowProgress={workflowProgress as any}
-            guidedMode={useCognitivePipeline}
+            guidedMode={isCognitiveMode}
             onCrownMove={(pid) => {
               setSynthesisProvider(pid);
               setProviderLock('synthesis', true);

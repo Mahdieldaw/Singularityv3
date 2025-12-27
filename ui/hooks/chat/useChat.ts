@@ -20,7 +20,7 @@ import {
   currentAppStepAtom,
   uiPhaseAtom,
   isHistoryPanelOpenAtom,
-  useCognitivePipelineAtom,
+  selectedModeAtom,
 
   iscomposingAtom, // Import new atom
   composerModelAtom, // Import new atom
@@ -60,7 +60,8 @@ export function useChat() {
   const turnIds = useAtomValue(turnIdsAtom);
   const refinerProvider = useAtomValue(refinerProviderAtom);
   const antagonistProvider = useAtomValue(antagonistProviderAtom);
-  const isGuidedMode = useAtomValue(useCognitivePipelineAtom);
+  const selectedMode = useAtomValue(selectedModeAtom);
+  const isGuidedMode = selectedMode !== "standard";
 
 
 

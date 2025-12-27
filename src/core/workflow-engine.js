@@ -585,17 +585,7 @@ export class WorkflowEngine {
     }
   }
 
-  async _checkCognitivePipeline() {
-    if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
-      try {
-        const storage = await chrome.storage.local.get("USE_COGNITIVE_PIPELINE");
-        return !!storage.USE_COGNITIVE_PIPELINE;
-      } catch (e) {
-        console.warn("[WorkflowEngine] Failed to read settings:", e);
-      }
-    }
-    return false;
-  }
+
 
   async execute(request, resolvedContext) {
     const { context, steps } = request;
@@ -620,8 +610,11 @@ export class WorkflowEngine {
     }
 
     try {
-      const useCognitivePipeline = await this._checkCognitivePipeline();
+      // Unify V1/V2: Mode driven execution
+      const mode = request.mode || (context.useCognitivePipeline ? "auto" : "standard");
+      const useCognitivePipeline = ["auto", "understand", "decide"].includes(mode);
       context.useCognitivePipeline = useCognitivePipeline;
+      context.mode = mode;
 
       if (resolvedContext && resolvedContext.type === "recompute") {
         console.log(
@@ -718,6 +711,26 @@ export class WorkflowEngine {
   }
 
   async _executeCognitivePipeline(request, context, steps, stepResults, workflowContexts, resolvedContext) {
+    // V1 -> V2 Crossover: Hydrate MapperArtifact if missing and requested mode requires it
+    if (!context.mapperArtifact && ["understand", "decide"].includes(context.mode)) {
+      try {
+        // Attempt to find a suitable V1 mapping output text from resolvedContext (previous turn)
+        const previousOutputs = resolvedContext?.providerContexts || {};
+        const v1MappingText = Object.values(previousOutputs)
+          .map(ctx => ctx?.text || "")
+          .find(text => text.includes("<mapping_output>") || text.includes("<decision_map>")); // Heuristic check
+
+        if (v1MappingText) {
+          console.log("[WorkflowEngine] Hydrating MapperArtifact from V1 output for crossover...");
+          context.mapperArtifact = parseV1MapperToArtifact(v1MappingText, {
+            query: context.userMessage || ""
+          });
+        }
+      } catch (err) {
+        console.warn("[WorkflowEngine] Failed to hydrate V1 artifact:", err);
+      }
+    }
+
     const promptSteps = steps.filter((step) => step.type === "prompt");
     const mappingSteps = steps.filter((step) => step.type === "mapping");
 
@@ -933,6 +946,16 @@ export class WorkflowEngine {
   }
 
   async _executeClassicPipeline(request, context, steps, stepResults, workflowContexts, resolvedContext) {
+    // V2 -> V1 Crossover: Flatten MapperArtifact to text options if present
+    if (context.mapperArtifact && !context.extractedOptions) {
+      try {
+        console.log("[WorkflowEngine] Flattening V2 MapperArtifact for V1 pipeline...");
+        context.extractedOptions = formatArtifactAsOptions(context.mapperArtifact);
+      } catch (err) {
+        console.warn("[WorkflowEngine] Failed to flatten V2 artifact:", err);
+      }
+    }
+
     const promptSteps = steps.filter((step) => step.type === "prompt");
     const synthesisSteps = steps.filter((step) => step.type === "synthesis");
     const mappingSteps = steps.filter((step) => step.type === "mapping");

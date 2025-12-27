@@ -292,13 +292,8 @@ export const includePromptInCopyAtom = atomWithStorage<boolean>(
 
 /**
  * Feature flag for the new Cognitive Pipeline (v2)
- * Backend reads this from chrome.storage.local (synced via side effect)
- * Default: false until ready for user testing
+ * REMOVED: Now controlled by selectedModeAtom ("standard" vs "auto")
  */
-export const useCognitivePipelineAtom = atomWithStorage<boolean>(
-  "htos_cognitive_pipeline",
-  true
-);
 
 // Provider Contexts
 export const providerContextsAtom = atomWithImmer<Record<string, any>>({});
@@ -317,24 +312,7 @@ export const activeProviderTargetAtom = atom<{
   providerId: string;
 } | null>(null);
 
-// -----------------------------
-// Pill-menu provider swap state
-// -----------------------------
-/**
- * Tracks which 3 providers are currently visible in the response block.
- * Users can swap providers in/out via the pill menu UI.
- */
-export const visibleProvidersAtom = atomWithStorage<string[]>(
-  "htos_visible_providers",
-  ["claude", "gemini", "chatgpt"], // Default visible trio
-);
 
-/**
- * Tracks which provider is currently selected for swapping.
- * Can be a visible provider (click-to-swap) or a hidden provider (swap source).
- * Null = no selection active.
- */
-export const swapSourceProviderAtom = atom<string | null>(null);
 
 // -----------------------------
 // Round-level selections
@@ -424,14 +402,10 @@ export const hasRejectedRefinementAtom = atom<boolean>(false);
 // -----------------------------
 // Original prompt saved when Composer replaces input (for Revert)
 export const originalPromptAtom = atom<string | null>(null);
-// Composer draft saved when user reverts (can be re-applied)
-export const composerDraftAtom = atom<string | null>(null);
-// Analyst drawer visibility
-export const analystDrawerOpenAtom = atom<boolean>(false);
+
+
 // Track refinement state for current draft: "composer" | "analyst" | "both" | null
 export const currentRefinementStateAtom = atom<"composer" | "analyst" | "both" | null>(null);
-// Message refinement metadata (keyed by message ID)
-export const messageRefinementMetaAtom = atomWithImmer<Record<string, { composed?: boolean; audited?: boolean }>>({});
 
 // -----------------------------
 // Global Toast Notification
@@ -602,7 +576,7 @@ export const hasAutoWidenedForSynthesisAtom = atom<string | null>(null);
  */
 
 /**
- * Selected Cognitive Mode (e.g. "auto", "explore", "understand", "decide")
+ * Selected Cognitive Mode (e.g. "standard", "auto", "understand", "decide")
  * Persisted in local storage.
  */
 import { CognitiveMode } from "@shared/contract";

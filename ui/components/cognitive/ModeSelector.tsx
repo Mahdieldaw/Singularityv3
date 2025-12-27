@@ -1,9 +1,9 @@
 
 import React from "react";
 import { useAtom } from "jotai";
-import { selectedModeAtom, useCognitivePipelineAtom } from "../../state/atoms";
+import { selectedModeAtom } from "../../state/atoms";
 import { CognitiveMode } from "../../../shared/contract";
-import { useAtomValue } from "jotai";
+
 
 const MODES: { id: CognitiveMode; label: string; icon: string; description: string }[] = [
     { id: "auto", label: "Auto", icon: "✨", description: "System decides based on query" },
@@ -12,10 +12,10 @@ const MODES: { id: CognitiveMode; label: string; icon: string; description: stri
 ];
 
 const ModeSelector: React.FC = () => {
-    const [selectedMode, setSelectedMode] = useAtom(selectedModeAtom);
-    const useCognitivePipeline = useAtomValue(useCognitivePipelineAtom);
+    const [selectedMode, setSelectedMode] = useAtom(selectedModeAtom as any) as [CognitiveMode, any];
+    const isCognitivePipeline = selectedMode !== "standard";
 
-    if (!useCognitivePipeline) return null;
+    if (!isCognitivePipeline) return null;
 
     const safeSelectedMode: CognitiveMode =
         MODES.some((m) => m.id === selectedMode) ? selectedMode : "auto";
