@@ -14,7 +14,7 @@ const getModelNames = (indices: number[]): string[] =>
 
 export function buildComparisonContent(
     artifact: MapperArtifact,
-    analysis: ExploreAnalysis
+    _analysis: ExploreAnalysis
 ): ComparisonContent {
     const dimensions = (artifact.dimensions_found || []).map((dimName) => {
         const dimClaims = artifact.consensus.claims.filter((c) => c.dimension === dimName);
@@ -67,7 +67,7 @@ export function buildComparisonContent(
 
 export function buildExplorationContent(
     artifact: MapperArtifact,
-    analysis: ExploreAnalysis
+    _analysis: ExploreAnalysis
 ): ExplorationContent {
     const paradigms = artifact.outliers
         .filter((o) => o.type === "frame_challenger")
@@ -104,7 +104,7 @@ export function buildExplorationContent(
 
 export function buildDecisionTreeContent(
     artifact: MapperArtifact,
-    analysis: ExploreAnalysis
+    _analysis: ExploreAnalysis
 ): DecisionTreeContent {
     const defaultClaim = artifact.consensus.claims[0];
     const default_path = defaultClaim?.text || "No clear default recommendation";
@@ -148,7 +148,7 @@ export function buildDecisionTreeContent(
 
 export function buildDirectAnswerContent(
     artifact: MapperArtifact,
-    analysis: ExploreAnalysis
+    _analysis: ExploreAnalysis
 ): DirectAnswerContent {
     const answer = artifact.consensus.claims[0]?.text || "No clear consensus reached";
 

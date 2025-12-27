@@ -8,6 +8,8 @@ import {
 } from "../../state/atoms";
 import api from "../../services/extension-api";
 
+import { MapperArtifact } from "../../../shared/contract";
+
 export type CognitiveMode = 'understand' | 'gauntlet';
 
 export type SelectedArtifact = {
@@ -22,6 +24,8 @@ export type SelectedArtifact = {
 export type CognitiveTransitionOptions = {
     providerId?: string;
     selectedArtifacts?: SelectedArtifact[];
+    mapperArtifact?: MapperArtifact;
+    userNotes?: string[];
 };
 
 export function useCognitiveMode(trackedAiTurnId?: string) {
@@ -31,7 +35,7 @@ export function useCognitiveMode(trackedAiTurnId?: string) {
     const setGlobalIsLoading = useSetAtom(isLoadingAtom);
     const setUiPhase = useSetAtom(uiPhaseAtom);
     const setActiveAiTurnId = useSetAtom(activeAiTurnIdAtom);
-    const [localIsTransitioning, setLocalIsTransitioning] = useState<boolean>(false);
+    const [, setLocalIsTransitioning] = useState<boolean>(false);
     const [error, setError] = useState<string | null>(null);
 
     const isTransitioning = !!trackedAiTurnId && globalIsLoading && activeAiTurnId === trackedAiTurnId;
@@ -62,6 +66,8 @@ export function useCognitiveMode(trackedAiTurnId?: string) {
                     mode,
                     providerId: options.providerId,
                     selectedArtifacts: options.selectedArtifacts || [],
+                    mapperArtifact: options.mapperArtifact,
+                    userNotes: options.userNotes,
                 },
             });
         } catch (err: any) {

@@ -27,7 +27,6 @@ import { getProviderName } from "../utils/provider-helpers";
 import { PROVIDER_LIMITS } from "../../shared/provider-limits";
 import { setProviderLock } from "../../shared/provider-locks";
 import { CouncilOrbs } from "./CouncilOrbs";
-import ModeSelector from "./cognitive/ModeSelector";
 
 interface ChatInputProps {
   onStartMapping?: (prompt: string) => void;
@@ -440,11 +439,6 @@ const ChatInput = ({
 
       {/* Main chat input container - wider to match/exceed synthesis bubble width */}
       <div className="flex gap-2 items-center relative w-full max-w-[min(900px,calc(100%-24px))] p-2.5 bg-surface border border-border-subtle/60 rounded-t-2xl rounded-b-2xl flex-wrap z-[100] shadow-elevated">
-
-        {/* Cognitive Mode Selector */}
-        <div className="w-full">
-          <ModeSelector />
-        </div>
 
         {/* Targeted Mode Banner */}
         {activeTarget && (

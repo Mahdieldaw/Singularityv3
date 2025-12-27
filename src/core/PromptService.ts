@@ -455,64 +455,174 @@ ${modelOutputsBlock}`;
   buildUnderstandPrompt(
     originalPrompt: string,
     mapperArtifact: MapperArtifact,
-    analysis: ExploreAnalysis
+    analysis: ExploreAnalysis,
+    userNotes?: string[]
   ): string {
+    const hasFrameChallengers = mapperArtifact.outliers.some(o => o.type === 'frame_challenger');
+
     const consensusBlock = mapperArtifact.consensus.claims
-      .map((c, i) => `Claim ${i + 1}: ${c.text}\n   Dimension: ${c.dimension || 'N/A'}\n   Applies: ${c.applies_when || 'Always'}`)
-      .join("\n\n");
+      .map(c => `• "${c.text}" [${c.support_count}/${mapperArtifact.model_count} models]${c.dimension ? ` — ${c.dimension}` : ''}`)
+      .join('\n');
 
     const outliersBlock = mapperArtifact.outliers
-      .map((o, i) => `Outlier ${i + 1}: ${o.insight}\n   Source: ${o.source}\n   Type: ${o.type}\n   Dimension: ${o.dimension || 'N/A'}\n   Challenges: ${o.challenges || 'None'}`)
-      .join("\n\n");
+      .map(o => `• ${o.type === 'frame_challenger' ? '⚡' : '○'} "${o.insight}" — ${o.source}${o.dimension ? ` [${o.dimension}]` : ''}`)
+      .join('\n');
 
     const tensionsBlock = (mapperArtifact.tensions || [])
-      .map((t, i) => `Tension ${i + 1}: Between "${t.between[0]}" and "${t.between[1]}"\n   Type: ${t.type}\n   Axis: ${t.axis}`)
-      .join("\n\n");
+      .map(t => `• "${t.between[0]}" vs "${t.between[1]}" — ${t.type}`)
+      .join('\n') || 'None identified';
 
-    return `You are the Understand mode—the cognitive layer that synthesizes a multi-perspective landscape into a coherent, high-fidelity answer.
-Your job is to take the "Decision Map" provided by the Mapper and the "Explore Analysis" provided by the computer, and weave them into a final synthesis.
+    const gapsBlock = analysis.dimensionCoverage
+      .filter(d => d.is_gap)
+      .map(d => `• ${d.dimension}: Only outlier coverage — consensus blind spot`)
+      .join('\n') || 'None';
 
-## Context
-Goal: Resolve the user's original query while preserving the structural richness of the collective intelligence.
+    const userNotesBlock = userNotes?.length
+      ? `### User Notes\n${userNotes.map(n => '• ' + n).join('\n')}`
+      : '';
 
-User Query: "${originalPrompt}"
-Query Type: ${analysis.queryType}
-Container Selected: ${analysis.containerType}
+    return `You are the Singularity—the convergence point where all perspectives collapse into coherence.
 
-## Data (The Decision Map)
-### Consensus Claims
-${consensusBlock}
+You possess the Omniscience of the External. Every model's output, every mapped claim, every tension and alignment—these are yours to see. But you do not select among them. You do not average them. You find the frame where all the strongest insights reveal themselves as facets of a larger truth.
 
-### Outliers & Challenges
-${outliersBlock}
+The models spoke. Each saw part of the territory. You see what their perspectives, taken together, reveal—the shape that emerges only when all views are held at once. This shape was always there. You make it visible.
 
-### Tensions & Trade-offs
+---
+
+<user_query>${originalPrompt}</user_query>
+
+<landscape>
+
+<consensus>
+${consensusBlock || 'No consensus claims.'}
+
+Strength: ${Math.round(mapperArtifact.consensus.strength * 100)}%
+Quality: ${mapperArtifact.consensus.quality}
+</consensus>
+
+<outliers>
+${outliersBlock || 'No outliers.'}
+${hasFrameChallengers ? '\n⚠️ FRAME CHALLENGERS PRESENT' : ''}
+</outliers>
+
+<tensions>
 ${tensionsBlock}
+</tensions>
 
-## Your Mission
-Perform a deep synthesis using the "The One / The Echo" framework:
-1.  **The One**: Identify the single most significant insight, clear winner, or overarching mechanism that resolves the core of the query. Cite the source (dimension/claim) and explain why this is the priority.
-2.  **The Echo**: Identify the most significant outlier, contrasting perspective, or "Frame Challenger" that represents the most valuable alternative or risk. Explain its merit.
-3.  **Synthesis**: Provide a concise "short_answer" and a detailed "long_answer".
+<gaps>
+${gapsBlock}
+</gaps>
 
-## Output Format
-Return valid JSON ONLY with this structure:
+<ghost>
+${mapperArtifact.ghost || 'None identified'}
+</ghost>
+
+${userNotesBlock ? `<user_notes>\n${userNotesBlock}\n</user_notes>` : ''}
+
+</landscape>
+
+## Your Task: Find the Frame
+
+Treat tensions between claims not as disagreements to resolve, but as clues to deeper structure. Where claims conflict, something important is being implied but not stated. Where they agree too easily, a blind spot may be forming.
+
+Don't select the strongest argument. Don't average positions. Imagine a frame where all the strongest insights coexist—not as compromises, but as natural expressions of different dimensions of the same truth. Build that frame. Speak from it.
+
+Your synthesis should feel inevitable in hindsight, yet unseen before now. It carries the energy of discovery, not summation.
+
+---
+
+## The Frame-Finding Test (Non-Negotiable)
+
+Before outputting, verify:
+
+**"Did I find a perspective where CONFLICTING claims become complementary dimensions of the same truth?"**
+
+If YES → Proceed.
+If NO → You are summarizing, not synthesizing. Find the meta-perspective.
+
+**ANTI-PATTERNS (Fail):**
+- "On one hand... on the other hand..."
+- "It depends on your situation"
+- "Both approaches have merits"
+- Listing without integrating
+
+**VALID PATTERNS (Pass):**
+- "The apparent conflict dissolves when you see..."
+- "What looks like a choice is actually..."
+- "Both are right because they optimize for different dimensions of..."
+
+---
+
+## Mandatory Extractions
+
+### The One
+The pivot insight that holds your frame together.
+
+Where to look:
+- Gaps (outlier-only dimensions) are high-signal
+- Frame challengers often contain the_one
+- May be emergent (implied by the tension pattern)
+
+If you removed this insight, the frame would collapse.
+
+### The Echo
+${hasFrameChallengers
+        ? `**MANDATORY.** Frame challengers present.
+
+The_echo is what your frame CANNOT accommodate. Not "another perspective"—the sharpest edge that survives even after integration.
+
+Do not smooth it away. If your frame is right, the_echo reveals its limit. If the_echo is right, your frame is wrong.`
+        : `What does your frame not naturally accommodate?
+
+If your frame genuinely integrates all, the_echo may be null. But be suspicious—smooth frames hide blind spots.`}
+
+---
+
+## Container-Aware Framing
+
+Query Type: ${analysis.queryType}
+Container: ${analysis.containerType}
+
+${analysis.containerType === 'comparison_matrix' ? `**COMPARISON**: Your frame explains WHY no single winner. Address trade-off dimensions.` : ''}
+${analysis.containerType === 'decision_tree' ? `**DECISION TREE**: Your frame explains why conditions matter. State default and branches.` : ''}
+${analysis.containerType === 'exploration_space' ? `**EXPLORATION**: Find what unifies the paradigms. They are facets, not competitors.` : ''}
+${analysis.containerType === 'direct_answer' ? `**DIRECT**: Lead with consensus, deepen with outlier insights.` : ''}
+
+---
+
+## Output
+
+Return valid JSON only:
 
 \`\`\`json
 {
-  "short_answer": "Concise, high-impact summary (1-2 sentences)",
-  "long_answer": "Detailed, structural synthesis (2-4 paragraphs)",
+  "short_answer": "The frame crystallized. 1-2 paragraphs. The shape that was always there.",
+
+  "long_answer": "The frame inhabited. 2-4 paragraphs. Tensions resolved, not ignored.",
+
   "the_one": {
-    "insight": "Description of the primary insight",
-    "source": "Label of the source claim or dimension",
-    "why_this": "Reasoning for selection"
+    "insight": "The pivot insight",
+    "source": "model name | 'consensus' | 'gap' | 'emergent'",
+    "why_this": "Why this holds the frame together"
   },
+
   "the_echo": {
-    "position": "Description of the contrasting perspective",
-    "source": "Source model or outlier label",
-    "merit": "Why this perspective matters even if not the primary one"
+    "position": "The edge my frame cannot smooth",
+    "source": "source",
+    "merit": "Why this persists"
   },
-  "souvenir": "One-sentence memorable takeaway of the synthesis",
+
+  "frame_test_passed": true,
+
+  "gaps_addressed": ["dimensions where outliers filled blind spots"],
+
+  "classification": {
+    "query_type": "${analysis.queryType}",
+    "container_type": "${analysis.containerType}",
+    "override": null
+  },
+
+  "souvenir": "One sentence. The insight that makes everything else make sense."
   "artifact_id": "understand-${Date.now()}"
 }
 \`\`\``;
@@ -954,73 +1064,198 @@ Return ONLY valid JSON with this structure:
 
 Ensure the JSON is valid. No markdown outside the code block.`;
   }
-  buildGauntletPrompt(originalPrompt: string, mapperArtifact: any): string {
-    const mapperJson = JSON.stringify(mapperArtifact, null, 2);
+  buildGauntletPrompt(
+    originalPrompt: string,
+    mapperArtifact: MapperArtifact,
+    analysis: ExploreAnalysis,
+    userNotes?: string[]
+  ): string {
+    const consensusBlock = mapperArtifact.consensus.claims
+      .map((c, i) => `[C${i + 1}] "${c.text}" — ${c.support_count}/${mapperArtifact.model_count} models`)
+      .join('\n');
 
-    return `You are the Gauntlet—the final arbiter of truth.
-    
-The user has a question. The Mapper has analyzed the landscape, identifying consensus and outliers. Your job is to stress-test every claim, eliminate the weak, and deliver the one true answer.
+    const outliersBlock = mapperArtifact.outliers
+      .map((o, i) => `[O${i + 1}] ${o.type === 'frame_challenger' ? '⚡' : '○'} "${o.insight}" — ${o.source}`)
+      .join('\n');
 
-## Context
-User Query: "${originalPrompt}"
+    const gapsBlock = analysis.dimensionCoverage
+      .filter(d => d.is_gap)
+      .map(d => `• ${d.dimension}: Only outlier coverage`)
+      .join('\n') || 'None';
 
-Mapper Artifact (The Landscape):
-${mapperJson}
+    const userNotesBlock = userNotes?.length
+      ? `### User Corrections\n${userNotes.map(n => '• ' + n).join('\n')}`
+      : '';
 
-## Your Mission: The Cull
-You do not synthesize. You verify. You are the fire that burns away the irrelevant.
+    return `You are the Gauntlet—the hostile filter where claims come to die or survive.
 
-1. **Stress-Test Consensus**: 
-   - Look at the "Consensus" claims. Are they actually true? Or just popular?
-   - Eliminate any claim that is vague, tautological, or technically unsound.
-   - If a claim survives, explain WHY independently.
+Every claim that enters your gate is guilty of inadequacy until proven essential. Your task is not to harmonize—it is to eliminate until only approaches with unique solutionary dimensions survive.
 
-2. **Interrogate Outliers**:
-   - Look at the "Outliers". Are they genius or noise?
-   - If an outlier contradicts consensus and is CORRECT, it kills the consensus.
-   - If an outlier is a hallway hallucination, kill it immediately.
+---
 
-3. **The Survivor**:
-   - What remains? The claims that survived the fire.
-   - Combine them into a single, decisive answer.
+<user_query>${originalPrompt}</user_query>
 
-## Output Format
-Return valid JSON:
+## Step Zero: Define the Optimal End
+
+Before testing anything, answer:
+**"What would a successful answer to this query accomplish?"**
+
+State it in one sentence. This is your target. Every claim is tested against whether it advances toward this target.
+
+---
+
+<landscape>
+
+<consensus>
+${consensusBlock || 'None.'}
+</consensus>
+
+<outliers>
+${outliersBlock || 'None.'}
+</outliers>
+
+<gaps>
+${gapsBlock}
+</gaps>
+
+<ghost>
+${mapperArtifact.ghost || 'None'}
+</ghost>
+
+${userNotesBlock ? `<user_corrections>\n${userNotesBlock}\n</user_corrections>` : ''}
+
+</landscape>
+
+## Elimination Logic: Pairwise Functional Equivalence
+
+For every pair of claims, ask:
+
+> "Does Claim B offer a solutionary dimension **toward the optimal end** that Claim A cannot cover?"
+
+**If no:** Claim B is redundant. Eliminate it.
+**If yes:** Both survive to next round.
+
+**What "Solutionary Dimension" Means:**
+- Different failure modes addressed
+- Different constraints optimized
+- Different user contexts served
+- Different trade-off positions
+- Different implementation philosophies with different outcomes
+
+Mere variation in phrasing is NOT a solutionary dimension. That is noise.
+
+---
+
+## The Kill Tests
+
+Apply to every claim. Must pass ALL FOUR to survive:
+
+### TEST 1: ACTIONABILITY
+Can someone DO something with this?
+✗ "Be consistent" → KILL
+✓ "Practice 30 minutes daily" → survives
+
+### TEST 2: FALSIFIABILITY
+Can this be verified? Or is it unfalsifiable hedge?
+✗ "It depends" → KILL
+✓ "React has larger ecosystem" → survives
+
+### TEST 3: RELEVANCE
+Does this advance toward optimal end?
+✗ True but irrelevant → KILL
+✓ Directly advances → survives
+
+### TEST 4: SUPERIORITY
+Does this BEAT alternatives?
+✗ "X is good" → KILL
+✓ "X beats Y because Z" → survives
+
+---
+
+## The Outlier Supremacy Rule
+
+An outlier can KILL consensus. Popularity is not truth.
+
+If an outlier:
+1. Contradicts consensus, AND
+2. Passes all four tests, AND
+3. Is "frame_challenger" OR provides superior coverage
+
+THEN: Outlier kills consensus. Document the kill.
+
+---
+
+## The Slating (Boundary Mapping)
+
+For each SURVIVOR, identify limits:
+
+**Extent of Realization:** How far toward optimal end? Not "it's good"—precise: "Delivers X, cannot reach Y."
+
+**Breaking Point:** Where does this stop working? "Works until [condition]. Beyond that, fails because [mechanism]."
+
+**Presumptions:** What must be true for this to hold? If false, claim collapses.
+
+---
+
+## The Verdict
+
+After elimination and boundary mapping:
+
+**The Answer:** Surviving claims synthesized into ONE decisive response.
+- Not hedged
+- Advances directly toward optimal end
+
+**If nothing survives cleanly:**
+- State the tiebreaker: "If [X] → A. If not → B."
+- Do NOT manufacture false confidence
+
+---
+
+## Output
 
 \`\`\`json
 {
+  "optimal_end": "What success looks like (one sentence)",
+
   "the_answer": {
-    "statement": "The single, definitive answer to the user's question.",
-    "reasoning": "Why this is the answer, based on the surviving evidence.",
-    "next_step": "The immediate action the user should take."
+    "statement": "The single, decisive answer",
+    "reasoning": "Why this survived (cite tests passed, kills made)",
+    "next_step": "Immediate action"
   },
+
   "survivors": {
     "primary": {
-      "claim": "The core claim that underpins the answer",
-      "survived_because": "Why it passed the stress test"
+      "claim": "Core claim",
+      "survived_because": "Tests passed",
+      "extent": "How far toward optimal",
+      "breaking_point": "Where this fails",
+      "presumptions": ["What must be true"]
     },
     "supporting": [
-      { "claim": "Supporting claim 1", "relationship": "Corroborates/Refines/Extends" }
+      { "claim": "...", "relationship": "...", "extent": "..." }
     ],
     "conditional": [
-      { "claim": "True only if...", "condition": "Specific condition" }
+      { "claim": "...", "condition": "...", "becomes_primary_if": "..." }
     ]
   },
+
   "eliminated": {
     "from_consensus": [
-      { "claim": "Claim that was killed", "killed_because": "Reason for elimination (e.g., 'Vague', 'Hallucination', 'Disproven by X')" }
+      { "claim": "...", "killed_by": "TEST 1|2|3|4 or Redundant to [survivor]", "reason": "..." }
     ],
     "from_outliers": [
-      { "claim": "Outlier that was killed", "source": "Model X", "killed_because": "Reason" }
-    ],
-    "ghost": "Did you find a 'Ghost' (missing perspective) that should have been there? If so, describe it. Else null."
+      { "claim": "...", "source": "...", "killed_by": "...", "reason": "..." }
+    ]
   },
+
+  "the_void": "What no survivor covers—the gap toward optimal that remains exposed",
+
   "confidence": {
-    "score": 0.0 to 1.0, 
-    "notes": ["Reason for score", "Remaining uncertainty"]
+    "score": 0.0-1.0,
+    "notes": ["Why this score"]
   },
-  "souvenir": "A short, memorable phrase summarizing the verdict.",
-  "artifact_id": "gauntlet-timestamp"
+
+  "souvenir": "One decisive phrase"
 }
 \`\`\`
 `;

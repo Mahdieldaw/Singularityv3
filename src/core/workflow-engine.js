@@ -3570,7 +3570,8 @@ Answer the user's message directly. Use context only to disambiguate.
     let understandPrompt = this.promptService.buildUnderstandPrompt(
       payload.originalPrompt,
       payload.mapperArtifact,
-      payload.exploreAnalysis
+      payload.exploreAnalysis,
+      payload.userNotes
     );
 
     if (payload.mappingText) {
@@ -3666,7 +3667,9 @@ Answer the user's message directly. Use context only to disambiguate.
 
     let gauntletPrompt = this.promptService.buildGauntletPrompt(
       payload.originalPrompt,
-      payload.mapperArtifact
+      payload.mapperArtifact,
+      payload.exploreAnalysis,
+      payload.userNotes
     );
 
     if (payload.mappingText) {
@@ -3797,7 +3800,7 @@ Answer the user's message directly. Use context only to disambiguate.
 
       const originalPrompt = extractUserMessage(userTurn);
 
-      const mapperArtifact = aiTurn.mapperArtifact;
+      const mapperArtifact = payload.mapperArtifact || aiTurn.mapperArtifact;
       const exploreAnalysis = aiTurn.exploreAnalysis;
 
       if (!mapperArtifact) {
@@ -3832,30 +3835,31 @@ Answer the user's message directly. Use context only to disambiguate.
       const step =
         mode === "understand"
           ? {
-              stepId,
-              type: "understand",
-              payload: {
-                understandProvider: preferredProvider,
-                mapperArtifact,
-                exploreAnalysis,
-                originalPrompt,
-                mappingText: latestMappingText,
-                selectedArtifacts: Array.isArray(selectedArtifacts) ? selectedArtifacts : [],
-                useThinking: false,
-              },
-            }
+            stepId,
+            type: "understand",
+            payload: {
+              understandProvider: preferredProvider,
+              mapperArtifact,
+              exploreAnalysis,
+              originalPrompt,
+              mappingText: latestMappingText,
+              selectedArtifacts: Array.isArray(selectedArtifacts) ? selectedArtifacts : [],
+              useThinking: false,
+            },
+          }
           : {
-              stepId,
-              type: "gauntlet",
-              payload: {
-                gauntletProvider: preferredProvider,
-                mapperArtifact,
-                originalPrompt,
-                mappingText: latestMappingText,
-                selectedArtifacts: Array.isArray(selectedArtifacts) ? selectedArtifacts : [],
-                useThinking: false,
-              },
-            };
+            stepId,
+            type: "gauntlet",
+            payload: {
+              gauntletProvider: preferredProvider,
+              mapperArtifact,
+              exploreAnalysis,
+              originalPrompt,
+              mappingText: latestMappingText,
+              selectedArtifacts: Array.isArray(selectedArtifacts) ? selectedArtifacts : [],
+              useThinking: false,
+            },
+          };
 
       const result =
         mode === "understand"
@@ -3949,19 +3953,19 @@ Answer the user's message directly. Use context only to disambiguate.
         turn: {
           user: userTurn
             ? {
-                id: userTurn.id,
-                type: "user",
-                text: userTurn.text || userTurn.content || "",
-                createdAt: userTurn.createdAt || Date.now(),
-                sessionId: effectiveSessionId,
-              }
+              id: userTurn.id,
+              type: "user",
+              text: userTurn.text || userTurn.content || "",
+              createdAt: userTurn.createdAt || Date.now(),
+              sessionId: effectiveSessionId,
+            }
             : {
-                id: userTurnId || "unknown",
-                type: "user",
-                text: originalPrompt || "",
-                createdAt: Date.now(),
-                sessionId: effectiveSessionId,
-              },
+              id: userTurnId || "unknown",
+              type: "user",
+              text: originalPrompt || "",
+              createdAt: Date.now(),
+              sessionId: effectiveSessionId,
+            },
           ai: {
             id: aiTurnId,
             type: "ai",

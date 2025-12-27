@@ -297,7 +297,7 @@ export const includePromptInCopyAtom = atomWithStorage<boolean>(
  */
 export const useCognitivePipelineAtom = atomWithStorage<boolean>(
   "htos_cognitive_pipeline",
-  false
+  true
 );
 
 // Provider Contexts

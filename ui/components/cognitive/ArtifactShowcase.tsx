@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { MapperArtifact, AiTurn, ExploreAnalysis } from "../../../shared/contract";
+import { applyEdits } from "../../utils/apply-artifact-edits";
+import { artifactEditsAtom } from "../../state/artifact-edits";
 import { RawResponseCard } from "./cards/RawResponseCard";
 
 import { selectedArtifactsAtom, selectedModelsAtom } from "../../state/atoms";
@@ -44,6 +46,13 @@ export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
     const [selectedIds, setSelectedIds] = useAtom(selectedArtifactsAtom);
     const [dimensionViewOpen, setDimensionViewOpen] = useState(false);
     const selectedModels = useAtomValue(selectedModelsAtom);
+    const [allEdits] = useAtom(artifactEditsAtom);
+
+    // Get modified artifact
+    const currentTurnId = turn?.id || mapperArtifact.turn.toString();
+    const edits = allEdits.get(currentTurnId);
+    const modifiedArtifact = useMemo(() => applyEdits(mapperArtifact, edits), [mapperArtifact, edits]);
+    const userNotes = edits?.userNotes;
 
     const availableProviders = useMemo(() => {
         const enabled = LLM_PROVIDERS_CONFIG.filter((p) => !!selectedModels?.[p.id]);
@@ -225,7 +234,7 @@ export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
                     value={nextProviderId}
                     onChange={(e) => setNextProviderId(e.target.value)}
                     disabled={isLoading}
-                    className="flex-1 bg-surface-base border border-border-subtle rounded px-2 py-1 text-sm text-text-primary focus:outline-none focus:border-brand-500 disabled:opacity-50"
+                    className="flex-1 bg-[#1a1b26] border border-border-subtle rounded px-2 py-1 text-sm text-gray-200 focus:outline-none focus:border-brand-500 disabled:opacity-50 appearance-none"
                 >
                     {availableProviders.map((p) => (
                         <option key={p.id} value={p.id}>
@@ -240,7 +249,12 @@ export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
 
             <div className="flex gap-3 mt-6 pt-2">
                 <button
-                    onClick={() => onUnderstand?.({ providerId: nextProviderId, selectedArtifacts })}
+                    onClick={() => onUnderstand?.({
+                        providerId: nextProviderId,
+                        selectedArtifacts,
+                        mapperArtifact: modifiedArtifact,
+                        userNotes
+                    })}
                     disabled={isLoading}
                     className="flex-1 px-4 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 
                                hover:from-blue-500 hover:to-indigo-500 
@@ -250,7 +264,12 @@ export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
                     🧠 Understand
                 </button>
                 <button
-                    onClick={() => onDecide?.({ providerId: nextProviderId, selectedArtifacts })}
+                    onClick={() => onDecide?.({
+                        providerId: nextProviderId,
+                        selectedArtifacts,
+                        mapperArtifact: modifiedArtifact,
+                        userNotes
+                    })}
                     disabled={isLoading}
                     className={`flex-1 px-4 py-3 text-white rounded-lg font-medium transition-all
                                disabled:opacity-50 disabled:cursor-not-allowed
