@@ -226,6 +226,7 @@ export function useChat() {
             }),
             providerMeta: {},
             clientUserTurnId: userTurnId,
+            mode: selectedMode as any,
           }
           : {
             type: "extend",
@@ -254,6 +255,7 @@ export function useChat() {
             }),
             providerMeta: {},
             clientUserTurnId: userTurnId,
+            mode: selectedMode as any,
           };
 
         // AI turn will be created upon TURN_CREATED from backend

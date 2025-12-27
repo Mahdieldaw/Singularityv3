@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import clsx from "clsx";
 import { AiTurn, ProviderResponse } from "../types";
 import MarkdownDisplay from "./MarkdownDisplay";
@@ -171,6 +171,45 @@ export const SynthesisBubble = React.memo<SynthesisBubbleProps>(
         getProviderName,
         CouncilOrbs
     }) => {
+        const hasMappingData = useMemo(() => {
+            const mapResps = aiTurn.mappingResponses || {};
+            return Object.values(mapResps).some(resps =>
+                Array.isArray(resps) && resps.some(r => r.text && r.text.trim().length > 0)
+            );
+        }, [aiTurn.mappingResponses]);
+
+        const actionBar = (
+            <div className="my-6 flex items-center justify-center gap-6 border-y border-border-subtle/60 py-3 w-full">
+                {refinerOutput?.outlier && (
+                    <button
+                        onClick={() => setShowEcho((prev) => !prev)}
+                        className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-surface-raised hover:bg-surface-highlight border border-border-subtle text-xs text-text-secondary"
+                        title="View contrarian echo"
+                    >
+                        <span className="text-sm">📢</span>
+                        <span>Echo</span>
+                    </button>
+                )}
+
+                <button
+                    onClick={onDecisionMapOpen}
+                    className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-surface-raised hover:bg-surface-highlight border border-border-subtle text-xs text-text-secondary"
+                    title="Open decision map"
+                >
+                    <span className="text-sm">📊</span>
+                    <span>Map</span>
+                </button>
+
+                {(refinerOutput || isRefinerLoading) && (
+                    <RefinerDot
+                        refiner={refinerOutput || null}
+                        onClick={onTrustPanelOpen}
+                        isLoading={isRefinerLoading}
+                    />
+                )}
+            </div>
+        );
+
         return (
             <div
                 className={clsx(
@@ -258,8 +297,11 @@ export const SynthesisBubble = React.memo<SynthesisBubbleProps>(
                 {(() => {
                     if (!wasSynthRequested)
                         return (
-                            <div className="text-text-muted/70 italic text-center relative z-10">
-                                Synthesis not enabled for this turn.
+                            <div className="flex flex-col items-center justify-center text-text-muted/70 italic relative z-10 w-full">
+                                <div className={clsx(!hasMappingData && "py-4")}>
+                                    Synthesis not enabled for this turn.
+                                </div>
+                                {hasMappingData && actionBar}
                             </div>
                         );
 
@@ -326,35 +368,7 @@ export const SynthesisBubble = React.memo<SynthesisBubbleProps>(
                                     />
                                 </div>
 
-                                <div className="my-6 flex items-center justify-center gap-6 border-y border-border-subtle/60 py-3">
-                                    {refinerOutput?.outlier && (
-                                        <button
-                                            onClick={() => setShowEcho((prev) => !prev)}
-                                            className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-surface-raised hover:bg-surface-highlight border border-border-subtle text-xs text-text-secondary"
-                                            title="View contrarian echo"
-                                        >
-                                            <span className="text-sm">📢</span>
-                                            <span>Echo</span>
-                                        </button>
-                                    )}
-
-                                    <button
-                                        onClick={onDecisionMapOpen}
-                                        className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-surface-raised hover:bg-surface-highlight border border-border-subtle text-xs text-text-secondary"
-                                        title="Open decision map"
-                                    >
-                                        <span className="text-sm">📊</span>
-                                        <span>Map</span>
-                                    </button>
-
-                                    {(refinerOutput || isRefinerLoading) && (
-                                        <RefinerDot
-                                            refiner={refinerOutput || null}
-                                            onClick={onTrustPanelOpen}
-                                            isLoading={isRefinerLoading}
-                                        />
-                                    )}
-                                </div>
+                                {actionBar}
 
                                 {refinerOutput?.outlier && showEcho && (
                                     <div className="mt-3 mx-auto max-w-2xl rounded-xl border border-border-subtle bg-surface-raised px-4 py-3 text-sm text-text-primary">
@@ -434,13 +448,20 @@ export const SynthesisBubble = React.memo<SynthesisBubbleProps>(
                     }
 
                     return (
-                        <div className="flex items-center justify-center h-full text-text-muted italic relative z-10">
+                        <div className="flex flex-col items-center justify-center h-full text-text-muted italic relative z-10 w-full">
                             {isMappingLoading ? (
-                                <div className="flex items-center gap-2">
+                                <div className="flex items-center gap-2 py-4">
                                     <span>Analyzing sources...</span>
                                     <span className="streaming-dots" />
                                 </div>
-                            ) : "Synthesis unavailable."}
+                            ) : (
+                                <>
+                                    <div className={clsx(!hasMappingData && "py-4")}>
+                                        Synthesis unavailable.
+                                    </div>
+                                    {hasMappingData && actionBar}
+                                </>
+                            )}
                         </div>
                     );
                 })()}
@@ -453,36 +474,38 @@ export const SynthesisBubble = React.memo<SynthesisBubbleProps>(
                 />
 
                 {/* Provider Errors (if any) */}
-                {Object.entries(providerErrors || {}).length > 0 && (
-                    <div className="provider-errors-section mt-3">
-                        <div className="flex items-center justify-between mb-2">
-                            <span className="text-sm text-text-secondary">⚠️ Some providers encountered issues</span>
-                            {retryableProviders.length > 0 && aiTurn.sessionId && (
-                                <button
-                                    onClick={onRetryAll}
-                                    className="provider-error-card__retry-btn"
-                                >
-                                    🔄 Retry All ({retryableProviders.length})
-                                </button>
-                            )}
+                {
+                    Object.entries(providerErrors || {}).length > 0 && (
+                        <div className="provider-errors-section mt-3">
+                            <div className="flex items-center justify-between mb-2">
+                                <span className="text-sm text-text-secondary">⚠️ Some providers encountered issues</span>
+                                {retryableProviders.length > 0 && aiTurn.sessionId && (
+                                    <button
+                                        onClick={onRetryAll}
+                                        className="provider-error-card__retry-btn"
+                                    >
+                                        🔄 Retry All ({retryableProviders.length})
+                                    </button>
+                                )}
+                            </div>
+                            {Object.entries(providerErrors).map(([pid, error]) => (
+                                <ProviderErrorCard
+                                    key={pid}
+                                    providerId={pid}
+                                    providerName={getProviderName(pid)}
+                                    error={error as any}
+                                    // ✅ FIX: Only pass the function if retryable AND session exists.
+                                    // Otherwise pass undefined to hide the button.
+                                    onRetry={
+                                        (error as any)?.retryable && aiTurn.sessionId
+                                            ? () => onRetryProvider(pid)
+                                            : undefined
+                                    }
+                                />
+                            ))}
                         </div>
-                        {Object.entries(providerErrors).map(([pid, error]) => (
-                            <ProviderErrorCard
-                                key={pid}
-                                providerId={pid}
-                                providerName={getProviderName(pid)}
-                                error={error as any}
-                                // ✅ FIX: Only pass the function if retryable AND session exists.
-                                // Otherwise pass undefined to hide the button.
-                                onRetry={
-                                    (error as any)?.retryable && aiTurn.sessionId
-                                        ? () => onRetryProvider(pid)
-                                        : undefined
-                                }
-                            />
-                        ))}
-                    </div>
-                )}
+                    )
+                }
 
                 {/* BOTTOM TRAY: Council Orbs - Centered */}
                 <div
@@ -515,36 +538,38 @@ export const SynthesisBubble = React.memo<SynthesisBubbleProps>(
                 </div>
 
                 {/* BOTTOM RIGHT: Recompute Icon Button */}
-                {!isThisTurnActive && (
-                    <div className="absolute bottom-6 right-10 z-30 pointer-events-auto opacity-0 group-hover/turn:opacity-100 focus-within:opacity-100 transition-opacity duration-300">
-                        <div className="relative group/recompute">
-                            <button
-                                className="flex items-center justify-center w-8 h-8 bg-surface-raised/80 border border-border-subtle rounded-full text-sm hover:bg-surface-highlight hover:scale-110 transition-all shadow-sm"
-                                title="Recompute synthesis"
-                            >
-                                <span className="text-brand-400">⚡</span>
-                            </button>
+                {
+                    !isThisTurnActive && (
+                        <div className="absolute bottom-6 right-10 z-30 pointer-events-auto opacity-0 group-hover/turn:opacity-100 focus-within:opacity-100 transition-opacity duration-300">
+                            <div className="relative group/recompute">
+                                <button
+                                    className="flex items-center justify-center w-8 h-8 bg-surface-raised/80 border border-border-subtle rounded-full text-sm hover:bg-surface-highlight hover:scale-110 transition-all shadow-sm"
+                                    title="Recompute synthesis"
+                                >
+                                    <span className="text-brand-400">⚡</span>
+                                </button>
 
-                            <div className="absolute bottom-full right-0 mb-2 min-w-[140px] bg-surface-raised border border-border-subtle rounded-xl shadow-elevated p-1.5 hidden group-hover/recompute:block transition-all animate-in fade-in zoom-in-95 duration-150">
-                                <div className="text-[10px] text-text-muted px-2 py-1 font-medium uppercase tracking-wider">Recompute</div>
-                                {providersConfig.map(p => (
-                                    <button
-                                        key={p.id}
-                                        onClick={(e) => {
-                                            e.stopPropagation();
-                                            onClipClick("synthesis", String(p.id));
-                                        }}
-                                        className="w-full text-left px-2 py-1.5 rounded-lg text-xs hover:bg-surface-highlight text-text-secondary hover:text-text-primary flex items-center gap-2"
-                                    >
-                                        <span className={`w-2 h-2 rounded-full`} style={{ backgroundColor: p.color || '#ccc' }} />
-                                        {p.name}
-                                    </button>
-                                ))}
+                                <div className="absolute bottom-full right-0 mb-2 min-w-[140px] bg-surface-raised border border-border-subtle rounded-xl shadow-elevated p-1.5 hidden group-hover/recompute:block transition-all animate-in fade-in zoom-in-95 duration-150">
+                                    <div className="text-[10px] text-text-muted px-2 py-1 font-medium uppercase tracking-wider">Recompute</div>
+                                    {providersConfig.map(p => (
+                                        <button
+                                            key={p.id}
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                onClipClick("synthesis", String(p.id));
+                                            }}
+                                            className="w-full text-left px-2 py-1.5 rounded-lg text-xs hover:bg-surface-highlight text-text-secondary hover:text-text-primary flex items-center gap-2"
+                                        >
+                                            <span className={`w-2 h-2 rounded-full`} style={{ backgroundColor: p.color || '#ccc' }} />
+                                            {p.name}
+                                        </button>
+                                    ))}
+                                </div>
                             </div>
                         </div>
-                    </div>
-                )}
-            </div>
+                    )
+                }
+            </div >
         );
     },
     (prev, next) => {

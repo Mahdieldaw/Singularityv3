@@ -97,6 +97,7 @@ const ChatInput = ({
           targetProvider: activeTarget.providerId,
           userMessage: prompt,
           useThinking: false,
+          mode: selectedMode as any,
         };
         await api.executeWorkflow(primitive);
         setActiveTarget(null);
