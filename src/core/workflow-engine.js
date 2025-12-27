@@ -807,6 +807,27 @@ export class WorkflowEngine {
 
             // EXIT EARLY: In Cognitive Mode, we stop here to let the user 
             // choose between Understand (Synthesis) or Decide (Gauntlet).
+
+            // CRITICAL: Persist the state before halting so history works!
+            try {
+              if (resolvedContext?.type !== "recompute") {
+                const persistResult = this._buildPersistenceResultFromStepResults(steps, stepResults);
+                const persistRequest = {
+                  type: resolvedContext?.type || "initialize",
+                  sessionId: context.sessionId,
+                  // Use currentUserMessage as fallback, ensuring it's not empty string if context.userMessage is
+                  userMessage: context?.userMessage || this.currentUserMessage || "",
+                  canonicalUserTurnId: context?.canonicalUserTurnId,
+                  canonicalAiTurnId: context?.canonicalAiTurnId,
+                };
+
+                await this.sessionManager.persist(persistRequest, resolvedContext, persistResult);
+                console.log('[WorkflowEngine] Persisted cognitive halt state for session:', context.sessionId);
+              }
+            } catch (err) {
+              console.error('[WorkflowEngine] Failed to persist cognitive halt state:', err);
+            }
+
             this._emitTurnFinalized(context, steps, stepResults, resolvedContext);
             this.port.postMessage({
               type: "WORKFLOW_COMPLETE",
