@@ -61,7 +61,6 @@ export function useChat() {
   const refinerProvider = useAtomValue(refinerProviderAtom);
   const antagonistProvider = useAtomValue(antagonistProviderAtom);
   const selectedMode = useAtomValue(selectedModeAtom);
-  const isGuidedMode = true; // Use cognitive mode by default for everyone
 
 
 
@@ -134,7 +133,7 @@ export function useChat() {
       // No pending cache: rely on Jotai atom serialization across updaters
 
       try {
-        const shouldUseSynthesis = !isGuidedMode && !!synthesisProvider;
+        const shouldUseSynthesis = !!synthesisProvider;
 
         const fallbackMapping = (() => {
           try {
@@ -151,7 +150,7 @@ export function useChat() {
         })();
         // Uniform behavior: allow Map to run even if its provider is not in the witness selection
         const shouldUseMapping = !!(
-          (isGuidedMode || mappingEnabled) &&
+          mappingEnabled &&
           effectiveMappingProvider
         );
 
@@ -212,14 +211,14 @@ export function useChat() {
             mapper: shouldUseMapping
               ? (effectiveMappingProvider as ProviderKey)
               : undefined,
-            refiner: !isGuidedMode && shouldUseSynthesis && effectiveRefinerProvider // Only run refiner if synthesis acts (it audits synthesis)
+            refiner: shouldUseSynthesis && effectiveRefinerProvider // Only run refiner if synthesis acts (it audits synthesis)
               ? (effectiveRefinerProvider as ProviderKey)
               : undefined,
-            antagonist: !isGuidedMode && effectiveAntagonistProvider
+            antagonist: effectiveAntagonistProvider
               ? (effectiveAntagonistProvider as ProviderKey)
               : undefined,
-            includeRefiner: !!(!isGuidedMode && shouldUseSynthesis && effectiveRefinerProvider),
-            includeAntagonist: !!(!isGuidedMode && effectiveAntagonistProvider),
+            includeRefiner: !!(shouldUseSynthesis && effectiveRefinerProvider),
+            includeAntagonist: !!(effectiveAntagonistProvider),
             useThinking: computeThinkFlag({
               modeThinkButtonOn: thinkOnChatGPT,
               input: prompt,
@@ -241,14 +240,14 @@ export function useChat() {
             mapper: shouldUseMapping
               ? (effectiveMappingProvider as ProviderKey)
               : undefined,
-            refiner: !isGuidedMode && shouldUseSynthesis && effectiveRefinerProvider
+            refiner: shouldUseSynthesis && effectiveRefinerProvider
               ? (effectiveRefinerProvider as ProviderKey)
               : undefined,
-            antagonist: !isGuidedMode && effectiveAntagonistProvider
+            antagonist: effectiveAntagonistProvider
               ? (effectiveAntagonistProvider as ProviderKey)
               : undefined,
-            includeRefiner: !!(!isGuidedMode && shouldUseSynthesis && effectiveRefinerProvider),
-            includeAntagonist: !!(!isGuidedMode && effectiveAntagonistProvider),
+            includeRefiner: !!(shouldUseSynthesis && effectiveRefinerProvider),
+            includeAntagonist: !!(effectiveAntagonistProvider),
             useThinking: computeThinkFlag({
               modeThinkButtonOn: thinkOnChatGPT,
               input: prompt,
@@ -286,7 +285,6 @@ export function useChat() {
       turnIds.length,
       selectedArtifacts,
       setSelectedArtifacts,
-      isGuidedMode,
     ],
   );
 

@@ -51,7 +51,6 @@ const ChatInput = ({
   const [isReducedMotion] = useAtom(isReducedMotionAtom as any) as [boolean, any];
   const [, setChatInputHeight] = useAtom(chatInputHeightAtom);
   const [selectedMode] = useAtom(selectedModeAtom as any) as [string, any];
-  const isCognitiveMode = true; // Cognitive mode is now the primary and only path
 
   // Streaming UX: hide config orbs during active round
   const isRoundActive = useAtomValue(isRoundActiveAtom);
@@ -424,7 +423,6 @@ const ChatInput = ({
             voiceProviderId={synthesisProvider}
             variant="active"
             workflowProgress={workflowProgress as any}
-            guidedMode={isCognitiveMode}
             onCrownMove={(pid) => {
               setSynthesisProvider(pid);
               setProviderLock('synthesis', true);

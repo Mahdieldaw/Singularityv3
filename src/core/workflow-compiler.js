@@ -87,25 +87,27 @@ export class WorkflowCompiler {
         break;
     }
 
-    // Synthesis step first
+    // Mapping step first
+    if (this._needsMappingStep(request, resolvedContext)) {
+      const mappingStep = this._createMappingStep(request, resolvedContext, {
+        batchStepId,
+      });
+      steps.push(mappingStep);
+    }
+
+    // Synthesis step after mapping (so it can reference mapping step IDs)
     if (this._needsSynthesisStep(request, resolvedContext)) {
+      const lastMappingStep =
+        steps.filter((s) => s.type === "mapping").slice(-1)[0] || null;
       const synthesisStep = this._createSynthesisStep(
         request,
         resolvedContext,
-        { batchStepId },
+        {
+          batchStepId,
+          mappingStepId: lastMappingStep?.stepId,
+        },
       );
       steps.push(synthesisStep);
-    }
-
-    // Mapping step after synthesis (so it can reference synthesis step IDs)
-    if (this._needsMappingStep(request, resolvedContext)) {
-      const lastSynthesisStep =
-        steps.filter((s) => s.type === "synthesis").slice(-1)[0] || null;
-      const mappingStep = this._createMappingStep(request, resolvedContext, {
-        batchStepId,
-        synthesisStepId: lastSynthesisStep?.stepId,
-      });
-      steps.push(mappingStep);
     }
 
     // Refiner step (if requested and dependencies exist)
@@ -212,9 +214,6 @@ export class WorkflowCompiler {
         // Explicitly allow mapper to continue thread from the batch step when available
         continueFromBatchStep: linkIds.batchStepId || undefined,
         sourceStepIds: linkIds.batchStepId ? [linkIds.batchStepId] : undefined,
-        synthesisStepIds: linkIds.synthesisStepId
-          ? [linkIds.synthesisStepId]
-          : undefined,
         providerOrder: Array.isArray(request.providers)
           ? request.providers.slice()
           : undefined,
@@ -261,7 +260,9 @@ export class WorkflowCompiler {
       payload: {
         synthesisProvider: synthesizer,
         sourceStepIds: linkIds.batchStepId ? [linkIds.batchStepId] : undefined,
-        // mappingStepIds deliberately omitted; mapping will run after synthesis now
+        mappingStepIds: linkIds.mappingStepId
+          ? [linkIds.mappingStepId]
+          : undefined,
         originalPrompt: request.userMessage,
         useThinking: !!request.useThinking && synthesizer === "chatgpt",
         attemptNumber: 1,
