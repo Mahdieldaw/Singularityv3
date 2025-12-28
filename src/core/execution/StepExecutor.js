@@ -1,7 +1,7 @@
 
 import { ArtifactProcessor } from '../../shared/artifact-processor';
 import { PROVIDER_LIMITS } from '../../shared/provider-limits';
-import { formatArtifactAsOptions, parseMapperArtifact, parseExploreOutput, parseGauntletOutput, parseUnderstandOutput, parseUnifiedMapperOutput } from '../../shared/parsing-utils';
+import { formatArtifactAsOptions, parseMapperArtifact, parseExploreOutput, parseGauntletOutput, parseUnderstandOutput, parseUnifiedMapperOutput, parseV1MapperToArtifact } from '../../shared/parsing-utils';
 import { classifyError, isProviderAuthError, createMultiProviderAuthError } from '../error-classifier.js';
 import { errorHandler } from '../../utils/ErrorHandler.js';
 import { computeExplore } from '../cognitive/explore-computer';
@@ -188,6 +188,14 @@ Answer the user's message directly. Use context only to disambiguate.
           results.forEach((res, pid) => {
             batchUpdates[pid] = res;
           });
+
+          // ✅ CRITICAL: Update in-memory cache SYNCHRONOUSLY
+          options.persistenceCoordinator.updateProviderContextsBatch(
+            context.sessionId,
+            batchUpdates,
+            true, // continueThread
+            { skipSave: true },
+          );
 
           // Update contexts async
           options.persistenceCoordinator.persistProviderContextsAsync(context.sessionId, batchUpdates);
@@ -731,8 +739,32 @@ Answer the user's message directly. Use context only to disambiguate.
         }
   
         if (!aiTurn) {
+          // Try text matching fallback if ID lookup failed (via adapter)
+          const fallbackText = context?.userMessage || "";
+          if (fallbackText && fallbackText.trim().length > 0 && sessionManager?.adapter?.isReady && sessionManager.adapter.isReady()) {
+            try {
+              const sessionTurns = await sessionManager.adapter.getTurnsBySessionId(context.sessionId);
+              if (Array.isArray(sessionTurns)) {
+                for (let i = 0; i < sessionTurns.length; i++) {
+                  const t = sessionTurns[i];
+                  if (t && t.type === "user" && String(t.text || "") === String(fallbackText)) {
+                    const next = sessionTurns[i + 1];
+                    if (next && next.type === "ai") {
+                      aiTurn = next;
+                      break;
+                    }
+                  }
+                }
+              }
+            } catch (e) {
+              throw new Error(`Could not find corresponding AI turn for ${turnId} (text fallback failed)`);
+            }
+          }
+
+          if (!aiTurn) {
             console.warn(`[StepExecutor] Could not resolve AI turn for source ${turnId}`);
             return [];
+          }
         }
   
         let sourceContainer;
@@ -759,6 +791,50 @@ Answer the user's message directly. Use context only to disambiguate.
         });
   
         let sourceArray = Array.from(latestMap.values());
+
+        // If embedded responses were not present, attempt provider_responses fallback (prefer indexed lookup)
+        if (
+          sourceArray.length === 0 &&
+          sessionManager?.adapter?.isReady &&
+          sessionManager.adapter.isReady()
+        ) {
+          try {
+            const responses = await sessionManager.adapter.getResponsesByTurnId(
+              aiTurn.id,
+            );
+
+            const respType = responseType || "batch";
+            const dbLatestMap = new Map();
+
+            (responses || [])
+              .filter(r => r?.responseType === respType && r.text?.trim())
+              .forEach(r => {
+                const existing = dbLatestMap.get(r.providerId);
+                if (!existing || (r.responseIndex || 0) >= (existing.responseIndex || 0)) {
+                  dbLatestMap.set(r.providerId, r);
+                }
+              });
+
+            sourceArray = Array.from(dbLatestMap.values()).map(r => ({
+              providerId: r.providerId,
+              text: r.text
+            }));
+            if (sourceArray.length > 0) {
+              console.log(
+                "[StepExecutor] provider_responses fallback succeeded for historical sources",
+              );
+            }
+          } catch (e) {
+            console.warn(
+              "[StepExecutor] provider_responses fallback failed for historical sources:",
+              e,
+            );
+          }
+        }
+
+        console.log(
+          `[StepExecutor] Found ${sourceArray.length} historical sources`,
+        );
         return sourceArray;
 
       } else if (payload.sourceStepIds) {
