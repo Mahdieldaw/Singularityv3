@@ -1,6 +1,6 @@
 
 const logger = {
-  stream: (msg, meta) => {
+  stream: () => {
     // console.debug(`[WorkflowEngine] ${msg}`, meta); 
   },
   debug: console.debug.bind(console),

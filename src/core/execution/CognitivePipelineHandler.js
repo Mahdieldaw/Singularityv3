@@ -1,6 +1,6 @@
 
 import { computeExplore } from '../cognitive/explore-computer';
-import { parseV1MapperToArtifact } from '../../shared/parsing-utils';
+import { parseV1MapperToArtifact } from '../../../shared/parsing-utils';
 import { extractUserMessage } from '../context-utils.js';
 
 export class CognitivePipelineHandler {

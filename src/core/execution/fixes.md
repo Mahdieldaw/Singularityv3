@@ -1,210 +1,330 @@
-🔴 CRITICAL ISSUES (Functionality Loss)
-1. Missing Synchronous Context Update in executePromptStep
-Original:
+errors
+
+src/core/execution/CognitivePipelineHandler.js:3:41 - error TS2307: Cannot find module '../../shared/parsing-utils' or its corresponding type declarations.
+
+3 import { parseV1MapperToArtifact } from '../../shared/parsing-utils';
+                                          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+src/core/execution/StepExecutor.js:2:35 - error TS2307: Cannot find module '../../shared/artifact-processor' or its corresponding type declarations.
+
+2 import { ArtifactProcessor } from '../../shared/artifact-processor';
+                                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+src/core/execution/StepExecutor.js:3:33 - error TS2307: Cannot find module '../../shared/provider-limits' or its corresponding type declarations.
+
+3 import { PROVIDER_LIMITS } from '../../shared/provider-limits';
+                                  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+src/core/execution/StepExecutor.js:4:177 - error TS2307: Cannot find module '../../shared/parsing-utils' or its corresponding type declarations.
+
+4 import { formatArtifactAsOptions, parseMapperArtifact, parseExploreOutput, parseGauntletOutput, parseUnderstandOutput, parseUnifiedMapperOutput, parseV1MapperToArtifact } from '../../shared/parsing-utils';
+                                                                                                                                                                                  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+src/core/execution/StepExecutor.js:5:25 - error TS2305: Module '"../error-classifier.js"' has no exported member 'isProviderAuthError'.
+
+5 import { classifyError, isProviderAuthError, createMultiProviderAuthError } from '../error-classifier.js';
+                          ~~~~~~~~~~~~~~~~~~~
+
+src/core/execution/StepExecutor.js:5:46 - error TS2305: Module '"../error-classifier.js"' has no exported member 'createMultiProviderAuthError'.       
+
+5 import { classifyError, isProviderAuthError, createMultiProviderAuthError } from '../error-classifier.js';
+                                               ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+src/core/execution/StreamingManager.js:3:12 - error TS6133: 'msg' is declared but its value is never read.
+
+3   stream: (msg, meta) => {
+             ~~~
+
+src/core/execution/StreamingManager.js:3:17 - error TS6133: 'meta' is declared but its value is never read.
+
+3   stream: (msg, meta) => {
+                  ~~~~
+
+src/core/workflow-engine.js:177:11 - error TS6133: 'batchSuccess' is declared but its value is never read.
+
+177       let batchSuccess = true;
+              ~~~~~~~~~~~~
+
+
+
+phase 2
+
+No, That Optimization Was NOT Implemented
+Looking at the proposed WorkflowEngine, it still has 7 separate phase methods:
 
 JavaScript
 
-// ✅ CRITICAL: Update in-memory cache SYNCHRONOUSLY
-this.sessionManager.updateProviderContextsBatch(
-  context.sessionId,
-  batchUpdates,
-  true, // continueThread
-  { skipSave: true },
-);
-
-this._persistProviderContextsAsync(context.sessionId, batchUpdates);
-New (StepExecutor.js):
+await this._executeBatchPhase(...)
+await this._executeMappingPhase(...)
+await this._executeSynthesisPhase(...)
+await this._executeRefinerPhase(...)
+await this._executeAntagonistPhase(...)
+await this._executeUnderstandPhase(...)
+await this._executeGauntletPhase(...)
+Each one follows the same pattern:
 
 JavaScript
 
-// Update contexts async
-options.persistenceCoordinator.persistProviderContextsAsync(context.sessionId, batchUpdates);
-Impact: The original does BOTH synchronous in-memory update AND async persistence. The new version only does deferred update (via setTimeout(..., 0)). This can cause race conditions where subsequent steps (synthesis/mapping) don't have context available immediately.
-
-Fix: Add synchronous update before async:
-
-JavaScript
-
-options.persistenceCoordinator.updateProviderContextsBatch(
-  context.sessionId,
-  batchUpdates,
-  true,
-  { skipSave: true }
-);
-options.persistenceCoordinator.persistProviderContextsAsync(context.sessionId, batchUpdates);
-2. Missing Import: parseV1MapperToArtifact in StepExecutor
-StepExecutor.js imports:
-
-JavaScript
-
-import { formatArtifactAsOptions, parseMapperArtifact, parseExploreOutput, parseGauntletOutput, parseUnderstandOutput, parseUnifiedMapperOutput } from '../../shared/parsing-utils';
-But uses:
-
-JavaScript
-
-// In executeUnderstandStep and executeGauntletStep:
-mapperArtifact = parseV1MapperToArtifact(payload.mappingText, {...});
-Fix: Add to imports:
-
-JavaScript
-
-import { ..., parseV1MapperToArtifact } from '../../shared/parsing-utils';
-3. Missing Fallback Logic in _resolveSourceData
-Original has two fallbacks that are missing:
-
-A) Provider responses table fallback:
-
-JavaScript
-
-// Original - after getting sourceArray:
-if (sourceArray.length === 0 && this.sessionManager?.adapter?.isReady()) {
-  const responses = await this.sessionManager.adapter.getResponsesByTurnId(aiTurn.id);
-  // ... fallback to indexed provider_responses
+async _execute[Type]Phase(steps, context, stepResults, resolvedContext) {
+    const typeSteps = steps.filter(s => s.type === "[type]");
+    for (const step of typeSteps) {
+      try {
+        const result = await this.stepExecutor.execute[Type]Step(...);
+        stepResults.set(step.stepId, { status: "completed", result });
+        this._emitStepUpdate(...);
+        // Upsert...
+      } catch (error) {
+        this._handleStepError(...);
+      }
+    }
 }
-B) Text matching fallback:
+This is ~200 lines of repetitive code that could be ~50 lines.
 
+Here's the Optimized Version
 JavaScript
 
-// Original:
-const fallbackText = context?.userMessage || this.currentUserMessage || "";
-if (fallbackText && ...) {
-  const sessionTurns = await this.sessionManager.adapter.getTurnsBySessionId(context.sessionId);
-  // ... match by text content
-}
-Impact: Historical recompute workflows may fail to find source data when it's stored in provider_responses table but not embedded in turn objects.
+export class WorkflowEngine {
+  constructor(orchestrator, sessionManager, port, options = {}) {
+    // ... existing constructor code ...
 
-4. Reference to Non-existent Property in StepExecutor
-In _resolveSourceData:
+    // Executor mapping
+    this._executors = {
+      prompt: (step, ctx, opts) => this.stepExecutor.executePromptStep(step, ctx, opts),
+      mapping: (step, ctx, results, wfCtx, resolved, opts) => 
+        this.stepExecutor.executeMappingStep(step, ctx, results, wfCtx, resolved, opts),
+      synthesis: (step, ctx, results, wfCtx, resolved, opts) => 
+        this.stepExecutor.executeSynthesisStep(step, ctx, results, wfCtx, resolved, opts),
+      refiner: (step, ctx, results, opts) => 
+        this.stepExecutor.executeRefinerStep(step, ctx, results, opts),
+      antagonist: (step, ctx, results, opts) => 
+        this.stepExecutor.executeAntagonistStep(step, ctx, results, opts),
+      understand: (step, ctx, results, opts) => 
+        this.stepExecutor.executeUnderstandStep(step, ctx, results, opts),
+      gauntlet: (step, ctx, results, opts) => 
+        this.stepExecutor.executeGauntletStep(step, ctx, results, opts),
+    };
 
-JavaScript
-
-const fallbackText = context?.userMessage || this.currentUserMessage || "";
-Issue: this.currentUserMessage doesn't exist on StepExecutor - it's only set on WorkflowEngine.
-
-Fix: Remove the reference or pass it via options/context.
-
-🟡 MEDIUM ISSUES (Behavioral Differences)
-5. Missing Explore Phase Execution
-The new WorkflowEngine.execute() has:
-
-_executeBatchPhase ✅
-_executeMappingPhase ✅
-_executeSynthesisPhase ✅
-_executeRefinerPhase ✅
-_executeAntagonistPhase ✅
-_executeUnderstandPhase ✅
-_executeGauntletPhase ✅
-_executeExplorePhase ❌ MISSING
-However: Looking at the original, executeExploreStep exists but is never actually called in _executeCognitivePipeline or _executeClassicPipeline. So this might be intentional/dead code. But TurnEmitter does handle explore response type, so verify if explore is triggered elsewhere.
-
-6. handleCognitiveHalt doesn't persist for mapping_artifact_missing case
-Original:
-
-JavaScript
-
-// For mapping_artifact_missing:
-try {
-  if (resolvedContext?.type !== "recompute") {
-    const persistResult = this._buildPersistenceResultFromStepResults(steps, stepResults);
-    await this.sessionManager.persist(persistRequest, resolvedContext, persistResult);
+    // Provider key mapping for upsert
+    this._providerKeys = {
+      prompt: null, // Batch has multiple providers, handled specially
+      mapping: 'mappingProvider',
+      synthesis: 'synthesisProvider',
+      refiner: 'refinerProvider',
+      antagonist: 'antagonistProvider',
+      understand: 'understandProvider',
+      gauntlet: 'gauntletProvider',
+    };
   }
-} catch (_) { }
 
-this._emitTurnFinalized(context, steps, stepResults, resolvedContext);
-this.port.postMessage({ type: "WORKFLOW_COMPLETE", ... });
-New (CognitivePipelineHandler):
+  async execute(request, resolvedContext) {
+    const { context, steps } = request;
+    const stepResults = new Map();
+    const workflowContexts = {};
 
-JavaScript
+    // ... existing validation and setup ...
 
-try {
-    await this.persistenceCoordinator.persistStepResult(resolvedContext, context, steps, stepResults, userMessageForExplore);
-} catch (_) { }
+    try {
+      const mode = request.mode || "auto";
+      const useCognitivePipeline = ["auto", "understand", "decide"].includes(mode);
+      context.useCognitivePipeline = useCognitivePipeline;
+      context.mode = mode;
 
-this.port.postMessage({ type: "WORKFLOW_COMPLETE", ... });
-// Turn finalization handled by caller
-This looks OK since caller handles emitTurnFinalized, but verify persistStepResult implementation matches original flow.
+      this._seedContexts(resolvedContext, stepResults, workflowContexts);
+      this._hydrateV1Artifacts(context, resolvedContext);
 
-🟢 MINOR ISSUES
-7. Debug Logging Inconsistency
-Each new file has its own wdbg function definition. The original uses a global one. Functionally equivalent but differs in that debug state isn't shared.
-
-8. Redundant Parameter Passing
-responseProcessor is passed both in StepExecutor constructor AND in options for executeRefinerStep/executeAntagonistStep. Not a bug, but redundant.
-
-✅ VERIFIED CORRECT
-computeConsensusGateFromMapping - Identical
-normalizeCitationId / normalizeSupporterProviderIds - Identical
-StreamingManager delta logic - Equivalent (with added getRecoveredText helper)
-ContextManager resolution - Equivalent
-TurnEmitter finalization - Equivalent
-handleRetryRequest - Identical
-handleContinueCognitiveRequest delegation - Correct
-📋 RECOMMENDED FIXES
-JavaScript
-
-// 1. StepExecutor.js - Add missing import
-import { 
-  formatArtifactAsOptions, 
-  parseMapperArtifact, 
-  parseExploreOutput, 
-  parseGauntletOutput, 
-  parseUnderstandOutput, 
-  parseUnifiedMapperOutput,
-  parseV1MapperToArtifact  // ADD THIS
-} from '../../shared/parsing-utils';
-
-// 2. StepExecutor.executePromptStep - Add synchronous update
-onAllComplete: (results, errors) => {
-  const batchUpdates = {};
-  results.forEach((res, pid) => { batchUpdates[pid] = res; });
-  
-  // ✅ ADD: Synchronous in-memory update
-  options.sessionManager.updateProviderContextsBatch(
-    context.sessionId,
-    batchUpdates,
-    true,
-    { skipSave: true }
-  );
-  
-  // Then async persistence
-  options.persistenceCoordinator.persistProviderContextsAsync(context.sessionId, batchUpdates);
-  // ...rest of handler
-}
-
-// 3. StepExecutor._resolveSourceData - Add fallback logic
-// After building sourceArray from latestMap:
-if (sourceArray.length === 0 && sessionManager?.adapter?.isReady?.()) {
-  try {
-    const responses = await sessionManager.adapter.getResponsesByTurnId(aiTurn.id);
-    const respType = responseType || "batch";
-    const dbLatestMap = new Map();
-    
-    (responses || [])
-      .filter(r => r?.responseType === respType && r.text?.trim())
-      .forEach(r => {
-        const existing = dbLatestMap.get(r.providerId);
-        if (!existing || (r.responseIndex || 0) >= (existing.responseIndex || 0)) {
-          dbLatestMap.set(r.providerId, r);
+      // ✅ SINGLE LOOP - Steps are already ordered by WorkflowCompiler
+      for (const step of steps) {
+        // Skip check for consensus-gated steps
+        if (this._shouldSkipStep(step, context)) {
+          console.log(`[WorkflowEngine] Skipping ${step.type} step (consensus gate)`);
+          continue;
         }
-      });
-    
-    sourceArray = Array.from(dbLatestMap.values()).map(r => ({
-      providerId: r.providerId,
-      text: r.text
-    }));
-  } catch (e) {
-    console.warn("[StepExecutor] provider_responses fallback failed:", e);
-  }
-}
 
-// 4. Remove this.currentUserMessage reference in _resolveSourceData
-// Change:
-const fallbackText = context?.userMessage || this.currentUserMessage || "";
-// To:
-const fallbackText = context?.userMessage || "";
-Summary
-Category	Count
-🔴 Critical (blocks functionality)	4
-🟡 Medium (behavioral change)	2
-🟢 Minor (cosmetic/redundant)	2
-✅ Verified correct	7+
+        // Execute the step
+        const result = await this._executeStep(
+          step, context, stepResults, workflowContexts, resolvedContext
+        );
+
+        // Check for halt conditions
+        const haltReason = await this._checkHaltConditions(
+          step, result, request, context, steps, stepResults, resolvedContext, useCognitivePipeline
+        );
+        
+        if (haltReason) {
+          await this._haltWorkflow(request, context, steps, stepResults, resolvedContext, haltReason);
+          return;
+        }
+
+        // Post-step hooks (consensus gate after mapping)
+        this._postStepHooks(step, context, stepResults);
+      }
+
+      // All steps completed successfully
+      await this._persistAndFinalize(request, context, steps, stepResults, resolvedContext);
+
+    } catch (error) {
+      console.error(`[WorkflowEngine] Critical workflow execution error:`, error);
+      this.port.postMessage({
+        type: "WORKFLOW_COMPLETE",
+        sessionId: context.sessionId,
+        workflowId: request.workflowId,
+        error: "A critical error occurred.",
+      });
+    } finally {
+      this.streamingManager.clearCache(context?.sessionId);
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // UNIFIED STEP EXECUTION
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  async _executeStep(step, context, stepResults, workflowContexts, resolvedContext) {
+    const executor = this._executors[step.type];
+    if (!executor) {
+      throw new Error(`Unknown step type: ${step.type}`);
+    }
+
+    const options = this._buildOptionsForStep(step.type);
+
+    try {
+      // Execute
+      const result = await executor(step, context, stepResults, workflowContexts, resolvedContext, options);
+
+      // Update state
+      stepResults.set(step.stepId, { status: "completed", result });
+      this._emitStepUpdate(step, context, result, resolvedContext, "completed");
+
+      // Cache workflow contexts from batch results
+      if (step.type === 'prompt' && result?.results) {
+        Object.entries(result.results).forEach(([pid, data]) => {
+          if (data?.meta && Object.keys(data.meta).length > 0) {
+            workflowContexts[pid] = data.meta;
+          }
+        });
+      }
+
+      // Persist response (non-recompute)
+      await this._persistStepResponse(step, context, result, resolvedContext);
+
+      return result;
+
+    } catch (error) {
+      stepResults.set(step.stepId, { status: "failed", error: error.message });
+      this._emitStepUpdate(step, context, { error: error.message }, resolvedContext, "failed");
+      throw error; // Re-throw for halt handling
+    }
+  }
+
+  _buildOptionsForStep(stepType) {
+    const baseOptions = {
+      streamingManager: this.streamingManager,
+      persistenceCoordinator: this.persistenceCoordinator,
+      sessionManager: this.sessionManager,
+    };
+
+    if (['mapping', 'synthesis'].includes(stepType)) {
+      baseOptions.contextManager = this.contextManager;
+    }
+    if (['refiner', 'antagonist'].includes(stepType)) {
+      baseOptions.responseProcessor = this.responseProcessor;
+    }
+
+    return baseOptions;
+  }
+
+  async _persistStepResponse(step, context, result, resolvedContext) {
+    if (resolvedContext?.type === "recompute") return;
+    if (step.type === 'prompt') return; // Batch handled differently
+
+    const providerKey = this._providerKeys[step.type];
+    if (!providerKey) return;
+
+    const aiTurnId = context?.canonicalAiTurnId;
+    const providerId = step?.payload?.[providerKey];
+
+    if (aiTurnId && providerId) {
+      try {
+        await this.persistenceCoordinator.upsertProviderResponse(
+          context.sessionId,
+          aiTurnId,
+          providerId,
+          step.type === 'prompt' ? 'batch' : step.type,
+          0,
+          {
+            text: result?.text || "",
+            status: result?.status || "completed",
+            meta: result?.meta || {},
+          }
+        );
+      } catch (_) {}
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // CONTROL FLOW
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  _shouldSkipStep(step, context) {
+    const consensusOnly = !!context?.workflowControl?.consensusOnly;
+    if (consensusOnly && ['refiner', 'antagonist'].includes(step.type)) {
+      return true;
+    }
+    return false;
+  }
+
+  async _checkHaltConditions(step, result, request, context, steps, stepResults, resolvedContext, useCognitivePipeline) {
+    // After batch: check for insufficient witnesses
+    if (step.type === 'prompt') {
+      const resultsObj = result?.results || {};
+      const successfulCount = Object.values(resultsObj).filter(r => r.status === 'completed').length;
+      if (resolvedContext?.type !== 'recompute' && successfulCount < 2) {
+        return "insufficient_witnesses";
+      }
+    }
+
+    // After mapping: check for cognitive halt
+    if (step.type === 'mapping' && useCognitivePipeline) {
+      const shouldHalt = await this.cognitiveHandler.handleCognitiveHalt(
+        request, context, steps, stepResults, resolvedContext, this.currentUserMessage
+      );
+      if (shouldHalt) {
+        this.turnEmitter.emitTurnFinalized(context, steps, stepResults, resolvedContext, this.currentUserMessage);
+        return "cognitive_halt"; // Special: already finalized
+      }
+    }
+
+    return null; // No halt
+  }
+
+  _postStepHooks(step, context, stepResults) {
+    // Compute consensus gate after mapping
+    if (step.type === 'mapping') {
+      const mappingSteps = [step]; // Current step
+      const consensusGate = computeConsensusGateFromMapping({ stepResults, mappingSteps });
+      if (consensusGate) {
+        context.workflowControl = consensusGate;
+      }
+    }
+  }
+
+  async _haltWorkflow(request, context, steps, stepResults, resolvedContext, haltReason) {
+    if (haltReason === "cognitive_halt") {
+      // Already handled by cognitiveHandler
+      return;
+    }
+
+    await this._persistAndFinalize(request, context, steps, stepResults, resolvedContext);
+    
+    this.port.postMessage({
+      type: "WORKFLOW_COMPLETE",
+      sessionId: context.sessionId,
+      workflowId: request.workflowId,
+      finalResults: Object.fromEntries(stepResults),
+      haltReason,
+    });
+  }
+
+  // ... keep existing helpers: _seedContexts, _hydrateV1Artifacts, _persistAndFinalize, 
+  //     handleRetryRequest, handleContinueCognitiveRequest ...
+}
