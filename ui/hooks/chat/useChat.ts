@@ -135,42 +135,16 @@ export function useChat() {
       try {
         const shouldUseSynthesis = !!synthesisProvider;
 
-        const fallbackMapping = (() => {
-          try {
-            return localStorage.getItem("htos_mapping_provider");
-          } catch {
-            return null;
-          }
-        })();
-        const effectiveMappingProvider = (() => {
-          const fromSettings = mappingProvider || fallbackMapping || null;
-          if (fromSettings) return fromSettings;
-          if (activeProviders && activeProviders.length > 0) return activeProviders[0];
-          return null;
-        })();
+        // Simplify effective providers to respect explicit "None" (null) from atoms
+        const effectiveMappingProvider = mappingProvider;
         // Uniform behavior: allow Map to run even if its provider is not in the witness selection
         const shouldUseMapping = !!(
           mappingEnabled &&
           effectiveMappingProvider
         );
 
-        const fallbackRefiner = (() => {
-          try {
-            return localStorage.getItem("htos_refiner_provider") || localStorage.getItem("htos_last_refiner_model");
-          } catch {
-            return null;
-          }
-        })();
-        const effectiveRefinerProvider = refinerProvider || fallbackRefiner || null;
-
-        const fallbackAntagonist = (() => {
-          try {
-            return localStorage.getItem("htos_antagonist_provider");
-          } catch {
-            return null;
-          }
-        })();
-        const effectiveAntagonistProvider = antagonistProvider || fallbackAntagonist || null;
+        const effectiveRefinerProvider = refinerProvider;
+        const effectiveAntagonistProvider = antagonistProvider;
 
         const isInitialize =
           mode === "new" && (!currentSessionId || turnIds.length === 0);

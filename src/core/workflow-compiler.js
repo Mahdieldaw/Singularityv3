@@ -13,10 +13,10 @@ export class WorkflowCompiler {
 
     // Store defaults in memory from injected config
     this.defaults = {
-      mapper: config.htos_mapping_provider || "Gemini",
-      synthesizer: config.htos_last_synthesis_model || "claude",
-      refiner: config.htos_last_refiner_model || "claude",
-      antagonist: config.htos_last_antagonist_model || "claude"
+      mapper: config.htos_mapping_provider || null,
+      synthesizer: config.htos_last_synthesis_model || null,
+      refiner: config.htos_last_refiner_model || null,
+      antagonist: config.htos_last_antagonist_model || null
     };
   }
 

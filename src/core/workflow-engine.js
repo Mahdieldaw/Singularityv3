@@ -137,19 +137,19 @@ export class WorkflowEngine {
 
     // Executor mapping
     this._executors = {
-      prompt: (step, ctx, results, wfCtx, resolved, opts) => 
+      prompt: (step, ctx, _results, _wfCtx, _resolved, opts) => 
         this.stepExecutor.executePromptStep(step, ctx, opts),
       mapping: (step, ctx, results, wfCtx, resolved, opts) => 
         this.stepExecutor.executeMappingStep(step, ctx, results, wfCtx, resolved, opts),
       synthesis: (step, ctx, results, wfCtx, resolved, opts) => 
         this.stepExecutor.executeSynthesisStep(step, ctx, results, wfCtx, resolved, opts),
-      refiner: (step, ctx, results, wfCtx, resolved, opts) => 
+      refiner: (step, ctx, results, _wfCtx, _resolved, opts) => 
         this.stepExecutor.executeRefinerStep(step, ctx, results, opts),
-      antagonist: (step, ctx, results, wfCtx, resolved, opts) => 
+      antagonist: (step, ctx, results, _wfCtx, _resolved, opts) => 
         this.stepExecutor.executeAntagonistStep(step, ctx, results, opts),
-      understand: (step, ctx, results, wfCtx, resolved, opts) => 
+      understand: (step, ctx, results, _wfCtx, _resolved, opts) => 
         this.stepExecutor.executeUnderstandStep(step, ctx, results, opts),
-      gauntlet: (step, ctx, results, wfCtx, resolved, opts) => 
+      gauntlet: (step, ctx, results, _wfCtx, _resolved, opts) => 
         this.stepExecutor.executeGauntletStep(step, ctx, results, opts),
     };
 

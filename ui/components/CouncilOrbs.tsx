@@ -193,7 +193,7 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
     const handleSelectSynth = (pid: string) => {
         if (synthesisProvider === pid) {
             setSynthesisProvider(null);
-            setProviderLock('synthesis', false);
+            setProviderLock('synthesis', true);
         } else {
             setSynthesisProvider(pid);
             setProviderLock('synthesis', true);
@@ -203,7 +203,7 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
     const handleSelectMap = (pid: string) => {
         if (mapProviderVal === pid) {
             setMapProvider(null);
-            setProviderLock('mapping', false);
+            setProviderLock('mapping', true);
         } else {
             setMapProvider(pid);
             setProviderLock('mapping', true);
@@ -398,7 +398,7 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
                                     const val = e.target.value;
                                     if (val === "") {
                                         setSynthesisProvider(null);
-                                        setProviderLock('synthesis', false);
+                                        setProviderLock('synthesis', true);
                                     } else {
                                         handleSelectSynth(val);
                                     }
@@ -427,7 +427,7 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
                                     const val = e.target.value;
                                     if (val === "") {
                                         setMapProvider(null);
-                                        setProviderLock('mapping', false);
+                                        setProviderLock('mapping', true);
                                     } else {
                                         handleSelectMap(val);
                                     }
@@ -482,6 +482,7 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
                                     const val = e.target.value;
                                     if (val === "") {
                                         setRefinerProvider(null);
+                                        setProviderLock('refiner', true);
                                     } else {
                                         handleSelectRefiner(val);
                                     }
@@ -536,6 +537,7 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
                                     const val = e.target.value;
                                     if (val === "") {
                                         setAntagonistProvider(null);
+                                        setProviderLock('antagonist', true);
                                     } else {
                                         handleSelectAntagonist(val);
                                     }
