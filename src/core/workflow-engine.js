@@ -1,3 +1,4 @@
+
 import { PromptService } from './PromptService';
 import { ResponseProcessor } from './ResponseProcessor';
 import { getHealthTracker } from './provider-health-tracker.js';
@@ -133,6 +134,35 @@ export class WorkflowEngine {
     this.persistenceCoordinator = new PersistenceCoordinator(sessionManager);
     this.turnEmitter = new TurnEmitter(port);
     this.cognitiveHandler = new CognitivePipelineHandler(port, this.persistenceCoordinator, sessionManager);
+
+    // Executor mapping
+    this._executors = {
+      prompt: (step, ctx, results, wfCtx, resolved, opts) => 
+        this.stepExecutor.executePromptStep(step, ctx, opts),
+      mapping: (step, ctx, results, wfCtx, resolved, opts) => 
+        this.stepExecutor.executeMappingStep(step, ctx, results, wfCtx, resolved, opts),
+      synthesis: (step, ctx, results, wfCtx, resolved, opts) => 
+        this.stepExecutor.executeSynthesisStep(step, ctx, results, wfCtx, resolved, opts),
+      refiner: (step, ctx, results, wfCtx, resolved, opts) => 
+        this.stepExecutor.executeRefinerStep(step, ctx, results, opts),
+      antagonist: (step, ctx, results, wfCtx, resolved, opts) => 
+        this.stepExecutor.executeAntagonistStep(step, ctx, results, opts),
+      understand: (step, ctx, results, wfCtx, resolved, opts) => 
+        this.stepExecutor.executeUnderstandStep(step, ctx, results, opts),
+      gauntlet: (step, ctx, results, wfCtx, resolved, opts) => 
+        this.stepExecutor.executeGauntletStep(step, ctx, results, opts),
+    };
+
+    // Provider key mapping for upsert
+    this._providerKeys = {
+      prompt: null, 
+      mapping: 'mappingProvider',
+      synthesis: 'synthesisProvider',
+      refiner: 'refinerProvider',
+      antagonist: 'antagonistProvider',
+      understand: 'understandProvider',
+      gauntlet: 'gauntletProvider',
+    };
   }
 
   async execute(request, resolvedContext) {
@@ -145,6 +175,7 @@ export class WorkflowEngine {
       request?.context?.userMessage ||
       this.currentUserMessage ||
       "";
+    
     if (!this.currentUserMessage?.trim()) {
       console.error("[WorkflowEngine] CRITICAL: execute() with empty userMessage!");
       return;
@@ -163,130 +194,41 @@ export class WorkflowEngine {
       context.useCognitivePipeline = useCognitivePipeline;
       context.mode = mode;
 
-      // Seed Contexts
       this._seedContexts(resolvedContext, stepResults, workflowContexts);
-
-      // Hydrate V1 artifacts if needed
       this._hydrateV1Artifacts(context, resolvedContext);
 
-      // --- BATCH PHASE ---
-      await this._executeBatchPhase(steps, context, stepResults, resolvedContext);
-
-      // Validate Batch
-      const batchSteps = steps.filter(s => s.type === 'prompt');
-      let batchSuccess = true;
-      for (const step of batchSteps) {
-          const res = stepResults.get(step.stepId);
-          if (res?.status === 'completed') {
-             const resultsObj = res.result?.results || {};
-             const successfulCount = Object.values(resultsObj).filter(r => r.status === 'completed').length;
-             if (resolvedContext?.type !== 'recompute' && successfulCount < 2) {
-                 batchSuccess = false;
-                 console.warn(`[WorkflowEngine] Pipeline halted: only ${successfulCount} models responded (need 2).`);
-                 await this._persistAndFinalize(request, context, steps, stepResults, resolvedContext); // Save what we have
-                 this.port.postMessage({
-                    type: "WORKFLOW_COMPLETE",
-                    sessionId: context.sessionId,
-                    workflowId: request.workflowId,
-                    finalResults: Object.fromEntries(stepResults),
-                    haltReason: "insufficient_witnesses",
-                  });
-                  return;
-             }
-             // Cache contexts
-             Object.entries(resultsObj).forEach(([pid, data]) => {
-                if (data && data.meta && Object.keys(data.meta).length > 0) {
-                  workflowContexts[pid] = data.meta;
-                }
-             });
-          }
-      }
-
-      // --- MAPPING PHASE ---
-      await this._executeMappingPhase(steps, context, stepResults, workflowContexts, resolvedContext);
-      
-      // Check for Mapping Failures
-      const mappingSteps = steps.filter(s => s.type === 'mapping');
-      for (const step of mappingSteps) {
-           const res = stepResults.get(step.stepId);
-           if (res?.status === 'failed') {
-                console.error(`[WorkflowEngine] Mapping failed (HALTING)`);
-                await this._persistAndFinalize(request, context, steps, stepResults, resolvedContext);
-                this.port.postMessage({
-                    type: "WORKFLOW_COMPLETE",
-                    sessionId: context.sessionId,
-                    workflowId: request.workflowId,
-                    finalResults: Object.fromEntries(stepResults),
-                    haltReason: "mapping_failed",
-                });
-                return;
-           }
-      }
-
-      // --- COGNITIVE HALT CHECK ---
-      if (useCognitivePipeline) {
-        const shouldHalt = await this.cognitiveHandler.handleCognitiveHalt(
-          request,
-          context,
-          steps,
-          stepResults,
-          resolvedContext,
-          this.currentUserMessage
-        );
-        if (shouldHalt) {
-            this.turnEmitter.emitTurnFinalized(context, steps, stepResults, resolvedContext, this.currentUserMessage);
-            return;
+      // ✅ SINGLE LOOP - Steps are already ordered by WorkflowCompiler
+      for (const step of steps) {
+        // Skip check for consensus-gated steps
+        if (this._shouldSkipStep(step, context)) {
+          console.log(`[WorkflowEngine] Skipping ${step.type} step (consensus gate)`);
+          continue;
         }
+
+        // Execute the step
+        const result = await this._executeStep(
+          step, context, stepResults, workflowContexts, resolvedContext
+        );
+
+        // Check for halt conditions
+        const haltReason = await this._checkHaltConditions(
+          step, result, request, context, steps, stepResults, resolvedContext, useCognitivePipeline
+        );
+        
+        if (haltReason) {
+          await this._haltWorkflow(request, context, steps, stepResults, resolvedContext, haltReason);
+          return;
+        }
+
+        // Post-step hooks (consensus gate after mapping)
+        this._postStepHooks(step, context, stepResults);
       }
 
-      // --- CONSENSUS GATE ---
-      const consensusGate =
-      resolvedContext?.type === "recompute"
-        ? null
-        : computeConsensusGateFromMapping({ stepResults, mappingSteps });
-      if (consensusGate) {
-        context.workflowControl = consensusGate;
-      }
-
-      // --- SYNTHESIS PHASE ---
-      await this._executeSynthesisPhase(steps, context, stepResults, workflowContexts, resolvedContext);
-      // Check Synthesis Failures
-      const synthesisSteps = steps.filter(s => s.type === 'synthesis');
-      for (const step of synthesisSteps) {
-            const res = stepResults.get(step.stepId);
-            if (res?.status === 'failed') {
-                await this._persistAndFinalize(request, context, steps, stepResults, resolvedContext);
-                this.port.postMessage({
-                    type: "WORKFLOW_COMPLETE",
-                    sessionId: context.sessionId,
-                    workflowId: request.workflowId,
-                    finalResults: Object.fromEntries(stepResults),
-                    haltReason: "synthesis_failed",
-                });
-                return;
-            }
-      }
-
-
-      // --- REFINER & ANTAGONIST (if not skipped) ---
-      const consensusOnly = !!context?.workflowControl?.consensusOnly;
-      if (!consensusOnly) {
-          await this._executeRefinerPhase(steps, context, stepResults, resolvedContext);
-          await this._executeAntagonistPhase(steps, context, stepResults, resolvedContext);
-      }
-
-      // --- UNDERSTAND & GAUNTLET (Non-Halted or Recompute) ---
-      await this._executeUnderstandPhase(steps, context, stepResults, resolvedContext);
-      await this._executeGauntletPhase(steps, context, stepResults, resolvedContext);
-
-      // --- PERSIST & FINALIZE ---
+      // All steps completed successfully
       await this._persistAndFinalize(request, context, steps, stepResults, resolvedContext);
 
     } catch (error) {
-      console.error(
-        `[WorkflowEngine] Critical workflow execution error:`,
-        error,
-      );
+      console.error(`[WorkflowEngine] Critical workflow execution error:`, error);
       this.port.postMessage({
         type: "WORKFLOW_COMPLETE",
         sessionId: context.sessionId,
@@ -298,274 +240,147 @@ export class WorkflowEngine {
     }
   }
 
-  // --- PHASE EXECUTORS ---
+  // ═══════════════════════════════════════════════════════════════════════════
+  // UNIFIED STEP EXECUTION
+  // ═══════════════════════════════════════════════════════════════════════════
 
-  async _executeBatchPhase(steps, context, stepResults, resolvedContext) {
-    const promptSteps = steps.filter(s => s.type === "prompt");
-    for (const step of promptSteps) {
-      try {
-        const result = await this.stepExecutor.executePromptStep(step, context, {
-          streamingManager: this.streamingManager,
-          persistenceCoordinator: this.persistenceCoordinator,
-          sessionManager: this.sessionManager,
+  async _executeStep(step, context, stepResults, workflowContexts, resolvedContext) {
+    const executor = this._executors[step.type];
+    if (!executor) {
+      throw new Error(`Unknown step type: ${step.type}`);
+    }
+
+    const options = this._buildOptionsForStep(step.type);
+
+    try {
+      const result = await executor(step, context, stepResults, workflowContexts, resolvedContext, options);
+
+      stepResults.set(step.stepId, { status: "completed", result });
+      this._emitStepUpdate(step, context, result, resolvedContext, "completed");
+
+      if (step.type === 'prompt' && result?.results) {
+        Object.entries(result.results).forEach(([pid, data]) => {
+          if (data?.meta && Object.keys(data.meta).length > 0) {
+            workflowContexts[pid] = data.meta;
+          }
         });
-        stepResults.set(step.stepId, { status: "completed", result });
-        this._emitStepUpdate(step, context, result, resolvedContext, "completed");
-      } catch (error) {
-        this._handleStepError(step, error, context, stepResults, resolvedContext);
       }
+
+      await this._persistStepResponse(step, context, result, resolvedContext);
+
+      return result;
+
+    } catch (error) {
+      stepResults.set(step.stepId, { status: "failed", error: error.message });
+      this._emitStepUpdate(step, context, { error: error.message }, resolvedContext, "failed");
+      throw error; 
     }
   }
 
-  async _executeMappingPhase(steps, context, stepResults, workflowContexts, resolvedContext) {
-    const mappingSteps = steps.filter(s => s.type === "mapping");
-    for (const step of mappingSteps) {
+  _buildOptionsForStep(stepType) {
+    const baseOptions = {
+      streamingManager: this.streamingManager,
+      persistenceCoordinator: this.persistenceCoordinator,
+      sessionManager: this.sessionManager,
+    };
+
+    if (['mapping', 'synthesis'].includes(stepType)) {
+      baseOptions.contextManager = this.contextManager;
+    }
+    if (['refiner', 'antagonist'].includes(stepType)) {
+      baseOptions.responseProcessor = this.responseProcessor;
+    }
+
+    return baseOptions;
+  }
+
+  async _persistStepResponse(step, context, result, resolvedContext) {
+    if (resolvedContext?.type === "recompute") return;
+    if (step.type === 'prompt') return; 
+
+    const providerKey = this._providerKeys[step.type];
+    if (!providerKey) return;
+
+    const aiTurnId = context?.canonicalAiTurnId;
+    const providerId = step?.payload?.[providerKey];
+
+    if (aiTurnId && providerId) {
       try {
-        const result = await this.stepExecutor.executeMappingStep(
-          step,
-          context,
-          stepResults,
-          workflowContexts,
-          resolvedContext,
+        await this.persistenceCoordinator.upsertProviderResponse(
+          context.sessionId,
+          aiTurnId,
+          providerId,
+          step.type,
+          0,
           {
-            streamingManager: this.streamingManager,
-            contextManager: this.contextManager,
-            persistenceCoordinator: this.persistenceCoordinator,
-            sessionManager: this.sessionManager
+            text: result?.text || "",
+            status: result?.status || "completed",
+            meta: result?.meta || {},
           }
         );
-        stepResults.set(step.stepId, { status: "completed", result });
-        this._emitStepUpdate(step, context, result, resolvedContext, "completed");
-        
-        // Upsert immediately for mapping
-        try {
-            if (resolvedContext?.type !== "recompute") {
-                const aiTurnId = context?.canonicalAiTurnId;
-                const providerId = step?.payload?.mappingProvider;
-                if (aiTurnId && providerId) {
-                  this.persistenceCoordinator.upsertProviderResponse(
-                    context.sessionId,
-                    aiTurnId,
-                    providerId,
-                    "mapping",
-                    0,
-                    {
-                      text: result?.text || "",
-                      status: result?.status || "completed",
-                      meta: result?.meta || {},
-                    },
-                  ).catch(() => { });
-                }
-              }
-        } catch (_) {}
+      } catch (_) {}
+    }
+  }
 
-      } catch (error) {
-        this._handleStepError(step, error, context, stepResults, resolvedContext);
+  // ═══════════════════════════════════════════════════════════════════════════
+  // CONTROL FLOW
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  _shouldSkipStep(step, context) {
+    const consensusOnly = !!context?.workflowControl?.consensusOnly;
+    if (consensusOnly && ['refiner', 'antagonist'].includes(step.type)) {
+      return true;
+    }
+    return false;
+  }
+
+  async _checkHaltConditions(step, result, request, context, steps, stepResults, resolvedContext, useCognitivePipeline) {
+    if (step.type === 'prompt') {
+      const resultsObj = result?.results || {};
+      const successfulCount = Object.values(resultsObj).filter(r => r.status === 'completed').length;
+      if (resolvedContext?.type !== 'recompute' && successfulCount < 2) {
+        return "insufficient_witnesses";
+      }
+    }
+
+    if (step.type === 'mapping' && useCognitivePipeline) {
+      const shouldHalt = await this.cognitiveHandler.handleCognitiveHalt(
+        request, context, steps, stepResults, resolvedContext, this.currentUserMessage
+      );
+      if (shouldHalt) {
+        this.turnEmitter.emitTurnFinalized(context, steps, stepResults, resolvedContext, this.currentUserMessage);
+        return "cognitive_halt"; 
+      }
+    }
+
+    return null; 
+  }
+
+  _postStepHooks(step, context, stepResults) {
+    if (step.type === 'mapping') {
+      const mappingSteps = [step]; 
+      const consensusGate = computeConsensusGateFromMapping({ stepResults, mappingSteps });
+      if (consensusGate) {
+        context.workflowControl = consensusGate;
       }
     }
   }
 
-  async _executeSynthesisPhase(steps, context, stepResults, workflowContexts, resolvedContext) {
-    const synthesisSteps = steps.filter(s => s.type === "synthesis");
-    for (const step of synthesisSteps) {
-      try {
-        const result = await this.stepExecutor.executeSynthesisStep(
-          step,
-          context,
-          stepResults,
-          workflowContexts,
-          resolvedContext,
-          {
-            streamingManager: this.streamingManager,
-            contextManager: this.contextManager,
-            persistenceCoordinator: this.persistenceCoordinator,
-            sessionManager: this.sessionManager
-          }
-        );
-        stepResults.set(step.stepId, { status: "completed", result });
-        this._emitStepUpdate(step, context, result, resolvedContext, "completed");
-
-        // Upsert
-        try {
-            if (resolvedContext?.type !== "recompute") {
-                const aiTurnId = context?.canonicalAiTurnId;
-                const providerId = step?.payload?.synthesisProvider;
-                if (aiTurnId && providerId) {
-                  this.persistenceCoordinator.upsertProviderResponse(
-                    context.sessionId,
-                    aiTurnId,
-                    providerId,
-                    "synthesis",
-                    0,
-                    {
-                        text: result?.text || "",
-                        status: result?.status || "completed",
-                        meta: result?.meta || {},
-                    },
-                  ).catch(() => { });
-                }
-              }
-        } catch (_) {}
-
-      } catch (error) {
-        this._handleStepError(step, error, context, stepResults, resolvedContext);
-      }
+  async _haltWorkflow(request, context, steps, stepResults, resolvedContext, haltReason) {
+    if (haltReason === "cognitive_halt") {
+      return;
     }
+
+    await this._persistAndFinalize(request, context, steps, stepResults, resolvedContext);
+    
+    this.port.postMessage({
+      type: "WORKFLOW_COMPLETE",
+      sessionId: context.sessionId,
+      workflowId: request.workflowId,
+      finalResults: Object.fromEntries(stepResults),
+      haltReason,
+    });
   }
-
-  async _executeRefinerPhase(steps, context, stepResults, resolvedContext) {
-      const refinerSteps = steps.filter(s => s.type === 'refiner');
-      for (const step of refinerSteps) {
-        try {
-            const result = await this.stepExecutor.executeRefinerStep(step, context, stepResults, {
-                 sessionManager: this.sessionManager,
-                 responseProcessor: this.responseProcessor
-            });
-            stepResults.set(step.stepId, { status: "completed", result });
-            this._emitStepUpdate(step, context, result, resolvedContext, "completed");
-
-            // Upsert
-            try {
-                if (resolvedContext?.type !== "recompute") {
-                    const aiTurnId = context?.canonicalAiTurnId;
-                    const providerId = step?.payload?.refinerProvider;
-                    if (aiTurnId && providerId) {
-                    this.persistenceCoordinator.upsertProviderResponse(
-                        context.sessionId,
-                        aiTurnId,
-                        providerId,
-                        "refiner",
-                        0,
-                        {
-                            text: result?.text || "",
-                            status: result?.status || "completed",
-                            meta: result?.meta || {},
-                        },
-                    ).catch(() => { });
-                    }
-                }
-            } catch (_) {}
-
-        } catch (error) {
-            this._handleStepError(step, error, context, stepResults, resolvedContext);
-        }
-      }
-  }
-
-  async _executeAntagonistPhase(steps, context, stepResults, resolvedContext) {
-    const antagonistSteps = steps.filter(s => s.type === 'antagonist');
-    for (const step of antagonistSteps) {
-      try {
-          const result = await this.stepExecutor.executeAntagonistStep(step, context, stepResults, {
-               sessionManager: this.sessionManager,
-               responseProcessor: this.responseProcessor
-          });
-          stepResults.set(step.stepId, { status: "completed", result });
-          this._emitStepUpdate(step, context, result, resolvedContext, "completed");
-          // Upsert
-          try {
-            if (resolvedContext?.type !== "recompute") {
-                const aiTurnId = context?.canonicalAiTurnId;
-                const providerId = step?.payload?.antagonistProvider;
-                if (aiTurnId && providerId) {
-                this.persistenceCoordinator.upsertProviderResponse(
-                    context.sessionId,
-                    aiTurnId,
-                    providerId,
-                    "antagonist",
-                    0,
-                    {
-                        text: result?.text || "",
-                        status: result?.status || "completed",
-                        meta: result?.meta || {},
-                    },
-                ).catch(() => { });
-                }
-            }
-        } catch (_) {}
-      } catch (error) {
-          this._handleStepError(step, error, context, stepResults, resolvedContext);
-      }
-    }
-}
-
-  async _executeUnderstandPhase(steps, context, stepResults, resolvedContext) {
-      const understandSteps = steps.filter(s => s.type === 'understand');
-      for (const step of understandSteps) {
-        try {
-            const result = await this.stepExecutor.executeUnderstandStep(step, context, stepResults, {
-                 streamingManager: this.streamingManager,
-                 persistenceCoordinator: this.persistenceCoordinator
-            });
-            stepResults.set(step.stepId, { status: "completed", result });
-            this._emitStepUpdate(step, context, result, resolvedContext, "completed");
-
-            // Upsert
-            try {
-                if (resolvedContext?.type !== "recompute") {
-                    const aiTurnId = context?.canonicalAiTurnId;
-                    const providerId = step?.payload?.understandProvider;
-                    if (aiTurnId && providerId) {
-                    this.persistenceCoordinator.upsertProviderResponse(
-                        context.sessionId,
-                        aiTurnId,
-                        providerId,
-                        "understand",
-                        0,
-                        {
-                            text: result?.text || "",
-                            status: result?.status || "completed",
-                            meta: result?.meta || {},
-                        },
-                    ).catch(() => { });
-                    }
-                }
-            } catch (_) {}
-
-        } catch (error) {
-             this._handleStepError(step, error, context, stepResults, resolvedContext);
-        }
-      }
-  }
-
-  async _executeGauntletPhase(steps, context, stepResults, resolvedContext) {
-    const gauntletSteps = steps.filter(s => s.type === 'gauntlet');
-    for (const step of gauntletSteps) {
-      try {
-          const result = await this.stepExecutor.executeGauntletStep(step, context, stepResults, {
-               streamingManager: this.streamingManager,
-               persistenceCoordinator: this.persistenceCoordinator
-          });
-          stepResults.set(step.stepId, { status: "completed", result });
-          this._emitStepUpdate(step, context, result, resolvedContext, "completed");
-
-           // Upsert
-           try {
-            if (resolvedContext?.type !== "recompute") {
-                const aiTurnId = context?.canonicalAiTurnId;
-                const providerId = step?.payload?.gauntletProvider;
-                if (aiTurnId && providerId) {
-                this.persistenceCoordinator.upsertProviderResponse(
-                    context.sessionId,
-                    aiTurnId,
-                    providerId,
-                    "gauntlet",
-                    0,
-                    {
-                        text: result?.text || "",
-                        status: result?.status || "completed",
-                        meta: result?.meta || {},
-                    },
-                ).catch(() => { });
-                }
-            }
-        } catch (_) {}
-
-      } catch (error) {
-           this._handleStepError(step, error, context, stepResults, resolvedContext);
-      }
-    }
-}
 
   // --- HELPERS ---
 
@@ -629,7 +444,6 @@ export class WorkflowEngine {
           console.warn("[WorkflowEngine] Failed to hydrate V1 artifact:", err);
         }
     }
-    // Flatten MapperArtifact for V1 compatibility (if needed by prompts)
     if (context.mapperArtifact && !context.extractedOptions) {
         try {
           console.log("[WorkflowEngine] Flattening V2 MapperArtifact for V1 pipeline...");
@@ -653,12 +467,6 @@ export class WorkflowEngine {
       });
   }
 
-  _handleStepError(step, error, context, stepResults, resolvedContext) {
-    console.error(`[WorkflowEngine] Step ${step.stepId} failed:`, error);
-    stepResults.set(step.stepId, { status: "failed", error: error.message });
-    this._emitStepUpdate(step, context, { error: error.message }, resolvedContext, "failed");
-  }
-
   async _persistAndFinalize(request, context, steps, stepResults, resolvedContext) {
       const result = {
         batchOutputs: {},
@@ -668,7 +476,7 @@ export class WorkflowEngine {
         antagonistOutputs: {},
         gauntletOutputs: {},
       };
-      // Re-construct result object for persistence
+      
       const stepById = new Map((steps || []).map((s) => [s.stepId, s]));
       stepResults.forEach((stepResult, stepId) => {
         if (stepResult.status !== "completed") return;

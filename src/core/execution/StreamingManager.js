@@ -1,7 +1,8 @@
 
+const STREAMING_DEBUG = false;
 const logger = {
-  stream: () => {
-    // console.debug(`[WorkflowEngine] ${msg}`, meta); 
+  stream: (_msg, _meta) => {
+    if (STREAMING_DEBUG) console.debug(`[StreamingManager] ${_msg}`, _meta);
   },
   debug: console.debug.bind(console),
   info: console.info.bind(console),
@@ -167,10 +168,10 @@ export class StreamingManager {
       return false;
     }
   }
-  
+
   // Helper to get recovered text for failure handling
   getRecoveredText(sessionId, stepId, providerId) {
-      const key = `${sessionId}:${stepId}:${providerId}`;
-      return this.lastStreamState.get(key) || "";
+    const key = `${sessionId}:${stepId}:${providerId}`;
+    return this.lastStreamState.get(key) || "";
   }
 }

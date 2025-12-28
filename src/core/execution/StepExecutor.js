@@ -7,7 +7,7 @@ import {
   errorHandler,
   isProviderAuthError,
   createMultiProviderAuthError
-} from '../ErrorHandler.js';
+} from '../../utils/ErrorHandler.js';
 import { computeExplore } from '../cognitive/explore-computer';
 
 const WORKFLOW_DEBUG = false;
