@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useRef, useEffect } from "react";
-import { useAtom, useAtomValue } from "jotai";
-import { providerEffectiveStateFamily, isSplitOpenAtom, synthesisProviderAtom, mappingProviderAtom, composerModelAtom, analystModelAtom, providerAuthStatusAtom, selectedModelsAtom, refinerProviderAtom, antagonistProviderAtom } from "../state/atoms";
+import { useAtom, useAtomValue, useSetAtom } from "jotai";
+import { providerEffectiveStateFamily, isSplitOpenAtom, synthesisProviderAtom, mappingProviderAtom, composerModelAtom, analystModelAtom, providerAuthStatusAtom, selectedModelsAtom, refinerProviderAtom, antagonistProviderAtom, providerLocksAtom } from "../state/atoms";
 import { LLMProvider } from "../types";
 import { PROVIDER_ACCENT_COLORS, WORKFLOW_STAGE_COLORS } from "../constants";
 import { getProviderColor, getProviderLogo } from "../utils/provider-helpers";
@@ -57,6 +57,7 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
     const [analystVal, setAnalyst] = useAtom(analystModelAtom);
     const [selectedModels, setSelectedModels] = useAtom(selectedModelsAtom);
     const [antagonistProvider, setAntagonistProvider] = useAtom(antagonistProviderAtom);
+    const setLocks = useSetAtom(providerLocksAtom);
     const containerRef = useRef<HTMLDivElement>(null);
 
     // Click Outside Listener
@@ -194,9 +195,11 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
         if (synthesisProvider === pid) {
             setSynthesisProvider(null);
             setProviderLock('synthesis', true);
+            setLocks(prev => ({ ...prev, synthesis: true }));
         } else {
             setSynthesisProvider(pid);
             setProviderLock('synthesis', true);
+            setLocks(prev => ({ ...prev, synthesis: true }));
         }
     };
 
@@ -204,9 +207,11 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
         if (mapProviderVal === pid) {
             setMapProvider(null);
             setProviderLock('mapping', true);
+            setLocks(prev => ({ ...prev, mapping: true }));
         } else {
             setMapProvider(pid);
             setProviderLock('mapping', true);
+            setLocks(prev => ({ ...prev, mapping: true }));
         }
     };
 
@@ -399,6 +404,7 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
                                     if (val === "") {
                                         setSynthesisProvider(null);
                                         setProviderLock('synthesis', true);
+                                        setLocks(prev => ({ ...prev, synthesis: true }));
                                     } else {
                                         handleSelectSynth(val);
                                     }
@@ -428,6 +434,7 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
                                     if (val === "") {
                                         setMapProvider(null);
                                         setProviderLock('mapping', true);
+                                        setLocks(prev => ({ ...prev, mapping: true }));
                                     } else {
                                         handleSelectMap(val);
                                     }
@@ -483,6 +490,7 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
                                     if (val === "") {
                                         setRefinerProvider(null);
                                         setProviderLock('refiner', true);
+                                        setLocks(prev => ({ ...prev, refiner: true }));
                                     } else {
                                         handleSelectRefiner(val);
                                     }
@@ -538,6 +546,7 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
                                     if (val === "") {
                                         setAntagonistProvider(null);
                                         setProviderLock('antagonist', true);
+                                        setLocks(prev => ({ ...prev, antagonist: true }));
                                     } else {
                                         handleSelectAntagonist(val);
                                     }

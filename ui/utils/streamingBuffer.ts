@@ -1,4 +1,3 @@
-// src/ui/utils/streamingBuffer.ts
 type ResponseType = "batch" | "synthesis" | "mapping" | "refiner" | "antagonist" | "understand" | "gauntlet";
 
 interface BatchUpdate {
@@ -10,7 +9,6 @@ interface BatchUpdate {
 }
 
 export class StreamingBuffer {
-  // Keyed by `${responseType}:${providerId}` to avoid collisions across types
   private pendingDeltas: Map<
     string,
     {
@@ -22,7 +20,6 @@ export class StreamingBuffer {
 
   private flushTimer: number | null = null;
   private onFlushCallback: (updates: BatchUpdate[]) => void;
-
 
   constructor(onFlush: (updates: BatchUpdate[]) => void) {
     this.onFlushCallback = onFlush;
@@ -52,12 +49,12 @@ export class StreamingBuffer {
   }
 
   private scheduleBatchFlush() {
-    // Cancel any pending flush
+    // ✅ FIX: Only schedule if not already scheduled
     if (this.flushTimer !== null) {
-      cancelAnimationFrame(this.flushTimer);
+      return;
     }
 
-    // ⭐ DOUBLE-RAF PATTERN: First RAF schedules, second RAF executes after layout
+    // Double-RAF for smooth rendering after layout
     this.flushTimer = window.requestAnimationFrame(() => {
       window.requestAnimationFrame(() => {
         this.flushAll();
