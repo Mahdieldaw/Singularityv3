@@ -1,6 +1,6 @@
 // src/core/workflow-engine.js - FIXED VERSION
 import { ArtifactProcessor } from '../../shared/artifact-processor';
-import { formatArtifactAsOptions, parseMapperArtifact, parseExploreOutput, parseGauntletOutput, parseUnderstandOutput, parseV1MapperToArtifact } from '../../shared/parsing-utils';
+import { formatArtifactAsOptions, parseMapperArtifact, parseExploreOutput, parseGauntletOutput, parseUnderstandOutput, parseV1MapperToArtifact, parseUnifiedMapperOutput } from '../../shared/parsing-utils';
 import { computeExplore } from './cognitive/explore-computer';
 import { PromptService } from './PromptService';
 import { ResponseProcessor } from './ResponseProcessor';
@@ -610,8 +610,8 @@ export class WorkflowEngine {
     }
 
     try {
-      // Unify V1/V2: Mode driven execution
-      const mode = request.mode || (context.useCognitivePipeline ? "auto" : "standard");
+      // Unify V1/V2: Mode driven execution - default to cognitive mode 'auto'
+      const mode = request.mode || "auto";
       const useCognitivePipeline = ["auto", "understand", "decide"].includes(mode);
       context.useCognitivePipeline = useCognitivePipeline;
       context.mode = mode;
@@ -675,25 +675,14 @@ export class WorkflowEngine {
         }
       }
 
-      if (useCognitivePipeline) {
-        await this._executeCognitivePipeline(
-          request,
-          context,
-          steps,
-          stepResults,
-          workflowContexts,
-          resolvedContext,
-        );
-      } else {
-        await this._executeClassicPipeline(
-          request,
-          context,
-          steps,
-          stepResults,
-          workflowContexts,
-          resolvedContext,
-        );
-      }
+      await this._executeCognitivePipeline(
+        request,
+        context,
+        steps,
+        stepResults,
+        workflowContexts,
+        resolvedContext,
+      );
     } catch (error) {
       console.error(
         `[WorkflowEngine] Critical workflow execution error:`,
@@ -841,7 +830,7 @@ export class WorkflowEngine {
 
     for (const step of mappingSteps) {
       try {
-        const result = await this.executeMappingV2Step(
+        const result = await this.executeMappingStep(
           step,
           context,
           stepResults,
@@ -3408,17 +3397,20 @@ Answer the user's message directly. Use context only to disambiguate.
 
             let graphTopology = null;
             let allOptions = null;
+            let mapperArtifact = null;
+
             if (finalResult?.text) {
               console.log('[WorkflowEngine] Mapping response length:', finalResult.text.length);
 
-              // Use ResponseProcessor pipeline
-              const processedMap = this.responseProcessor.processMappingResponse(finalResult.text);
+              // Use the new unified parser
+              const unifiedResult = parseUnifiedMapperOutput(finalResult.text);
 
-              graphTopology = processedMap.topology;
-              allOptions = processedMap.options;
+              graphTopology = unifiedResult.topology;
+              allOptions = unifiedResult.options;
+              mapperArtifact = unifiedResult.artifact;
 
-              // Proceed with artifact processing on the cleaned text
-              const processed = artifactProcessor.process(processedMap.text);
+              // Proceed with artifact processing on the narrative part
+              const processed = artifactProcessor.process(unifiedResult.narrative || finalResult.text);
               finalResult.text = processed.cleanText;
               finalResult.artifacts = processed.artifacts;
 
@@ -3429,6 +3421,10 @@ Answer the user's message directly. Use context only to disambiguate.
               console.log('[WorkflowEngine] Options extracted:', {
                 found: !!allOptions,
                 length: allOptions?.length || 0,
+              });
+              console.log('[WorkflowEngine] Mapper artifact extracted:', {
+                found: !!mapperArtifact,
+                claimCount: mapperArtifact?.consensus?.claims?.length || 0,
               });
             }
 
@@ -3494,6 +3490,7 @@ Answer the user's message directly. Use context only to disambiguate.
               status: "completed",
               meta: finalResultWithMeta.meta || {},
               artifacts: finalResult.artifacts || [],
+              mapperArtifact: mapperArtifact, // ✅ Return mapperArtifact for cognitive halt
               ...(finalResult.softError ? { softError: finalResult.softError } : {}),
             });
           },
@@ -3502,110 +3499,7 @@ Answer the user's message directly. Use context only to disambiguate.
     });
   }
 
-  /**
-   * Handle retry requests from frontend: reset circuit, emit queued status.
-   * Actual re-execution should be triggered by orchestration layer with original context.
-   */
-  async executeMappingV2Step(
-    step,
-    context,
-    previousResults,
-    workflowContexts = {},
-    resolvedContext,
-  ) {
-    const payload = step.payload;
-    const sourceData = await this.resolveSourceData(
-      payload,
-      context,
-      previousResults,
-    );
 
-    if (sourceData.length < 2) {
-      throw new Error(
-        `Mapping V2 requires at least 2 valid sources, but found ${sourceData.length}.`,
-      );
-    }
-
-    const mappingPrompt = this.promptService.buildMapperV2Prompt(
-      payload.originalPrompt,
-      sourceData
-    );
-
-    const providerContexts = this._resolveProviderContext(
-      payload.mappingProvider,
-      context,
-      payload,
-      workflowContexts,
-      previousResults,
-      resolvedContext,
-      "MappingV2",
-    );
-
-    console.log(
-      `[WorkflowEngine] Mapping V2 prompt for ${payload.mappingProvider}: ${mappingPrompt.length} chars`,
-    );
-
-    return new Promise((resolve, reject) => {
-      this.orchestrator.executeParallelFanout(
-        mappingPrompt,
-        [payload.mappingProvider],
-        {
-          sessionId: context.sessionId,
-          useThinking: payload.useThinking,
-          providerContexts: Object.keys(providerContexts).length
-            ? providerContexts
-            : undefined,
-          providerMeta: step?.payload?.providerMeta,
-          onPartial: (providerId, chunk) => {
-            this._dispatchPartialDelta(
-              context.sessionId,
-              step.stepId,
-              providerId,
-              chunk.text,
-              "MappingV2",
-            );
-          },
-          onAllComplete: (results, errors) => {
-            const finalResult = results.get(payload.mappingProvider);
-            const providerError = errors?.get?.(payload.mappingProvider);
-
-            if ((!finalResult || !finalResult.text) && providerError) {
-              reject(providerError);
-              return;
-            }
-
-            if (finalResult?.text) {
-              const mapperArtifact = parseMapperArtifact(finalResult.text);
-
-              this._dispatchPartialDelta(
-                context.sessionId,
-                step.stepId,
-                payload.mappingProvider,
-                finalResult.text,
-                "MappingV2",
-                true,
-              );
-
-              // Defer persistence
-              this._persistProviderContextsAsync(context.sessionId, {
-                [payload.mappingProvider]: finalResult,
-              });
-
-              resolve({
-                providerId: payload.mappingProvider,
-                text: finalResult.text,
-                status: "completed",
-                meta: finalResult.meta || {},
-                mapperArtifact: mapperArtifact,
-              });
-            } else {
-              reject(new Error("Empty response from Mapping V2 provider"));
-            }
-          },
-        },
-      );
-    });
-  }
 
   async executeUnderstandStep(step, context, _previousResults) {
     const payload = step.payload;
@@ -3634,9 +3528,6 @@ Answer the user's message directly. Use context only to disambiguate.
       payload.userNotes
     );
 
-    if (payload.mappingText) {
-      understandPrompt += `\n\n<RAW_DECISION_MAP>\n${payload.mappingText}\n</RAW_DECISION_MAP>`;
-    }
 
     if (Array.isArray(payload.selectedArtifacts) && payload.selectedArtifacts.length > 0) {
       const selectionLines = payload.selectedArtifacts.map((a, index) => {
@@ -3743,9 +3634,6 @@ Answer the user's message directly. Use context only to disambiguate.
       payload.userNotes
     );
 
-    if (payload.mappingText) {
-      gauntletPrompt += `\n\n<RAW_DECISION_MAP>\n${payload.mappingText}\n</RAW_DECISION_MAP>`;
-    }
 
     if (Array.isArray(payload.selectedArtifacts) && payload.selectedArtifacts.length > 0) {
       const selectionLines = payload.selectedArtifacts.map((a, index) => {

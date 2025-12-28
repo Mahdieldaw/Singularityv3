@@ -50,9 +50,8 @@ const ChatInput = ({
   const [isVisibleMode] = useAtom(isVisibleModeAtom as any) as [boolean, any];
   const [isReducedMotion] = useAtom(isReducedMotionAtom as any) as [boolean, any];
   const [, setChatInputHeight] = useAtom(chatInputHeightAtom);
-  const [selectedMode, setSelectedMode] = useAtom(selectedModeAtom as any) as [string, any];
-
-  const isCognitiveMode = selectedMode !== "standard"; // auto, understand, decide are all cognitive flow
+  const [selectedMode] = useAtom(selectedModeAtom as any) as [string, any];
+  const isCognitiveMode = true; // Cognitive mode is now the primary and only path
 
   // Streaming UX: hide config orbs during active round
   const isRoundActive = useAtomValue(isRoundActiveAtom);
@@ -415,27 +414,7 @@ const ChatInput = ({
 
   return (
     <div className="flex justify-center flex-col items-center pointer-events-auto">
-      <div className="w-full max-w-[min(900px,calc(100%-24px))] flex justify-end mb-2">
-        <div className="flex items-center gap-3 px-3 py-1.5 bg-surface-highlight/20 border border-border-subtle rounded-xl">
-          <span className={`text-xs font-medium ${isCognitiveMode ? "text-text-tertiary" : "text-text-primary"}`}>
-            Classic
-          </span>
-          <button
-            type="button"
-            onClick={() => setSelectedMode(isCognitiveMode ? "standard" : "auto")}
-            disabled={isLoading || mappingActive}
-            className={`relative w-10 h-5 rounded-full transition-all duration-200 ${isCognitiveMode ? "bg-brand-500" : "bg-border-strong"} ${isLoading || mappingActive ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
-            title={isCognitiveMode ? "Guided" : "Classic"}
-          >
-            <div
-              className={`absolute top-0.5 w-4 h-4 bg-white rounded-full transition-all duration-200 ${isCognitiveMode ? "left-[22px]" : "left-0.5"}`}
-            />
-          </button>
-          <span className={`text-xs font-medium ${isCognitiveMode ? "text-text-primary" : "text-text-tertiary"}`}>
-            Guided
-          </span>
-        </div>
-      </div>
+
 
       {/* Config Orbs - Float above input, hugging the top edge */}
       {!isRoundActive && (

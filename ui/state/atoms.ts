@@ -576,7 +576,7 @@ export const hasAutoWidenedForSynthesisAtom = atom<string | null>(null);
  */
 
 /**
- * Selected Cognitive Mode (e.g. "standard", "auto", "understand", "decide")
+ * Selected Cognitive Mode (e.g. "auto", "understand", "decide")
  * Persisted in local storage.
  */
 import { CognitiveMode } from "@shared/contract";

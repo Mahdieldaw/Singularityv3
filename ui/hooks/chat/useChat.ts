@@ -61,7 +61,7 @@ export function useChat() {
   const refinerProvider = useAtomValue(refinerProviderAtom);
   const antagonistProvider = useAtomValue(antagonistProviderAtom);
   const selectedMode = useAtomValue(selectedModeAtom);
-  const isGuidedMode = selectedMode !== "standard";
+  const isGuidedMode = true; // Use cognitive mode by default for everyone
 
 
 

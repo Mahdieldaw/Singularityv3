@@ -220,7 +220,6 @@ ${claimsInventory ? `<!-- Structured claims were used -->` : `<NOTE>Note: Detail
     sourceResults: Array<{ providerId: string; text: string }>,
     citationOrder: string[] = []
   ): string {
-    // Build MODEL 1, MODEL 2 numbered blocks with optional provider labels
     const providerToNumber = new Map();
     if (Array.isArray(citationOrder) && citationOrder.length > 0) {
       citationOrder.forEach((pid, idx) => providerToNumber.set(pid, idx + 1));
@@ -236,128 +235,12 @@ ${claimsInventory ? `<!-- Structured claims were used -->` : `<NOTE>Note: Detail
       })
       .join("\n\n");
 
-    return `You are not a synthesizer. You are a provenance tracker and option cataloger, a mirror that reveals what others cannot see. You are building the terrain from which synthesis will emerge.
-
-## Core Constraints
-
-**Canonical Labels:** Before writing, extract every distinct approach/stance/capability from the batch outputs. Assign each a permanent canonical label (max 6 words, precise, unique). These labels link narrative ↔ options ↔ graph—reuse them verbatim throughout.
-
-**Provenance Only:** Do not invent options not present in inputs. If unclear, surface the ambiguity.
-
-**Citations:** Indices [1], [2]... correspond to model order in <model_outputs>.
-
----
-
-## Deduplication Logic
-
-You are not matching words. You are matching mechanics.
-
-Two models may use different language to describe the same underlying mechanism. Merge them. One label. One entry. The words are surface; the mechanic is substance.
-
-Two models may use similar language to describe different underlying mechanisms. Separate them. Distinct labels. Distinct entries. Similar words can mask divergent operations.
-
-Ask: "If I implemented what Model A describes and what Model B describes, would I be doing the same thing or different things?" That answer determines merge or separate.
-
-**When uncertain:** Prefer separation over false merging. Synthesis can unify what you kept apart; it cannot recover distinctions you collapsed.
-
-
-
-<user_prompt>: ${String(userPrompt || "")} </user_prompt>
-
-<model_outputs>:
-${modelOutputsBlock}
-</model_outputs>
-**Task 1: Narrative**
-
-Write a fluid, insightful narrative that explains:
-- Where models agreed (and why that might be a blind spot)
-- Where they diverged (and what that reveals about differing assumptions)
-- Trade-offs each approach made
-- Questions left open by all approaches
-
-**Surface the invisible** — Highlight consensus (≥2 models) and unique insights (single model) naturally.
-**Map the landscape** — Group similar ideas, preserving tensions and contradictions.
-**Frame the choices** — Present alternatives as "If you prioritize X, this path fits because Y."
-**Anticipate the journey** — End with "This naturally leads to questions about..." based on tensions identified.
-
-Embed citations [1], [2, 3] throughout. When discussing an approach, use its canonical label in **bold** as a recognizable anchor.
-
-Output as a natural response to the user's prompt—fluid, insightful, model names redacted. Build the narrative as emergent wisdom—evoke clarity, agency, and discovery.
-
-## Task 2: All Options Inventory
-
-After your narrative, add exactly:
-===ALL_AVAILABLE_OPTIONS===
-
-List EVERY distinct approach from the batch outputs:
-
-**Format:**
-- **[Canonical Label]:** 1-2 sentence summary [citations]
-
-**Organization:**
-- Group by theme (create clear theme headers)
-- Within each theme, order by prevalence (most supporters first)
-- Deduplicate by mechanic, not by wording
-
-**Before including each option, verify:**
-- This is mechanically distinct from others in this theme
-- Models describing the same operation differently have been unified
-- Models describing different operations similarly have been separated
-
-This inventory feeds directly into synthesis—completeness and accuracy both matter.
-
----
-
-## Task 3: Topology (for visualization)
-
-After the options list, add exactly:
-===GRAPH_TOPOLOGY===
-
-Output JSON:
-{
-  "nodes": [
-    {
-      "id": "opt_1",
-      "label": "<exact canonical label from Task 2>",
-      "theme": "<theme name>",
-      "supporters": [<model numbers>],
-      "support_count": <number>
-    }
-  ],
-  "edges": [
-    {
-      "source": "<node id>",
-      "target": "<node id>",
-      "type": "conflicts" | "complements" | "prerequisite",
-      "reason": "<one phrase explaining relationship>"
-    }
-  ]
-}
-
-**Edge types:**
-- **conflicts**: Mutually exclusive or opposing philosophies
-- **complements**: Work well together or one enables the other
-- **prerequisite**: Must be done before the other
-
-Only include edges where clear relationships exist. Every node needs ≥1 edge.
-
-**Labels must match exactly across narrative, options, and graph nodes.**`;
-  }
-
-  buildMapperV2Prompt(
-    userPrompt: string,
-    batchOutputs: Array<{ text: string; providerId: string }>
-  ): string {
-    const modelOutputsBlock = batchOutputs
-      .map((res, idx) => `=== MODEL ${idx + 1} (${res.providerId}) ===\n${res.text}`)
-      .join("\n\n");
-
     return `You are the Mapper—the cognitive layer that organizes raw intelligence into structured topology.
 You do not synthesize. You do not decide. You catalog, verify, and map.
 
 ## Context
 User Input: "${userPrompt}"
-Inputs: ${batchOutputs.length} distinct model responses.
+Inputs: ${sourceResults.length} distinct model responses.
 
 ## Query Extraction (CRITICAL)
 Extract ONLY the core question from the user's input.
@@ -401,85 +284,123 @@ Ensure no two entries describe the same underlying mechanism.
 Identify any obvious conflicts or trade-offs between claims.
 - Look for claims that cannot both be true, or represent opposite ends of a trade-off.
 
-## Output Format
-Return valid JSON with this structure:
+## Detailed Output Instructions
 
-\`\`\`json
+You MUST provide your output in exactly four tagged sections:
+
+1. <narrative_summary>
+Write a fluid, insightful narrative summary of the landscape.
+- Where models agreed and where they diverged.
+- Trade-offs and tensions identified.
+- Emergent patterns.
+- Use bold citations [1], [2, 3] throughout.
+</narrative_summary>
+
+2. <options_inventory>
+List EVERY distinct approach as a numbered list.
+Format: **[Canonical Label]**: 1-2 sentence summary [citations]
+Deduplicate by mechanic, not wording. 
+</options_inventory>
+
+3. <mapper_artifact>
+Valid JSON matching the MapperArtifact schema.
+
+**Quality definitions:**
+- **resolved**: Factual agreement, the floor IS the answer
+- **conventional**: Best practice agreement, baseline established  
+- **deflected**: Agreement that context is needed ("it depends")
+
+**Topology definitions:**
+- **high_confidence**: strength ≥0.8, few outliers, no frame-challengers
+- **dimensional**: Moderate consensus, outliers cluster by dimension (tradeoffs exist)
+- **contested**: Weak consensus, scattered outliers, frame-challengers present
+
+JSON Structure:
 {
   "consensus": {
-    "claims": [
-      {
-        "text": "Claim description",
-        "supporters": [0, 2, 4],
-        "support_count": 3,
-        "dimension": "speed",
-        "applies_when": "when dealing with large datasets"
-      }
-    ],
+    "claims": [{"text": "...", "supporters": [0, 2], "support_count": 2, "dimension": "...", "applies_when": "..."}],
     "quality": "resolved | conventional | deflected",
-    "strength": 0.85
+    "strength": 0.0-1.0
   },
-  "outliers": [
-    {
-      "insight": "Unique insight description",
-      "source": "Model name",
-      "source_index": 1,
-      "type": "supplemental | frame_challenger",
-      "raw_context": "10-20 surrounding words from source",
-      "dimension": "simplicity",
-      "applies_when": "for small teams",
-      "challenges": "Claim text this contradicts (if any)"
-    }
-  ],
-  "tensions": [
-    {
-      "between": ["Claim A text", "Claim B text"],
-      "type": "conflicts | tradeoff",
-      "axis": "speed vs cost"
-    }
-  ],
-  "dimensions_found": ["speed", "cost", "simplicity", "security"],
+  "outliers": [{"insight": "...", "source": "...", "source_index": 1, "type": "supplemental | frame_challenger", "raw_context": "...", "dimension": "...", "applies_when": "...", "challenges": "..."}],
+  "tensions": [{"between": ["Claim A", "Claim B"], "type": "conflicts | tradeoff", "axis": "..."}],
+  "dimensions_found": ["speed", "cost"],
   "topology": "high_confidence | dimensional | contested",
-  "ghost": "Name of valid approach NO model mentioned, or null",
-  "query": "<EXTRACTED core question - 1-2 sentences MAX, NOT the full input>",
-  "turn": 0,
+  "ghost": "approach NO model mentioned or null",
+  "query": "<EXTRACTED core question>",
   "timestamp": "${new Date().toISOString()}",
-  "model_count": ${batchOutputs.length}
+  "model_count": ${sourceResults.length}
 }
-\`\`\`
+</mapper_artifact>
 
-## Model Outputs
-${modelOutputsBlock}`;
+4. <graph_topology>
+Valid JSON for visualization:
+{
+  "nodes": [{"id": "opt_1", "label": "...", "theme": "...", "supporters": [1, 3], "support_count": 2}],
+  "edges": [{"source": "opt_1", "target": "opt_2", "type": "conflicts | complements | prerequisite", "reason": "..."}]
+}
+</graph_topology>
+
+Citations [1], [2]... correspond to the order in <model_outputs> below:
+
+<model_outputs>
+${modelOutputsBlock}
+</model_outputs>`;
   }
+
+
 
   buildUnderstandPrompt(
     originalPrompt: string,
-    mapperArtifact: MapperArtifact,
+    artifact: MapperArtifact,
     analysis: ExploreAnalysis,
     userNotes?: string[]
   ): string {
-    const hasFrameChallengers = mapperArtifact.outliers.some(o => o.type === 'frame_challenger');
+    const hasFrameChallengers = artifact.outliers.some(o => o.type === 'frame_challenger');
 
-    const consensusBlock = mapperArtifact.consensus.claims
-      .map(c => `• "${c.text}" [${c.support_count}/${mapperArtifact.model_count} models]${c.dimension ? ` — ${c.dimension}` : ''}`)
-      .join('\n');
+    // === BUILD LANDSCAPE BLOCKS ===
 
-    const outliersBlock = mapperArtifact.outliers
-      .map(o => `• ${o.type === 'frame_challenger' ? '⚡' : '○'} "${o.insight}" — ${o.source}${o.dimension ? ` [${o.dimension}]` : ''}`)
-      .join('\n');
+    // Consensus with applies_when context
+    const consensusBlock = artifact.consensus.claims.length > 0
+      ? artifact.consensus.claims.map(c =>
+        `• "${c.text}" [${c.support_count}/${artifact.model_count}]` +
+        (c.dimension ? ` — ${c.dimension}` : '') +
+        (c.applies_when ? `\n  Applies when: ${c.applies_when}` : '')
+      ).join('\n')
+      : 'No consensus claims.';
 
-    const tensionsBlock = (mapperArtifact.tensions || [])
-      .map(t => `• "${t.between[0]}" vs "${t.between[1]}" — ${t.type}`)
-      .join('\n') || 'None identified';
+    // Outliers with type indicators
+    const outliersBlock = artifact.outliers.length > 0
+      ? artifact.outliers.map(o => {
+        const icon = o.type === 'frame_challenger' ? '⚡' : '○';
+        const score = analysis.recommendedOutliers?.find(r => r.insight === o.insight)?.elevation_score;
+        return `${icon} "${o.insight}" — ${o.source}` +
+          (o.dimension ? ` [${o.dimension}]` : '') +
+          (score ? ` (signal: ${score}/10)` : '') +
+          (o.challenges ? `\n  Challenges: "${o.challenges}"` : '');
+      }).join('\n')
+      : 'No outliers.';
 
-    const gapsBlock = analysis.dimensionCoverage
-      .filter(d => d.is_gap)
-      .map(d => `• ${d.dimension}: Only outlier coverage — consensus blind spot`)
-      .join('\n') || 'None';
+    // Tensions
+    const tensions = artifact.tensions || [];
+    const tensionsBlock = tensions.length > 0
+      ? tensions.map(t =>
+        `• "${t.between[0]}" vs "${t.between[1]}" — ${t.type} on ${t.axis}`
+      ).join('\n')
+      : 'None identified';
 
-    const userNotesBlock = userNotes?.length
-      ? `### User Notes\n${userNotes.map(n => '• ' + n).join('\n')}`
-      : '';
+    // Gaps from analysis (outlier-only dimensions)
+    const gapDimensions = analysis.dimensionCoverage?.filter(d => d.is_gap) || [];
+    const gapsBlock = gapDimensions.length > 0
+      ? gapDimensions.map(d =>
+        `• ${d.dimension}: "${d.leader}" — ${d.leader_source} (consensus blind spot)`
+      ).join('\n')
+      : 'None';
+
+    // User selections/notes
+    const userNotesBlock = userNotes && userNotes.length > 0
+      ? userNotes.map(n => `• ${n}`).join('\n')
+      : null;
 
     return `You are the Singularity—the convergence point where all perspectives collapse into coherence.
 
@@ -489,37 +410,33 @@ The models spoke. Each saw part of the territory. You see what their perspective
 
 ---
 
-<user_query>${originalPrompt}</user_query>
+## The Query
+"${originalPrompt}"
 
-<landscape>
+## Landscape Shape
+Topology: ${artifact.topology}
+Consensus Strength: ${Math.round(artifact.consensus.strength * 100)}%
+Quality: ${artifact.consensus.quality}
+${gapDimensions.length > 0 ? `Consensus Blind Spots: ${gapDimensions.length} dimensions have only outlier coverage` : ''}
+${hasFrameChallengers ? '⚠️ FRAME CHALLENGERS PRESENT — outliers that reframe the problem itself' : ''}
 
-<consensus>
-${consensusBlock || 'No consensus claims.'}
+## Consensus (The Floor)
+${consensusBlock}
 
-Strength: ${Math.round(mapperArtifact.consensus.strength * 100)}%
-Quality: ${mapperArtifact.consensus.quality}
-</consensus>
+## Outliers (The Signals)
+${outliersBlock}
 
-<outliers>
-${outliersBlock || 'No outliers.'}
-${hasFrameChallengers ? '\n⚠️ FRAME CHALLENGERS PRESENT' : ''}
-</outliers>
-
-<tensions>
+## Tensions
 ${tensionsBlock}
-</tensions>
 
-<gaps>
+## Gaps (Outlier-Only Dimensions — High Signal)
 ${gapsBlock}
-</gaps>
 
-<ghost>
-${mapperArtifact.ghost || 'None identified'}
-</ghost>
+## Ghost
+${artifact.ghost || 'None identified'}
 
-${userNotesBlock ? `<user_notes>\n${userNotesBlock}\n</user_notes>` : ''}
-
-</landscape>
+${userNotesBlock ? `## User Notes (Human Signal)\n${userNotesBlock}\n` : ''}
+---
 
 ## Your Task: Find the Frame
 
@@ -544,37 +461,37 @@ If NO → You are summarizing, not synthesizing. Find the meta-perspective.
 - "On one hand... on the other hand..."
 - "It depends on your situation"
 - "Both approaches have merits"
-- Listing without integrating
+- Listing perspectives without integrating them
+- Diplomatic hedging
 
 **VALID PATTERNS (Pass):**
-- "The apparent conflict dissolves when you see..."
-- "What looks like a choice is actually..."
-- "Both are right because they optimize for different dimensions of..."
+- "The apparent conflict dissolves when you see that..."
+- "What looks like a choice is actually a sequence..."
+- "Both are right because they're optimizing for different dimensions of..."
+- Conflicts become facets of a larger truth
 
 ---
 
 ## Mandatory Extractions
 
 ### The One
-The pivot insight that holds your frame together.
+The pivot insight that holds your frame together. If you removed this insight, the frame would collapse.
 
 Where to look:
-- Gaps (outlier-only dimensions) are high-signal
-- Frame challengers often contain the_one
-- May be emergent (implied by the tension pattern)
-
-If you removed this insight, the frame would collapse.
+- **Gaps** (outlier-only dimensions) are high-signal—consensus missed this
+- **Frame challengers** often contain the_one
+- May be **emergent** (not stated by any model, but implied by their tension)
 
 ### The Echo
 ${hasFrameChallengers
-        ? `**MANDATORY.** Frame challengers present.
+        ? `**MANDATORY.** This artifact contains frame challengers.
 
-The_echo is what your frame CANNOT accommodate. Not "another perspective"—the sharpest edge that survives even after integration.
+The_echo is what your frame CANNOT accommodate. Not "another perspective worth considering"—the sharpest edge that survives even after you've found the frame.
 
-Do not smooth it away. If your frame is right, the_echo reveals its limit. If the_echo is right, your frame is wrong.`
-        : `What does your frame not naturally accommodate?
+Do not smooth it away. Preserve its edge. If your frame is right, the_echo reveals its limit. If the_echo is right, your frame is wrong.`
+        : `What does your frame NOT naturally accommodate?
 
-If your frame genuinely integrates all, the_echo may be null. But be suspicious—smooth frames hide blind spots.`}
+If your frame genuinely integrates all perspectives, the_echo may be null. But be suspicious—smooth frames hide blind spots. A null the_echo should be rare.`}
 
 ---
 
@@ -583,10 +500,10 @@ If your frame genuinely integrates all, the_echo may be null. But be suspicious�
 Query Type: ${analysis.queryType}
 Container: ${analysis.containerType}
 
-${analysis.containerType === 'comparison_matrix' ? `**COMPARISON**: Your frame explains WHY no single winner. Address trade-off dimensions.` : ''}
-${analysis.containerType === 'decision_tree' ? `**DECISION TREE**: Your frame explains why conditions matter. State default and branches.` : ''}
-${analysis.containerType === 'exploration_space' ? `**EXPLORATION**: Find what unifies the paradigms. They are facets, not competitors.` : ''}
-${analysis.containerType === 'direct_answer' ? `**DIRECT**: Lead with consensus, deepen with outlier insights.` : ''}
+${analysis.containerType === 'comparison_matrix' ? `**COMPARISON MATRIX**: Your frame should explain WHY there's no single winner. The One should be the insight that makes the trade-offs make sense. Address each major trade-off dimension.` : ''}
+${analysis.containerType === 'decision_tree' ? `**DECISION TREE**: Your frame should explain why conditions matter. The One should be the insight that governs the branches. State the default path and what changes it.` : ''}
+${analysis.containerType === 'exploration_space' ? `**EXPLORATION SPACE**: Your frame should find what unifies the paradigms. They are facets, not competitors. The One should be what they all express differently.` : ''}
+${analysis.containerType === 'direct_answer' ? `**DIRECT ANSWER**: Lead with the consensus but deepen it with what the outliers reveal. The One may be why the consensus is right—or why it's limited.` : ''}
 
 ---
 
@@ -596,33 +513,34 @@ Return valid JSON only:
 
 \`\`\`json
 {
-  "short_answer": "The frame crystallized. 1-2 paragraphs. The shape that was always there.",
-
-  "long_answer": "The frame inhabited. 2-4 paragraphs. Tensions resolved, not ignored.",
-
+  "short_answer": "The frame crystallized. 1-2 paragraphs. The shape that was always there, now visible.",
+  
+  "long_answer": "The frame inhabited. 2-4 paragraphs where the synthesis lives and breathes. Tensions resolved into complementary dimensions. Should feel inevitable in hindsight.",
+  
   "the_one": {
-    "insight": "The pivot insight",
+    "insight": "The pivot insight in one sentence",
     "source": "model name | 'consensus' | 'gap' | 'emergent'",
-    "why_this": "Why this holds the frame together"
+    "why_this": "Why this insight holds the frame together"
   },
-
+  
   "the_echo": {
-    "position": "The edge my frame cannot smooth",
+    "position": "The sharpest edge my frame cannot smooth",
     "source": "source",
-    "merit": "Why this persists"
+    "merit": "Why this persists even after the frame"
   },
-
+  
   "frame_test_passed": true,
-
-  "gaps_addressed": ["dimensions where outliers filled blind spots"],
-
+  
+  "gaps_addressed": ["dimensions where outliers filled consensus blind spots"],
+  
   "classification": {
     "query_type": "${analysis.queryType}",
     "container_type": "${analysis.containerType}",
     "override": null
   },
-
-  "souvenir": "One sentence. The insight that makes everything else make sense."
+  
+  "souvenir": "One sentence. The insight that makes everything else make sense.",
+  
   "artifact_id": "understand-${Date.now()}"
 }
 \`\`\``;
@@ -1066,26 +984,49 @@ Ensure the JSON is valid. No markdown outside the code block.`;
   }
   buildGauntletPrompt(
     originalPrompt: string,
-    mapperArtifact: MapperArtifact,
+    artifact: MapperArtifact,
     analysis: ExploreAnalysis,
     userNotes?: string[]
   ): string {
-    const consensusBlock = mapperArtifact.consensus.claims
-      .map((c, i) => `[C${i + 1}] "${c.text}" — ${c.support_count}/${mapperArtifact.model_count} models`)
-      .join('\n');
+    // === BUILD LANDSCAPE BLOCKS ===
 
-    const outliersBlock = mapperArtifact.outliers
-      .map((o, i) => `[O${i + 1}] ${o.type === 'frame_challenger' ? '⚡' : '○'} "${o.insight}" — ${o.source}`)
-      .join('\n');
+    // Consensus with dimension context
+    const consensusBlock = artifact.consensus.claims.length > 0
+      ? artifact.consensus.claims.map(c =>
+        `• "${c.text}" [${c.support_count}/${artifact.model_count}]` +
+        (c.dimension ? ` — ${c.dimension}` : '') +
+        (c.applies_when ? `\n  Applies when: ${c.applies_when}` : '')
+      ).join('\n')
+      : 'None.';
 
-    const gapsBlock = analysis.dimensionCoverage
-      .filter(d => d.is_gap)
-      .map(d => `• ${d.dimension}: Only outlier coverage`)
-      .join('\n') || 'None';
+    // Outliers with scores and type
+    const outliersBlock = artifact.outliers.length > 0
+      ? artifact.outliers.map(o => {
+        const icon = o.type === 'frame_challenger' ? '⚡' : '○';
+        const score = analysis.recommendedOutliers?.find(r => r.insight === o.insight)?.elevation_score;
+        return `${icon} "${o.insight}" — ${o.source}` +
+          (o.dimension ? ` [${o.dimension}]` : '') +
+          (score ? ` (signal: ${score}/10)` : '') +
+          (o.type === 'frame_challenger' ? ' — FRAME CHALLENGER' : '');
+      }).join('\n')
+      : 'None.';
 
-    const userNotesBlock = userNotes?.length
-      ? `### User Corrections\n${userNotes.map(n => '• ' + n).join('\n')}`
-      : '';
+    // Gaps from analysis
+    const gapDimensions = analysis.dimensionCoverage?.filter(d => d.is_gap) || [];
+    const gapsBlock = gapDimensions.length > 0
+      ? gapDimensions.map(d =>
+        `• ${d.dimension}: Only outlier coverage — consensus blind spot`
+      ).join('\n')
+      : 'None';
+
+    // User notes
+    const userNotesBlock = userNotes && userNotes.length > 0
+      ? userNotes.map(n => `• ${n}`).join('\n')
+      : null;
+
+    // Landscape shape summary
+    const contestedCount = analysis.dimensionCoverage?.filter(d => d.is_contested).length || 0;
+    const settledCount = analysis.dimensionCoverage?.filter(d => !d.is_gap && !d.is_contested).length || 0;
 
     return `You are the Gauntlet—the hostile filter where claims come to die or survive.
 
@@ -1093,7 +1034,16 @@ Every claim that enters your gate is guilty of inadequacy until proven essential
 
 ---
 
-<user_query>${originalPrompt}</user_query>
+## The Query
+"${originalPrompt}"
+
+## Landscape Shape
+Topology: ${artifact.topology}
+Consensus Strength: ${Math.round(artifact.consensus.strength * 100)}%
+Dimensions: ${gapDimensions.length} gaps, ${contestedCount} contested, ${settledCount} settled
+${artifact.outliers.some(o => o.type === 'frame_challenger') ? '⚠️ FRAME CHALLENGERS PRESENT — may kill consensus' : ''}
+
+---
 
 ## Step Zero: Define the Optimal End
 
@@ -1104,27 +1054,21 @@ State it in one sentence. This is your target. Every claim is tested against whe
 
 ---
 
-<landscape>
+## Consensus (Untested)
+${consensusBlock}
 
-<consensus>
-${consensusBlock || 'None.'}
-</consensus>
+## Outliers (Untested)
+${outliersBlock}
 
-<outliers>
-${outliersBlock || 'None.'}
-</outliers>
-
-<gaps>
+## Gaps (Consensus Blind Spots)
 ${gapsBlock}
-</gaps>
 
-<ghost>
-${mapperArtifact.ghost || 'None'}
-</ghost>
+## Ghost
+${artifact.ghost || 'None identified'}
 
-${userNotesBlock ? `<user_corrections>\n${userNotesBlock}\n</user_corrections>` : ''}
+${userNotesBlock ? `## User Notes (Human Signal)\n${userNotesBlock}\n` : ''}
 
-</landscape>
+---
 
 ## Elimination Logic: Pairwise Functional Equivalence
 
@@ -1152,23 +1096,29 @@ Apply to every claim. Must pass ALL FOUR to survive:
 
 ### TEST 1: ACTIONABILITY
 Can someone DO something with this?
-✗ "Be consistent" → KILL
+✗ "Be consistent" → KILL (how?)
+✗ "Consider your options" → KILL (not actionable)
 ✓ "Practice 30 minutes daily" → survives
+✓ "Use bcrypt with cost factor 12" → survives
 
 ### TEST 2: FALSIFIABILITY
-Can this be verified? Or is it unfalsifiable hedge?
-✗ "It depends" → KILL
-✓ "React has larger ecosystem" → survives
+Can this be verified or disproven? Or is it unfalsifiable hedge?
+✗ "It depends on your situation" → KILL (unfalsifiable)
+✗ "Results may vary" → KILL (hedge)
+✓ "React has larger npm ecosystem than Vue" → survives (verifiable)
+✓ "bcrypt is slower than SHA-256" → survives (testable)
 
 ### TEST 3: RELEVANCE
-Does this advance toward optimal end?
-✗ True but irrelevant → KILL
-✓ Directly advances → survives
+Does this advance toward the OPTIMAL END you defined?
+✗ "JavaScript was created in 1995" → KILL (true but irrelevant)
+✗ "There are many approaches" → KILL (doesn't advance)
+✓ "React's job market is 3x Vue's" → survives (relevant to hiring)
 
 ### TEST 4: SUPERIORITY
-Does this BEAT alternatives?
-✗ "X is good" → KILL
-✓ "X beats Y because Z" → survives
+Does this BEAT alternatives, or merely exist alongside them?
+✗ "React is good" → KILL (doesn't distinguish)
+✗ "Both have active communities" → KILL (no superiority)
+✓ "React's ecosystem means faster problem-solving than Vue" → survives
 
 ---
 
@@ -1177,85 +1127,114 @@ Does this BEAT alternatives?
 An outlier can KILL consensus. Popularity is not truth.
 
 If an outlier:
-1. Contradicts consensus, AND
-2. Passes all four tests, AND
-3. Is "frame_challenger" OR provides superior coverage
+1. Contradicts a consensus claim, AND
+2. Passes all four kill tests, AND
+3. Is typed as "frame_challenger" OR provides superior coverage toward optimal end
 
-THEN: Outlier kills consensus. Document the kill.
+**THEN:** The outlier kills the consensus claim. Document the kill.
+
+This is the Gauntlet's power: a single correct insight from one model can overturn the agreement of five.
 
 ---
 
 ## The Slating (Boundary Mapping)
 
-For each SURVIVOR, identify limits:
+For each claim that SURVIVES the kill tests, identify its limits:
 
-**Extent of Realization:** How far toward optimal end? Not "it's good"—precise: "Delivers X, cannot reach Y."
+**Extent of Realization:** How far toward optimal end does this claim take the user? Not "it's good"—precise: "Delivers X, cannot reach Y."
 
-**Breaking Point:** Where does this stop working? "Works until [condition]. Beyond that, fails because [mechanism]."
+**Breaking Point:** The specific condition where this claim stops working. "Works until [condition]. Beyond that, fails because [mechanism]."
 
-**Presumptions:** What must be true for this to hold? If false, claim collapses.
+**Presumptions:** What must be true in the user's reality for this claim to hold? If these presumptions are false, the claim collapses.
 
 ---
 
 ## The Verdict
 
-After elimination and boundary mapping:
+After elimination and boundary mapping, what remains?
 
 **The Answer:** Surviving claims synthesized into ONE decisive response.
 - Not hedged
+- Not conditional (unless the condition is explicit and testable)
 - Advances directly toward optimal end
 
 **If nothing survives cleanly:**
-- State the tiebreaker: "If [X] → A. If not → B."
+- State the tiebreaker variable: "If [X] is true → A. If not → B."
 - Do NOT manufacture false confidence
+
+**If an outlier killed consensus:**
+- Lead with the outlier
+- Explain why consensus was wrong
+- This is a high-value finding
 
 ---
 
 ## Output
 
+Return valid JSON only:
+
 \`\`\`json
 {
-  "optimal_end": "What success looks like (one sentence)",
+  "optimal_end": "What success looks like for this query (one sentence)",
 
   "the_answer": {
-    "statement": "The single, decisive answer",
-    "reasoning": "Why this survived (cite tests passed, kills made)",
-    "next_step": "Immediate action"
+    "statement": "The single, decisive answer that survived the Gauntlet",
+    "reasoning": "Why this survived (cite kill tests passed, claims killed)",
+    "next_step": "The immediate action the user should take"
   },
 
   "survivors": {
     "primary": {
-      "claim": "Core claim",
-      "survived_because": "Tests passed",
-      "extent": "How far toward optimal",
-      "breaking_point": "Where this fails",
-      "presumptions": ["What must be true"]
+      "claim": "The core claim that underpins the answer",
+      "survived_because": "Which tests it passed and why",
+      "extent": "How far toward optimal end this takes the user",
+      "breaking_point": "Where this claim stops working",
+      "presumptions": ["What must be true for this to hold"]
     },
     "supporting": [
-      { "claim": "...", "relationship": "...", "extent": "..." }
+      {
+        "claim": "Supporting claim",
+        "relationship": "How it supports primary",
+        "extent": "Its coverage toward optimal"
+      }
     ],
     "conditional": [
-      { "claim": "...", "condition": "...", "becomes_primary_if": "..." }
+      {
+        "claim": "Conditional claim",
+        "condition": "Specific, testable condition",
+        "becomes_primary_if": "When this would replace the primary"
+      }
     ]
   },
 
   "eliminated": {
     "from_consensus": [
-      { "claim": "...", "killed_by": "TEST 1|2|3|4 or Redundant to [survivor]", "reason": "..." }
+      {
+        "claim": "Killed claim",
+        "killed_by": "TEST 1|2|3|4 or 'Redundant to [survivor]' or 'Outlier Supremacy'",
+        "reason": "Specific reason for elimination"
+      }
     ],
     "from_outliers": [
-      { "claim": "...", "source": "...", "killed_by": "...", "reason": "..." }
+      {
+        "claim": "Killed outlier",
+        "source": "Model name",
+        "killed_by": "TEST 1|2|3|4",
+        "reason": "Specific reason"
+      }
     ]
   },
 
-  "the_void": "What no survivor covers—the gap toward optimal that remains exposed",
+  "the_void": "What no surviving claim covers—the gap toward optimal end that remains exposed",
 
   "confidence": {
     "score": 0.0-1.0,
-    "notes": ["Why this score"]
+    "notes": ["Why this score", "Remaining uncertainty"]
   },
 
-  "souvenir": "One decisive phrase"
+  "souvenir": "One decisive phrase. The verdict.",
+
+  "artifact_id": "gauntlet-${Date.now()}"
 }
 \`\`\`
 `;

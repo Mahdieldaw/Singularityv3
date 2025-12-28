@@ -10,7 +10,7 @@ export type ProviderKey =
 export type WorkflowStepType = "prompt" | "synthesis" | "mapping" | "refiner" | "antagonist" | "explore";
 export type SynthesisStrategy = "continuation" | "fresh";
 
-export type CognitiveMode = "standard" | "auto" | "understand" | "decide";
+export type CognitiveMode = "auto" | "understand" | "decide";
 
 export interface GauntletOutput {
   the_answer: {

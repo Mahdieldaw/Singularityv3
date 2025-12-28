@@ -258,6 +258,18 @@ export function parseMappingResponse(response: string | null | undefined): {
 } {
     if (!response) return { narrative: '', options: null, optionTitles: [], graphTopology: null };
 
+    // 0. Check for Unified Tagged Output first
+    if (response.includes('<narrative_summary>') || response.includes('<options_inventory>')) {
+        const unified = parseUnifiedMapperOutput(response);
+        const optionTitles = unified.options ? parseOptionTitles(unified.options) : [];
+        return {
+            narrative: unified.narrative || response, // Fallback to raw if narrative tag is missing
+            options: unified.options,
+            optionTitles,
+            graphTopology: unified.topology,
+        };
+    }
+
     // First extract graph topology
     const { text: textWithoutTopology, topology } = extractGraphTopologyAndStrip(response);
 
@@ -550,6 +562,82 @@ export function createEmptyMapperArtifact(): MapperArtifact {
 }
 
 /**
+ * Parse Unified Mapper Output
+ * Extracts content from <raw_narrative>, <options_inventory>, <mapper_artifact>, and <graph_topology> tags.
+ */
+export function parseUnifiedMapperOutput(text: string): {
+    narrative: string;
+    options: string | null;
+    artifact: MapperArtifact | null;
+    topology: GraphTopology | null;
+} {
+    if (!text) {
+        return { narrative: "", options: null, artifact: null, topology: null };
+    }
+
+    const extractTag = (tag: string) => {
+        const pattern = new RegExp(`<${tag}>([\\s\\S]*?)<\\/${tag}>`, 'i');
+        const match = text.match(pattern);
+        return match ? match[1].trim() : null;
+    };
+
+    const narrativeSummary = extractTag('narrative_summary');
+    const optionsInventory = extractTag('options_inventory');
+    const mapperArtifactJson = extractTag('mapper_artifact');
+    const graphTopologyJson = extractTag('graph_topology');
+
+    let artifact: MapperArtifact | null = null;
+    if (mapperArtifactJson) {
+        try {
+            // Support both fenced and raw JSON within tags
+            const cleanJson = mapperArtifactJson.replace(/```(?:json)?\s*([\s\S]*?)```/i, '$1').trim();
+            const parsed = JSON.parse(cleanJson);
+            if (parsed && typeof parsed === 'object') {
+                artifact = {
+                    ...createEmptyMapperArtifact(),
+                    ...parsed,
+                    consensus: {
+                        ...createEmptyMapperArtifact().consensus,
+                        ...(parsed.consensus || {})
+                    }
+                };
+            }
+        } catch (e) {
+            console.warn("[parsing-utils] Failed to parse <mapper_artifact> JSON", e);
+        }
+    }
+
+    let topology: GraphTopology | null = null;
+    if (graphTopologyJson) {
+        try {
+            const cleanJson = graphTopologyJson.replace(/```(?:json)?\s*([\s\S]*?)```/i, '$1').trim();
+            topology = JSON.parse(cleanJson);
+        } catch (e) {
+            console.warn("[parsing-utils] Failed to parse <graph_topology> JSON", e);
+        }
+    }
+
+    // Fallback: If tags are missing, try legacy parsing
+    if (!narrativeSummary && !mapperArtifactJson) {
+        const legacy = parseMappingResponse(text);
+        const legacyArtifact = parseV1MapperToArtifact(text, { graphTopology: legacy.graphTopology });
+        return {
+            narrative: legacy.narrative || text,
+            options: legacy.options,
+            artifact: legacyArtifact,
+            topology: legacy.graphTopology
+        };
+    }
+
+    return {
+        narrative: narrativeSummary || "",
+        options: optionsInventory,
+        artifact: artifact,
+        topology: topology
+    };
+}
+
+/**
  * Parse MapperArtifact from text.
  * Expects sections: ===CONSENSUS===, ===OUTLIERS===, ===METADATA===
  */
@@ -559,7 +647,13 @@ export function parseMapperArtifact(text: string): MapperArtifact {
     const normalized = normalizeText(text);
     const artifact = createEmptyMapperArtifact();
 
-    // 1. Try JSON parsing first
+    // 1. Try Unified Tagged Parser first
+    if (normalized.includes('<mapper_artifact>')) {
+        const unified = parseUnifiedMapperOutput(text);
+        if (unified.artifact) return unified.artifact;
+    }
+
+    // 2. Try JSON parsing
     try {
         const jsonMatch = normalized.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/) || normalized.match(/^\{[\s\S]*\}$/);
         if (jsonMatch) {
@@ -699,6 +793,19 @@ export function parseV1MapperToArtifact(
     v1Output: string,
     options: { graphTopology?: any; query?: string; turn?: number; timestamp?: string } = {},
 ): MapperArtifact {
+    // 1. Check for Unified Tagged Output first
+    if (v1Output && v1Output.includes('<mapper_artifact>')) {
+        const unified = parseUnifiedMapperOutput(v1Output);
+        if (unified.artifact) {
+            return {
+                ...unified.artifact,
+                query: options.query || unified.artifact.query || "",
+                turn: options.turn || unified.artifact.turn || 0,
+                timestamp: options.timestamp || unified.artifact.timestamp || new Date().toISOString()
+            };
+        }
+    }
+
     const artifact = createEmptyMapperArtifact();
     const query = typeof options.query === "string" ? options.query : "";
     const turn = typeof options.turn === "number" ? options.turn : 0;

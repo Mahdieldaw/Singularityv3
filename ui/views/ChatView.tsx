@@ -21,7 +21,7 @@ import { useChat } from "../hooks/chat/useChat";
 import { SplitPaneRightPanel } from "../components/SplitPaneRightPanel";
 import { CouncilOrbsVertical } from "../components/CouncilOrbsVertical";
 import { useSmartProviderDefaults } from "../hooks/providers/useSmartProviderDefaults";
-import { useExperimentalFlagSync } from "../hooks/cognitive/useExperimentalFlagSync";
+
 
 import { safeLazy } from "../utils/safeLazy";
 // Lazy load DecisionMapSheet (named export adapter)
@@ -49,8 +49,7 @@ export default function ChatView() {
   // Smart Defaults
   useSmartProviderDefaults();
 
-  // Experimental Features Sync
-  useExperimentalFlagSync();
+
 
   const virtuosoRef = useRef<VirtuosoHandle | null>(null);
   const { selectChat } = useChat();

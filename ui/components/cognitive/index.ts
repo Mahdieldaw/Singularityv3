@@ -1,6 +1,6 @@
 export { default as GauntletOutputView } from './GauntletOutputView';
 export { default as UnderstandOutputView } from './UnderstandOutputView';
-export { default as ModeSelector } from './ModeSelector';
+
 export { SelectionBar } from './SelectionBar';
 
 export { ArtifactShowcase } from './ArtifactShowcase';
