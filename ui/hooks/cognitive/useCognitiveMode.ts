@@ -10,7 +10,7 @@ import api from "../../services/extension-api";
 
 import { MapperArtifact } from "../../../shared/contract";
 
-export type CognitiveMode = 'understand' | 'gauntlet';
+export type CognitiveMode = 'understand' | 'gauntlet' | 'refine' | 'antagonist';
 
 export type SelectedArtifact = {
     id: string;

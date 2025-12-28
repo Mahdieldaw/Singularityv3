@@ -1,6 +1,15 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { UnderstandOutput } from '../../../shared/contract';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useAtomValue, useSetAtom } from 'jotai';
+import { selectedModelsAtom, activeSplitPanelAtom } from '../../state/atoms';
+import { LLM_PROVIDERS_CONFIG } from '../../constants';
+import type { CognitiveTransitionOptions } from '../../hooks/cognitive/useCognitiveMode';
+import { AntagonistOutputState } from '../../hooks/useAntagonistOutput';
+import { RefinerOutput } from '../../../shared/parsing-utils';
+import { AiTurn } from '../../types';
+import RefinerDot from '../refinerui/RefinerDot';
+import AntagonistCard from '../antagonist/AntagonistCard';
 
 // Icons
 const ChevronDown = ({ className }: { className?: string }) => (
@@ -24,11 +33,40 @@ const CheckIcon = ({ className }: { className?: string }) => (
 
 interface UnderstandOutputViewProps {
     output: UnderstandOutput;
+    onRefine?: (options?: CognitiveTransitionOptions) => void;
+    onAntagonist?: (options?: CognitiveTransitionOptions) => void;
+    isLoading?: boolean;
+    refinerState: { output: RefinerOutput | null; isLoading: boolean };
+    antagonistState: AntagonistOutputState;
+    aiTurn: AiTurn;
 }
 
-const UnderstandOutputView: React.FC<UnderstandOutputViewProps> = ({ output }) => {
+const UnderstandOutputView: React.FC<UnderstandOutputViewProps> = ({ 
+    output, 
+    onRefine, 
+    onAntagonist, 
+    isLoading = false,
+    refinerState,
+    antagonistState,
+    aiTurn
+}) => {
     const [longAnswerOpen, setLongAnswerOpen] = useState(true);
     const [copied, setCopied] = useState(false);
+    const selectedModels = useAtomValue(selectedModelsAtom);
+    const setActiveSplitPanel = useSetAtom(activeSplitPanelAtom);
+
+    const availableProviders = useMemo(() => {
+        const enabled = LLM_PROVIDERS_CONFIG.filter((p) => !!selectedModels?.[p.id]);
+        return enabled.length > 0 ? enabled : LLM_PROVIDERS_CONFIG;
+    }, [selectedModels]);
+
+    const [nextProviderId, setNextProviderId] = useState<string>(() => availableProviders[0]?.id || "gemini");
+
+    useEffect(() => {
+        if (!availableProviders.some((p) => p.id === nextProviderId)) {
+            setNextProviderId(availableProviders[0]?.id || "gemini");
+        }
+    }, [availableProviders, nextProviderId]);
 
     const handleCopySouvenir = () => {
         if (output.souvenir) {
@@ -42,6 +80,8 @@ const UnderstandOutputView: React.FC<UnderstandOutputViewProps> = ({ output }) =
         return <div className="p-4 text-text-secondary italic">Understanding synthesis is empty.</div>;
     }
 
+    const refinerOutput = refinerState.output;
+
     return (
         <div className="flex flex-col gap-6 p-1 max-w-full overflow-hidden text-sm">
             {/* HER0 - THE SHORT ANSWER */}
@@ -53,17 +93,81 @@ const UnderstandOutputView: React.FC<UnderstandOutputViewProps> = ({ output }) =
                 {/* Decorative background glow */}
                 <div className="absolute top-0 right-0 w-32 h-32 bg-accent-primary/5 rounded-full blur-3xl -translate-y-1/2 translate-x-1/3 pointer-events-none" />
 
-                <h2 className="text-lg font-semibold text-text-primary tracking-tight mb-4">The Synthesis</h2>
+                <div className="flex items-center justify-between mb-4">
+                    <h2 className="text-lg font-semibold text-text-primary tracking-tight m-0">The Synthesis</h2>
+                    <RefinerDot 
+                        refiner={refinerOutput} 
+                        isLoading={refinerState.isLoading} 
+                        onClick={() => setActiveSplitPanel({ turnId: aiTurn.id, providerId: '__trust__' })}
+                    />
+                </div>
 
                 <div className="prose prose-sm max-w-none text-text-primary">
                     <p className="font-medium text-base leading-relaxed">{output.short_answer}</p>
                 </div>
             </motion.div>
 
-            {/* THE ONE & THE ECHO */}
+            {/* REFINER INLINE SIGNALS (GEM / ECHO / NEXT) */}
+            {refinerOutput && (
+                <div className="flex flex-col gap-4 animate-in fade-in slide-in-from-bottom-2 duration-500">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {refinerOutput.gem && (
+                            <div className="bg-amber-500/5 border border-amber-500/20 rounded-xl p-4">
+                                <div className="flex items-center gap-2 mb-2">
+                                    <Sparkles className="text-amber-500" />
+                                    <span className="text-xs font-bold uppercase tracking-wider text-amber-600">The Insight</span>
+                                </div>
+                                <p className="text-text-primary font-medium leading-normal mb-1">
+                                    {refinerOutput.gem.insight}
+                                </p>
+                                {refinerOutput.gem.impact && (
+                                    <p className="text-xs text-text-secondary italic">
+                                        {refinerOutput.gem.impact}
+                                    </p>
+                                )}
+                            </div>
+                        )}
+                        {refinerOutput.outlier && (
+                            <div className="bg-indigo-500/5 border border-indigo-500/20 rounded-xl p-4">
+                                <div className="flex items-center gap-2 mb-2">
+                                    <Wind className="text-indigo-500" />
+                                    <span className="text-xs font-bold uppercase tracking-wider text-indigo-600">Contrarian View</span>
+                                </div>
+                                <p className="text-text-primary font-medium leading-normal mb-1">
+                                    {refinerOutput.outlier.position}
+                                </p>
+                                {refinerOutput.outlier.why && (
+                                    <p className="text-xs text-text-secondary italic">
+                                        {refinerOutput.outlier.why}
+                                    </p>
+                                )}
+                            </div>
+                        )}
+                    </div>
+
+                    {refinerOutput.leap && refinerOutput.leap.action && (
+                        <div className="bg-brand-500/10 border border-brand-500/20 rounded-xl p-4">
+                            <div className="flex items-center gap-2 mb-2">
+                                <span className="w-2 h-2 rounded-full bg-brand-400" />
+                                <span className="text-xs font-bold text-brand-400 uppercase tracking-wider">Next Step</span>
+                            </div>
+                            <div className="text-sm font-bold text-text-primary mb-1">
+                                {refinerOutput.leap.action}
+                            </div>
+                            {refinerOutput.leap.rationale && (
+                                <div className="text-xs text-text-secondary italic">
+                                    {refinerOutput.leap.rationale}
+                                </div>
+                            )}
+                        </div>
+                    )}
+                </div>
+            )}
+
+            {/* THE ONE & THE ECHO (Original specialized outcome fields) */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {/* THE ONE */}
-                {output.the_one && (
+                {output.the_one && !refinerOutput?.gem && (
                     <motion.div
                         initial={{ opacity: 0, x: -10 }}
                         animate={{ opacity: 1, x: 0 }}
@@ -89,7 +193,7 @@ const UnderstandOutputView: React.FC<UnderstandOutputViewProps> = ({ output }) =
                 )}
 
                 {/* THE ECHO */}
-                {output.the_echo && (
+                {output.the_echo && !refinerOutput?.outlier && (
                     <motion.div
                         initial={{ opacity: 0, x: 10 }}
                         animate={{ opacity: 1, x: 0 }}
@@ -114,6 +218,16 @@ const UnderstandOutputView: React.FC<UnderstandOutputViewProps> = ({ output }) =
                     </motion.div>
                 )}
             </div>
+
+            {/* ANTAGONIST INLINE */}
+            {antagonistState.output && (
+                <div className="animate-in fade-in slide-in-from-bottom-2 duration-500">
+                    <AntagonistCard 
+                        aiTurn={aiTurn} 
+                        activeProviderId={antagonistState.providerId || undefined}
+                    />
+                </div>
+            )}
 
             {/* THE LONG ANSWER (Collapsible) */}
             {output.long_answer && (
@@ -164,6 +278,46 @@ const UnderstandOutputView: React.FC<UnderstandOutputViewProps> = ({ output }) =
                     </button>
                 </div>
             )}
+
+            {/* CONTROLS */}
+            <div className="flex items-center gap-3 bg-surface-raised border border-border-subtle rounded-xl px-3 py-2 mt-4">
+                <div className="text-xs text-text-secondary">Model</div>
+                <select
+                    value={nextProviderId}
+                    onChange={(e) => setNextProviderId(e.target.value)}
+                    disabled={isLoading}
+                    className="flex-1 bg-[#1a1b26] border border-border-subtle rounded px-2 py-1 text-sm text-gray-200 focus:outline-none focus:border-brand-500 disabled:opacity-50 appearance-none"
+                >
+                    {availableProviders.map((p) => (
+                        <option key={p.id} value={p.id}>
+                            {p.name}
+                        </option>
+                    ))}
+                </select>
+            </div>
+
+            <div className="flex gap-3 mt-2">
+                <button
+                    onClick={() => onRefine?.({ providerId: nextProviderId })}
+                    disabled={isLoading}
+                    className="flex-1 px-4 py-3 bg-gradient-to-r from-purple-600 to-fuchsia-600 
+                               hover:from-purple-500 hover:to-fuchsia-500 
+                               text-white rounded-lg font-medium transition-all
+                               disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                    🔥 Challenge
+                </button>
+                <button
+                    onClick={() => onAntagonist?.({ providerId: nextProviderId })}
+                    disabled={isLoading}
+                    className="flex-1 px-4 py-3 bg-gradient-to-r from-slate-700 to-slate-800 
+                               hover:from-slate-600 hover:to-slate-700 
+                               text-white rounded-lg font-medium transition-all
+                               disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                    ⏭️ Next
+                </button>
+            </div>
         </div>
     );
 };

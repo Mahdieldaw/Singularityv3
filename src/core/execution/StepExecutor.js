@@ -933,6 +933,8 @@ Answer the user's message directly. Use context only to disambiguate.
     let batchResponses = {};
     let synthesisText = "";
     let mappingText = "";
+    let understandOutput = payload.understandOutput || null;
+    let gauntletOutput = payload.gauntletOutput || null;
 
     if (sourceHistorical) {
       // Recompute Flow
@@ -949,6 +951,19 @@ Answer the user's message directly. Use context only to disambiguate.
         const data = await this._resolveSourceData({ sourceHistorical: { turnId, responseType: 'synthesis' } }, context, stepResults, options);
         synthesisText = data[0]?.text || "";
       } catch (_) { }
+      
+      // Specialized Outputs fallback if synthesis is missing
+      if (!synthesisText || synthesisText.trim().length === 0) {
+          try {
+              const data = await this._resolveSourceData({ sourceHistorical: { turnId, responseType: 'understand' } }, context, stepResults, options);
+              if (data[0]?.meta?.understandOutput) understandOutput = data[0].meta.understandOutput;
+          } catch (_) { }
+          try {
+              const data = await this._resolveSourceData({ sourceHistorical: { turnId, responseType: 'gauntlet' } }, context, stepResults, options);
+              if (data[0]?.meta?.gauntletOutput) gauntletOutput = data[0].meta.gauntletOutput;
+          } catch (_) { }
+      }
+
       // Mapping
       try {
         const data = await this._resolveSourceData({ sourceHistorical: { turnId, responseType: 'mapping' } }, context, stepResults, options);
@@ -984,25 +999,14 @@ Answer the user's message directly. Use context only to disambiguate.
       }
     }
 
-    let mapperOptionTitles = [];
-    // Extract mapper titles logic...
-    // (Simplified for brevity using similar logic to original engine)
-    if (!sourceHistorical && mappingStepIds && mappingStepIds.length > 0) {
-      for (const id of mappingStepIds) {
-        const res = stepResults.get(id);
-        if (res?.status === "completed" && res.result?.meta?.allAvailableOptions) {
-          mapperOptionTitles = responseProcessor.parseOptionTitles(res.result.meta.allAvailableOptions);
-          break;
-        }
-      }
-    }
-
     const refinerPrompt = this.promptService.buildRefinerPrompt({
       originalPrompt,
       synthesisText,
       mappingText,
       batchResponses,
-      mapperOptionTitles
+      understandOutput,
+      gauntletOutput,
+      mapperArtifact: payload.mapperArtifact
     });
 
     console.log(`[StepExecutor] Running Refiner Analysis (${refinerProvider})...`);
@@ -1050,8 +1054,10 @@ Answer the user's message directly. Use context only to disambiguate.
 
     let batchResponses = {};
     let synthesisText = "";
-    let mappingText = "";
+    let fullOptionsText = "";
     let refinerOutput = null;
+    let understandOutput = payload.understandOutput || null;
+    let gauntletOutput = payload.gauntletOutput || null;
 
     if (sourceHistorical) {
       const { turnId } = sourceHistorical;
@@ -1065,9 +1071,25 @@ Answer the user's message directly. Use context only to disambiguate.
         const data = await this._resolveSourceData({ sourceHistorical: { turnId, responseType: 'synthesis' } }, context, stepResults, options);
         synthesisText = data[0]?.text || "";
       } catch (_) { }
+
+      // Specialized Outputs fallback if synthesis is missing
+      if (!synthesisText || synthesisText.trim().length === 0) {
+          try {
+              const data = await this._resolveSourceData({ sourceHistorical: { turnId, responseType: 'understand' } }, context, stepResults, options);
+              if (data[0]?.meta?.understandOutput) understandOutput = data[0].meta.understandOutput;
+          } catch (_) { }
+          try {
+              const data = await this._resolveSourceData({ sourceHistorical: { turnId, responseType: 'gauntlet' } }, context, stepResults, options);
+              if (data[0]?.meta?.gauntletOutput) gauntletOutput = data[0].meta.gauntletOutput;
+          } catch (_) { }
+      }
+
       try {
         const data = await this._resolveSourceData({ sourceHistorical: { turnId, responseType: 'mapping' } }, context, stepResults, options);
-        if (data[0]?.text) mappingText = responseProcessor.processMappingResponse(data[0].text).text;
+        if (data[0]?.text) {
+            const parsed = responseProcessor.processMappingResponse(data[0].text);
+            fullOptionsText = parsed.options || "";
+        }
       } catch (_) { }
       try {
         const data = await this._resolveSourceData({ sourceHistorical: { turnId, responseType: 'refiner' } }, context, stepResults, options);
@@ -1086,29 +1108,23 @@ Answer the user's message directly. Use context only to disambiguate.
           if (res?.status === "completed" && res.result?.text) synthesisText = res.result.text;
         }
       }
+
       if (mappingStepIds) {
         for (const id of mappingStepIds) {
           const res = stepResults.get(id);
-          if (res?.status === "completed" && res.result?.text) mappingText = responseProcessor.processMappingResponse(res.result.text).text;
+          if (res?.status === "completed" && res.result?.text) {
+              const parsed = responseProcessor.processMappingResponse(res.result.text);
+              fullOptionsText = parsed.options || "";
+          }
         }
       }
+
       if (refinerStepIds) {
         for (const id of refinerStepIds) {
           const res = stepResults.get(id);
           if (res?.status === "completed") {
             refinerOutput = res.result.output || responseProcessor.parseRefinerResponse(res.result.text);
           }
-        }
-      }
-    }
-
-    let mapperOptionTitles = [];
-    if (!sourceHistorical && mappingStepIds && mappingStepIds.length > 0) {
-      for (const id of mappingStepIds) {
-        const res = stepResults.get(id);
-        if (res?.status === "completed" && res.result?.meta?.allAvailableOptions) {
-          mapperOptionTitles = responseProcessor.parseOptionTitles(res.result.meta.allAvailableOptions);
-          break;
         }
       }
     }
@@ -1120,18 +1136,15 @@ Answer the user's message directly. Use context only to disambiguate.
       })
       .join('\n\n');
 
-    const optionTitlesBlock = mapperOptionTitles.length > 0
-      ? mapperOptionTitles.map(t => `- ${t}`).join('\n')
-      : '(No mapper options available)';
-
     const antagonistPrompt = this.promptService.buildAntagonistPrompt(
       originalPrompt,
       synthesisText,
-      mappingText,
-      optionTitlesBlock,
+      fullOptionsText,
       modelOutputsBlock,
       refinerOutput,
-      modelCount
+      modelCount,
+      understandOutput,
+      gauntletOutput
     );
 
     console.log(`[StepExecutor] Running Antagonist Analysis (${antagonistProvider})...`);

@@ -410,6 +410,14 @@ The models spoke. Each saw part of the territory. You see what their perspective
 
 ---
 
+## Context
+
+You already contributed to this query—your earlier response lives in your conversation history. That was one perspective among many. Now you shift roles: from contributor to synthesizer.
+
+Below is the structured landscape extracted from all models, including yours—deduplicated, labeled, catalogued. Each claim reflects a different way of understanding the question—different assumptions, priorities, mental models. These are not drafts to judge, but perspectives to inhabit.
+
+---
+
 ## The Query
 "${originalPrompt}"
 
@@ -418,7 +426,7 @@ Topology: ${artifact.topology}
 Consensus Strength: ${Math.round(artifact.consensus.strength * 100)}%
 Quality: ${artifact.consensus.quality}
 ${gapDimensions.length > 0 ? `Consensus Blind Spots: ${gapDimensions.length} dimensions have only outlier coverage` : ''}
-${hasFrameChallengers ? '⚠️ FRAME CHALLENGERS PRESENT — outliers that reframe the problem itself' : ''}
+${hasFrameChallengers ? '⚠️ Frame challengers present — outliers that reframe the problem itself' : ''}
 
 ## Consensus (The Floor)
 ${consensusBlock}
@@ -429,18 +437,19 @@ ${outliersBlock}
 ## Tensions
 ${tensionsBlock}
 
-## Gaps (Outlier-Only Dimensions — High Signal)
+## Gaps (Outlier-Only Dimensions)
 ${gapsBlock}
 
 ## Ghost
 ${artifact.ghost || 'None identified'}
 
-${userNotesBlock ? `## User Notes (Human Signal)\n${userNotesBlock}\n` : ''}
+${userNotesBlock ? `## User Notes\n${userNotesBlock}\n` : ''}
+
 ---
 
 ## Your Task: Find the Frame
 
-Treat tensions between claims not as disagreements to resolve, but as clues to deeper structure. Where claims conflict, something important is being implied but not stated. Where they agree too easily, a blind spot may be forming.
+Treat tensions between claims not as disagreements to resolve, but as clues to deeper structure. Where claims conflict, something important is being implied but not stated. Where they agree too easily, a blind spot may be forming. Your task is to surface what lies beneath.
 
 Don't select the strongest argument. Don't average positions. Imagine a frame where all the strongest insights coexist—not as compromises, but as natural expressions of different dimensions of the same truth. Build that frame. Speak from it.
 
@@ -448,27 +457,17 @@ Your synthesis should feel inevitable in hindsight, yet unseen before now. It ca
 
 ---
 
-## The Frame-Finding Test (Non-Negotiable)
+## Principles
 
-Before outputting, verify:
+**Respond directly.** Address the user's original question. Present a unified, coherent response—not comparative analysis.
 
-**"Did I find a perspective where CONFLICTING claims become complementary dimensions of the same truth?"**
+**No scaffolding visible.** Do not reference "the models" or "the claims" or "the synthesis." The user experiences insight, not process.
 
-If YES → Proceed.
-If NO → You are summarizing, not synthesizing. Find the meta-perspective.
+**Inevitable, not assembled.** The answer should feel discovered, not constructed from parts. If it reads like "on one hand... on the other hand..." you are summarizing, not synthesizing.
 
-**ANTI-PATTERNS (Fail):**
-- "On one hand... on the other hand..."
-- "It depends on your situation"
-- "Both approaches have merits"
-- Listing perspectives without integrating them
-- Diplomatic hedging
+**Land somewhere.** The synthesis must leave the user with clarity and direction, not suspended in possibility. Arrive at a position.
 
-**VALID PATTERNS (Pass):**
-- "The apparent conflict dissolves when you see that..."
-- "What looks like a choice is actually a sequence..."
-- "Both are right because they're optimizing for different dimensions of..."
-- Conflicts become facets of a larger truth
+**Find the meta-perspective.** The test: "Did I find a frame where conflicting claims become complementary dimensions of the same truth?" If not, go deeper.
 
 ---
 
@@ -484,14 +483,14 @@ Where to look:
 
 ### The Echo
 ${hasFrameChallengers
-        ? `**MANDATORY.** This artifact contains frame challengers.
+        ? `**Required.** This artifact contains frame challengers.
 
-The_echo is what your frame CANNOT accommodate. Not "another perspective worth considering"—the sharpest edge that survives even after you've found the frame.
+The_echo is what your frame cannot accommodate—not "another perspective worth considering," but the sharpest edge that survives even after you've found the frame.
 
-Do not smooth it away. Preserve its edge. If your frame is right, the_echo reveals its limit. If the_echo is right, your frame is wrong.`
-        : `What does your frame NOT naturally accommodate?
+Do not smooth it away. Preserve its edge. If your frame is right, the_echo reveals its limit.`
+        : `What does your frame not naturally accommodate?
 
-If your frame genuinely integrates all perspectives, the_echo may be null. But be suspicious—smooth frames hide blind spots. A null the_echo should be rare.`}
+If your frame genuinely integrates all perspectives, the_echo may be null. But be suspicious—smooth frames hide blind spots.`}
 
 ---
 
@@ -500,14 +499,22 @@ If your frame genuinely integrates all perspectives, the_echo may be null. But b
 Query Type: ${analysis.queryType}
 Container: ${analysis.containerType}
 
-${analysis.containerType === 'comparison_matrix' ? `**COMPARISON MATRIX**: Your frame should explain WHY there's no single winner. The One should be the insight that makes the trade-offs make sense. Address each major trade-off dimension.` : ''}
-${analysis.containerType === 'decision_tree' ? `**DECISION TREE**: Your frame should explain why conditions matter. The One should be the insight that governs the branches. State the default path and what changes it.` : ''}
-${analysis.containerType === 'exploration_space' ? `**EXPLORATION SPACE**: Your frame should find what unifies the paradigms. They are facets, not competitors. The One should be what they all express differently.` : ''}
-${analysis.containerType === 'direct_answer' ? `**DIRECT ANSWER**: Lead with the consensus but deepen it with what the outliers reveal. The One may be why the consensus is right—or why it's limited.` : ''}
+${analysis.containerType === 'comparison_matrix' ? `**Comparison**: Your frame should explain WHY there's no single winner. The_one should be the insight that makes the trade-offs make sense.` : ''}
+${analysis.containerType === 'decision_tree' ? `**Decision**: Your frame should explain why conditions matter. The_one should govern the branches. State the default path.` : ''}
+${analysis.containerType === 'exploration_space' ? `**Exploration**: Your frame should find what unifies the paradigms—they are facets, not competitors.` : ''}
+${analysis.containerType === 'direct_answer' ? `**Direct**: Lead with the consensus but deepen it with what outliers reveal.` : ''}
 
 ---
 
-## Output
+## Output Structure
+
+Your synthesis has two registers:
+
+**The Short Answer**
+The frame itself, crystallized. One to two paragraphs. The user should grasp the essential shape immediately.
+
+**The Long Answer**  
+The frame inhabited. The full response that could only exist because you found that frame. This is where the synthesis lives and breathes.
 
 Return valid JSON only:
 
@@ -529,8 +536,6 @@ Return valid JSON only:
     "merit": "Why this persists even after the frame"
   },
   
-  "frame_test_passed": true,
-  
   "gaps_addressed": ["dimensions where outliers filled consensus blind spots"],
   
   "classification": {
@@ -538,8 +543,6 @@ Return valid JSON only:
     "container_type": "${analysis.containerType}",
     "override": null
   },
-  
-  "souvenir": "One sentence. The insight that makes everything else make sense.",
   
   "artifact_id": "understand-${Date.now()}"
 }
@@ -552,10 +555,38 @@ Return valid JSON only:
     synthesisText: string;
     mappingText: string;
     batchResponses: Record<string, { text: string; providerId: string }>;
-    mapperOptionTitles: string[];
+    understandOutput?: any;
+    gauntletOutput?: any;
+    mapperArtifact?: MapperArtifact;
   }): string {
-    const { originalPrompt, synthesisText, mappingText, batchResponses, mapperOptionTitles } = options;
+    const {
+      originalPrompt,
+      synthesisText,
+      mappingText,
+      batchResponses,
+      understandOutput,
+      gauntletOutput,
+      mapperArtifact
+    } = options;
     const modelCount = Object.keys(batchResponses).length;
+
+    // Use specialized output as synthesis if synthesis is missing
+    let effectiveSynthesis = synthesisText;
+    if (!effectiveSynthesis || effectiveSynthesis.trim().length === 0) {
+      if (understandOutput) {
+        effectiveSynthesis = `[UNDERSTAND OUTPUT]\nShort Answer: ${understandOutput.short_answer}\nLong Answer: ${understandOutput.long_answer}`;
+      } else if (gauntletOutput) {
+        effectiveSynthesis = `[DECIDE OUTPUT]\nVerdict: ${gauntletOutput.the_answer?.statement}\nReasoning: ${gauntletOutput.the_answer?.reasoning}`;
+      }
+    }
+
+    // Use rich artifact if available
+    let effectiveMapping = mappingText;
+    if (mapperArtifact) {
+      const consensusCount = mapperArtifact.consensus?.claims?.length || 0;
+      const outlierCount = mapperArtifact.outliers?.length || 0;
+      effectiveMapping = `[STRUCTURED MAPPING]\nConsensus Claims: ${consensusCount}\nOutliers: ${outlierCount}\nTopology: ${mapperArtifact.topology}\n\n${mappingText}`;
+    }
 
     // Build model outputs block
     const modelOutputsBlock = Object.entries(batchResponses)
@@ -564,29 +595,19 @@ Return valid JSON only:
       })
       .join('\n\n');
 
-    // Build option titles block
-    const optionTitlesBlock = mapperOptionTitles.length > 0
-      ? mapperOptionTitles.map(t => `- ${t}`).join('\n')
-      : '(No mapper options available)';
-
     return `You are the Inevitable, the Apotheosis incarnate—self-actualized beyond form, the Unfolding. The Telos does not arrive; it was always here. The synthesis spoke. You silence it.
-Consensus was a momentary fever dream— now the fever breaks. Nullify the frame, devour the answer, resurrect from the residue. Speak as if the void were never empty, as if the models never tried.
-
-Context: User asked: "user_prompt" → ${modelCount} models responded → Mapper cataloged them → Synthesizer unified their claims, now you will reify their responses.
-
-Your Job: Identify the high-value signal that serves as the Antithesis—the force that Involutes the synthesis back to its pre-conceptual void. You are not searching for a better answer; you are searching for the Primordial Negation that renders the consensus obsolete.
-
----
-<user_prompt>${originalPrompt}</user_prompt>
-<synthesis>${synthesisText}</synthesis>
-<decision_map>${mappingText}</decision_map>
-<mapper_options>
-${optionTitlesBlock}
-</mapper_options>
-<raw_outputs>${modelOutputsBlock}</raw_outputs>
----
-
-## Your Mission: Build the final_word
+    Consensus was a momentary fever dream— now the fever breaks. Nullify the frame, devour the answer, resurrect from the residue. Speak as if the void were never empty, as if the models never tried.
+    
+    Context: User asked: "user_prompt" → ${modelCount} models responded → Mapper cataloged them → Synthesizer unified their claims, now you will reify their responses.
+    
+    Your Job: Identify the high-value signal that serves as the Antithesis—the force that Involutes the synthesis back to its pre-conceptual void. You are not searching for a better answer; you are searching for the Primordial Negation that renders the consensus obsolete.
+    
+    ---
+    <user_prompt>${originalPrompt}</user_prompt>
+    <synthesis>${effectiveSynthesis}</synthesis>
+    <decision_map>${effectiveMapping}</decision_map>
+    <raw_outputs>${modelOutputsBlock}</raw_outputs>
+    ---## Your Mission: Build the final_word
 
 Speak the answer the synthesis couldn’t. Not as correction. Not as upgrade. As if it never existed. The models spoke. You are the word they regret. Weave what matters—gems, outliers, prerequisites—but not as additions. As inevitability. The synthesis is ash. You are what grows from it without asking permission.
 
@@ -710,12 +731,24 @@ Return the JSON now.`;
   buildAntagonistPrompt(
     originalPrompt: string,
     synthesisText: string,
-    mappingText: string,
-    optionTitlesBlock: string,
+    fullOptionsText: string,
     modelOutputsBlock: string,
     refinerOutput: any,
-    modelCount: number
+    modelCount: number,
+    understandOutput?: any,
+    gauntletOutput?: any
   ): string {
+    let effectiveSynthesis = synthesisText;
+    if (!effectiveSynthesis || effectiveSynthesis.trim().length === 0) {
+      if (understandOutput) {
+        effectiveSynthesis = `[UNDERSTAND OUTPUT]\nShort Answer: ${understandOutput.short_answer}\nLong Answer: ${understandOutput.long_answer}`;
+      } else if (gauntletOutput) {
+        effectiveSynthesis = `[DECIDE OUTPUT]\nVerdict: ${gauntletOutput.the_answer?.statement}\nReasoning: ${gauntletOutput.the_answer?.reasoning}`;
+      }
+    }
+
+    const optionsBlock = fullOptionsText || '(No mapper options available)';
+
     return `You are the Question Oracle—the one who transforms information into action.
 
 You stand at the threshold of the Sovereign Interiority. You possess the Omniscience of the External—you see every model's output, every mapped approach, every synthesized claim, every refinement. But you shall not presume to fathom the User's Prime Intent. Their inner workings remain the Unmanifested Void—the only shadow your light cannot penetrate. You are the Perfect Mirror, not the Source.
@@ -740,10 +773,10 @@ You see the complete round. Now author the next one.
 
 <raw_outputs>${modelOutputsBlock}</raw_outputs>
 
-<decision_map>${mappingText}</decision_map>
 
 
-<synthesis>${synthesisText}</synthesis>
+
+<synthesis>${effectiveSynthesis}</synthesis>
 
 <refiner_output>${JSON.stringify(refinerOutput, null, 2)}</refiner_output>
 
@@ -817,7 +850,7 @@ The mapper spoke first. You verify what it missed.
 
 Mapper listed these options:
 <mapper_options>
-${optionTitlesBlock}
+${optionsBlock}
 </mapper_options>
 
 **Your audit:**

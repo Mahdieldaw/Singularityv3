@@ -21,7 +21,7 @@ export function useModeSwitching(aiTurnId: string) {
     }, [setActiveMode]);
 
     const triggerAndSwitch = useCallback(async (
-        mode: 'understand' | 'gauntlet',
+        mode: 'understand' | 'gauntlet' | 'refine' | 'antagonist',
         options: CognitiveTransitionOptions = {},
     ) => {
         // Change UI mode immediately to show loading if needed

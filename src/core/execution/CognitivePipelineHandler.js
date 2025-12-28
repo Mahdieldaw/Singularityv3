@@ -1,6 +1,6 @@
 
 import { computeExplore } from '../cognitive/explore-computer';
-import { parseV1MapperToArtifact } from '../../../shared/parsing-utils';
+import { parseV1MapperToArtifact, parseMappingResponse, parseOptionTitles } from '../../../shared/parsing-utils';
 import { extractUserMessage } from '../context-utils.js';
 
 export class CognitivePipelineHandler {
@@ -139,17 +139,47 @@ export class CognitivePipelineHandler {
       let mapperArtifact = payload.mapperArtifact || aiTurn.mapperArtifact || null;
       let exploreAnalysis = payload.exploreAnalysis || aiTurn.exploreAnalysis || null;
 
-      if (mode !== "understand" && mode !== "gauntlet") {
+      if (mode !== "understand" && mode !== "gauntlet" && mode !== "refine" && mode !== "antagonist") {
         throw new Error(`Unknown cognitive mode: ${mode}`);
       }
 
       const priorResponses = await adapter.getResponsesByTurnId(aiTurnId);
+      
+      // Categorize responses
+      const batchResponses = {};
+      let synthesisText = "";
+      let understandOutput = aiTurn.understandOutput || null;
+      let gauntletOutput = aiTurn.gauntletOutput || null;
+      let refinerOutput = aiTurn.refinerOutput || null;
+
+      (priorResponses || []).forEach(r => {
+          if (r.responseType === 'batch' && r.text) {
+              batchResponses[r.providerId] = { text: r.text, providerId: r.providerId };
+          } else if (r.responseType === 'synthesis' && !synthesisText) {
+              synthesisText = r.text;
+          } else if (r.responseType === 'understand' && !understandOutput) {
+              understandOutput = r.meta?.understandOutput || null;
+          } else if (r.responseType === 'gauntlet' && !gauntletOutput) {
+              gauntletOutput = r.meta?.gauntletOutput || null;
+          } else if (r.responseType === 'refiner' && !refinerOutput) {
+              refinerOutput = r.meta?.refinerOutput || null;
+          }
+      });
+
       const mappingResponses = (priorResponses || [])
         .filter((r) => r && r.responseType === "mapping" && r.providerId)
         .sort((a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0))
       const mappingProviders = mappingResponses.map((r) => r.providerId);
       const latestMappingText = mappingResponses?.[0]?.text || "";
       const latestMappingMeta = mappingResponses?.[0]?.meta || {};
+
+      let mapperOptionTitles = [];
+      if (latestMappingMeta.allAvailableOptions) {
+          mapperOptionTitles = parseOptionTitles(latestMappingMeta.allAvailableOptions);
+      } else if (latestMappingText) {
+          const parsed = parseMappingResponse(latestMappingText);
+          mapperOptionTitles = parsed.optionTitles || [];
+      }
 
       if (!mapperArtifact && mappingResponses?.[0]) {
         mapperArtifact = parseV1MapperToArtifact(latestMappingText, {
@@ -178,28 +208,15 @@ export class CognitivePipelineHandler {
         userMessage: originalPrompt,
       };
 
+      let step;
       const stepId = `${mode}-${preferredProvider}-${Date.now()}`;
-      const step =
-        mode === "understand"
-          ? {
+
+      if (mode === "understand" || mode === "gauntlet") {
+        step = {
             stepId,
-            type: "understand",
+            type: mode,
             payload: {
-              understandProvider: preferredProvider,
-              mapperArtifact,
-              exploreAnalysis,
-              originalPrompt,
-              mappingText: latestMappingText,
-              mappingMeta: latestMappingMeta,
-              selectedArtifacts: Array.isArray(selectedArtifacts) ? selectedArtifacts : [],
-              useThinking: false,
-            },
-          }
-          : {
-            stepId,
-            type: "gauntlet",
-            payload: {
-              gauntletProvider: preferredProvider,
+              [`${mode}Provider`]: preferredProvider,
               mapperArtifact,
               exploreAnalysis,
               originalPrompt,
@@ -209,18 +226,61 @@ export class CognitivePipelineHandler {
               useThinking: false,
             },
           };
+      } else if (mode === "refine") {
+          step = {
+              stepId,
+              type: "refiner",
+              payload: {
+                  refinerProvider: preferredProvider,
+                  originalPrompt,
+                  synthesisText,
+                  mappingText: latestMappingText,
+                  understandOutput,
+                  gauntletOutput,
+                  mapperArtifact,
+                  mapperOptionTitles,
+                  sourceHistorical: { turnId: aiTurnId, responseType: 'batch' } // So StepExecutor knows to fetch batch
+              }
+          };
+      } else if (mode === "antagonist") {
+          const optionTitlesBlock = mapperOptionTitles.length > 0
+              ? mapperOptionTitles.map(t => `- ${t}`).join('\n')
+              : '(No mapper options available)';
+
+          step = {
+              stepId,
+              type: "antagonist",
+              payload: {
+                  antagonistProvider: preferredProvider,
+                  originalPrompt,
+                  synthesisText,
+                  mappingText: latestMappingText,
+                  understandOutput,
+                  gauntletOutput,
+                  refinerOutput,
+                  optionTitlesBlock,
+                  sourceHistorical: { turnId: aiTurnId, responseType: 'batch' }
+              }
+          };
+      }
 
       const executorOptions = {
           streamingManager, 
           persistenceCoordinator: this.persistenceCoordinator, 
-          contextManager, // Passed but likely not used heavily for simple continuation
+          contextManager, 
           sessionManager: this.sessionManager
       };
 
-      const result =
-        mode === "understand"
-          ? await stepExecutor.executeUnderstandStep(step, context, new Map(), executorOptions)
-          : await stepExecutor.executeGauntletStep(step, context, new Map(), executorOptions);
+      let result;
+      if (mode === "understand") {
+          result = await stepExecutor.executeUnderstandStep(step, context, new Map(), executorOptions);
+      } else if (mode === "gauntlet") {
+          result = await stepExecutor.executeGauntletStep(step, context, new Map(), executorOptions);
+      } else if (mode === "refine") {
+          result = await stepExecutor.executeRefinerStep(step, context, new Map(), executorOptions);
+      } else if (mode === "antagonist") {
+          result = await stepExecutor.executeAntagonistStep(step, context, new Map(), executorOptions);
+      }
 
       try {
         this.port.postMessage({
@@ -232,11 +292,13 @@ export class CognitivePipelineHandler {
         });
       } catch (_) { }
 
+      const responseTypeForDb = mode === 'refine' ? 'refiner' : mode;
+
       await this.sessionManager.upsertProviderResponse(
         effectiveSessionId,
         aiTurnId,
         preferredProvider,
-        mode,
+        responseTypeForDb,
         0,
         { text: result?.text || "", status: result?.status || "completed", meta: result?.meta || {} },
       );

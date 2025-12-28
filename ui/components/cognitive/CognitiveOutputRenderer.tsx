@@ -6,9 +6,13 @@ import { ArtifactShowcase } from './ArtifactShowcase';
 import UnderstandOutputView from './UnderstandOutputView';
 import GauntletOutputView from './GauntletOutputView';
 import TransitionBar from './TransitionBar';
+import { AntagonistOutputState } from '../../hooks/useAntagonistOutput';
+import { RefinerOutput } from '../../../shared/parsing-utils';
 
 interface CognitiveOutputRendererProps {
     aiTurn: AiTurn;
+    refinerState: { output: RefinerOutput | null; isLoading: boolean };
+    antagonistState: AntagonistOutputState;
 }
 
 /**
@@ -16,7 +20,11 @@ interface CognitiveOutputRendererProps {
  * Manages the transition between the initial "Landscape" (PostMapper/ArtifactShowcase)
  * and specialized outcomes (Understand/Decide).
  */
-export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = ({ aiTurn }) => {
+export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = ({ 
+    aiTurn, 
+    refinerState, 
+    antagonistState 
+}) => {
     const {
         activeMode,
         setActiveMode,
@@ -83,11 +91,27 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
                 )}
 
                 {activeMode === 'understand' && aiTurn.understandOutput && (
-                    <UnderstandOutputView output={aiTurn.understandOutput} />
+                    <UnderstandOutputView 
+                        output={aiTurn.understandOutput} 
+                        onRefine={(options) => triggerAndSwitch('refine', options)}
+                        onAntagonist={(options) => triggerAndSwitch('antagonist', options)}
+                        isLoading={isTransitioning}
+                        refinerState={refinerState}
+                        antagonistState={antagonistState}
+                        aiTurn={aiTurn}
+                    />
                 )}
 
                 {activeMode === 'gauntlet' && aiTurn.gauntletOutput && (
-                    <GauntletOutputView output={aiTurn.gauntletOutput} />
+                    <GauntletOutputView 
+                        output={aiTurn.gauntletOutput} 
+                        onRefine={(options) => triggerAndSwitch('refine', options)}
+                        onAntagonist={(options) => triggerAndSwitch('antagonist', options)}
+                        isLoading={isTransitioning}
+                        refinerState={refinerState}
+                        antagonistState={antagonistState}
+                        aiTurn={aiTurn}
+                    />
                 )}
 
                 {/* Loading state for specialized modes without data yet */}
