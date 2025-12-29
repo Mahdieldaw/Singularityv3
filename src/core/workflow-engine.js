@@ -135,22 +135,13 @@ export class WorkflowEngine {
     this.turnEmitter = new TurnEmitter(port);
     this.cognitiveHandler = new CognitivePipelineHandler(port, this.persistenceCoordinator, sessionManager);
 
-    // Executor mapping
+    // Executor mapping - FOUNDATION ONLY
+    // Cognitive steps (understand, gauntlet, refiner, antagonist) are handled via handleContinueCognitiveRequest
     this._executors = {
       prompt: (step, ctx, _results, _wfCtx, _resolved, opts) => 
         this.stepExecutor.executePromptStep(step, ctx, opts),
       mapping: (step, ctx, results, wfCtx, resolved, opts) => 
         this.stepExecutor.executeMappingStep(step, ctx, results, wfCtx, resolved, opts),
-      synthesis: (step, ctx, results, wfCtx, resolved, opts) => 
-        this.stepExecutor.executeSynthesisStep(step, ctx, results, wfCtx, resolved, opts),
-      refiner: (step, ctx, results, _wfCtx, _resolved, opts) => 
-        this.stepExecutor.executeRefinerStep(step, ctx, results, opts),
-      antagonist: (step, ctx, results, _wfCtx, _resolved, opts) => 
-        this.stepExecutor.executeAntagonistStep(step, ctx, results, opts),
-      understand: (step, ctx, results, _wfCtx, _resolved, opts) => 
-        this.stepExecutor.executeUnderstandStep(step, ctx, results, opts),
-      gauntlet: (step, ctx, results, _wfCtx, _resolved, opts) => 
-        this.stepExecutor.executeGauntletStep(step, ctx, results, opts),
     };
 
     // Provider key mapping for upsert
@@ -193,6 +184,12 @@ export class WorkflowEngine {
       const useCognitivePipeline = ["auto", "understand", "decide"].includes(mode);
       context.useCognitivePipeline = useCognitivePipeline;
       context.mode = mode;
+
+      // VALIDATION: Ensure only foundation steps are present in the main loop
+      const invalidSteps = steps.filter(s => !['prompt', 'mapping'].includes(s.type));
+      if (invalidSteps.length > 0) {
+        throw new Error(`Foundation phase received cognitive/legacy steps: ${invalidSteps.map(s => s.type).join(', ')}. Foundation only supports 'prompt' and 'mapping'.`);
+      }
 
       this._seedContexts(resolvedContext, stepResults, workflowContexts);
       this._hydrateV1Artifacts(context, resolvedContext);
@@ -284,12 +281,11 @@ export class WorkflowEngine {
       sessionManager: this.sessionManager,
     };
 
-    if (['mapping', 'synthesis'].includes(stepType)) {
+    if (stepType === 'mapping') {
       baseOptions.contextManager = this.contextManager;
     }
-    if (['refiner', 'antagonist'].includes(stepType)) {
-      baseOptions.responseProcessor = this.responseProcessor;
-    }
+    // Note: refiner/antagonist options setup kept generic or handled in CognitivePipelineHandler if needed,
+    // but here we are strictly Foundation phase.
 
     return baseOptions;
   }
@@ -470,11 +466,11 @@ export class WorkflowEngine {
   async _persistAndFinalize(request, context, steps, stepResults, resolvedContext) {
       const result = {
         batchOutputs: {},
-        synthesisOutputs: {},
+        synthesisOutputs: {}, // Kept for schema compatibility, though empty
         mappingOutputs: {},
-        refinerOutputs: {},
-        antagonistOutputs: {},
-        gauntletOutputs: {},
+        refinerOutputs: {}, // Empty in foundation phase
+        antagonistOutputs: {}, // Empty in foundation phase
+        gauntletOutputs: {}, // Empty in foundation phase
       };
       
       const stepById = new Map((steps || []).map((s) => [s.stepId, s]));
@@ -484,19 +480,10 @@ export class WorkflowEngine {
         if (!step) return;
         if (step.type === "prompt") {
           result.batchOutputs = stepResult.result?.results || {};
-        } else if (step.type === "synthesis") {
-          const providerId = step.payload?.synthesisProvider;
-          if (providerId) result.synthesisOutputs[providerId] = stepResult.result;
         } else if (step.type === "mapping") {
           const providerId = step.payload?.mappingProvider;
           if (providerId) result.mappingOutputs[providerId] = stepResult.result;
-        } else if (step.type === "refiner") {
-          const providerId = step.payload?.refinerProvider;
-          if (providerId) result.refinerOutputs[providerId] = stepResult.result;
-        } else if (step.type === "antagonist") {
-          const providerId = step.payload?.antagonistProvider;
-          if (providerId) result.antagonistOutputs[providerId] = stepResult.result;
-        }
+        } 
       });
 
       const persistRequest = {

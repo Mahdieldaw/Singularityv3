@@ -36,11 +36,3 @@ yarn-error.log*
 Thumbs.db
 
 
-.md
-package-lock*
-.svg
-.txt
-.txt*
-.md*
-.md/*
-/.md/

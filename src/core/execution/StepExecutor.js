@@ -9,6 +9,7 @@ import {
   createMultiProviderAuthError
 } from '../../utils/ErrorHandler.js';
 import { computeExplore } from '../cognitive/explore-computer';
+import { classifyClaimsWithSignals, buildUnderstandSignalInjection, buildDecideSignalInjection, buildRefinerSignalInjection, buildAntagonistSignalInjection } from '../../utils/signal-router';
 
 const WORKFLOW_DEBUG = false;
 const wdbg = (...args) => {
@@ -999,7 +1000,7 @@ Answer the user's message directly. Use context only to disambiguate.
       }
     }
 
-    const refinerPrompt = this.promptService.buildRefinerPrompt({
+    let refinerPrompt = this.promptService.buildRefinerPrompt({
       originalPrompt,
       synthesisText,
       mappingText,
@@ -1008,6 +1009,29 @@ Answer the user's message directly. Use context only to disambiguate.
       gauntletOutput,
       mapperArtifact: payload.mapperArtifact
     });
+
+    try {
+      const adapter = options.sessionManager?.adapter;
+      if (adapter && adapter.isReady && adapter.isReady()) {
+        const aiTurn = await adapter.get("turns", context.canonicalAiTurnId);
+        const edits = aiTurn?.artifactEdit || null;
+        let artifact = payload.mapperArtifact || null;
+        if (!artifact && mappingText) {
+          artifact = parseV1MapperToArtifact(mappingText, {
+            graphTopology: payload?.mappingMeta?.graphTopology,
+            query: originalPrompt,
+          });
+        }
+        if (artifact) {
+          const classified = classifyClaimsWithSignals(artifact, edits);
+          const inputType = understandOutput ? "understand" : "decide";
+          const injection = buildRefinerSignalInjection(classified, inputType);
+          if (injection && injection.length > 0) {
+            refinerPrompt += injection;
+          }
+        }
+      }
+    } catch (_) { }
 
     console.log(`[StepExecutor] Running Refiner Analysis (${refinerProvider})...`);
 
@@ -1136,7 +1160,7 @@ Answer the user's message directly. Use context only to disambiguate.
       })
       .join('\n\n');
 
-    const antagonistPrompt = this.promptService.buildAntagonistPrompt(
+    let antagonistPrompt = this.promptService.buildAntagonistPrompt(
       originalPrompt,
       synthesisText,
       fullOptionsText,
@@ -1146,6 +1170,31 @@ Answer the user's message directly. Use context only to disambiguate.
       understandOutput,
       gauntletOutput
     );
+
+    try {
+      const adapter = options.sessionManager?.adapter;
+      if (adapter && adapter.isReady && adapter.isReady()) {
+        const aiTurn = await adapter.get("turns", context.canonicalAiTurnId);
+        const edits = aiTurn?.artifactEdit || null;
+        let artifact = payload.mapperArtifact || null;
+        if (!artifact && fullOptionsText) {
+          const mapText = fullOptionsText;
+          artifact = parseV1MapperToArtifact(mapText, {
+            graphTopology: payload?.mappingMeta?.graphTopology,
+            query: originalPrompt,
+          });
+        }
+        if (artifact) {
+          const classified = classifyClaimsWithSignals(artifact, edits);
+          const inputType = understandOutput ? "understand" : "decide";
+          const ghostOverride = edits?.ghostOverride || null;
+          const injection = buildAntagonistSignalInjection(classified, inputType, ghostOverride);
+          if (injection && injection.length > 0) {
+            antagonistPrompt += injection;
+          }
+        }
+      }
+    } catch (_) { }
 
     console.log(`[StepExecutor] Running Antagonist Analysis (${antagonistProvider})...`);
 
@@ -1226,6 +1275,19 @@ Answer the user's message directly. Use context only to disambiguate.
       narrativeSummary,
       payload.userNotes
     );
+
+    try {
+      const adapter = options.sessionManager?.adapter;
+      if (adapter && adapter.isReady && adapter.isReady()) {
+        const aiTurn = await adapter.get("turns", context.canonicalAiTurnId);
+        const edits = aiTurn?.artifactEdit || null;
+        const classified = classifyClaimsWithSignals(mapperArtifact, edits);
+        const injection = buildUnderstandSignalInjection(classified);
+        if (injection && injection.length > 0) {
+          understandPrompt += injection;
+        }
+      }
+    } catch (_) { }
 
     if (Array.isArray(payload.selectedArtifacts) && payload.selectedArtifacts.length > 0) {
       const selectionLines = payload.selectedArtifacts.map((a, index) => {
@@ -1331,6 +1393,19 @@ Answer the user's message directly. Use context only to disambiguate.
       exploreAnalysis,
       payload.userNotes
     );
+
+    try {
+      const adapter = options.sessionManager?.adapter;
+      if (adapter && adapter.isReady && adapter.isReady()) {
+        const aiTurn = await adapter.get("turns", context.canonicalAiTurnId);
+        const edits = aiTurn?.artifactEdit || null;
+        const classified = classifyClaimsWithSignals(mapperArtifact, edits);
+        const injection = buildDecideSignalInjection(classified);
+        if (injection && injection.length > 0) {
+          gauntletPrompt += injection;
+        }
+      }
+    } catch (_) { }
 
     if (Array.isArray(payload.selectedArtifacts) && payload.selectedArtifacts.length > 0) {
       const selectionLines = payload.selectedArtifacts.map((a, index) => {

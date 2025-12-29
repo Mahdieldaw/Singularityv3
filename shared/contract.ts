@@ -239,12 +239,19 @@ export interface InitializeRequest {
 /**
  * Continues an existing conversation with a new user message.
  */
+export interface ArtifactCurationPayload {
+  turnId: string | null;
+  timestamp: number;
+  selectedArtifactIds: string[];
+  edits?: any;
+}
+
 export interface ExtendRequest {
   type: "extend";
   sessionId: string;
   userMessage: string;
   providers: ProviderKey[];
-  forcedContextReset?: ProviderKey[]; // Optional: Explicitly force new context for specific providers
+  forcedContextReset?: ProviderKey[];
   includeMapping: boolean;
   includeSynthesis: boolean;
   synthesizer?: ProviderKey;
@@ -255,8 +262,9 @@ export interface ExtendRequest {
   includeAntagonist?: boolean;
   useThinking?: boolean;
   providerMeta?: Partial<Record<ProviderKey, any>>;
-  clientUserTurnId?: string; // Optional: client-side provisional ID for the user's turn.
+  clientUserTurnId?: string;
   mode?: CognitiveMode;
+  artifactCuration?: ArtifactCurationPayload;
 }
 
 /**

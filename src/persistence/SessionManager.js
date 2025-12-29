@@ -2,7 +2,7 @@
 // Supports both legacy chrome.storage and new persistence layer via feature flag
 
 import { SimpleIndexedDBAdapter } from "./SimpleIndexedDBAdapter.js";
-import { formatArtifactAsOptions } from "../../shared/parsing-utils";
+import { buildMinimalMapperArtifact } from "../utils/context-bridge";
 
 
 
@@ -250,6 +250,42 @@ export class SessionManager {
     };
     await this.adapter.put("turns", aiTurnRecord);
 
+    if (mapperArtifact) {
+      try {
+        const minimal = buildMinimalMapperArtifact(request.mapperArtifact);
+        const bridge = {
+          query: String(request.userMessage || ""),
+          established: { positive: [], negative: [] },
+          openEdges: [],
+          nextStep: null,
+          landscape: minimal,
+          turnId: aiTurnId,
+        };
+        await this.persistContextBridge(sessionId, aiTurnId, bridge);
+      } catch (_) { }
+    }
+
+    if (request?.artifactCuration?.edits) {
+      const edits = request.artifactCuration.edits || {};
+      try {
+        const totalClaims = (request?.mapperArtifact?.consensus?.claims?.length || 0) + (request?.mapperArtifact?.outliers?.length || 0);
+        const changeCount = (edits.added?.length || 0) + (edits.removed?.length || 0) + ((edits.modified?.length || 0) * 2);
+        const ratio = changeCount / Math.max(totalClaims, 1);
+        const intensity = ratio < 0.15 ? "light" : (ratio < 0.4 ? "moderate" : "heavy");
+        const enrichedEdit = {
+          sessionId,
+          turnId: aiTurnId,
+          editedAt: Date.now(),
+          userNotes: request?.artifactCuration?.userNotes || null,
+          edits,
+          tickedIds: request?.artifactCuration?.selectedArtifactIds || [],
+          ghostOverride: request?.artifactCuration?.ghostOverride || null,
+          editIntensity: intensity,
+        };
+        await this.persistArtifactEdit(sessionId, aiTurnId, enrichedEdit);
+      } catch (_) { }
+    }
+
     // 5) Provider responses
     await this._persistProviderResponses(sessionId, aiTurnId, result, now);
 
@@ -356,6 +392,42 @@ export class SessionManager {
       meta: await this._attachRunIdMeta(aiTurnId),
     };
     await this.adapter.put("turns", aiTurnRecord);
+
+    if (mapperArtifact) {
+      try {
+        const minimal = buildMinimalMapperArtifact(request.mapperArtifact);
+        const bridge = {
+          query: String(request.userMessage || ""),
+          established: { positive: [], negative: [] },
+          openEdges: [],
+          nextStep: null,
+          landscape: minimal,
+          turnId: aiTurnId,
+        };
+        await this.persistContextBridge(sessionId, aiTurnId, bridge);
+      } catch (_) { }
+    }
+
+    if (request?.artifactCuration?.edits) {
+      const edits = request.artifactCuration.edits || {};
+      try {
+        const totalClaims = (request?.mapperArtifact?.consensus?.claims?.length || 0) + (request?.mapperArtifact?.outliers?.length || 0);
+        const changeCount = (edits.added?.length || 0) + (edits.removed?.length || 0) + ((edits.modified?.length || 0) * 2);
+        const ratio = changeCount / Math.max(totalClaims, 1);
+        const intensity = ratio < 0.15 ? "light" : (ratio < 0.4 ? "moderate" : "heavy");
+        const enrichedEdit = {
+          sessionId,
+          turnId: aiTurnId,
+          editedAt: Date.now(),
+          userNotes: request?.artifactCuration?.userNotes || null,
+          edits,
+          tickedIds: request?.artifactCuration?.selectedArtifactIds || [],
+          ghostOverride: request?.artifactCuration?.ghostOverride || null,
+          editIntensity: intensity,
+        };
+        await this.persistArtifactEdit(sessionId, aiTurnId, enrichedEdit);
+      } catch (_) { }
+    }
 
     // 4) Provider responses
     await this._persistProviderResponses(sessionId, aiTurnId, result, now);
@@ -1226,19 +1298,11 @@ export class SessionManager {
     }
 
     if (request?.mapperArtifact) {
-      const optionsText = formatArtifactAsOptions(request.mapperArtifact);
-      if (optionsText) summary += `<council_views>\n${optionsText}\n</council_views>`;
-    } else {
-      const mappingOutputs = result?.mappingOutputs || {};
-      const mapProvider = Object.keys(mappingOutputs)[0];
-      if (mapProvider && mappingOutputs[mapProvider]?.text) {
-        const mapText = mappingOutputs[mapProvider].text;
-        const narrative = String(mapText).split("===ALL_AVAILABLE_OPTIONS===")[0].trim();
-        const extracted = this._extractContextFromMapping(narrative);
-        if (extracted) {
-          summary += `<council_views>\n${extracted}\n</council_views>`;
-        }
-      }
+      try {
+        const minimal = buildMinimalMapperArtifact(request.mapperArtifact);
+        const block = JSON.stringify(minimal);
+        summary += `<council_views>\n${block}\n</council_views>`;
+      } catch (_) { }
     }
 
     const finalSummary = summary.trim();
@@ -1250,6 +1314,51 @@ export class SessionManager {
     });
 
     return finalSummary;
+  }
+
+  async persistContextBridge(sessionId, turnId, bridge) {
+    try {
+      if (!this.adapter) return;
+      const record = { ...bridge, sessionId, createdAt: Date.now() };
+      await this.adapter.put("context_bridges", record, turnId);
+    } catch (_) { }
+  }
+
+  async persistArtifactEdit(sessionId, turnId, edit) {
+    try {
+      if (!this.adapter) return;
+      const turn = await this.adapter.get("turns", turnId);
+      if (!turn) return;
+      const updated = { ...turn, artifactEdit: edit, updatedAt: Date.now() };
+      await this.adapter.put("turns", updated, turnId);
+    } catch (_) { }
+  }
+
+  async getContextBridge(turnId) {
+    try {
+      if (!this.adapter) return null;
+      return await this.adapter.get("context_bridges", turnId);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  async getLatestContextBridge(sessionId) {
+    try {
+      if (!this.adapter) return null;
+      const turns = await this.adapter.getTurnsBySessionId(sessionId);
+      if (!Array.isArray(turns) || turns.length === 0) return null;
+      for (let i = turns.length - 1; i >= 0; i--) {
+        const t = turns[i];
+        if (t?.type === "ai") {
+          const br = await this.getContextBridge(t.id);
+          if (br) return br;
+        }
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
   }
 
 

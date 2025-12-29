@@ -14,11 +14,11 @@ This document maps the current V3 implementation (Cognitive Pipeline) and its in
 1. Part 0: System Context (Manifest V3 Extension)
 2. Part 1: The Cognitive Flow
 3. Part 2: Data Contracts (Requests, Artifacts, Messages)
-4. Part 3: Backend Runtime (Resolve → Compile → Execute)
-5. Part 4: UI Runtime (State → Views → Interactions)
-6. Part 5: Persistence & History (IndexedDB)
-7. Part 6: Error Resilience (Retries, Degraded Runs)
-8. Part 7: Security & Privacy
+4. Part 3: The Interaction Model
+5. Part 4: Primary Synthesis (Parallel Tracks)
+6. Part 5: Enhancement Layers
+7. Part 6: Context Bridge (Composite)
+8. Part 7: History & Memory Architecture
 9. Part 8: Artifact Editing & Signal Preservation
 10. Part 9: UI State Machine (Cognitive Halt → Continuations)
 
@@ -266,9 +266,141 @@ text
 
 text
 
-````
-
 ---
+
+## Part 2: Data Contracts (Requests, Artifacts, Messages)
+
+Singularity V3 has three contract layers:
+
+1. **UI → Backend requests** (workflow primitives)
+2. **Backend internal steps** (compiled workflow)
+3. **Backend → UI messages** (real-time port stream)
+
+The canonical shared shapes live in `shared/contract.ts`. Message-type string constants used by the UI live in `shared/messaging.ts`.
+
+### 2.1 UI → Backend: Port Message Envelopes
+
+The UI talks to the service worker through a long-lived `chrome.runtime.Port`, using a simple envelope:
+
+```ts
+{ type: string; payload?: any }
+```
+
+#### Execute Workflow
+
+UI sender: `ui/services/extension-api.ts` (posts `{ type: EXECUTE_WORKFLOW, payload: request }`).
+
+Backend receiver: `src/core/connection-handler.js` (routes `EXECUTE_WORKFLOW` into `_handleExecuteWorkflow`).
+
+The `payload` is a `PrimitiveWorkflowRequest`:
+
+```ts
+export type PrimitiveWorkflowRequest =
+  | InitializeRequest
+  | ExtendRequest
+  | RecomputeRequest;
+```
+
+#### Continue Cognitive Workflow
+
+When the workflow halts after mapping (cognitive choice point), the UI can resume with:
+
+```ts
+{ 
+  type: "CONTINUE_COGNITIVE_WORKFLOW",
+  payload: {
+    sessionId: string;
+    aiTurnId: string;
+    mode: "understand" | "gauntlet" | "refine" | "antagonist";
+    providerId?: string;
+    selectedArtifacts: Array<{ id: string; kind: string; text: string; dimension?: string; source?: string; meta?: any }>;
+    mapperArtifact?: MapperArtifact;
+    userNotes?: string[];
+  }
+}
+```
+
+UI sender: `ui/hooks/cognitive/useCognitiveMode.ts`.
+
+Backend receiver: `src/core/connection-handler.js` (routes to `workflowEngine.handleContinueCognitiveRequest(message.payload)`).
+
+### 2.2 Workflow Primitive Requests (UI → Backend)
+
+These are the “public API” inputs into the backend compiler/engine, defined in `shared/contract.ts`.
+
+#### InitializeRequest
+
+Starts a new session (or uses a provided one).
+
+Key fields:
+- `userMessage`: the prompt
+- `providers`: the batch fan-out set
+- `includeMapping`, `includeSynthesis`: feature flags for which phases to run
+- `synthesizer`, `mapper`, `refiner`, `antagonist`: role selection overrides
+- `mode?: "auto" | "understand" | "decide"`: cognitive routing hint (backend still decides actual halt behavior)
+
+#### ExtendRequest
+
+Continues an existing session.
+
+Key differences vs initialize:
+- `sessionId` is required
+- `forcedContextReset?: ProviderKey[]` can force fresh threads for specific providers
+
+#### RecomputeRequest
+
+Re-runs a historical step without advancing the main conversation.
+
+Key fields:
+- `sourceTurnId`: the AI turn whose historical outputs are the source
+- `stepType`: what to recompute (e.g. mapping/synthesis/batch)
+- `targetProvider`: which provider should do the re-run
+
+### 2.3 Backend → UI: Real-Time Message Stream
+
+The backend emits typed messages over the port (definitions in `shared/contract.ts`). The UI uses these to render streaming, progress bars, and turn finalization.
+
+Core messages:
+- `TURN_CREATED`: announces canonical IDs (`userTurnId`, `aiTurnId`) early
+- `PARTIAL_RESULT`: streaming deltas keyed by `stepId` and `providerId`
+- `WORKFLOW_STEP_UPDATE`: completion/failure marker for a step; `result.meta` may carry structured outputs
+- `WORKFLOW_PROGRESS`: aggregate progress across providers in a phase
+- `WORKFLOW_PARTIAL_COMPLETE`: workflow finished with some failures
+- `WORKFLOW_COMPLETE`: terminal marker for the workflow execution request
+- `TURN_FINALIZED`: emits the full persisted turn record (`AiTurn` with all response buckets)
+
+Two conventions that matter everywhere:
+
+1. **`stepId` is the join key** between streaming (`PARTIAL_RESULT`) and completion (`WORKFLOW_STEP_UPDATE`).
+2. **Structured outputs travel in `result.meta`** on `WORKFLOW_STEP_UPDATE` (e.g. `meta.understandOutput`, `meta.gauntletOutput`), while raw text continues to stream via `PARTIAL_RESULT`.
+
+### 2.4 Cognitive Pipeline: Artifact Halt & Continuation
+
+The cognitive pipeline introduces an extra event that is currently handled as an untyped message in the UI.
+
+#### MAPPER_ARTIFACT_READY (Backend → UI)
+
+Emitter: `src/core/execution/CognitivePipelineHandler.js` (`handleCognitiveHalt`).
+
+UI handler: `ui/hooks/chat/usePortMessageHandler.ts` (stores `mapperArtifact` + `exploreAnalysis` on the `AiTurn`).
+
+Payload shape (as emitted by backend):
+
+```ts
+{
+  type: "MAPPER_ARTIFACT_READY";
+  sessionId: string;
+  aiTurnId: string;
+  artifact: MapperArtifact;
+  analysis: ExploreAnalysis;
+}
+```
+
+This is the “choice point” contract: the UI now has a stable `MapperArtifact` plus computed `ExploreAnalysis` and can render the Artifact Showcase without waiting for a collapsed synthesis.
+
+#### CONTINUE_COGNITIVE_WORKFLOW (UI → Backend)
+
+When the user chooses a lens (Understand/Gauntlet/Refine/Antagonist), the UI sends `CONTINUE_COGNITIVE_WORKFLOW` and the backend rehydrates the stored turn and executes a new cognitive step via `workflowEngine.handleContinueCognitiveRequest`.
 
 ## Part 3: The Interaction Model
 
