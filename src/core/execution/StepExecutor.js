@@ -1189,10 +1189,41 @@ Answer the user's message directly. Use context only to disambiguate.
       throw new Error("Understand mode requires a MapperArtifact and ExploreAnalysis.");
     }
 
+    // Extract additional context for rich prompt
+    let graphTopology = payload.mappingMeta?.graphTopology || null;
+    let optionsInventory = [];
+    let narrativeSummary = "";
+
+    const mappingText = payload.mappingText || "";
+    if (mappingText) {
+        const parsed = parseUnifiedMapperOutput(mappingText);
+        if (!graphTopology) graphTopology = parsed.topology;
+        narrativeSummary = parsed.narrative;
+        
+        // Parse options inventory string into list of {label, summary} objects
+        const optionsStr = parsed.options || "";
+        if (optionsStr) {
+            const lines = optionsStr.split('\n');
+            for (const line of lines) {
+                // Match: "1. **Label**: Summary" or "- **Label**: Summary"
+                const match = line.match(/^\s*(?:\d+\.|\-|\*|•)\s*\*?\*?([^:*]+)\*?\*?:\s*(.*)$/);
+                if (match) {
+                    optionsInventory.push({
+                        label: match[1].trim().replace(/^\*\*|\*\*$/g, ''),
+                        summary: match[2].trim().replace(/\s*\[\d+(?:\s*,\s*\d+)*\]/g, '') // Strip citations
+                    });
+                }
+            }
+        }
+    }
+
     let understandPrompt = this.promptService.buildUnderstandPrompt(
       payload.originalPrompt,
       mapperArtifact,
       exploreAnalysis,
+      graphTopology,
+      optionsInventory,
+      narrativeSummary,
       payload.userNotes
     );
 

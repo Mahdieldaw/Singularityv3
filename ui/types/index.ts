@@ -158,7 +158,7 @@ export interface LaunchpadDraftSection {
   text: string;
 }
 
-export type CognitiveViewMode = 'artifact' | 'understand' | 'gauntlet' | 'refine' | 'antagonist';
+export type CognitiveViewMode = 'artifact' | 'understand' | 'gauntlet';
 
 export interface LaunchpadDraft {
   id: string;

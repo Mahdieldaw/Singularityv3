@@ -37,6 +37,7 @@ import {
   workflowProgressForTurnFamily,
 } from "../state/atoms";
 import { useRefinerOutput } from "../hooks/useRefinerOutput";
+import { useAntagonistOutput } from "../hooks/useAntagonistOutput";
 import { parseMappingResponse } from "../../shared/parsing-utils";
 
 import { SynthesisBubble } from "./SynthesisBubble";

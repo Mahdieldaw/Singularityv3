@@ -24,10 +24,12 @@ export function useModeSwitching(aiTurnId: string) {
         mode: 'understand' | 'gauntlet' | 'refine' | 'antagonist',
         options: CognitiveTransitionOptions = {},
     ) => {
-        // Change UI mode immediately to show loading if needed
-        setActiveMode(mode);
+        // Change UI mode immediately to show loading if needed for top-level views
+        if (mode === 'understand' || mode === 'gauntlet') {
+            setActiveMode(mode);
+        }
         // Trigger backend
-        await transitionToMode(aiTurnId, mode, options);
+        await transitionToMode(aiTurnId, mode as any, options);
     }, [aiTurnId, setActiveMode, transitionToMode]);
 
     return {
