@@ -34,3 +34,13 @@ yarn-error.log*
 # System Files
 .DS_Store
 Thumbs.db
+
+
+.md
+package-lock*
+.svg
+.txt
+.txt*
+.md*
+.md/*
+/.md/
