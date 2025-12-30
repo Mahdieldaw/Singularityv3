@@ -239,7 +239,6 @@ export class SessionManager {
       isComplete: true,
       sequence: 1,
       batchResponseCount: this.countResponses(result.batchOutputs),
-      synthesisResponseCount: this.countResponses(result.synthesisOutputs),
       mappingResponseCount: this.countResponses(result.mappingOutputs),
       refinerResponseCount: this.countResponses(result.refinerOutputs),
       antagonistResponseCount: this.countResponses(result.antagonistOutputs),
@@ -382,7 +381,6 @@ export class SessionManager {
       isComplete: true,
       sequence: nextSequence + 1,
       batchResponseCount: this.countResponses(result.batchOutputs),
-      synthesisResponseCount: this.countResponses(result.synthesisOutputs),
       mappingResponseCount: this.countResponses(result.mappingOutputs),
       refinerResponseCount: this.countResponses(result.refinerOutputs),
       antagonistResponseCount: this.countResponses(result.antagonistOutputs),
@@ -465,8 +463,6 @@ export class SessionManager {
     // 2) Extract Result Data (UNIFIED)
     let output;
     if (stepType === "batch") output = result?.batchOutputs?.[targetProvider];
-    else if (stepType === "synthesis")
-      output = result?.synthesisOutputs?.[targetProvider];
     else if (stepType === "mapping")
       output = result?.mappingOutputs?.[targetProvider];
     else if (stepType === "refiner")
@@ -528,9 +524,6 @@ export class SessionManager {
         // Increment specific counter
         if (stepType === "batch")
           freshTurn.batchResponseCount = (freshTurn.batchResponseCount || 0) + 1;
-        else if (stepType === "synthesis")
-          freshTurn.synthesisResponseCount =
-            (freshTurn.synthesisResponseCount || 0) + 1;
         else if (stepType === "mapping")
           freshTurn.mappingResponseCount =
             (freshTurn.mappingResponseCount || 0) + 1;
@@ -569,12 +562,6 @@ export class SessionManager {
         if (output?.meta && Object.keys(output.meta).length > 0)
           contexts[pid] = this._safeMeta(output.meta);
       });
-      Object.entries(result?.synthesisOutputs || {}).forEach(
-        ([pid, output]) => {
-          if (output?.meta && Object.keys(output.meta).length > 0)
-            contexts[pid] = this._safeMeta(output.meta);
-        },
-      );
       Object.entries(result?.mappingOutputs || {}).forEach(([pid, output]) => {
         if (output?.meta && Object.keys(output.meta).length > 0)
           contexts[pid] = this._safeMeta(output.meta);
@@ -646,32 +633,6 @@ export class SessionManager {
         status: output?.status || "completed",
         meta: this._safeMeta(output?.meta || {}),
         createdAt: now,
-        updatedAt: now,
-        completedAt: now,
-      });
-    }
-
-    // 2. Synthesis (idempotent/singleton per provider)
-    for (const [providerId, output] of Object.entries(result?.synthesisOutputs || {})) {
-      // Check if exists to preserve ID/createdAt (simulating upset logic)
-      const existing = existingResponses.find(
-        r => r.providerId === providerId && r.responseType === "synthesis" && r.responseIndex === 0
-      );
-
-      const respId = existing?.id || `pr-${sessionId}-${aiTurnId}-${providerId}-synthesis-0-${now}-${count++}`;
-      const createdAtKeep = existing?.createdAt || now;
-
-      recordsToSave.push({
-        id: respId,
-        sessionId,
-        aiTurnId,
-        providerId,
-        responseType: "synthesis",
-        responseIndex: 0,
-        text: output?.text || existing?.text || "",
-        status: output?.status || existing?.status || "completed",
-        meta: this._safeMeta(output?.meta ?? existing?.meta ?? {}),
-        createdAt: createdAtKeep,
         updatedAt: now,
         completedAt: now,
       });
@@ -1217,48 +1178,6 @@ export class SessionManager {
     }
   }
 
-
-  /**
-   * Extract "The Short Answer" section or fallback to intro paragraphs from synthesis text
-   * @param {string} text 
-   */
-  _extractContextFromSynthesis(text) {
-    if (!text) return "";
-
-    // 1. Look for "The Short Answer" delimiter
-    const shortAnswerMatch = text.match(/#+\s*The Short Answer/i);
-    if (shortAnswerMatch) {
-      const startIndex = shortAnswerMatch.index + shortAnswerMatch[0].length;
-      const remaining = text.slice(startIndex).trim();
-      // Extract until next header or formatting change
-      const nextHeaderMatch = remaining.match(/\n#+\s/);
-      let content = remaining;
-      if (nextHeaderMatch) {
-        content = remaining.slice(0, nextHeaderMatch.index).trim();
-      }
-      // CLEANUP: Remove "The Long Answer" if it leaked in
-      return content.replace(/#+\s*The Long Answer/i, "").trim();
-    }
-
-    // 2. Fallback: If text starts with header, take text between first and second header
-    if (text.trim().match(/^#+\s/)) {
-      const headers = Array.from(text.matchAll(/\n#+\s/g));
-      if (headers.length > 0) {
-        // Text starts with header (index 0 implied), find next header
-        // Let's simplify: split by headers and take the first non-empty content block
-        const parts = text.split(/\n#+\s/).map(p => p.trim()).filter(p => p.length > 0);
-        return parts[0] || "";
-      }
-    }
-
-    // 3. Fallback: Take first few paragraphs before any header
-    const firstHeaderIndex = text.search(/\n#+\s/);
-    const preHeaderText = firstHeaderIndex > -1 ? text.slice(0, firstHeaderIndex) : text;
-
-    const paragraphs = preHeaderText.split(/\n\s*\n/).filter(p => p.trim().length > 0);
-    return paragraphs.slice(0, 3).join("\n\n").trim();
-  }
-
   /**
    * Extract decision map context (consensus + divergence) from narrative section
    * @param {string} text - Narrative section only (pre-parsed)
@@ -1285,16 +1204,6 @@ export class SessionManager {
       summary += `<previous_synthesis>\n${request.understandOutput.short_answer}\n</previous_synthesis>\n\n`;
     } else if (request?.gauntletOutput?.the_answer?.statement) {
       summary += `<previous_synthesis>\n${request.gauntletOutput.the_answer.statement}\n</previous_synthesis>\n\n`;
-    } else {
-      const synthesisOutputs = result?.synthesisOutputs || {};
-      const synthProvider = Object.keys(synthesisOutputs)[0];
-      if (synthProvider && synthesisOutputs[synthProvider]?.text) {
-        const synthText = synthesisOutputs[synthProvider].text;
-        const extracted = this._extractContextFromSynthesis(synthText);
-        if (extracted) {
-          summary += `<previous_synthesis>\n${extracted}\n</previous_synthesis>\n\n`;
-        }
-      }
     }
 
     if (request?.mapperArtifact) {
@@ -1309,7 +1218,7 @@ export class SessionManager {
     console.log("[SessionManager] Built Context Summary:", {
       length: finalSummary.length,
       preview: finalSummary.slice(0, 100).replace(/\n/g, "\\n") + "...",
-      hasSynthesis: finalSummary.includes("<previous_synthesis>"),
+      hasPreviousAnswer: finalSummary.includes("<previous_synthesis>"),
       hasMapping: finalSummary.includes("<council_views>")
     });
 

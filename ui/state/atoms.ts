@@ -241,10 +241,7 @@ export const mappingProviderAtom = atomWithStorage<string | null>(
   "htos_mapping_provider",
   null,
 );
-export const synthesisProviderAtom = atomWithStorage<string | null>(
-  "htos_synthesis_provider",
-  null,
-);
+
 export const refinerProviderAtom = atomWithStorage<string | null>(
   "htos_refiner_provider",
   null,
@@ -258,8 +255,7 @@ export const antagonistProviderAtom = atomWithStorage<string | null>(
  * Provider locks - stored in chrome.storage.local for backend access
  * UI writes, backend reads. Not atomWithStorage because we need chrome.storage.local
  */
-export const providerLocksAtom = atom<{ synthesis: boolean; mapping: boolean; refiner: boolean; antagonist: boolean }>({
-  synthesis: false,
+export const providerLocksAtom = atom<{ mapping: boolean; refiner: boolean; antagonist: boolean }>({
   mapping: false,
   refiner: false,
   antagonist: false,
@@ -303,7 +299,13 @@ export const providerContextsAtom = atomWithImmer<Record<string, any>>({});
 // -----------------------------
 export const activeRecomputeStateAtom = atom<{
   aiTurnId: string;
-  stepType: "synthesis" | "mapping" | "batch" | "refiner" | "antagonist";
+  stepType:
+  | "mapping"
+  | "batch"
+  | "refiner"
+  | "antagonist"
+  | "understand"
+  | "gauntlet";
   providerId: string;
 } | null>(null);
 
@@ -461,7 +463,8 @@ export type WorkflowStage =
   | 'streaming'
   | 'complete'
   | 'error'
-  | 'synthesizing';
+  | 'complete'
+  | 'error';
 
 export interface ProviderWorkflowState {
   stage: WorkflowStage;
@@ -564,16 +567,7 @@ export const isRoundActiveAtom = atom((get) => {
  */
 export const hasAutoOpenedPaneAtom = atom<string | null>(null);
 
-/**
- * Track if we've auto-widened the left pane for synthesis this turn
- * Value is the turnId or null
- */
-export const hasAutoWidenedForSynthesisAtom = atom<string | null>(null);
 
-/**
- * Split pane ratio (left pane percentage) for programmatic control
- * Used by ChatView to sync with react-resizable-panels
- */
 
 /**
  * Selected Cognitive Mode (e.g. "auto", "understand", "decide")

@@ -13,7 +13,7 @@ export function useClipActions() {
   const setAntagonistProvider = useSetAtom(antagonistProviderAtom);
   const setAlertText = useSetAtom(alertTextAtom);
   const setTurnsMap = useSetAtom(turnsMapAtom);
-  const { runSynthesisForAiTurn, runMappingForAiTurn, runRefinerForAiTurn, runAntagonistForAiTurn } = useRoundActions();
+  const { runMappingForAiTurn, runRefinerForAiTurn, runAntagonistForAiTurn } = useRoundActions();
 
   const handleClipClick = useCallback(
     async (
@@ -99,8 +99,7 @@ export function useClipActions() {
         if (hasValidExisting) return;
 
         if (type === "synthesis") {
-          // We rely on runSynthesisForAiTurn to validate if there are enough inputs
-          await runSynthesisForAiTurn(aiTurnId, providerId);
+          setAlertText("Synthesis recompute is currently disabled.");
         } else if (type === "mapping") {
           await runMappingForAiTurn(aiTurnId, providerId);
         } else if (type === "refiner") {
@@ -116,7 +115,6 @@ export function useClipActions() {
     },
     [
       turnsMap,
-      runSynthesisForAiTurn,
       runMappingForAiTurn,
       runRefinerForAiTurn,
       setAlertText,

@@ -93,6 +93,7 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
                 {activeMode === 'understand' && aiTurn.understandOutput && (
                     <UnderstandOutputView 
                         output={aiTurn.understandOutput} 
+                        onRecompute={(options) => triggerAndSwitch('understand', options)}
                         onRefine={(options) => triggerAndSwitch('refine', options)}
                         onAntagonist={(options) => triggerAndSwitch('antagonist', options)}
                         isLoading={isTransitioning}
@@ -105,6 +106,7 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
                 {activeMode === 'gauntlet' && aiTurn.gauntletOutput && (
                     <GauntletOutputView 
                         output={aiTurn.gauntletOutput} 
+                        onRecompute={(options) => triggerAndSwitch('gauntlet', options)}
                         onRefine={(options) => triggerAndSwitch('refine', options)}
                         onAntagonist={(options) => triggerAndSwitch('antagonist', options)}
                         isLoading={isTransitioning}

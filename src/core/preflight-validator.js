@@ -71,21 +71,6 @@ export async function runPreflight(request, authStatus, availableProviders) {
             .slice(0, 3);
     }
 
-    // === Synthesizer ===
-    let synthesizer = request.synthesizer || null;
-    if (synthesizer && !isProviderAuthorized(synthesizer, authStatus)) {
-        if (locks.synthesis) {
-            // Locked but unauthorized: ephemeral fallback, don't change lock
-            const fallback = selectBestProvider('synthesis', authStatus, availableProviders);
-            warnings.push(`Synthesizer "${synthesizer}" is locked but unauthorized; using "${fallback}" for this request`);
-            synthesizer = fallback;
-        } else {
-            synthesizer = selectBestProvider('synthesis', authStatus, availableProviders);
-        }
-    } else if (!synthesizer) {
-        synthesizer = selectBestProvider('synthesis', authStatus, availableProviders);
-    }
-
     // === Mapper ===
     let mapper = request.mapper || null;
     if (mapper && !isProviderAuthorized(mapper, authStatus)) {
@@ -128,6 +113,6 @@ export async function runPreflight(request, authStatus, availableProviders) {
         refiner = selectBestProvider('refiner', authStatus, availableProviders);
     }
 
-    return { providers, synthesizer, mapper, antagonist, refiner, warnings };
+    return { providers, mapper, antagonist, refiner, warnings };
 }
 

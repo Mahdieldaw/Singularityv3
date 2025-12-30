@@ -33,6 +33,7 @@ const CheckIcon = ({ className }: { className?: string }) => (
 
 interface UnderstandOutputViewProps {
     output: UnderstandOutput;
+    onRecompute?: (options?: CognitiveTransitionOptions) => void;
     onRefine?: (options?: CognitiveTransitionOptions) => void;
     onAntagonist?: (options?: CognitiveTransitionOptions) => void;
     isLoading?: boolean;
@@ -43,6 +44,7 @@ interface UnderstandOutputViewProps {
 
 const UnderstandOutputView: React.FC<UnderstandOutputViewProps> = ({ 
     output, 
+    onRecompute,
     onRefine, 
     onAntagonist, 
     isLoading = false,
@@ -77,7 +79,7 @@ const UnderstandOutputView: React.FC<UnderstandOutputViewProps> = ({
     };
 
     if (!output.short_answer && !output.souvenir) {
-        return <div className="p-4 text-text-secondary italic">Understanding synthesis is empty.</div>;
+        return <div className="p-4 text-text-secondary italic">Understanding output is empty.</div>;
     }
 
     const refinerOutput = refinerState.output;
@@ -94,7 +96,7 @@ const UnderstandOutputView: React.FC<UnderstandOutputViewProps> = ({
                 <div className="absolute top-0 right-0 w-32 h-32 bg-accent-primary/5 rounded-full blur-3xl -translate-y-1/2 translate-x-1/3 pointer-events-none" />
 
                 <div className="flex items-center justify-between mb-4">
-                    <h2 className="text-lg font-semibold text-text-primary tracking-tight m-0">The Synthesis</h2>
+                    <h2 className="text-lg font-semibold text-text-primary tracking-tight m-0">The Understanding</h2>
                     <RefinerDot 
                         refiner={refinerOutput} 
                         isLoading={refinerState.isLoading} 
@@ -238,7 +240,7 @@ const UnderstandOutputView: React.FC<UnderstandOutputViewProps> = ({
                     >
                         <span className="font-medium text-text-primary flex items-center gap-2">
                             Deep Context
-                            <span className="text-[10px] text-text-tertiary font-mono bg-surface-highlight px-1.5 py-0.5 rounded uppercase">Full Synthesis</span>
+                            <span className="text-[10px] text-text-tertiary font-mono bg-surface-highlight px-1.5 py-0.5 rounded uppercase">Full Context</span>
                         </span>
                         {longAnswerOpen ? <ChevronDown className="text-text-tertiary" /> : <ChevronRight className="text-text-tertiary" />}
                     </button>
@@ -294,6 +296,13 @@ const UnderstandOutputView: React.FC<UnderstandOutputViewProps> = ({
                         </option>
                     ))}
                 </select>
+                <button
+                    onClick={() => onRecompute?.({ providerId: nextProviderId, isRecompute: true, sourceTurnId: aiTurn.id })}
+                    disabled={isLoading}
+                    className="px-3 py-1.5 text-xs rounded-md border border-border-subtle bg-surface-base text-text-secondary hover:text-text-primary hover:bg-surface-highlight/50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                    Re-run
+                </button>
             </div>
 
             <div className="flex gap-3 mt-2">

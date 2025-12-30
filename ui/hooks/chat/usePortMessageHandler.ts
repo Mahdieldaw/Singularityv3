@@ -12,7 +12,7 @@ import {
   selectedModelsAtom,
   mappingEnabledAtom,
   mappingProviderAtom,
-  synthesisProviderAtom,
+
   refinerProviderAtom,
   antagonistProviderAtom,
   lastActivityAtAtom,
@@ -22,7 +22,7 @@ import {
   activeSplitPanelAtom,
   isSplitOpenAtom,
   hasAutoOpenedPaneAtom,
-  hasAutoWidenedForSynthesisAtom,
+
 } from "../../state/atoms";
 import { activeRecomputeStateAtom, lastStreamingProviderAtom } from "../../state/atoms";
 import { StreamingBuffer } from "../../utils/streamingBuffer";
@@ -41,12 +41,11 @@ const PORT_DEBUG_UI = false;
  * CRITICAL: Step type detection must match backend stepId patterns
  * Backend generates: 'batch-<timestamp>', 'synthesis-<provider>-<timestamp>', 'mapping-<provider>-<timestamp>'
  */
-function getStepType(stepId: string): "batch" | "synthesis" | "mapping" | "refiner" | "antagonist" | "understand" | "gauntlet" | null {
+function getStepType(stepId: string): "batch" | "mapping" | "refiner" | "antagonist" | "understand" | "gauntlet" | null {
   if (!stepId || typeof stepId !== "string") return null;
 
   // Match backend patterns exactly
-  if (stepId.startsWith("synthesis-") || stepId.includes("-synthesis-"))
-    return "synthesis";
+
   if (stepId.startsWith("mapping-") || stepId.includes("-mapping-"))
     return "mapping";
   if (stepId.startsWith("refiner-") || stepId.includes("-refiner-"))
@@ -68,7 +67,7 @@ function getStepType(stepId: string): "batch" | "synthesis" | "mapping" | "refin
  */
 function extractProviderFromStepId(
   stepId: string,
-  stepType: "synthesis" | "mapping" | "refiner" | "antagonist" | "understand" | "gauntlet",
+  stepType: "mapping" | "refiner" | "antagonist" | "understand" | "gauntlet",
 ): string | null {
   // Support provider IDs with hyphens/dots/etc., assuming last segment is numeric timestamp
   const re = new RegExp(`^${stepType}-(.+)-(\\d+)$`);
@@ -89,7 +88,7 @@ export function usePortMessageHandler() {
   const selectedModels = useAtomValue(selectedModelsAtom);
   const mappingEnabled = useAtomValue(mappingEnabledAtom);
   const mappingProvider = useAtomValue(mappingProviderAtom);
-  const synthesisProvider = useAtomValue(synthesisProviderAtom);
+
   const refinerProvider = useAtomValue(refinerProviderAtom);
   const antagonistProvider = useAtomValue(antagonistProviderAtom);
   const setLastActivityAt = useSetAtom(lastActivityAtAtom);
@@ -103,8 +102,7 @@ export function usePortMessageHandler() {
   const setActiveSplitPanel = useSetAtom(activeSplitPanelAtom);
   const hasAutoOpenedPane = useAtomValue(hasAutoOpenedPaneAtom);
   const setHasAutoOpenedPane = useSetAtom(hasAutoOpenedPaneAtom);
-  const hasAutoWidened = useAtomValue(hasAutoWidenedForSynthesisAtom);
-  const setHasAutoWidened = useSetAtom(hasAutoWidenedForSynthesisAtom);
+
   // Note: We rely on Jotai's per-atom update serialization; no manual pending cache
 
   // Refs to avoid stale closure values during streaming updates
@@ -117,7 +115,7 @@ export function usePortMessageHandler() {
   const activeAiTurnIdRef = useRef<string | null>(null);
   const activeRecomputeRef = useRef<{
     aiTurnId: string;
-    stepType: "synthesis" | "mapping" | "batch" | "refiner" | "antagonist" | "understand" | "gauntlet";
+    stepType: "mapping" | "batch" | "refiner" | "antagonist" | "understand" | "gauntlet";
     providerId: string;
   } | null>(null);
   // Track whether we've already logged the first PARTIAL_RESULT for a given
@@ -167,7 +165,7 @@ export function usePortMessageHandler() {
             aiTurnId,
             sessionId: msgSessionId,
             providers: msgProviders,
-            synthesisProvider: msgSynthesisProvider,
+
             mappingProvider: msgMappingProvider,
             refinerProvider: msgRefinerProvider,
             antagonistProvider: msgAntagonistProvider
@@ -186,7 +184,7 @@ export function usePortMessageHandler() {
             ? msgProviders
             : LLM_PROVIDERS_CONFIG.filter((p) => selectedModels[p.id]).map((p) => p.id as ProviderKey);
 
-          const effectiveSynthesisProvider = msgSynthesisProvider || synthesisProvider;
+
           const effectiveMappingProvider = msgMappingProvider || mappingProvider;
           const effectiveRefinerProvider = msgRefinerProvider || refinerProvider;
           const effectiveAntagonistProvider = msgAntagonistProvider || antagonistProvider;
@@ -219,18 +217,15 @@ export function usePortMessageHandler() {
               aiTurnId,
               ensuredUser,
               activeProviders,
-              !!mappingEnabled && !!effectiveMappingProvider, // 1. Mapping
-              !!effectiveSynthesisProvider,                  // 2. Synthesis
-              !!effectiveRefinerProvider,                    // 3. Refiner
+              !!mappingEnabled && !!effectiveMappingProvider,
+              !!effectiveRefinerProvider,
               effectiveMappingProvider || undefined,
-              effectiveSynthesisProvider || undefined,
               effectiveRefinerProvider || undefined,
-              effectiveAntagonistProvider || undefined,       // 4. Antagonist
+              effectiveAntagonistProvider || undefined,
               Date.now(),
               ensuredUser.id,
               {
                 mapping: !!mappingEnabled && !!effectiveMappingProvider,
-                synthesis: !!effectiveSynthesisProvider,
                 refiner: !!effectiveRefinerProvider,
                 antagonist: !!effectiveAntagonistProvider
               },
@@ -322,10 +317,7 @@ export function usePortMessageHandler() {
                       ...normalizedIncoming,
                     } as any;
                   })(),
-                  synthesisResponses: {
-                    ...(existingAi.synthesisResponses || {}),
-                    ...((turn.ai as AiTurn)?.synthesisResponses || {}),
-                  },
+
                   mappingResponses: {
                     ...(existingAi.mappingResponses || {}),
                     ...((turn.ai as AiTurn)?.mappingResponses || {}),
@@ -370,7 +362,7 @@ export function usePortMessageHandler() {
 
           // Reset streaming UX state flags on finalization
           setHasAutoOpenedPane(null);
-          setHasAutoWidened(null);
+
 
           break;
         }
@@ -393,7 +385,7 @@ export function usePortMessageHandler() {
           let pid: string | null | undefined = providerId;
           if (
             (!pid || typeof pid !== "string") &&
-            (stepType === "synthesis" || stepType === "mapping")
+            (stepType === "mapping")
           ) {
             pid = extractProviderFromStepId(stepId, stepType);
           }
@@ -564,22 +556,12 @@ export function usePortMessageHandler() {
                     updatedAt: Date.now(),
                     meta: {
                       ...(data?.meta || {}),
-                      isPrimary: normalizedId === synthesisProvider
                     },
                     artifacts: data?.artifacts || [], // ✅ Preserve artifacts
                   };
 
-                  if (stepType === "synthesis") {
-                    aiTurn.synthesisResponses = {
-                      ...(aiTurn.synthesisResponses || {}),
-                      [normalizedId]: updateResponseList(
-                        aiTurn.synthesisResponses?.[normalizedId],
-                        baseEntry,
-                      ),
-                    };
-                    aiTurn.synthesisVersion =
-                      (aiTurn.synthesisVersion ?? 0) + 1;
-                  } else if (stepType === "mapping") {
+
+                  if (stepType === "mapping") {
                     aiTurn.mappingResponses = {
                       ...(aiTurn.mappingResponses || {}),
                       [normalizedId]: updateResponseList(
@@ -682,7 +664,7 @@ export function usePortMessageHandler() {
                 if (
                   (!providerId || typeof providerId !== "string") &&
                   (!providerId || typeof providerId !== "string") &&
-                  (stepType === "synthesis" || stepType === "mapping" || stepType === "refiner" || stepType === "antagonist")
+                  (stepType === "mapping" || stepType === "refiner" || stepType === "antagonist")
                 ) {
                   providerId = extractProviderFromStepId(stepId, stepType);
                 }
@@ -703,39 +685,8 @@ export function usePortMessageHandler() {
                       typeof error === "string" ? error : result?.text || "";
                     const now = Date.now();
 
-                    if (stepType === "synthesis") {
-                      const arr = Array.isArray(
-                        aiTurn.synthesisResponses?.[providerId!],
-                      )
-                        ? [
-                          ...(aiTurn.synthesisResponses![
-                            providerId!
-                          ] as any[]),
-                        ]
-                        : [];
-                      if (arr.length > 0) {
-                        const latest = arr[arr.length - 1] as any;
-                        arr[arr.length - 1] = {
-                          ...latest,
-                          status: "error",
-                          text: errText || (latest?.text ?? ""),
-                          updatedAt: now,
-                        };
-                      } else {
-                        arr.push({
-                          providerId: providerId!,
-                          text: errText || "",
-                          status: "error",
-                          createdAt: now,
-                          updatedAt: now,
-                        } as any);
-                      }
-                      aiTurn.synthesisResponses = {
-                        ...(aiTurn.synthesisResponses || {}),
-                        [providerId!]: arr as any,
-                      };
-                      aiTurn.synthesisVersion = (aiTurn.synthesisVersion ?? 0) + 1;
-                    } else if (stepType === "mapping") {
+
+                    if (stepType === "mapping") {
                       const arr = Array.isArray(
                         aiTurn.mappingResponses?.[providerId!],
                       )
@@ -922,14 +873,7 @@ export function usePortMessageHandler() {
                 }
               }
 
-              // AUTO-WIDEN FOR SYNTHESIS: When synthesis phase starts
-              if (
-                activeId &&
-                phase === 'synthesis' &&
-                hasAutoWidened !== activeId
-              ) {
-                setHasAutoWidened(activeId);
-              }
+
             }
           } catch (e) {
             console.warn('[Port] Failed to process WORKFLOW_PROGRESS', e);
@@ -969,7 +913,7 @@ export function usePortMessageHandler() {
 
           // Reset streaming UX state for next round
           setHasAutoOpenedPane(null);
-          setHasAutoWidened(null);
+          setHasAutoOpenedPane(null);
           // Do NOT clear activeAiTurnId here; wait for TURN_FINALIZED
           break;
         }
@@ -1006,15 +950,7 @@ export function usePortMessageHandler() {
       selectedModels,
       mappingEnabled,
       mappingProvider,
-      synthesisProvider,
-      refinerProvider,
-      // Auto-open split pane dependencies
-      isSplitOpen,
-      setActiveSplitPanel,
-      hasAutoOpenedPane,
-      setHasAutoOpenedPane,
-      hasAutoWidened,
-      setHasAutoWidened,
+
     ],
   );
 

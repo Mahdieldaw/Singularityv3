@@ -2,7 +2,6 @@
 import {
   aggregateBatchOutputs,
   findLatestMappingOutput,
-  findLatestSynthesisOutput,
   extractUserMessage
 } from './context-utils.js';
 
@@ -160,8 +159,6 @@ export class ContextResolver {
       responses,
       request.preferredMappingProvider,
     );
-    // Also resolve latest synthesis output for mapping recompute
-    const latestSynthesisOutput = findLatestSynthesisOutput(responses);
 
     const providerContextsAtSourceTurn = sourceTurn.providerContexts || {};
     const sourceUserMessage = await this._getUserMessageForTurn(sourceTurn);
@@ -172,7 +169,6 @@ export class ContextResolver {
       sourceTurnId,
       frozenBatchOutputs,
       latestMappingOutput,
-      latestSynthesisOutput, // ← NEW: Include historical synthesis for mapping
       providerContextsAtSourceTurn,
       stepType,
       targetProvider,
@@ -239,4 +235,3 @@ export class ContextResolver {
     return this.sessionManager.adapter.getResponsesByTurnId(aiTurnId);
   }
 }
-

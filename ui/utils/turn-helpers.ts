@@ -28,15 +28,13 @@ export function createOptimisticAiTurn(
   userTurn: UserTurn,
   activeProviders: ProviderKey[],
   shouldUseMapping: boolean,
-  shouldUseSynthesis: boolean,
   shouldUseRefiner: boolean,
   mappingProvider?: string,
-  synthesisProvider?: string,
   refinerProvider?: string,
   antagonistProvider?: string,
   timestamp?: number,
   explicitUserTurnId?: string,
-  requestedFeatures?: { synthesis: boolean; mapping: boolean; refiner: boolean; antagonist: boolean },
+  requestedFeatures?: { mapping: boolean; refiner: boolean; antagonist: boolean },
 ): AiTurn {
   const now = timestamp || Date.now();
 
@@ -56,23 +54,7 @@ export function createOptimisticAiTurn(
     ];
   });
 
-  // Initialize synthesis responses if enabled
-  const synthesisResponses: Record<string, ProviderResponse[]> = {};
-  if (shouldUseSynthesis && synthesisProvider) {
-    synthesisResponses[synthesisProvider] = [
-      {
-        providerId: synthesisProvider as ProviderKey,
-        text: "",
-        status: PRIMARY_STREAMING_PROVIDER_IDS.includes(
-          String(synthesisProvider),
-        )
-          ? "streaming"
-          : "pending",
-        createdAt: now,
-        updatedAt: now,
-      },
-    ];
-  }
+
 
   // Initialize mapping responses if enabled
   const mappingResponses: Record<string, ProviderResponse[]> = {};
@@ -123,7 +105,6 @@ export function createOptimisticAiTurn(
     threadId: "default-thread",
     userTurnId: effectiveUserTurnId,
     batchResponses: pendingBatch,
-    synthesisResponses,
     mappingResponses,
     refinerResponses,
     antagonistResponses,
@@ -132,12 +113,10 @@ export function createOptimisticAiTurn(
     meta: {
       isOptimistic: true,
       expectedProviders: activeProviders, // ✅ STORE expected providers
-      synthesizer: synthesisProvider,
       mapper: mappingProvider,
       refiner: refinerProvider,
       antagonist: antagonistProvider,
       ...(requestedFeatures ? { requestedFeatures } : {}),
-      ...(synthesisProvider ? { synthesizer: synthesisProvider } : {}),
       ...(mappingProvider ? { mapper: mappingProvider } : {}),
       ...(refinerProvider ? { refiner: refinerProvider } : {}),
       ...(antagonistProvider ? { antagonist: antagonistProvider } : {}),
@@ -152,11 +131,11 @@ export function applyStreamingUpdates(
     providerId: string;
     text: string;
     status: string;
-    responseType: "batch" | "synthesis" | "mapping" | "refiner" | "antagonist" | "understand" | "gauntlet";
+    responseType: "batch" | "mapping" | "refiner" | "antagonist" | "understand" | "gauntlet";
   }>,
 ) {
   let batchChanged = false;
-  let synthesisChanged = false;
+
   let mappingChanged = false;
   let refinerChanged = false;
   let antagonistChanged = false;
@@ -198,31 +177,7 @@ export function applyStreamingUpdates(
       }
 
       aiTurn.batchResponses[providerId] = arr;
-    } else if (responseType === "synthesis") {
-      synthesisChanged = true;
-      if (!aiTurn.synthesisResponses) aiTurn.synthesisResponses = {};
-      const arr = normalizeResponseArray(aiTurn.synthesisResponses[providerId]);
 
-      const latest = arr.length > 0 ? arr[arr.length - 1] : undefined;
-      const isLatestTerminal = latest && (latest.status === "completed" || latest.status === "error");
-
-      if (latest && !isLatestTerminal) {
-        arr[arr.length - 1] = {
-          ...latest,
-          text: (latest.text || "") + delta,
-          status: status as any,
-          updatedAt: Date.now(),
-        };
-      } else {
-        arr.push({
-          providerId: providerId as ProviderKey,
-          text: delta,
-          status: status as any,
-          createdAt: Date.now(),
-        });
-      }
-
-      aiTurn.synthesisResponses[providerId] = arr;
     } else if (responseType === "mapping") {
       mappingChanged = true;
       if (!aiTurn.mappingResponses) aiTurn.mappingResponses = {};
@@ -349,7 +304,7 @@ export function applyStreamingUpdates(
 
   // ✅ Bump versions only for changed types
   if (batchChanged) aiTurn.batchVersion = (aiTurn.batchVersion ?? 0) + 1;
-  if (synthesisChanged) aiTurn.synthesisVersion = (aiTurn.synthesisVersion ?? 0) + 1;
+
   if (mappingChanged) aiTurn.mappingVersion = (aiTurn.mappingVersion ?? 0) + 1;
   if (refinerChanged) aiTurn.refinerVersion = (aiTurn.refinerVersion ?? 0) + 1;
   if (antagonistChanged) aiTurn.antagonistVersion = (aiTurn.antagonistVersion ?? 0) + 1;
@@ -406,8 +361,8 @@ export function normalizeBackendRoundsToTurns(
         batchResponses[providerId] = arr;
       });
 
-      // Normalize synthesis/mapping responses to arrays
-      const normalizeSynthMap = (
+      // Normalize mapping/other responses to arrays
+      const normalizeResponseMap = (
         raw: any
       ): Record<string, ProviderResponse[]> => {
         if (!raw) return {};
@@ -430,12 +385,11 @@ export function normalizeBackendRoundsToTurns(
         threadId: "default-thread",
         createdAt: round.completedAt || round.createdAt || Date.now(),
         batchResponses,
-        synthesisResponses: normalizeSynthMap(round.synthesisResponses),
-        mappingResponses: normalizeSynthMap(round.mappingResponses),
-        refinerResponses: normalizeSynthMap(round.refinerResponses),
-        antagonistResponses: normalizeSynthMap(round.antagonistResponses),
-        understandResponses: normalizeSynthMap(round.understandResponses),
-        gauntletResponses: normalizeSynthMap(round.gauntletResponses),
+        mappingResponses: normalizeResponseMap(round.mappingResponses),
+        refinerResponses: normalizeResponseMap(round.refinerResponses),
+        antagonistResponses: normalizeResponseMap(round.antagonistResponses),
+        understandResponses: normalizeResponseMap(round.understandResponses),
+        gauntletResponses: normalizeResponseMap(round.gauntletResponses),
         meta: round.meta || {},
       };
       normalized.push(aiTurn);

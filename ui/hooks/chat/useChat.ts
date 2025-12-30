@@ -11,7 +11,6 @@ import {
   selectedModelsAtom,
   mappingEnabledAtom,
   mappingProviderAtom,
-  synthesisProviderAtom,
   refinerProviderAtom,
   antagonistProviderAtom,
   powerUserModeAtom,
@@ -55,7 +54,6 @@ export function useChat() {
   const selectedModels = useAtomValue(selectedModelsAtom);
   const mappingEnabled = useAtomValue(mappingEnabledAtom);
   const mappingProvider = useAtomValue(mappingProviderAtom);
-  const synthesisProvider = useAtomValue(synthesisProviderAtom);
   const powerUserMode = useAtomValue(powerUserModeAtom);
   const thinkOnChatGPT = useAtomValue(thinkOnChatGPTAtom);
   const currentSessionId = useAtomValue(currentSessionIdAtom);
@@ -139,15 +137,10 @@ export function useChat() {
       // No pending cache: rely on Jotai atom serialization across updaters
 
       try {
-        const shouldUseSynthesis = !!synthesisProvider;
-
-        // Simplify effective providers to respect explicit "None" (null) from atoms
-        const effectiveMappingProvider = mappingProvider;
-        // Uniform behavior: allow Map to run even if its provider is not in the witness selection
-        const shouldUseMapping = !!(
-          mappingEnabled &&
-          effectiveMappingProvider
-        );
+        const effectiveMappingProvider =
+          mappingProvider ||
+          (activeProviders.length > 0 ? (activeProviders[0] as any) : null);
+        const shouldUseMapping = true;
 
         const effectiveRefinerProvider = refinerProvider;
         const effectiveAntagonistProvider = antagonistProvider;
@@ -198,20 +191,16 @@ export function useChat() {
             userMessage: finalUserMessage,
             providers: activeProviders,
             includeMapping: shouldUseMapping,
-            includeSynthesis: shouldUseSynthesis,
-            synthesizer: shouldUseSynthesis
-              ? (synthesisProvider as ProviderKey)
-              : undefined,
             mapper: shouldUseMapping
               ? (effectiveMappingProvider as ProviderKey)
               : undefined,
-            refiner: shouldUseSynthesis && effectiveRefinerProvider // Only run refiner if synthesis acts (it audits synthesis)
+            refiner: effectiveRefinerProvider
               ? (effectiveRefinerProvider as ProviderKey)
               : undefined,
             antagonist: effectiveAntagonistProvider
               ? (effectiveAntagonistProvider as ProviderKey)
               : undefined,
-            includeRefiner: !!(shouldUseSynthesis && effectiveRefinerProvider),
+            includeRefiner: !!(effectiveRefinerProvider),
             includeAntagonist: !!(effectiveAntagonistProvider),
             useThinking: computeThinkFlag({
               modeThinkButtonOn: thinkOnChatGPT,
@@ -227,20 +216,16 @@ export function useChat() {
             userMessage: finalUserMessage,
             providers: activeProviders,
             includeMapping: shouldUseMapping,
-            includeSynthesis: shouldUseSynthesis,
-            synthesizer: shouldUseSynthesis
-              ? (synthesisProvider as ProviderKey)
-              : undefined,
             mapper: shouldUseMapping
               ? (effectiveMappingProvider as ProviderKey)
               : undefined,
-            refiner: shouldUseSynthesis && effectiveRefinerProvider
+            refiner: effectiveRefinerProvider
               ? (effectiveRefinerProvider as ProviderKey)
               : undefined,
             antagonist: effectiveAntagonistProvider
               ? (effectiveAntagonistProvider as ProviderKey)
               : undefined,
-            includeRefiner: !!(shouldUseSynthesis && effectiveRefinerProvider),
+            includeRefiner: !!(effectiveRefinerProvider),
             includeAntagonist: !!(effectiveAntagonistProvider),
             useThinking: computeThinkFlag({
               modeThinkButtonOn: thinkOnChatGPT,
@@ -270,7 +255,6 @@ export function useChat() {
       setCurrentSessionId,
       setIsLoading,
       setActiveAiTurnId,
-      synthesisProvider,
       mappingEnabled,
       mappingProvider,
       refinerProvider,
@@ -369,8 +353,8 @@ export function useChat() {
               },
             );
 
-            // Normalize synthesis/mapping responses to arrays
-            const normalizeSynthMap = (
+            // Normalize mapping/other responses to arrays
+            const normalizeResponseMap = (
               raw: any,
             ): Record<string, ProviderResponse[]> => {
               if (!raw) return {};
@@ -393,12 +377,12 @@ export function useChat() {
               threadId: "default-thread",
               createdAt: round.completedAt || round.createdAt || Date.now(),
               batchResponses,
-              synthesisResponses: normalizeSynthMap(round.synthesisResponses),
-              mappingResponses: normalizeSynthMap(round.mappingResponses),
-              refinerResponses: normalizeSynthMap(round.refinerResponses),
-              antagonistResponses: normalizeSynthMap(round.antagonistResponses),
-              understandResponses: normalizeSynthMap(round.understandResponses),
-              gauntletResponses: normalizeSynthMap(round.gauntletResponses),
+
+              mappingResponses: normalizeResponseMap(round.mappingResponses),
+              refinerResponses: normalizeResponseMap(round.refinerResponses),
+              antagonistResponses: normalizeResponseMap(round.antagonistResponses),
+              understandResponses: normalizeResponseMap(round.understandResponses),
+              gauntletResponses: normalizeResponseMap(round.gauntletResponses),
               // Cognitive pipeline structured outputs
               mapperArtifact: round.mapperArtifact || undefined,
               exploreAnalysis: round.exploreAnalysis || undefined,
@@ -516,7 +500,7 @@ export function useChat() {
         const lastTurnId = turnIds[turnIds.length - 1];
 
         let userPrompt = "";
-        let synthesisText = "";
+
         let mappingText = "";
         let batchText = "";
 
@@ -527,10 +511,7 @@ export function useChat() {
             const userTurn = turnsMap.get(aiTurn.userTurnId);
             userPrompt = userTurn?.type === "user" ? userTurn.text : "";
 
-            synthesisText = Object.values(aiTurn.synthesisResponses || {})
-              .flat()
-              .map((r) => r.text)
-              .join("\n\n");
+
 
             mappingText = Object.values(aiTurn.mappingResponses || {})
               .flat()
@@ -549,7 +530,7 @@ export function useChat() {
 
         const context = {
           userPrompt,
-          synthesisText,
+
           mappingText,
           batchText,
           sessionId: currentSessionId || null,

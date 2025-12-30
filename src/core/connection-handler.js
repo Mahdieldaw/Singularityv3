@@ -111,7 +111,6 @@ export class ConnectionHandler {
       const resps = await adapter.getResponsesByTurnId(aiTurnId);
       const buckets = {
         batchResponses: {},
-        synthesisResponses: {},
         mappingResponses: {},
         refinerResponses: {},
         antagonistResponses: {},
@@ -131,8 +130,6 @@ export class ConnectionHandler {
         };
         if (r.responseType === "batch") {
           (buckets.batchResponses[r.providerId] ||= []).push(entry);
-        } else if (r.responseType === "synthesis") {
-          (buckets.synthesisResponses[r.providerId] ||= []).push(entry);
         } else if (r.responseType === "mapping") {
           (buckets.mappingResponses[r.providerId] ||= []).push(entry);
         } else if (r.responseType === "refiner") {
@@ -155,7 +152,6 @@ export class ConnectionHandler {
       // Require at least some responses to finalize
       const hasAny =
         Object.keys(buckets.batchResponses).length > 0 ||
-        Object.keys(buckets.synthesisResponses).length > 0 ||
         Object.keys(buckets.mappingResponses).length > 0 ||
         Object.keys(buckets.refinerResponses).length > 0 ||
         Object.keys(buckets.antagonistResponses).length > 0 ||
@@ -192,7 +188,6 @@ export class ConnectionHandler {
             threadId: aiTurn.threadId || "default-thread",
             createdAt: aiTurn.createdAt || Date.now(),
             batchResponses: buckets.batchResponses,
-            synthesisResponses: buckets.synthesisResponses,
             mappingResponses: buckets.mappingResponses,
             refinerResponses: buckets.refinerResponses,
             antagonistResponses: buckets.antagonistResponses,
@@ -394,6 +389,26 @@ export class ConnectionHandler {
         `[ConnectionHandler] Processing ${executeRequest.type} primitive`,
       );
 
+      if (executeRequest.type === "recompute") {
+        const stepType = executeRequest.stepType;
+        if (["understand", "gauntlet", "refiner", "antagonist"].includes(stepType)) {
+          const mode =
+            stepType === "refiner"
+              ? "refine"
+              : stepType;
+          await this.workflowEngine.handleContinueCognitiveRequest({
+            sessionId: executeRequest.sessionId,
+            aiTurnId: executeRequest.sourceTurnId,
+            mode,
+            providerId: executeRequest.targetProvider,
+            selectedArtifacts: [],
+            isRecompute: true,
+            sourceTurnId: executeRequest.sourceTurnId,
+          });
+          return;
+        }
+      }
+
       // Step 1: Resolve context
       try {
         resolvedContext =
@@ -428,35 +443,6 @@ export class ConnectionHandler {
       const hasBatch =
         Array.isArray(executeRequest?.providers) &&
         executeRequest.providers.length > 0;
-      const hasSynthesis = !!(
-        executeRequest?.synthesis?.enabled &&
-        executeRequest.synthesis.providers?.length > 0
-      );
-      const hasMapping = !!(
-        executeRequest?.mapping?.enabled &&
-        executeRequest.mapping.providers?.length > 0
-      );
-
-      if (!hasBatch && (hasSynthesis || hasMapping) && !userTurnId) {
-        console.error(
-          "[ConnectionHandler] Missing userTurnId in historical-only request",
-        );
-        this.port.postMessage({
-          type: "WORKFLOW_STEP_UPDATE",
-          sessionId: executeRequest?.sessionId || "unknown",
-          stepId: "validate-user-turn",
-          status: "failed",
-          error: "Missing userTurnId for historical run",
-          // Attach recompute metadata when applicable
-          isRecompute: executeRequest?.type === "recompute",
-          sourceTurnId: executeRequest?.sourceTurnId,
-        });
-        this.port.postMessage({
-          type: "WORKFLOW_COMPLETE",
-          sessionId: executeRequest?.sessionId || "unknown",
-        });
-        return;
-      }
 
       // Generate session ID if needed
       if (!executeRequest?.sessionId || executeRequest.sessionId === "") {
@@ -495,7 +481,6 @@ export class ConnectionHandler {
             aiTurnId,
             // ✅ Include actual providers being used so UI doesn't guess from stale state
             providers: executeRequest.providers || [],
-            synthesisProvider: executeRequest.synthesizer || null,
             mappingProvider: executeRequest.mapper || null,
           });
         } catch (_) { }
@@ -595,7 +580,6 @@ export class ConnectionHandler {
     const result = await runPreflight(
       {
         providers: executeRequest.providers,
-        synthesizer: executeRequest.synthesizer,
         mapper: executeRequest.mapper,
         antagonist: executeRequest.antagonist,
         refiner: executeRequest.refiner,
@@ -606,7 +590,6 @@ export class ConnectionHandler {
 
     // Apply results
     executeRequest.providers = result.providers;
-    executeRequest.synthesizer = result.synthesizer;
     executeRequest.mapper = result.mapper;
     executeRequest.antagonist = result.antagonist;
     executeRequest.refiner = result.refiner;
@@ -623,7 +606,6 @@ export class ConnectionHandler {
     // ONLY fail if zero providers available
     const hasAnyProvider =
       result.providers.length > 0 ||
-      result.synthesizer !== null ||
       result.mapper !== null ||
       result.antagonist !== null ||
       result.refiner !== null;
@@ -631,7 +613,6 @@ export class ConnectionHandler {
     if (!hasAnyProvider) {
       const attempted = [
         ...(executeRequest.providers || []),
-        executeRequest.synthesizer,
         executeRequest.mapper,
         executeRequest.antagonist,
         executeRequest.refiner,

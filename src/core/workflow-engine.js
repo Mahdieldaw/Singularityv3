@@ -148,11 +148,6 @@ export class WorkflowEngine {
     this._providerKeys = {
       prompt: null, 
       mapping: 'mappingProvider',
-      synthesis: 'synthesisProvider',
-      refiner: 'refinerProvider',
-      antagonist: 'antagonistProvider',
-      understand: 'understandProvider',
-      gauntlet: 'gauntletProvider',
     };
   }
 
@@ -466,7 +461,6 @@ export class WorkflowEngine {
   async _persistAndFinalize(request, context, steps, stepResults, resolvedContext) {
       const result = {
         batchOutputs: {},
-        synthesisOutputs: {}, // Kept for schema compatibility, though empty
         mappingOutputs: {},
         refinerOutputs: {}, // Empty in foundation phase
         antagonistOutputs: {}, // Empty in foundation phase

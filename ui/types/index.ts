@@ -51,9 +51,8 @@ export type {
 /** The current high-level step of the UI, controlling what major controls are shown. */
 export type AppStep =
   | "initial"
-  | "awaitingSynthesis"
-  | "synthesis"
-  | "synthesisDone";
+  | "cognitive"
+  | "complete";
 
 /** The UI's finite state for core user interactions. */
 export type UiPhase = "idle" | "streaming" | "awaiting_action";
@@ -93,7 +92,6 @@ export interface AiTurn extends Omit<ContractAiTurn, "type"> {
   type: "ai";
   // UI-only fields for efficient dependency tracking in React hooks
   batchVersion?: number;
-  synthesisVersion?: number;
   mappingVersion?: number;
   refinerVersion?: number;
   antagonistVersion?: number;

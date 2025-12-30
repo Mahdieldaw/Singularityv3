@@ -136,47 +136,6 @@ export function findLatestMappingOutput(providerResponses = [], preferredProvide
 }
 
 /**
- * Find the latest valid synthesis output among provider responses for a turn.
- * @param {Array} providerResponses - List of response objects
- * @returns {Object|null} The synthesis output or null
- */
-export function findLatestSynthesisOutput(providerResponses = []) {
-    try {
-        if (!providerResponses || providerResponses.length === 0) {
-            return null;
-        }
-
-        const synthesisResponses = providerResponses.filter(
-            (r) =>
-                r &&
-                r.responseType === "synthesis" &&
-                r.text &&
-                String(r.text).trim().length > 0,
-        );
-
-        if (synthesisResponses.length === 0) {
-            return null;
-        }
-
-        // Sort by most recent update
-        synthesisResponses.sort(
-            (a, b) =>
-                (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0),
-        );
-
-        const latest = synthesisResponses[0];
-        return {
-            providerId: latest.providerId,
-            text: latest.text,
-            meta: latest.meta || {},
-        };
-    } catch (e) {
-        console.warn("[ContextUtils] findLatestSynthesisOutput failed:", e);
-        return null;
-    }
-}
-
-/**
  * Extract text content from a user turn object.
  * @param {Object} userTurn - The user turn object
  * @returns {string} The text content

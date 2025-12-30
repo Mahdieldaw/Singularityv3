@@ -6,8 +6,29 @@ import { getProviderName } from "./provider-helpers";
 // MARKDOWN FORMATTING UTILITIES
 // ============================================================================
 
-export function formatSynthesisForMd(text: string, providerName: string): string {
-    return `## Singularity Synthesis (via ${providerName})\n\n${text}\n\n`;
+export function formatAnalysisContextForMd(analysis: any, providerName: string = "Unknown"): string {
+    if (!analysis) return "";
+    let md = "";
+
+    // Understand Logic
+    if (analysis.short_answer) {
+        md += `## Singularity Analysis (via ${providerName})\n\n`;
+        md += `### The Short Answer\n\n${analysis.short_answer}\n\n`;
+    }
+    if (analysis.long_answer) {
+        md += `### The Long Answer\n\n${analysis.long_answer}\n\n`;
+    }
+
+    // Gauntlet Logic
+    if (analysis.the_answer?.statement) {
+        md += `## Singularity Verdict (via ${providerName})\n\n`;
+        md += `> ${analysis.the_answer.statement}\n\n`;
+        if (analysis.the_answer.reasoning) {
+            md += `**Reasoning:** ${analysis.the_answer.reasoning}\n\n`;
+        }
+    }
+
+    return md;
 }
 
 export function formatDecisionMapForMd(
@@ -55,8 +76,8 @@ export function formatProviderResponseForMd(response: ProviderResponse, provider
 export function formatTurnForMd(
     _turnid: string,
     userPrompt: string | null,
-    synthesisText: string | null,
-    synthesisProviderId: string | undefined,
+    analysisOutput: any | null,
+    analysisProviderId: string | undefined,
     decisionMap: { narrative?: string; options?: string | null; topology?: GraphTopology | null } | null,
     batchResponses: Record<string, ProviderResponse>,
     includePrompt: boolean = true
@@ -68,12 +89,12 @@ export function formatTurnForMd(
         md += `## User\n\n${userPrompt}\n\n`;
     }
 
-    // 2. Synthesis
-    if (synthesisText) {
-        const providerName = synthesisProviderId
-            ? getProviderName(synthesisProviderId)
+    // 2. Analysis / Verdict
+    if (analysisOutput) {
+        const providerName = analysisProviderId
+            ? getProviderName(analysisProviderId)
             : "Unknown";
-        md += formatSynthesisForMd(synthesisText, providerName);
+        md += formatAnalysisContextForMd(analysisOutput, providerName);
     }
 
     // 3. Decision Map
@@ -135,6 +156,7 @@ export function formatSessionForMarkdown(fullSession: { title: string, turns: Tu
     // Actually formatTurnForMd seems to be designed to render a "Round".
 
     let lastUserTurn: UserTurn | null = null;
+    let decisionMap: { narrative?: string; options?: string | null; topology?: GraphTopology | null } | null = null;
 
     fullSession.turns.forEach(turn => {
         if (isUserTurn(turn)) {
@@ -162,28 +184,18 @@ export function formatSessionForMarkdown(fullSession: { title: string, turns: Tu
                 // If the array is ordered, we likely saw it.
             }
 
-            // Extract Synthesis
-            let synthesisText = null;
-            let synthesisProviderId = undefined;
-            let decisionMap = null;
+            // Extract Analysis Context (Understand or Gauntlet)
+            let analysisOutput = aiTurn.understandOutput || aiTurn.gauntletOutput || null;
+            let analysisProviderId = undefined;
 
-            // Synthesis
-            const synthPid = (aiTurn.meta as any)?.synthesizer;
-            const synthResponses = aiTurn.synthesisResponses || {};
-            let targetSynthPid = synthPid;
-            if (!targetSynthPid) {
-                targetSynthPid = Object.keys(synthResponses).find(pid => {
-                    const arr = synthResponses[pid];
+            if (analysisOutput) {
+                // Determine the provider ID for the analysis
+                const targetType = aiTurn.understandOutput ? 'understand' : 'gauntlet';
+                const responses = (aiTurn as any)[`${targetType}Responses`] || {};
+                analysisProviderId = Object.keys(responses).find(pid => {
+                    const arr = responses[pid];
                     return Array.isArray(arr) && arr.some(r => r.text);
                 });
-            }
-            if (targetSynthPid && synthResponses[targetSynthPid]) {
-                const resps = synthResponses[targetSynthPid];
-                const latest = Array.isArray(resps) ? resps[resps.length - 1] : resps;
-                if (latest && latest.text) {
-                    synthesisText = latest.text;
-                    synthesisProviderId = targetSynthPid;
-                }
             }
 
             // Decision Map
@@ -223,8 +235,8 @@ export function formatSessionForMarkdown(fullSession: { title: string, turns: Tu
             md += formatTurnForMd(
                 aiTurn.id,
                 userPrompt,
-                synthesisText,
-                synthesisProviderId,
+                analysisOutput,
+                analysisProviderId,
                 decisionMap,
                 batchResponses,
                 !!userPrompt // include prompt if we found it
@@ -267,11 +279,7 @@ interface SanitizedUserTurn {
 interface SanitizedAiTurn {
     role: "council";
     timestamp: number;
-    synthesis?: {
-        providerId: string;
-        text: string;
-        modelName?: string;
-    };
+
     decisionMap?: {
         providerId: string;
         narrative: string;
@@ -313,26 +321,22 @@ export function sanitizeSessionForExport(
         }
 
         if (isAiTurn(turn)) {
-            // 1. Extract Synthesis
-            let synthesis: SanitizedAiTurn['synthesis'] | undefined;
-            const synthPid = (turn.meta as any)?.synthesizer;
-            const synthResponses = turn.synthesisResponses || {};
+            // 1. Extract Analysis Context (Understand or Gauntlet)
+            let analysis: { providerId: string; output: any; type: string } | undefined;
+            const targetType = turn.understandOutput ? 'understand' : turn.gauntletOutput ? 'gauntlet' : null;
 
-            let targetSynthPid = synthPid;
-            if (!targetSynthPid) {
-                targetSynthPid = Object.keys(synthResponses).find(pid => {
-                    const arr = synthResponses[pid];
+            if (targetType) {
+                const responses = (turn as any)[`${targetType}Responses`] || {};
+                const pid = Object.keys(responses).find(p => {
+                    const arr = responses[p];
                     return Array.isArray(arr) && arr.some(r => r.text);
                 });
-            }
 
-            if (targetSynthPid && synthResponses[targetSynthPid]) {
-                const resps = synthResponses[targetSynthPid];
-                const latest = Array.isArray(resps) ? resps[resps.length - 1] : resps;
-                if (latest && latest.text) {
-                    synthesis = {
-                        providerId: targetSynthPid,
-                        text: latest.text,
+                if (pid) {
+                    analysis = {
+                        providerId: pid,
+                        output: (turn as any)[`${targetType}Output`],
+                        type: targetType
                     };
                 }
             }
@@ -378,10 +382,10 @@ export function sanitizeSessionForExport(
                 }
             });
 
-            const base: SanitizedAiTurn = {
+            const base: any = {
                 role: "council",
                 timestamp: (turn as any).createdAt || Date.now(),
-                synthesis,
+                analysis,
                 decisionMap,
                 councilMemberOutputs
             };

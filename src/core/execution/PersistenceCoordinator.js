@@ -30,7 +30,6 @@ export class PersistenceCoordinator {
   buildPersistenceResultFromStepResults(steps, stepResults) {
     const out = {
       batchOutputs: {},
-      synthesisOutputs: {},
       mappingOutputs: {},
       refinerOutputs: {},
       antagonistOutputs: {},
@@ -53,17 +52,6 @@ export class PersistenceCoordinator {
               meta: r?.meta || {},
             };
           });
-          return;
-        }
-        if (step.type === "synthesis") {
-          const providerId = result?.providerId || step?.payload?.synthesisProvider;
-          if (!providerId) return;
-          out.synthesisOutputs[providerId] = {
-            providerId,
-            text: result?.text || "",
-            status: result?.status || "completed",
-            meta: result?.meta || {},
-          };
           return;
         }
         if (step.type === "mapping") {
@@ -122,17 +110,6 @@ export class PersistenceCoordinator {
               meta: { error: errorText },
             };
           });
-          return;
-        }
-        if (step.type === "synthesis") {
-          const providerId = step?.payload?.synthesisProvider;
-          if (!providerId) return;
-          out.synthesisOutputs[providerId] = {
-            providerId,
-            text: "",
-            status: "error",
-            meta: { error: errorText },
-          };
           return;
         }
         if (step.type === "mapping") {

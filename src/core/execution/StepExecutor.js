@@ -481,229 +481,6 @@ Answer the user's message directly. Use context only to disambiguate.
     });
   }
 
-  async executeSynthesisStep(step, context, stepResults, workflowContexts, resolvedContext, options) {
-    const { streamingManager, contextManager, persistenceCoordinator } = options;
-    const artifactProcessor = new ArtifactProcessor();
-    const payload = step.payload;
-    const sourceData = await this._resolveSourceData(
-      payload,
-      context,
-      stepResults,
-      options
-    );
-
-    if (sourceData.length < 2) {
-      throw new Error(
-        `Synthesis requires at least 2 valid sources, but found ${sourceData.length}.`,
-      );
-    }
-
-    wdbg(
-      `[StepExecutor] Running synthesis with ${sourceData.length
-      } sources: ${sourceData.map((s) => s.providerId).join(", ")} `,
-    );
-
-    let mappingResult = null;
-
-    if (payload.mappingStepIds && payload.mappingStepIds.length > 0) {
-      for (const mappingStepId of payload.mappingStepIds) {
-        const mappingStepResult = stepResults.get(mappingStepId);
-        if (
-          mappingStepResult?.status === "completed" &&
-          mappingStepResult.result?.text
-        ) {
-          mappingResult = mappingStepResult.result;
-          break;
-        }
-      }
-      if (!mappingResult || !String(mappingResult.text || "").trim()) {
-        console.warn(
-          `[StepExecutor] No valid mapping result found; proceeding without Map input`,
-        );
-      }
-    } else {
-      if (
-        !mappingResult &&
-        resolvedContext?.type === "recompute" &&
-        resolvedContext?.latestMappingOutput
-      ) {
-        mappingResult = resolvedContext.latestMappingOutput;
-      }
-      if (!mappingResult) {
-        try {
-          stepResults.forEach((val) => {
-            if (!mappingResult && val && val.result && val.result.meta && val.result.meta.allAvailableOptions) {
-              mappingResult = val.result;
-            }
-          });
-        } catch (_) { }
-      }
-    }
-
-    const runSynthesis = async (providerId) => {
-      const extractedOptions =
-        mappingResult?.meta?.allAvailableOptions ||
-        (payload?.mapperArtifact ? formatArtifactAsOptions(payload.mapperArtifact) : null) ||
-        null;
-
-      console.log('[DEBUG] Synthesis options check:', {
-        hasMappingResult: !!mappingResult,
-        hasMetaOptions: !!mappingResult?.meta?.allAvailableOptions,
-        optionsLength: extractedOptions?.length || 0,
-      });
-
-      const synthPrompt = this.promptService.buildSynthesisPrompt(
-        payload.originalPrompt,
-        sourceData,
-        providerId,
-        extractedOptions
-      );
-
-      const promptLength = synthPrompt.length;
-      console.log(`[StepExecutor] Synthesis prompt length for ${providerId}: ${promptLength} chars`);
-
-      const limits = PROVIDER_LIMITS[providerId];
-      if (limits && promptLength > limits.maxInputChars) {
-        console.warn(`[StepExecutor] Prompt length ${promptLength} exceeds limit ${limits.maxInputChars} for ${providerId}`);
-        throw new Error(`INPUT_TOO_LONG: Prompt length ${promptLength} exceeds limit ${limits.maxInputChars} for ${providerId}`);
-      }
-
-      const providerContexts = contextManager.resolveProviderContext(
-        providerId,
-        context,
-        payload,
-        workflowContexts,
-        stepResults,
-        resolvedContext,
-        "Synthesis",
-      );
-
-      return new Promise((resolve, reject) => {
-        this.orchestrator.executeParallelFanout(
-          synthPrompt,
-          [providerId],
-          {
-            sessionId: context.sessionId,
-            useThinking: payload.useThinking,
-            providerContexts: Object.keys(providerContexts).length
-              ? providerContexts
-              : undefined,
-            providerMeta: step?.payload?.providerMeta,
-            onPartial: (pid, chunk) => {
-              streamingManager.dispatchPartialDelta(
-                context.sessionId,
-                step.stepId,
-                pid,
-                chunk.text,
-                "Synthesis",
-              );
-            },
-            onError: (error) => {
-              reject(error);
-            },
-            onAllComplete: (results, errors) => {
-              let finalResult = results.get(providerId);
-              const providerError = errors?.get?.(providerId);
-
-              if ((!finalResult || !finalResult.text) && providerError) {
-                const recovered = streamingManager.getRecoveredText(
-                  context.sessionId, step.stepId, providerId
-                );
-                if (recovered && recovered.trim().length > 0) {
-                  finalResult = finalResult || { providerId, meta: {} };
-                  finalResult.text = recovered;
-                  finalResult.softError = finalResult.softError || {
-                    message: providerError?.message || String(providerError),
-                  };
-                }
-              }
-
-              if (finalResult?.text) {
-                const { cleanText, artifacts } = artifactProcessor.process(finalResult.text);
-                finalResult.text = cleanText;
-                finalResult.artifacts = artifacts;
-              }
-
-              if (finalResult?.text) {
-                streamingManager.dispatchPartialDelta(
-                  context.sessionId,
-                  step.stepId,
-                  providerId,
-                  finalResult.text,
-                  "Synthesis",
-                  true,
-                );
-              }
-
-              if (!finalResult || !finalResult.text) {
-                if (providerError) {
-                  reject(providerError);
-                } else {
-                  reject(
-                    new Error(
-                      `Synthesis provider ${providerId} returned empty response`,
-                    ),
-                  );
-                }
-                return;
-              }
-
-              persistenceCoordinator.persistProviderContextsAsync(context.sessionId, {
-                [providerId]: finalResult,
-              });
-
-              try {
-                if (finalResult?.meta) {
-                  workflowContexts[providerId] = finalResult.meta;
-                  wdbg(
-                    `[StepExecutor] Updated workflow context for ${providerId
-                    }: ${Object.keys(finalResult.meta).join(",")} `,
-                  );
-                }
-              } catch (_) { }
-
-              resolve({
-                providerId: providerId,
-                text: finalResult.text,
-                status: "completed",
-                meta: finalResult.meta || {},
-                artifacts: finalResult.artifacts || [],
-                ...(finalResult.softError ? { softError: finalResult.softError } : {}),
-              });
-            },
-          },
-        );
-      });
-    };
-
-    try {
-      return await runSynthesis(payload.synthesisProvider);
-    } catch (error) {
-      if (isProviderAuthError(error)) {
-        console.warn(`[StepExecutor] Synthesis failed with auth error for ${payload.synthesisProvider}, attempting fallback...`);
-
-        const fallbackStrategy = errorHandler.fallbackStrategies.get('PROVIDER_AUTH_FAILED');
-        if (fallbackStrategy) {
-          try {
-            const fallbackProvider = await fallbackStrategy(
-              'synthesis',
-              { failedProviderId: payload.synthesisProvider }
-            );
-
-            if (fallbackProvider) {
-              console.log(`[StepExecutor] executing synthesis with fallback provider: ${fallbackProvider} `);
-              return await runSynthesis(fallbackProvider);
-            }
-          } catch (fallbackError) {
-            console.warn(`[StepExecutor] Fallback failed: `, fallbackError);
-          }
-        }
-      }
-
-      throw error;
-    }
-  }
-
   // Refiner, Antagonist, Explore, Understand, Gauntlet implementations follow similar patterns
   // I'll condense them here assuming they use similar shared logic for resolving sources
 
@@ -774,7 +551,6 @@ Answer the user's message directly. Use context only to disambiguate.
 
       let sourceContainer;
       switch (responseType) {
-        case "synthesis": sourceContainer = aiTurn.synthesisResponses || {}; break;
         case "mapping": sourceContainer = aiTurn.mappingResponses || {}; break;
         case "refiner": sourceContainer = aiTurn.refinerResponses || {}; break;
         case "antagonist": sourceContainer = aiTurn.antagonistResponses || {}; break;
@@ -862,61 +638,126 @@ Answer the user's message directly. Use context only to disambiguate.
     throw new Error("No valid source specified for step.");
   }
 
-  async executeExploreStep(step, context, stepResults, options) {
+  async _executeGenericSingleStep(step, context, providerId, prompt, stepType, options, parseOutputFn) {
+    const { streamingManager, persistenceCoordinator } = options;
     const { payload } = step;
-    let mapperArtifact = null;
 
-    if (payload.sourceHistorical) {
-      // Historical resolution...
-      // For simplicity in this refactor, I'm assuming _resolveSourceData covers fetching
-      // but retrieving the raw text to parse requires a specific call.
-      // Ideally _resolveSourceData should return enough info.
-      // Re-implementing simplified logic here:
-      const data = await this._resolveSourceData({ sourceHistorical: { ...payload.sourceHistorical, responseType: 'mapping' } }, context, stepResults, options);
-      const rawMapping = data[0]?.text || "";
-      if (rawMapping) mapperArtifact = parseMapperArtifact(rawMapping);
-    } else {
-      const mapStepId = payload.mappingStepIds?.[0] || payload.sourceStepIds?.[0];
-      if (mapStepId) {
-        const res = stepResults.get(mapStepId);
-        if (res?.status === "completed" && res.result?.text) {
-          mapperArtifact = parseMapperArtifact(res.result.text);
+    console.log(`[StepExecutor] ${stepType} prompt for ${providerId}: ${prompt.length} chars`);
+
+    // 1. Check Limits
+    const limits = PROVIDER_LIMITS[providerId];
+    if (limits && prompt.length > limits.maxInputChars) {
+      console.warn(`[StepExecutor] ${stepType} prompt length ${prompt.length} exceeds limit ${limits.maxInputChars} for ${providerId}`);
+      throw new Error(`INPUT_TOO_LONG: Prompt length ${prompt.length} exceeds limit ${limits.maxInputChars} for ${providerId}`);
+    }
+
+    const runRequest = async (pid) => {
+      return new Promise((resolve, reject) => {
+        this.orchestrator.executeParallelFanout(
+          prompt,
+          [pid],
+          {
+            sessionId: context.sessionId,
+            useThinking: payload.useThinking || false,
+            onPartial: (id, chunk) => {
+              streamingManager.dispatchPartialDelta(
+                context.sessionId,
+                step.stepId,
+                id,
+                chunk.text,
+                stepType
+              );
+            },
+            onAllComplete: (results, errors) => {
+              let finalResult = results.get(pid);
+              const providerError = errors?.get?.(pid);
+
+              // 2. Partial Recovery
+              if ((!finalResult || !finalResult.text) && providerError) {
+                const recovered = streamingManager.getRecoveredText(
+                  context.sessionId, step.stepId, pid
+                );
+                if (recovered && recovered.trim().length > 0) {
+                  finalResult = finalResult || { providerId: pid, meta: {} };
+                  finalResult.text = recovered;
+                  finalResult.softError = finalResult.softError || {
+                    message: providerError?.message || String(providerError),
+                  };
+                } else {
+                  reject(providerError);
+                  return;
+                }
+              }
+
+              if (finalResult?.text) {
+                // 3. Parse Output
+                let outputData = null;
+                try {
+                  outputData = parseOutputFn(finalResult.text);
+                } catch (parseErr) {
+                  console.warn(`[StepExecutor] Output parsing failed for ${stepType}:`, parseErr);
+                  // We continue with raw text if parsing fails, but mark it? 
+                  // For now, allow specific parsers to handle robustness or throw.
+                }
+
+                streamingManager.dispatchPartialDelta(
+                  context.sessionId,
+                  step.stepId,
+                  pid,
+                  finalResult.text,
+                  stepType,
+                  true
+                );
+
+                // 4. Persist Context
+                persistenceCoordinator.persistProviderContextsAsync(context.sessionId, {
+                  [pid]: finalResult,
+                });
+
+                resolve({
+                  providerId: pid,
+                  text: finalResult.text,
+                  status: "completed",
+                  meta: {
+                    ...finalResult.meta,
+                    ...(outputData ? { [`${stepType.toLowerCase()}Output`]: outputData } : {})
+                  },
+                  output: outputData, // Standardize output access
+                  ...(finalResult.softError ? { softError: finalResult.softError } : {}),
+                });
+              } else {
+                reject(new Error(`Empty response from ${stepType} provider`));
+              }
+            }
+          }
+        );
+      });
+    };
+
+    // 5. Auth Fallback Wrapper
+    try {
+      return await runRequest(providerId);
+    } catch (error) {
+      if (isProviderAuthError(error)) {
+        console.warn(`[StepExecutor] ${stepType} failed with auth error for ${providerId}, attempting fallback...`);
+        const fallbackStrategy = errorHandler.fallbackStrategies.get('PROVIDER_AUTH_FAILED');
+        if (fallbackStrategy) {
+          try {
+            const fallbackProvider = await fallbackStrategy(
+              stepType.toLowerCase(),
+              { failedProviderId: providerId }
+            );
+            if (fallbackProvider) {
+              console.log(`[StepExecutor] Executing ${stepType} with fallback provider: ${fallbackProvider}`);
+              return await runRequest(fallbackProvider);
+            }
+          } catch (fallbackError) {
+            console.warn(`[StepExecutor] Fallback failed: `, fallbackError);
+          }
         }
       }
+      throw error;
     }
-
-    if (!mapperArtifact) {
-      console.warn("[StepExecutor] Explore step missing mapper artifact, using default.");
-      mapperArtifact = { consensus: { claims: [] }, outliers: [], topology: "high_confidence", query: payload.originalPrompt };
-    }
-
-    const explorePrompt = this.promptService.buildExplorePrompt(payload.originalPrompt, mapperArtifact);
-
-    console.log(`[StepExecutor] Running Explore Analysis (${payload.exploreProvider})...`);
-
-    const result = await this.orchestrator.executeSingle(
-      explorePrompt,
-      payload.exploreProvider,
-      {
-        sessionId: context.sessionId,
-        timeout: 60000,
-      }
-    );
-
-    const rawText = result.text || "";
-    const parsedOutput = parseExploreOutput(rawText);
-
-    return {
-      providerId: payload.exploreProvider,
-      output: parsedOutput,
-      text: rawText,
-      type: "explore",
-      meta: {
-        container: parsedOutput.container,
-        artifactId: parsedOutput.artifact_id
-      },
-      status: "completed"
-    };
   }
 
   async executeRefinerStep(step, context, stepResults, options) {
@@ -926,46 +767,33 @@ Answer the user's message directly. Use context only to disambiguate.
       refinerProvider,
       sourceStepIds,
       originalPrompt,
-      synthesisStepIds,
       mappingStepIds,
       sourceHistorical
     } = payload;
 
     let batchResponses = {};
-    let synthesisText = "";
     let mappingText = "";
     let understandOutput = payload.understandOutput || null;
     let gauntletOutput = payload.gauntletOutput || null;
 
     if (sourceHistorical) {
-      // Recompute Flow
       const { turnId } = sourceHistorical;
-      // Batch
       try {
         const data = await this._resolveSourceData({ sourceHistorical: { turnId, responseType: 'batch' } }, context, stepResults, options);
         data.forEach(item => {
           if (item.text) batchResponses[item.providerId] = { text: item.text, providerId: item.providerId };
         });
       } catch (_) { }
-      // Synthesis
-      try {
-        const data = await this._resolveSourceData({ sourceHistorical: { turnId, responseType: 'synthesis' } }, context, stepResults, options);
-        synthesisText = data[0]?.text || "";
-      } catch (_) { }
       
-      // Specialized Outputs fallback if synthesis is missing
-      if (!synthesisText || synthesisText.trim().length === 0) {
-          try {
-              const data = await this._resolveSourceData({ sourceHistorical: { turnId, responseType: 'understand' } }, context, stepResults, options);
-              if (data[0]?.meta?.understandOutput) understandOutput = data[0].meta.understandOutput;
-          } catch (_) { }
-          try {
-              const data = await this._resolveSourceData({ sourceHistorical: { turnId, responseType: 'gauntlet' } }, context, stepResults, options);
-              if (data[0]?.meta?.gauntletOutput) gauntletOutput = data[0].meta.gauntletOutput;
-          } catch (_) { }
-      }
+      try {
+          const data = await this._resolveSourceData({ sourceHistorical: { turnId, responseType: 'understand' } }, context, stepResults, options);
+          if (data[0]?.meta?.understandOutput) understandOutput = data[0].meta.understandOutput;
+      } catch (_) { }
+      try {
+          const data = await this._resolveSourceData({ sourceHistorical: { turnId, responseType: 'gauntlet' } }, context, stepResults, options);
+          if (data[0]?.meta?.gauntletOutput) gauntletOutput = data[0].meta.gauntletOutput;
+      } catch (_) { }
 
-      // Mapping
       try {
         const data = await this._resolveSourceData({ sourceHistorical: { turnId, responseType: 'mapping' } }, context, stepResults, options);
         const raw = data[0]?.text || "";
@@ -973,21 +801,11 @@ Answer the user's message directly. Use context only to disambiguate.
       } catch (_) { }
 
     } else {
-      // Standard Flow
       const batchStepResults = stepResults.get(sourceStepIds?.[0])?.result?.results || {};
       Object.entries(batchStepResults).forEach(([pid, res]) => {
         if (res && res.text) batchResponses[pid] = { text: res.text, providerId: pid };
       });
-
-      if (synthesisStepIds && synthesisStepIds.length > 0) {
-        for (const id of synthesisStepIds) {
-          const res = stepResults.get(id);
-          if (res?.status === "completed" && res.result?.text) {
-            synthesisText = res.result.text;
-            break;
-          }
-        }
-      }
+      
       if (mappingStepIds && mappingStepIds.length > 0) {
         for (const id of mappingStepIds) {
           const res = stepResults.get(id);
@@ -1002,7 +820,6 @@ Answer the user's message directly. Use context only to disambiguate.
 
     let refinerPrompt = this.promptService.buildRefinerPrompt({
       originalPrompt,
-      synthesisText,
       mappingText,
       batchResponses,
       understandOutput,
@@ -1033,34 +850,10 @@ Answer the user's message directly. Use context only to disambiguate.
       }
     } catch (_) { }
 
-    console.log(`[StepExecutor] Running Refiner Analysis (${refinerProvider})...`);
-
-    const result = await this.orchestrator.executeSingle(
-      refinerPrompt,
-      refinerProvider,
-      {
-        sessionId: context.sessionId,
-        timeout: 90000,
-      }
+    return this._executeGenericSingleStep(
+        step, context, refinerProvider, refinerPrompt, "Refiner", options,
+        (text) => responseProcessor.parseRefinerResponse(responseProcessor.extractContent(text))
     );
-
-    const rawRefinerText = responseProcessor.extractContent(result.text);
-    const parsedRefiner = responseProcessor.parseRefinerResponse(rawRefinerText);
-
-    if (!parsedRefiner) {
-      throw new Error("Refiner analysis returned null (failed or empty)");
-    }
-
-    return {
-      providerId: refinerProvider,
-      output: parsedRefiner,
-      text: String(rawRefinerText || ""),
-      meta: {
-        confidenceScore: parsedRefiner.confidenceScore,
-        presentationStrategy: parsedRefiner.presentationStrategy,
-      },
-      status: "completed"
-    };
   }
 
   async executeAntagonistStep(step, context, stepResults, options) {
@@ -1070,14 +863,12 @@ Answer the user's message directly. Use context only to disambiguate.
       antagonistProvider,
       sourceStepIds,
       originalPrompt,
-      synthesisStepIds,
       mappingStepIds,
       refinerStepIds,
       sourceHistorical
     } = payload;
 
     let batchResponses = {};
-    let synthesisText = "";
     let fullOptionsText = "";
     let refinerOutput = null;
     let understandOutput = payload.understandOutput || null;
@@ -1091,22 +882,15 @@ Answer the user's message directly. Use context only to disambiguate.
           if (item.text) batchResponses[item.providerId] = { text: item.text, providerId: item.providerId };
         });
       } catch (_) { }
+      
       try {
-        const data = await this._resolveSourceData({ sourceHistorical: { turnId, responseType: 'synthesis' } }, context, stepResults, options);
-        synthesisText = data[0]?.text || "";
+          const data = await this._resolveSourceData({ sourceHistorical: { turnId, responseType: 'understand' } }, context, stepResults, options);
+          if (data[0]?.meta?.understandOutput) understandOutput = data[0].meta.understandOutput;
       } catch (_) { }
-
-      // Specialized Outputs fallback if synthesis is missing
-      if (!synthesisText || synthesisText.trim().length === 0) {
-          try {
-              const data = await this._resolveSourceData({ sourceHistorical: { turnId, responseType: 'understand' } }, context, stepResults, options);
-              if (data[0]?.meta?.understandOutput) understandOutput = data[0].meta.understandOutput;
-          } catch (_) { }
-          try {
-              const data = await this._resolveSourceData({ sourceHistorical: { turnId, responseType: 'gauntlet' } }, context, stepResults, options);
-              if (data[0]?.meta?.gauntletOutput) gauntletOutput = data[0].meta.gauntletOutput;
-          } catch (_) { }
-      }
+      try {
+          const data = await this._resolveSourceData({ sourceHistorical: { turnId, responseType: 'gauntlet' } }, context, stepResults, options);
+          if (data[0]?.meta?.gauntletOutput) gauntletOutput = data[0].meta.gauntletOutput;
+      } catch (_) { }
 
       try {
         const data = await this._resolveSourceData({ sourceHistorical: { turnId, responseType: 'mapping' } }, context, stepResults, options);
@@ -1125,14 +909,7 @@ Answer the user's message directly. Use context only to disambiguate.
       Object.entries(batchStepResults).forEach(([pid, res]) => {
         if (res && res.text) batchResponses[pid] = { text: res.text, providerId: pid };
       });
-
-      if (synthesisStepIds) {
-        for (const id of synthesisStepIds) {
-          const res = stepResults.get(id);
-          if (res?.status === "completed" && res.result?.text) synthesisText = res.result.text;
-        }
-      }
-
+      
       if (mappingStepIds) {
         for (const id of mappingStepIds) {
           const res = stepResults.get(id);
@@ -1142,7 +919,6 @@ Answer the user's message directly. Use context only to disambiguate.
           }
         }
       }
-
       if (refinerStepIds) {
         for (const id of refinerStepIds) {
           const res = stepResults.get(id);
@@ -1162,7 +938,6 @@ Answer the user's message directly. Use context only to disambiguate.
 
     let antagonistPrompt = this.promptService.buildAntagonistPrompt(
       originalPrompt,
-      synthesisText,
       fullOptionsText,
       modelOutputsBlock,
       refinerOutput,
@@ -1196,29 +971,14 @@ Answer the user's message directly. Use context only to disambiguate.
       }
     } catch (_) { }
 
-    console.log(`[StepExecutor] Running Antagonist Analysis (${antagonistProvider})...`);
-
-    const result = await this.orchestrator.executeSingle(
-      antagonistPrompt,
-      antagonistProvider,
-      {
-        sessionId: context.sessionId,
-        timeout: 90000,
-      }
+    return this._executeGenericSingleStep(
+        step, context, antagonistProvider, antagonistPrompt, "Antagonist", options,
+        (text) => responseProcessor.extractContent(text) 
     );
-
-    const rawAntagonistText = responseProcessor.extractContent(result.text);
-
-    return {
-      providerId: antagonistProvider,
-      text: String(rawAntagonistText || ""),
-      meta: {},
-      status: "completed"
-    };
   }
 
   async executeUnderstandStep(step, context, _previousResults, options) {
-    const { streamingManager, persistenceCoordinator } = options;
+    const { streamingManager } = options;
     const payload = step.payload;
 
     const mapperArtifact =
@@ -1238,7 +998,6 @@ Answer the user's message directly. Use context only to disambiguate.
       throw new Error("Understand mode requires a MapperArtifact and ExploreAnalysis.");
     }
 
-    // Extract additional context for rich prompt
     let graphTopology = payload.mappingMeta?.graphTopology || null;
     let optionsInventory = [];
     let narrativeSummary = "";
@@ -1248,18 +1007,15 @@ Answer the user's message directly. Use context only to disambiguate.
         const parsed = parseUnifiedMapperOutput(mappingText);
         if (!graphTopology) graphTopology = parsed.topology;
         narrativeSummary = parsed.narrative;
-        
-        // Parse options inventory string into list of {label, summary} objects
         const optionsStr = parsed.options || "";
         if (optionsStr) {
             const lines = optionsStr.split('\n');
             for (const line of lines) {
-                // Match: "1. **Label**: Summary" or "- **Label**: Summary"
                 const match = line.match(/^\s*(?:\d+\.|\-|\*|•)\s*\*?\*?([^:*]+)\*?\*?:\s*(.*)$/);
                 if (match) {
                     optionsInventory.push({
                         label: match[1].trim().replace(/^\*\*|\*\*$/g, ''),
-                        summary: match[2].trim().replace(/\s*\[\d+(?:\s*,\s*\d+)*\]/g, '') // Strip citations
+                        summary: match[2].trim().replace(/\s*\[\d+(?:\s*,\s*\d+)*\]/g, '')
                     });
                 }
             }
@@ -1303,71 +1059,13 @@ Answer the user's message directly. Use context only to disambiguate.
       understandPrompt += `\n\n<USER_SELECTED_ARTIFACTS>\n${selectionLines.join("\n\n")}\n</USER_SELECTED_ARTIFACTS>`;
     }
 
-    console.log(
-      `[StepExecutor] Understand prompt for ${payload.understandProvider}: ${understandPrompt.length} chars`,
+    return this._executeGenericSingleStep(
+        step, context, payload.understandProvider, understandPrompt, "Understand", options,
+        (text) => parseUnderstandOutput(text)
     );
-
-    return new Promise((resolve, reject) => {
-      this.orchestrator.executeParallelFanout(
-        understandPrompt,
-        [payload.understandProvider],
-        {
-          sessionId: context.sessionId,
-          useThinking: payload.useThinking || false,
-          onPartial: (providerId, chunk) => {
-            streamingManager.dispatchPartialDelta(
-              context.sessionId,
-              step.stepId,
-              providerId,
-              chunk.text,
-              "Understand"
-            );
-          },
-          onAllComplete: (results, errors) => {
-            const finalResult = results.get(payload.understandProvider);
-            const providerError = errors?.get?.(payload.understandProvider);
-
-            if ((!finalResult || !finalResult.text) && providerError) {
-              reject(providerError);
-              return;
-            }
-
-            if (finalResult?.text) {
-              const understandOutput = parseUnderstandOutput(finalResult.text);
-
-              streamingManager.dispatchPartialDelta(
-                context.sessionId,
-                step.stepId,
-                payload.understandProvider,
-                finalResult.text,
-                "Understand",
-                true
-              );
-
-              persistenceCoordinator.persistProviderContextsAsync(context.sessionId, {
-                [payload.understandProvider]: finalResult,
-              });
-
-              resolve({
-                providerId: payload.understandProvider,
-                text: finalResult.text,
-                status: "completed",
-                meta: {
-                  ...finalResult.meta,
-                  understandOutput
-                },
-              });
-            } else {
-              reject(new Error("Empty response from Understand provider"));
-            }
-          }
-        }
-      );
-    });
   }
 
   async executeGauntletStep(step, context, _previousResults, options) {
-    const { streamingManager, persistenceCoordinator } = options;
     const payload = step.payload;
 
     const mapperArtifact =
@@ -1421,67 +1119,10 @@ Answer the user's message directly. Use context only to disambiguate.
       gauntletPrompt += `\n\n<USER_SELECTED_ARTIFACTS>\n${selectionLines.join("\n\n")}\n</USER_SELECTED_ARTIFACTS>`;
     }
 
-    console.log(
-      `[StepExecutor] Gauntlet prompt for ${payload.gauntletProvider}: ${gauntletPrompt.length} chars`,
+    return this._executeGenericSingleStep(
+        step, context, payload.gauntletProvider, gauntletPrompt, "Gauntlet", options,
+        (text) => parseGauntletOutput(text)
     );
-
-    return new Promise((resolve, reject) => {
-      this.orchestrator.executeParallelFanout(
-        gauntletPrompt,
-        [payload.gauntletProvider],
-        {
-          sessionId: context.sessionId,
-          useThinking: false,
-          onPartial: (providerId, chunk) => {
-            streamingManager.dispatchPartialDelta(
-              context.sessionId,
-              step.stepId,
-              providerId,
-              chunk.text,
-              "Gauntlet"
-            );
-          },
-          onAllComplete: (results, errors) => {
-            const finalResult = results.get(payload.gauntletProvider);
-            const providerError = errors?.get?.(payload.gauntletProvider);
-
-            if ((!finalResult || !finalResult.text) && providerError) {
-              reject(providerError);
-              return;
-            }
-
-            if (finalResult?.text) {
-              const gauntletOutput = parseGauntletOutput(finalResult.text);
-
-              streamingManager.dispatchPartialDelta(
-                context.sessionId,
-                step.stepId,
-                payload.gauntletProvider,
-                finalResult.text,
-                "Gauntlet",
-                true
-              );
-
-              persistenceCoordinator.persistProviderContextsAsync(context.sessionId, {
-                [payload.gauntletProvider]: finalResult,
-              });
-
-              resolve({
-                providerId: payload.gauntletProvider,
-                text: finalResult.text,
-                status: "completed",
-                meta: {
-                  ...finalResult.meta,
-                  gauntletOutput
-                },
-              });
-
-            } else {
-              reject(new Error("Empty response from Gauntlet provider"));
-            }
-          }
-        }
-      );
-    });
   }
+
 }

@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useRef, useEffect } from "react";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
-import { providerEffectiveStateFamily, isSplitOpenAtom, synthesisProviderAtom, mappingProviderAtom, composerModelAtom, analystModelAtom, providerAuthStatusAtom, selectedModelsAtom, refinerProviderAtom, antagonistProviderAtom, providerLocksAtom } from "../state/atoms";
+import { providerEffectiveStateFamily, isSplitOpenAtom, mappingProviderAtom, composerModelAtom, analystModelAtom, providerAuthStatusAtom, selectedModelsAtom, refinerProviderAtom, antagonistProviderAtom, providerLocksAtom } from "../state/atoms";
 import { LLMProvider } from "../types";
 import { PROVIDER_ACCENT_COLORS, WORKFLOW_STAGE_COLORS } from "../constants";
 import { getProviderColor, getProviderLogo } from "../utils/provider-helpers";
@@ -28,8 +28,8 @@ export type WorkflowStage =
     | 'thinking'
     | 'streaming'
     | 'complete'
-    | 'error'
-    | 'synthesizing';
+    | 'complete'
+    | 'error';
 
 export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
     turnId,
@@ -50,7 +50,6 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
     const longPressRef = useRef<any>(null);
     const isSplitOpen = useAtomValue(isSplitOpenAtom);
     const authStatus = useAtomValue(providerAuthStatusAtom);
-    const [synthesisProvider, setSynthesisProvider] = useAtom(synthesisProviderAtom);
     const [mapProviderVal, setMapProvider] = useAtom(mappingProviderAtom);
     const [refinerProvider, setRefinerProvider] = useAtom(refinerProviderAtom);
     const [composerVal, setComposer] = useAtom(composerModelAtom);
@@ -191,17 +190,7 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
         }
     };
 
-    const handleSelectSynth = (pid: string) => {
-        if (synthesisProvider === pid) {
-            setSynthesisProvider(null);
-            setProviderLock('synthesis', true);
-            setLocks(prev => ({ ...prev, synthesis: true }));
-        } else {
-            setSynthesisProvider(pid);
-            setProviderLock('synthesis', true);
-            setLocks(prev => ({ ...prev, synthesis: true }));
-        }
-    };
+
 
     const handleSelectMap = (pid: string) => {
         if (mapProviderVal === pid) {
@@ -395,34 +384,7 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
                 <div className="absolute left-1/2 -translate-x-1/2 bottom-[110%] bg-surface-raised border border-border-subtle rounded-xl shadow-elevated p-3 z-[100] min-w-[500px] w-max max-w-[90vw]">
                     <div className="text-xs text-text-muted mb-2">Council Menu</div>
                     <div className="grid grid-cols-2 gap-4">
-                        <div>
-                            <div className="flex items-center gap-2 mb-2 text-sm"><span>👑</span><span>Synthesizer</span></div>
-                            <select
-                                value={synthesisProvider || ""}
-                                onChange={(e) => {
-                                    const val = e.target.value;
-                                    if (val === "") {
-                                        setSynthesisProvider(null);
-                                        setProviderLock('synthesis', true);
-                                        setLocks(prev => ({ ...prev, synthesis: true }));
-                                    } else {
-                                        handleSelectSynth(val);
-                                    }
-                                }}
-                                className="w-full bg-chip border border-border-subtle rounded-md px-2 py-1.5 text-xs text-text-primary outline-none focus:border-brand-500 transition-colors"
-                            >
-                                <option value="">None</option>
-                                {allProviders.map(p => {
-                                    const pid = String(p.id);
-                                    const isUnauthorized = authStatus && authStatus[pid] === false;
-                                    return (
-                                        <option key={`s-${pid}`} value={pid} disabled={isUnauthorized}>
-                                            {p.name} {isUnauthorized ? "(Locked)" : ""}
-                                        </option>
-                                    );
-                                })}
-                            </select>
-                        </div>
+
 
                         {/* Mapper Dropdown */}
                         <div>
@@ -792,7 +754,7 @@ const Orb: React.FC<OrbProps> = ({
                 <div className="council-stage-badge" style={{ backgroundColor: stageColor }}>
                     {workflowStage === 'thinking' && '🤔'}
                     {workflowStage === 'streaming' && '💬'}
-                    {workflowStage === 'synthesizing' && '✨'}
+
                     {workflowStage === 'error' && '⚠️'}
                 </div>
             )}
@@ -809,7 +771,7 @@ const Orb: React.FC<OrbProps> = ({
                                     ? `Generating (${workflowProgress}%)`
                                     : 'Generating...'
                             )}
-                            {workflowStage === 'synthesizing' && 'Synthesizing...'}
+
                             {workflowStage === 'complete' && 'Complete'}
                             {workflowStage === 'error' && 'Error'}
                         </span>

@@ -2,6 +2,7 @@ import { useCallback, useState } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
 import {
     activeAiTurnIdAtom,
+    activeRecomputeStateAtom,
     currentSessionIdAtom,
     isLoadingAtom,
     uiPhaseAtom,
@@ -26,6 +27,8 @@ export type CognitiveTransitionOptions = {
     selectedArtifacts?: SelectedArtifact[];
     mapperArtifact?: MapperArtifact;
     userNotes?: string[];
+    isRecompute?: boolean;
+    sourceTurnId?: string;
 };
 
 export function useCognitiveMode(trackedAiTurnId?: string) {
@@ -35,6 +38,7 @@ export function useCognitiveMode(trackedAiTurnId?: string) {
     const setGlobalIsLoading = useSetAtom(isLoadingAtom);
     const setUiPhase = useSetAtom(uiPhaseAtom);
     const setActiveAiTurnId = useSetAtom(activeAiTurnIdAtom);
+    const setActiveRecomputeState = useSetAtom(activeRecomputeStateAtom);
     const [, setLocalIsTransitioning] = useState<boolean>(false);
     const [error, setError] = useState<string | null>(null);
 
@@ -58,6 +62,16 @@ export function useCognitiveMode(trackedAiTurnId?: string) {
             setUiPhase("streaming");
             setGlobalIsLoading(true);
 
+            if (options.isRecompute && options.providerId) {
+                const stepTypeForUi =
+                    mode === "refine" ? "refiner" : mode;
+                setActiveRecomputeState({
+                    aiTurnId,
+                    stepType: stepTypeForUi,
+                    providerId: options.providerId,
+                });
+            }
+
             await api.sendPortMessage({
                 type: "CONTINUE_COGNITIVE_WORKFLOW",
                 payload: {
@@ -68,6 +82,8 @@ export function useCognitiveMode(trackedAiTurnId?: string) {
                     selectedArtifacts: options.selectedArtifacts || [],
                     mapperArtifact: options.mapperArtifact,
                     userNotes: options.userNotes,
+                    isRecompute: !!options.isRecompute,
+                    sourceTurnId: options.sourceTurnId,
                 },
             });
         } catch (err: any) {
@@ -77,8 +93,15 @@ export function useCognitiveMode(trackedAiTurnId?: string) {
             setGlobalIsLoading(false);
             setUiPhase("awaiting_action");
             setActiveAiTurnId(null);
+            setActiveRecomputeState(null);
         }
-    }, [sessionId, setActiveAiTurnId, setGlobalIsLoading, setUiPhase]);
+    }, [
+        sessionId,
+        setActiveAiTurnId,
+        setActiveRecomputeState,
+        setGlobalIsLoading,
+        setUiPhase,
+    ]);
 
     return {
         transitionToMode,

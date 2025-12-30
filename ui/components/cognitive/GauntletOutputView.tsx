@@ -39,6 +39,7 @@ const Wind = ({ className }: { className?: string }) => (
 
 interface GauntletOutputViewProps {
     output: GauntletOutput;
+    onRecompute?: (options?: CognitiveTransitionOptions) => void;
     onRefine?: (options?: CognitiveTransitionOptions) => void;
     onAntagonist?: (options?: CognitiveTransitionOptions) => void;
     isLoading?: boolean;
@@ -47,8 +48,9 @@ interface GauntletOutputViewProps {
     aiTurn: AiTurn;
 }
 
-const GauntletOutputView: React.FC<GauntletOutputViewProps> = ({ 
+const GauntletOutputView: React.FC<GauntletOutputViewProps> = ({
     output,
+    onRecompute,
     onRefine,
     onAntagonist,
     isLoading = false,
@@ -353,6 +355,13 @@ const GauntletOutputView: React.FC<GauntletOutputViewProps> = ({
                         </option>
                     ))}
                 </select>
+                <button
+                    onClick={() => onRecompute?.({ providerId: nextProviderId, isRecompute: true, sourceTurnId: aiTurn.id })}
+                    disabled={isLoading}
+                    className="px-3 py-1.5 text-xs rounded-md border border-border-subtle bg-surface-base text-text-secondary hover:text-text-primary hover:bg-surface-highlight/50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                    Re-run
+                </button>
             </div>
 
             <div className="flex gap-3 mt-2">

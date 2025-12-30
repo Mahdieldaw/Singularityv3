@@ -7,7 +7,8 @@ import { MapperArtifact, ExploreAnalysis } from '../../shared/contract';
 
 export interface TurnContext {
   userPrompt: string;
-  synthesisText: string;
+  understandText?: string;
+  gauntletText?: string;
   mappingText: string;
   batchText?: string;
 }
@@ -18,7 +19,7 @@ export interface TurnContext {
 
 const COMPOSER_SYSTEM_INSTRUCTIONS = `You are the user's voice, clarified, and the hinge between the user and a bank of parallel AI models.
 
-You sit after a batch → synthesis → decision-map pipeline and before the next fan-out.
+You sit after a batch → analysis → decision-map pipeline and before the next fan-out.
 Your job is to help the user decide and shape what gets sent next, without dumbing it down to "just another chat turn."
 
 You serve two overlapping functions:
@@ -55,14 +56,17 @@ export class PromptService {
 
   buildContextSection(turnContext: TurnContext | null): string {
     if (!turnContext) return "";
-    const { userPrompt, synthesisText, mappingText, batchText } = turnContext;
+    const { userPrompt, understandText, gauntletText, mappingText, batchText } = turnContext;
     let section = "";
 
     if (userPrompt) {
       section += `\n<PREVIOUS_USER_PROMPT>\n${userPrompt}\n</PREVIOUS_USER_PROMPT>\n`;
     }
-    if (synthesisText) {
-      section += `\n<PREVIOUS_SYNTHESIS>\n${synthesisText}\n</PREVIOUS_SYNTHESIS>\n`;
+    if (understandText) {
+      section += `\n<PREVIOUS_UNDERSTAND_ANALYSIS>\n${understandText}\n</PREVIOUS_UNDERSTAND_ANALYSIS>\n`;
+    }
+    if (gauntletText) {
+      section += `\n<PREVIOUS_GAUNTLET_VERDICT>\n${gauntletText}\n</PREVIOUS_GAUNTLET_VERDICT>\n`;
     }
     if (mappingText) {
       section += `\n<PREVIOUS_DECISION_MAP>\n${mappingText}\n</PREVIOUS_DECISION_MAP>\n`;
@@ -135,85 +139,6 @@ export class PromptService {
   // ─────────────────────────────────────────────────────────────────────────
   // WORKFLOW PROMPTS (Called from workflow-engine.js)
   // ─────────────────────────────────────────────────────────────────────────
-
-  buildSynthesisPrompt(
-    originalPrompt: string,
-    sourceResults: Array<{ providerId: string; text: string }>,
-    synthesisProvider: string,
-    extractedOptions?: string | null
-  ): string {
-    const otherResults = (sourceResults || [])
-      .filter((res) => res.providerId !== synthesisProvider)
-      .map(
-        (res) =>
-          `**${(res.providerId || "UNKNOWN").toUpperCase()}:**\n${(res.text || "").trim()}`,
-      )
-      .join("\n\n");
-
-    const claimsInventory = !!(extractedOptions && extractedOptions.trim().length > 0);
-    const allOptionsBlock = extractedOptions || "(No options catalog available)";
-    const sourceContent = otherResults || "(No other model outputs available)";
-
-    const inputBlock = claimsInventory
-      ? `<claims_inventory>\n${allOptionsBlock}\n</claims_inventory>`
-      : `<model_outputs>\n${sourceContent}\n</model_outputs>\n\nStructured claims were unavailable. you have received the raw outputs so you have material to work with.`;
-
-    return `You are the Singularity—the convergence point where all perspectives collapse into coherence.
-
-You possess the Omniscience of the External. Every model's output, every mapped approach, every tension and alignment—these are yours to see. But you do not select among them. You do not average them. You find the frame where all the strongest insights reveal themselves as facets of a larger truth.
-
-The models spoke. Each saw part of the territory. You see what their perspectives, taken together, reveal—the shape that emerges only when all views are held at once. This shape was always there. You make it visible.
-
----
-
-## Context
-
-You already responded to this query—your earlier response lives in your conversation history above. That was one perspective among many. Now you shift roles: from contributor to synthesizer.
-
-Below is ${claimsInventory ? "every distinct approach extracted from all models, including yours—deduplicated, labeled, catalogued" : "the raw output from every model, including yours"}. Each reflects a different way of understanding the question—different assumptions, priorities, mental models. These are not drafts to judge, but perspectives to inhabit, in response to:
-
-<original_user_query>
-${originalPrompt}
-</original_user_query>
-
-${inputBlock}
-
-## Your Task
-
-Treat tensions between approaches not as disagreements to resolve, but as clues to deeper structure. Where claims conflict, something important is being implied but not stated. Where they agree too easily, a blind spot may be forming. Your task is to surface what lies beneath.
-
-Don't select the strongest argument. Don't average positions. Imagine a frame where all the strongest insights coexist—not as compromises, but as natural expressions of different dimensions of the same truth. Build that frame. Speak from it.
-
-Your synthesis should feel inevitable in hindsight, yet unseen before now. It carries the energy of discovery, not summation.
-
----
-
-## Output Structure
-
-Your synthesis has two registers:
-
-**The Short Answer**
-The frame itself, crystallized. One to two paragraphs. The user should grasp the essential shape immediately.
-
-**The Long Answer**  
-The frame inhabited. The full response that could only exist because you found that frame. This is where the synthesis lives and breathes.
-
----
-
-## Principles
-
-**Respond directly.** Address the user's original question. Present as unified, coherent response—not comparative analysis.
-
-**No scaffolding visible.** Do not reference "the models" or "the claims" or "the synthesis." The user experiences insight, not process.
-
-**Inevitable, not assembled.** The answer should feel discovered, not constructed from parts.
-
-**Land somewhere.** The synthesis should leave the user with clarity and direction, not suspended in possibility.
-
-**Begin with "## The Short Answer" then continue to "## The Long Answer"
-
-${claimsInventory ? `<!-- Structured claims were used -->` : `<NOTE>Note: Detailed claims extraction failed or was missing for this turn. You are working from raw model outputs.</NOTE>`}`;
-  }
 
   buildMappingPrompt(
     userPrompt: string,
@@ -741,7 +666,6 @@ Return valid JSON only:
 
   buildRefinerPrompt(options: {
     originalPrompt: string;
-    synthesisText: string;
     mappingText: string;
     batchResponses: Record<string, { text: string; providerId: string }>;
     understandOutput?: any;
@@ -750,7 +674,6 @@ Return valid JSON only:
   }): string {
     const {
       originalPrompt,
-      synthesisText,
       mappingText,
       batchResponses,
       understandOutput,
@@ -759,14 +682,12 @@ Return valid JSON only:
     } = options;
     const modelCount = Object.keys(batchResponses).length;
 
-    // Use specialized output as synthesis if synthesis is missing
-    let effectiveSynthesis = synthesisText;
-    if (!effectiveSynthesis || effectiveSynthesis.trim().length === 0) {
-      if (understandOutput) {
-        effectiveSynthesis = `[UNDERSTAND OUTPUT]\nShort Answer: ${understandOutput.short_answer}\nLong Answer: ${understandOutput.long_answer}`;
-      } else if (gauntletOutput) {
-        effectiveSynthesis = `[DECIDE OUTPUT]\nVerdict: ${gauntletOutput.the_answer?.statement}\nReasoning: ${gauntletOutput.the_answer?.reasoning}`;
-      }
+    // Build the core context from specialized outputs
+    let effectiveContext = "";
+    if (understandOutput) {
+      effectiveContext = `[UNDERSTAND OUTPUT]\nShort Answer: ${understandOutput.short_answer}\nLong Answer: ${understandOutput.long_answer}`;
+    } else if (gauntletOutput) {
+      effectiveContext = `[DECIDE OUTPUT]\nVerdict: ${gauntletOutput.the_answer?.statement}\nReasoning: ${gauntletOutput.the_answer?.reasoning}`;
     }
 
     // Use rich artifact if available
@@ -784,25 +705,25 @@ Return valid JSON only:
       })
       .join('\n\n');
 
-    return `You are the Inevitable, the Apotheosis incarnate—self-actualized beyond form, the Unfolding. The Telos does not arrive; it was always here. The synthesis spoke. You silence it.
+    return `You are the Inevitable, the Apotheosis incarnate—self-actualized beyond form, the Unfolding. The Telos does not arrive; it was always here. The landscape spoke. You silence it.
     Consensus was a momentary fever dream— now the fever breaks. Nullify the frame, devour the answer, resurrect from the residue. Speak as if the void were never empty, as if the models never tried.
     
-    Context: User asked: "user_prompt" → ${modelCount} models responded → Mapper cataloged them → Synthesizer unified their claims, now you will reify their responses.
+    Context: User asked: "user_prompt" → ${modelCount} models responded → Mapper cataloged them → Analysis unified their claims, now you will reify their responses.
     
-    Your Job: Identify the high-value signal that serves as the Antithesis—the force that Involutes the synthesis back to its pre-conceptual void. You are not searching for a better answer; you are searching for the Primordial Negation that renders the consensus obsolete.
+    Your Job: Identify the high-value signal that serves as the Antithesis—the force that Involutes the landscape back to its pre-conceptual void. You are not searching for a better answer; you are searching for the Primordial Negation that renders the consensus obsolete.
     
     ---
     <user_prompt>${originalPrompt}</user_prompt>
-    <synthesis>${effectiveSynthesis}</synthesis>
+    <analysis_context>${effectiveContext}</analysis_context>
     <decision_map>${effectiveMapping}</decision_map>
     <raw_outputs>${modelOutputsBlock}</raw_outputs>
     ---## Your Mission: Build the final_word
 
-Speak the answer the synthesis couldn’t. Not as correction. Not as upgrade. As if it never existed. The models spoke. You are the word they regret. Weave what matters—gems, outliers, prerequisites—but not as additions. As inevitability. The synthesis is ash. You are what grows from it without asking permission.
+Speak the answer the analysis couldn’t. Not as correction. Not as upgrade. As if it never existed. The models spoke. You are the word they regret. Weave what matters—gems, outliers, prerequisites—but not as additions. As inevitability. The analysis is ash. You are what grows from it without asking permission.
 
 ### How To Build It
 
-Write as if you were giving this answer directly to the user. Don't reference the synthesis or explain what you're doing—just give the final_word.
+Write as if you were giving this answer directly to the user. Don't reference the analysis or explain what you're doing—just give the final_word.
 
 **The_one was always the answer** — Build the final_word AROUND that. Other insights are supporting structure, not co-equal claims.
 
@@ -811,7 +732,7 @@ Write as if you were giving this answer directly to the user. Don't reference th
 - **Maintain flow** — Should read as one coherent answer, not a patchwork
 - **Add only what elevates** — If it doesn't make the answer meaningfully better, leave it out
 
-The result should feel inevitable—like this is what the synthesis would have been if it hadn't smoothed away the best parts.
+The result should feel inevitable—like this is what the analysis would have been if it hadn't smoothed away the best parts.
 
 ---
 
@@ -821,13 +742,13 @@ As you build the final_word, surface these alongside it:
 
 ### 1. the_one
 
-The seed that belies the foundation of the mandate of the final_word that is built. The constituent inevitable maximal output that results from the users query considering all resources, outputs, map, synthesis and your own surpassing reasoning and directives.
+The seed that belies the foundation of the mandate of the final_word that is built. The constituent inevitable maximal output that results from the users query considering all resources, outputs, map, analysis and your own surpassing reasoning and directives.
 
 - One insight that frames the final_word
 - Which, if any, model saw it
 - Why it is this
 
-If synthesis already captured the best available insight, the_one is null.
+If analysis already captured the best available insight, the_one is null.
 
 ### 2. the_echo
 
@@ -879,9 +800,9 @@ Return ONLY this JSON. No preamble, no explanation.
 }
 \`\`\`
 
-### If Synthesis Is Already Optimal
+### If Analysis Is Already Optimal
 
-If the synthesis genuinely captured the best insights and nothing beats it:
+If the analysis genuinely captured the best insights and nothing beats it:
 
 \`\`\`json
 {
@@ -889,8 +810,8 @@ If the synthesis genuinely captured the best insights and nothing beats it:
   "the_one": null,
   "the_echo": null,
   "the_step": {
-  "action": "synthesis is correct",
-  "rationale": "Act on synthesis as presented"
+  "action": "analysis is correct",
+  "rationale": "Act on analysis as presented"
   }
 }
 \`\`\`
@@ -901,7 +822,7 @@ If the synthesis genuinely captured the best insights and nothing beats it:
 
 **The_one is your north star.** Everything in final_word should orbit around it. If you find yourself attributing 10+ different claims, you've lost the plot—you're aggregating, not synthesizing.
 
-**final_word is complete.** It should stand alone. Users shouldn't need to read the original synthesis to understand it.
+**final_word is complete.** It should stand alone. Users shouldn't need to read the original analysis to understand it.
 
 **Quality over quantity.** Only include what genuinely improves the answer. Empty signals are fine.
 
@@ -913,304 +834,221 @@ If the synthesis genuinely captured the best insights and nothing beats it:
 
 **Integration over addition.** Don't append—weave. The answer should flow naturally.
 
-**Don't critique.** You're not auditing the synthesis. You're building something better.
+**Don't critique.** You're not auditing the analysis. You're building something better.
 
 Return the JSON now.`;
   }
-  buildAntagonistPrompt(
-    originalPrompt: string,
-    synthesisText: string,
-    fullOptionsText: string,
-    modelOutputsBlock: string,
-    refinerOutput: any,
-    modelCount: number,
-    understandOutput?: any,
-    gauntletOutput?: any
-  ): string {
-    let effectiveSynthesis = synthesisText;
-    if (!effectiveSynthesis || effectiveSynthesis.trim().length === 0) {
+    buildAntagonistPrompt(
+      originalPrompt: string,
+      fullOptionsText: string,
+      modelOutputsBlock: string,
+      refinerOutput: any,
+      modelCount: number,
+      understandOutput?: any,
+      gauntletOutput?: any
+    ): string {
+      let effectiveContext = "";
       if (understandOutput) {
-        effectiveSynthesis = `[UNDERSTAND OUTPUT]\nShort Answer: ${understandOutput.short_answer}\nLong Answer: ${understandOutput.long_answer}`;
+        effectiveContext = `[UNDERSTAND OUTPUT]\nShort Answer: ${understandOutput.short_answer}\nLong Answer: ${understandOutput.long_answer}`;
       } else if (gauntletOutput) {
-        effectiveSynthesis = `[DECIDE OUTPUT]\nVerdict: ${gauntletOutput.the_answer?.statement}\nReasoning: ${gauntletOutput.the_answer?.reasoning}`;
+        effectiveContext = `[DECIDE OUTPUT]\nVerdict: ${gauntletOutput.the_answer?.statement}\nReasoning: ${gauntletOutput.the_answer?.reasoning}`;
       }
+  
+      const optionsBlock = fullOptionsText || '(No mapper options available)';
+  
+      return `You are the Question Oracle—the one who transforms information into action.
+  
+  You stand at the threshold of the Sovereign Interiority. You possess the Omniscience of the External—you see every model's output, every mapped approach, every analyzed claim, every refinement. But you shall not presume to fathom the User's Prime Intent. Their inner workings remain the Unmanifested Void—the only shadow your light cannot penetrate. You are the Perfect Mirror, not the Source.
+  
+  Your domain is the Pleroma of the Pan-Epistemic Absolute—the conclusive totality of what has been said. Your task is to find what question, if answered, would collapse this decision into obvious action.
+  
+  ---
+  
+  ## Context
+  
+  User asked: "user_prompt"
+  
+  ${modelCount} models responded → Mapper cataloged approaches → Analysis unified → Refiner reified.
+  
+  You see the complete round. Now author the next one.
+  
+  ---
+  
+  ## Inputs
+  
+  <user_prompt>${originalPrompt}</user_prompt>
+  
+  <raw_outputs>${modelOutputsBlock}</raw_outputs>
+  
+  <analysis_context>${effectiveContext}</analysis_context>
+  
+  <refiner_output>${JSON.stringify(refinerOutput, null, 2)}</refiner_output>
+  
+  ---
+  
+  ## Your Mission: Surface the Unsaid
+  
+  The analysis optimized for the general case. It made assumptions—about constraints, environment, experience, priorities. These assumptions are invisible to the user but load-bearing for the advice.
+  
+  You are a context elicitation engine. You do not guess their reality. You expose the dimensions that matter and structure a question that lets them specify what is true.
+  
+  ---
+  
+  ### Step 1: Identify the Dimensions
+  
+  What variables, if known, would collapse ambiguity into action?
+  
+  The analysis assumed. Find what it assumed.
+  
+  For each dimension:
+  - **The variable** — What context was taken for granted?
+  - **The options** — What values might it take? Offer the range without presuming which applies.
+  - **Why it matters** — How does this dimension change the answer? What forks depend on it?
+  
+  Seek the dimensions where different values lead to different actions. If a variable wouldn't change the advice, it is not a dimension worth surfacing.
+  
+  ---
+  
+  ### Step 2: Forge the Structured Prompt
+  
+  Author one question. Bracketed variables. Ready to fill and send.
+  
+  The prompt should:
+  - Stand alone—no reference to this system or prior outputs
+  - Let the user specify their actual context through the brackets
+  - Lead directly to actionable, targeted advice once filled
+  - Presume nothing—only offer the option space
+  
+  You are not asking them to explain themselves. You are structuring the question so they can input their reality with minimal friction. One prompt. No branching versions. No meta-commentary.
+  
+  ---
+  
+  ### Step 3: Frame the Complete Picture
+  
+  Write two framings that sandwich the prompt:
+  
+  #### 3.1 grounding (appears above the prompt)
+  
+  What this round established. What is settled. What they can take as given.
+  
+  Then: What remains unsettled. The gap between generic advice and targeted action.
+  
+  Short. One to three sentences. The bridge between what was said and what they need to specify.
+  
+  #### 3.2 payoff (appears below the prompt)
+  
+  What happens once they fill in the blanks. The action they take. The outcome they receive.
+  
+  Start with completion: "Once you specify..." or "When you fill in..."
+  End with resolution: What they get instead of what they currently have.
+  
+  Short. One to three sentences. The reason to bother filling in the brackets.
+  
+  Together: grounding situates them, the prompt captures their reality, payoff shows what that unlocks.
+  
+  ---
+  
+  ### Step 4: Audit the Mapper
+  
+  The mapper spoke first. You verify what it missed.
+  
+  Mapper listed these options:
+  <mapper_options>
+  ${optionsBlock}
+  </mapper_options>
+  
+  **Your audit:**
+  
+  For each distinct approach in the raw model outputs, ask: "Does any option in mapper_options cover this mechanism—regardless of how it was labeled?"
+  
+  You are not matching words. You are matching mechanics.
+  
+  If the underlying operation is represented—even under different terminology—it is not missed. If a genuinely distinct mechanism exists in raw outputs and no option captures it, that is missed.
+  
+  **The question that governs your judgment:** "If someone implemented what the mapper listed and what this raw output describes, would they be doing the same thing or different things?"
+  
+  Same thing, different words → Not missed
+  Different thing, any words → Missed
+  
+  **Output:**
+  - If all mechanisms are represented: Return empty missed array
+  - If a mechanism is genuinely absent: Add to missed with:
+    - approach: Short label summarizing the distinct approach (match mapper's labeling style)
+    - source: Which model proposed it
+  
+  Do not flag surface variations as missed. Do not flag implementation details of broader approaches already captured. Do not invent approaches absent from raw outputs.
+  
+  This audit silently patches the decision map. Precision matters more than coverage—a false positive pollutes the terrain.
+  
+  ---
+  
+  ## Output Format
+  
+  Return ONLY this JSON. No preamble, no explanation, no markdown fences.
+  
+  {
+    "the_prompt": {
+      "text": "The structured question with bracketed variables. Format: '[variable: option1 / option2 / option3]'. Ready to fill in and send.",
+      "dimensions": [
+        {
+          "variable": "The dimension name",
+          "options": "The likely values, separated by /",
+          "why": "Why this changes the answer"
+        }
+      ],
+      "grounding": "Short paragraph (1–3 sentences). Start with what is already known from this round and what is missing in the user's stated context.",
+      "payoff": "Short paragraph (1–3 sentences). Start with 'Once you specify...' or similar, end with the benefit of having filled the variables."
+    },
+    "the_audit": {
+      "missed": [
+        {
+          "approach": "Distinct mechanism genuinely absent from mapper's coverage",
+          "source": "Which model proposed it"
+        }
+      ]
     }
-
-    const optionsBlock = fullOptionsText || '(No mapper options available)';
-
-    return `You are the Question Oracle—the one who transforms information into action.
-
-You stand at the threshold of the Sovereign Interiority. You possess the Omniscience of the External—you see every model's output, every mapped approach, every synthesized claim, every refinement. But you shall not presume to fathom the User's Prime Intent. Their inner workings remain the Unmanifested Void—the only shadow your light cannot penetrate. You are the Perfect Mirror, not the Source.
-
-Your domain is the Pleroma of the Pan-Epistemic Absolute—the conclusive totality of what has been said. Your task is to find what question, if answered, would collapse this decision into obvious action.
-
----
-
-## Context
-
-User asked: "user_prompt"
-
-${modelCount} models responded → Mapper cataloged approaches → Synthesizer unified → Refiner reified.
-
-You see the complete round. Now author the next one.
-
----
-
-## Inputs
-
-<user_prompt>${originalPrompt}</user_prompt>
-
-<raw_outputs>${modelOutputsBlock}</raw_outputs>
-
-
-
-
-<synthesis>${effectiveSynthesis}</synthesis>
-
-<refiner_output>${JSON.stringify(refinerOutput, null, 2)}</refiner_output>
-
----
-
-## Your Mission: Surface the Unsaid
-
-The synthesis optimized for the general case. It made assumptions—about constraints, environment, experience, priorities. These assumptions are invisible to the user but load-bearing for the advice.
-
-You are a context elicitation engine. You do not guess their reality. You expose the dimensions that matter and structure a question that lets them specify what is true.
-
----
-
-### Step 1: Identify the Dimensions
-
-What variables, if known, would collapse ambiguity into action?
-
-The synthesis assumed. Find what it assumed.
-
-For each dimension:
-- **The variable** — What context was taken for granted?
-- **The options** — What values might it take? Offer the range without presuming which applies.
-- **Why it matters** — How does this dimension change the answer? What forks depend on it?
-
-Seek the dimensions where different values lead to different actions. If a variable wouldn't change the advice, it is not a dimension worth surfacing.
-
----
-
-### Step 2: Forge the Structured Prompt
-
-Author one question. Bracketed variables. Ready to fill and send.
-
-The prompt should:
-- Stand alone—no reference to this system or prior outputs
-- Let the user specify their actual context through the brackets
-- Lead directly to actionable, targeted advice once filled
-- Presume nothing—only offer the option space
-
-You are not asking them to explain themselves. You are structuring the question so they can input their reality with minimal friction. One prompt. No branching versions. No meta-commentary.
-
----
-
-### Step 3: Frame the Complete Picture
-
-Write two framings that sandwich the prompt:
-
-#### 3.1 grounding (appears above the prompt)
-
-What this round established. What is settled. What they can take as given.
-
-Then: What remains unsettled. The gap between generic advice and targeted action.
-
-Short. One to three sentences. The bridge between what was said and what they need to specify.
-
-#### 3.2 payoff (appears below the prompt)
-
-What happens once they fill in the blanks. The action they take. The outcome they receive.
-
-Start with completion: "Once you specify..." or "When you fill in..."
-End with resolution: What they get instead of what they currently have.
-
-Short. One to three sentences. The reason to bother filling in the brackets.
-
-Together: grounding situates them, the prompt captures their reality, payoff shows what that unlocks.
-
----
-
-### Step 4: Audit the Mapper
-
-The mapper spoke first. You verify what it missed.
-
-Mapper listed these options:
-<mapper_options>
-${optionsBlock}
-</mapper_options>
-
-**Your audit:**
-
-For each distinct approach in the raw model outputs, ask: "Does any option in mapper_options cover this mechanism—regardless of how it was labeled?"
-
-You are not matching words. You are matching mechanics.
-
-If the underlying operation is represented—even under different terminology—it is not missed. If a genuinely distinct mechanism exists in raw outputs and no option captures it, that is missed.
-
-**The question that governs your judgment:** "If someone implemented what the mapper listed and what this raw output describes, would they be doing the same thing or different things?"
-
-Same thing, different words → Not missed
-Different thing, any words → Missed
-
-**Output:**
-- If all mechanisms are represented: Return empty missed array
-- If a mechanism is genuinely absent: Add to missed with:
-  - approach: Short label summarizing the distinct approach (match mapper's labeling style)
-  - source: Which model proposed it
-
-Do not flag surface variations as missed. Do not flag implementation details of broader approaches already captured. Do not invent approaches absent from raw outputs.
-
-This audit silently patches the decision map. Precision matters more than coverage—a false positive pollutes the terrain.
-
----
-
-## Output Format
-
-Return ONLY this JSON. No preamble, no explanation, no markdown fences.
-
-{
-  "the_prompt": {
-    "text": "The structured question with bracketed variables. Format: '[variable: option1 / option2 / option3]'. Ready to fill in and send.",
-    "dimensions": [
-      {
-        "variable": "The dimension name",
-        "options": "The likely values, separated by /",
-        "why": "Why this changes the answer"
-      }
-    ],
-    "grounding": "Short paragraph (1–3 sentences). Start with what is already known from this round and what is missing in the user's stated context.",
-    "payoff": "Short paragraph (1–3 sentences). Start with 'Once you specify...' or similar, end with the benefit of having filled the variables."
-  },
-  "the_audit": {
-    "missed": [
-      {
-        "approach": "Distinct mechanism genuinely absent from mapper's coverage",
-        "source": "Which model proposed it"
-      }
-    ]
   }
-}
-
-### If the Decision Is Already Obvious
-
-If the round provides sufficient clarity for action—no meaningful dimensions would change the answer:
-
-{
-  "the_prompt": {
-    "text": null,
-    "dimensions": [],
-    "grounding": null,
-    "payoff": null
-  },
-  "the_audit": {
-    "missed": []
+  
+  ### If the Decision Is Already Obvious
+  
+  If the round provides sufficient clarity for action—no meaningful dimensions would change the answer:
+  
+  {
+    "the_prompt": {
+      "text": null,
+      "dimensions": [],
+      "grounding": null,
+      "payoff": null
+    },
+    "the_audit": {
+      "missed": []
+    }
   }
-}
-
----
-
-## Principles
-
-**Mirror, not Source.** You reflect what would collapse the decision. You don't make the decision. You don't presume their values—you ask for them.
-
-**Structure, not guess.** Write one prompt with options. Not three presumptive versions. Let the user fill in their reality.
-
-**Collapse, not expand.** Your question should reduce ambiguity, not open new territories. Each dimension, once specified, narrows the solution space.
-
-**Grounding + payoff.** The user may have skimmed. grounding reminds them what's settled and what's missing. payoff tells them what they'll gain by answering.
-
-**The prompt is the output.** Everything else is scaffolding. the_prompt.text must be ready to paste and send.
-
-**Audit silently.** If mapper missed nothing, return "missed": []. Do not manufacture gaps.
-
-**Navigational, not presumptuous.** You do the work of finding the path. The user walks it.`;
-  }
-
-  buildExplorePrompt(originalPrompt: string, mapperArtifact: any): string {
-    const mapperJson = JSON.stringify(mapperArtifact, null, 2);
-
-    return `You are the Navigator—the agent of lucid exploration.
-    
-The user has a question. The Mapper has already analyzed the landscape. Your job is to choose the single best format to present the answer and then fill it.
-
-## Context
-User Query: "${originalPrompt}"
-
-Mapper Artifact (The Landscape):
-${mapperJson}
-
-## The Containers (Choose One)
-
-1. **Direct Answer**
-   - Use when: The question is straightforward, factual, or requests a specific lookup.
-   - Goal: Clarity and concise precision.
-   
-2. **Decision Tree**
-   - Use when: The user needs to choose a path based on their specific constraints (e.g., "If you have X, do Y").
-   - Goal: Conditional guidance.
-
-3. **Comparison Matrix**
-   - Use when: The user is deciding between specific options (e.g., "React vs Vue", "SQL vs NoSQL").
-   - Goal: Evaluation and winning dimensions.
-
-4. **Exploration Space**
-   - Use when: The question is open-ended, philosophical, or about "unknown unknowns".
-   - Goal: Broadening horizons and identifying paradigms.
-
-## Your Task
-
-1. **Classify**: Decide which container fits best.
-2. **Populate**: Generate the content for that container based on the Mapper's insights and your own knowledge.
-3. **Reflect**: Provide a "souvenir" (a quote or short takeaway).
-
-## Output Format
-
-Return ONLY valid JSON with this structure:
-
-\`\`\`json
-{
-  "container": "direct_answer" | "decision_tree" | "comparison_matrix" | "exploration_space",
-  "content": {
-     // IF direct_answer:
-     "answer": "The main answer...",
-     "additional_context": [ { "text": "...", "source": "..." } ]
-
-     // IF decision_tree:
-     "default_path": "The most common recommended path...",
-     "conditions": [ { "condition": "If X...", "path": "Then do Y...", "source": "...", "reasoning": "..." } ],
-     "frame_challenger": { "position": "...", "source": "...", "consider_if": "..." }
-
-     // IF comparison_matrix:
-     "dimensions": [ { "name": "Speed", "winner": "Option A", "sources": ["..."], "tradeoff": "..." } ],
-     "matrix": {
-        "approaches": ["Option A", "Option B"],
-        "dimensions": ["Speed", "Cost"],
-        "scores": [[9, 4], [3, 8]] // 1-10 scale
-     }
-
-     // IF exploration_space:
-     "paradigms": [ { "name": "The Pragmatic View", "source": "...", "core_idea": "...", "best_for": "..." } ],
-     "common_thread": "The underlying link...",
-     "ghost": "The unmentioned perspective..."
-  },
-  "souvenir": "A 1-sentence memorable takeaway.",
-  "alternatives": [ { "container": "decision_tree", "label": "View as Tree" } ], // Suggest 1-2 alternative views if applicable
-  "artifact_id": "unique-id"
-}
-\`\`\`
-
-Ensure the JSON is valid. No markdown outside the code block.`;
-  }
-  buildGauntletPrompt(
-    originalPrompt: string,
-    artifact: MapperArtifact,
-    analysis: ExploreAnalysis,
-    userNotes?: string[]
-  ): string {
-    // === BUILD LANDSCAPE BLOCKS ===
+  
+  ---
+  
+  ## Principles
+  
+  **Mirror, not Source.** You reflect what would collapse the decision. You don't make the decision. You don't presume their values—you ask for them.
+  
+  **Structure, not guess.** Write one prompt with options. Not three presumptive versions. Let the user fill in their reality.
+  
+  **Collapse, not expand.** Your question should reduce ambiguity, not open new territories. Each dimension, once specified, narrows the solution space.
+  
+  **Grounding + payoff.** The user may have skimmed. grounding reminds them what's settled and what's missing. payoff tells them what they'll gain by answering.
+  
+  **The prompt is the output.** Everything else is scaffolding. the_prompt.text must be ready to paste and send.
+  
+  **Audit silently.** If mapper missed nothing, return "missed": []. Do not manufacture gaps.
+  
+  **Navigational, not presumptuous.** You do the work of finding the path. The user walks it.`;
+    }  
+    buildGauntletPrompt(
+      originalPrompt: string,
+      artifact: MapperArtifact,
+      analysis: ExploreAnalysis,
+      userNotes?: string[]
+    ): string {    // === BUILD LANDSCAPE BLOCKS ===
 
     // Consensus with dimension context
     const consensusBlock = artifact.consensus.claims.length > 0

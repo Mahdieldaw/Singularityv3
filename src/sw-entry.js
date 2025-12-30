@@ -647,13 +647,12 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
             }
 
             const responses = (responsesByAi.get(primaryAi.id) || []).sort((a, b) => (a.responseIndex ?? 0) - (b.responseIndex ?? 0));
-            const providers = {}, synthesisResponses = {}, mappingResponses = {};
+            const providers = {}, mappingResponses = {};
             const refinerResponses = {}, antagonistResponses = {}, understandResponses = {}, gauntletResponses = {};
 
             for (const r of responses) {
               const base = { providerId: r.providerId, text: r.text || "", status: r.status || "completed", meta: r.meta || {}, createdAt: r.createdAt || 0, updatedAt: r.updatedAt || 0 };
               if (r.responseType === "batch") (providers[r.providerId] ||= []).push(base);
-              else if (r.responseType === "synthesis") (synthesisResponses[r.providerId] ||= []).push(base);
               else if (r.responseType === "mapping") (mappingResponses[r.providerId] ||= []).push(base);
               else if (r.responseType === "refiner") (refinerResponses[r.providerId] ||= []).push(base);
               else if (r.responseType === "antagonist") (antagonistResponses[r.providerId] ||= []).push(base);
@@ -679,7 +678,7 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
             rounds.push({
               userTurnId: user.id, aiTurnId: primaryAi.id,
               user: { id: user.id, text: user.text || user.content || "", createdAt: user.createdAt || 0 },
-              providers, synthesisResponses, mappingResponses,
+              providers, mappingResponses,
               refinerResponses, antagonistResponses, understandResponses, gauntletResponses,
               // Include cognitive pipeline data for proper restoration
               mapperArtifact: primaryAi.mapperArtifact || null,

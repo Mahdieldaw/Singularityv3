@@ -7,8 +7,7 @@ export type ProviderKey =
   | "gemini-pro"
   | "chatgpt"
   | "qwen";
-export type WorkflowStepType = "prompt" | "synthesis" | "mapping" | "refiner" | "antagonist" | "explore";
-export type SynthesisStrategy = "continuation" | "fresh";
+export type WorkflowStepType = "prompt" | "mapping" | "refiner" | "antagonist" | "understand" | "gauntlet";
 
 export type CognitiveMode = "auto" | "understand" | "decide";
 
@@ -223,10 +222,8 @@ export interface InitializeRequest {
   userMessage: string;
   providers: ProviderKey[];
   includeMapping: boolean;
-  includeSynthesis: boolean;
   includeRefiner?: boolean;
   includeAntagonist?: boolean;
-  synthesizer?: ProviderKey;
   mapper?: ProviderKey;
   refiner?: ProviderKey;
   antagonist?: ProviderKey;
@@ -253,8 +250,6 @@ export interface ExtendRequest {
   providers: ProviderKey[];
   forcedContextReset?: ProviderKey[];
   includeMapping: boolean;
-  includeSynthesis: boolean;
-  synthesizer?: ProviderKey;
   mapper?: ProviderKey;
   refiner?: ProviderKey;
   antagonist?: ProviderKey;
@@ -268,13 +263,13 @@ export interface ExtendRequest {
 }
 
 /**
- * Re-runs a synthesis or mapping step for a historical turn with a different provider.
+ * Re-runs a workflow step for a historical turn with a different provider.
  */
 export interface RecomputeRequest {
   type: "recompute";
   sessionId: string;
   sourceTurnId: string;
-  stepType: "synthesis" | "mapping" | "batch" | "refiner" | "antagonist";
+  stepType: "mapping" | "batch" | "refiner" | "antagonist" | "understand" | "gauntlet";
   targetProvider: ProviderKey;
   userMessage?: string;
   useThinking?: boolean;
@@ -296,36 +291,27 @@ export interface PromptStepPayload {
   useThinking?: boolean;
 }
 
-export interface SynthesisStepPayload {
-  synthesisProvider: ProviderKey;
-  strategy: SynthesisStrategy;
+export interface MappingStepPayload {
+  mappingProvider: ProviderKey;
   sourceStepIds?: string[];
   sourceHistorical?: {
     turnId: string;
-    responseType: "batch" | "synthesis" | "mapping";
-  };
-  originalPrompt: string;
-  useThinking?: boolean;
-  continueConversationId?: string;
-  attemptNumber?: number;
-  preferredMappingProvider?: ProviderKey;
+    mapperArtifact?: MapperArtifact;
+    useCognitivePipeline?: boolean;
+  }
+
 }
 
-export interface MappingStepPayload
-  extends Omit<SynthesisStepPayload, "synthesisProvider"> {
-  mappingProvider: ProviderKey;
-  mapperArtifact?: MapperArtifact;
-  useCognitivePipeline?: boolean;
-}
 
 export interface RefinerStepPayload {
   refinerProvider: ProviderKey;
   sourceStepIds?: string[];
-  synthesisStepIds?: string[];
   mappingStepIds?: string[];
+  understandOutput?: UnderstandOutput;
+  gauntletOutput?: GauntletOutput;
   sourceHistorical?: {
     turnId: string;
-    responseType: string;
+    responseType: "batch" | "mapping" | "understand" | "gauntlet";
   };
   originalPrompt: string;
 }
@@ -333,12 +319,14 @@ export interface RefinerStepPayload {
 export interface AntagonistStepPayload {
   antagonistProvider: ProviderKey;
   sourceStepIds?: string[];
-  synthesisStepIds?: string[];
   mappingStepIds?: string[];
   refinerStepIds?: string[];
+  understandOutput?: UnderstandOutput;
+  gauntletOutput?: GauntletOutput;
+  refinerOutput?: any;
   sourceHistorical?: {
     turnId: string;
-    responseType: string;
+    responseType: "batch" | "mapping" | "understand" | "gauntlet" | "refiner";
   };
   originalPrompt: string;
 }
@@ -349,29 +337,28 @@ export interface GauntletStepPayload {
   mappingStepIds?: string[];
   sourceHistorical?: {
     turnId: string;
-    responseType: string;
+    responseType: "batch" | "mapping";
   };
   originalPrompt: string;
   mapperArtifact: MapperArtifact;
 }
 
-export interface ExploreStepPayload {
-
-  exploreProvider: ProviderKey;
+export interface UnderstandStepPayload {
+  understandProvider: ProviderKey;
   sourceStepIds?: string[];
   mappingStepIds?: string[];
   sourceHistorical?: {
     turnId: string;
-    responseType: string;
+    responseType: "batch" | "mapping";
   };
   originalPrompt: string;
+  mapperArtifact: MapperArtifact;
 }
 
 export interface WorkflowStep {
   stepId: string;
   type: WorkflowStepType;
-  payload: PromptStepPayload | SynthesisStepPayload | MappingStepPayload | RefinerStepPayload | AntagonistStepPayload | ExploreStepPayload | GauntletStepPayload;
-
+  payload: PromptStepPayload | MappingStepPayload | RefinerStepPayload | AntagonistStepPayload | UnderstandStepPayload | GauntletStepPayload;
 }
 
 export interface WorkflowContext {
@@ -414,7 +401,7 @@ export interface RecomputeContext {
   frozenBatchOutputs: Record<ProviderKey, ProviderResponse>;
   latestMappingOutput?: { providerId: string; text: string; meta: any } | null;
   providerContextsAtSourceTurn: Record<ProviderKey, { meta: any }>;
-  stepType: "synthesis" | "mapping" | "batch" | "refiner";
+  stepType: "mapping" | "batch" | "refiner" | "understand" | "gauntlet";
   targetProvider: ProviderKey;
   sourceUserMessage: string;
 }
@@ -460,7 +447,7 @@ export interface WorkflowProgressMessage {
   type: 'WORKFLOW_PROGRESS';
   sessionId: string;
   aiTurnId: string;
-  phase: 'batch' | 'synthesis' | 'mapping';
+  phase: 'batch' | 'mapping';
   providerStatuses: ProviderStatus[];
   completedCount: number;
   totalCount: number;
@@ -473,7 +460,6 @@ export interface TurnCreatedMessage {
   userTurnId: string;
   aiTurnId: string;
   providers?: ProviderKey[];
-  synthesisProvider?: ProviderKey | null;
   mappingProvider?: ProviderKey | null;
   refinerProvider?: ProviderKey | null;
   antagonistProvider?: ProviderKey | null;
@@ -550,7 +536,7 @@ export interface RetryProviderRequest {
   sessionId: string;
   aiTurnId: string;
   providerIds: string[];       // Which providers to retry
-  retryScope: 'batch' | 'synthesis' | 'mapping'; // Which phase to retry
+  retryScope: 'batch' | 'mapping'; // Which phase to retry
 }
 
 /**
@@ -565,7 +551,6 @@ export interface WorkflowPartialCompleteMessage {
     providerId: string;
     error: ProviderError;
   }>;
-  synthesisCompleted: boolean;
   mappingCompleted: boolean;
 }
 
@@ -636,7 +621,6 @@ export interface AiTurn {
   isComplete?: boolean;
   // Arrays for all response buckets for uniform handling
   batchResponses: Record<string, ProviderResponse[]>;
-  synthesisResponses: Record<string, ProviderResponse[]>;
   mappingResponses: Record<string, ProviderResponse[]>;
   refinerResponses?: Record<string, ProviderResponse[]>;
   antagonistResponses?: Record<string, ProviderResponse[]>;
@@ -677,19 +661,11 @@ export interface Thread {
 export function isPromptPayload(payload: any): payload is PromptStepPayload {
   return "prompt" in payload && "providers" in payload;
 }
-export function isSynthesisPayload(
-  payload: any,
-): payload is SynthesisStepPayload {
-  return "synthesisProvider" in payload;
-}
 export function isMappingPayload(payload: any): payload is MappingStepPayload {
   return "mappingProvider" in payload;
 }
 export function isRefinerPayload(payload: any): payload is RefinerStepPayload {
   return "refinerProvider" in payload;
-}
-export function isExplorePayload(payload: any): payload is ExploreStepPayload {
-  return "exploreProvider" in payload;
 }
 export function isGauntletPayload(payload: any): payload is GauntletStepPayload {
   return "gauntletProvider" in payload;

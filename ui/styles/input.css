@@ -1481,15 +1481,7 @@
         }
     }
 
-    @keyframes synthesisGlow {
-        0% {
-            opacity: 0.5;
-        }
 
-        100% {
-            opacity: 1;
-        }
-    }
 
     @keyframes spin {
         to {

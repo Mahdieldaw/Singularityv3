@@ -11,7 +11,7 @@ import {
   toastAtom,
   activeSplitPanelAtom,
   isDecisionMapOpenAtom,
-  synthesisProviderAtom,
+
   includePromptInCopyAtom,
   activeRecomputeStateAtom,
   mappingProviderAtom,
@@ -40,7 +40,7 @@ import { useRefinerOutput } from "../hooks/useRefinerOutput";
 import { useAntagonistOutput } from "../hooks/useAntagonistOutput";
 import { parseMappingResponse } from "../../shared/parsing-utils";
 
-import { SynthesisBubble } from "./SynthesisBubble";
+
 import { CognitiveOutputRenderer } from "./cognitive";
 
 // --- Helper Functions ---
@@ -55,7 +55,7 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
 }) => {
   // --- CONNECTED STATE LOGIC ---
 
-  const synthesisProvider = useAtomValue(synthesisProviderAtom);
+
   const mappingProvider = useAtomValue(mappingProviderAtom);
   const { handleClipClick } = useClipActions();
   const [globalActiveRecomputeState] = useAtom(activeRecomputeStateAtom);
@@ -95,12 +95,14 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
   // Filter activeRecomputeState to only include synthesis/mapping (AiTurnBlock doesn't handle batch)
   const activeRecomputeState = useMemo(() => {
     if (!globalActiveRecomputeState) return null;
-    if (globalActiveRecomputeState.stepType === 'batch') return null;
-    return globalActiveRecomputeState as { aiTurnId: string; stepType: "synthesis" | "mapping"; providerId: string; };
+    if (globalActiveRecomputeState.stepType === 'mapping') {
+      return globalActiveRecomputeState as { aiTurnId: string; stepType: "mapping"; providerId: string; };
+    }
+    return null;
   }, [globalActiveRecomputeState]);
 
   // Use global synthesis provider, or fall back to the provider used for generation
-  const activeSynthesisClipProviderId = synthesisProvider || aiTurn.meta?.synthesizer;
+  const activeSynthesisClipProviderId = aiTurn.meta?.synthesizer;
 
   // For mapping, if no explicit global selection and meta.mapper is missing,
   // default to the first provider that has mapping responses
@@ -168,113 +170,19 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
   } | null>(null);
 
 
-  // --- SYNTHESIS TABS LOGIC ---
-  const synthesisTabs = useMemo(() => {
-    if (!aiTurn.synthesisResponses) return [];
 
-    interface SynthTab {
-      id: string; // unique: providerId + index
-      providerId: string;
-      index: number;
-      label: string;
-      response: ProviderResponse;
-      isLatest: boolean;
-    }
 
-    const tabs: SynthTab[] = [];
-    const providerOrder = new Map(
-      LLM_PROVIDERS_CONFIG.map((p, idx) => [String(p.id), idx] as const)
-    );
-    const providersWithResponses = Object.entries(aiTurn.synthesisResponses)
-      .filter(([_, resps]) => Array.isArray(resps) && resps.length > 0);
-
-    // Sort providers by predetermined order or alphabetical
-    // This ensures tabs are stable
-    const sortedProviders = providersWithResponses.sort((a, b) => {
-      const idxA = providerOrder.get(a[0]) ?? Number.POSITIVE_INFINITY;
-      const idxB = providerOrder.get(b[0]) ?? Number.POSITIVE_INFINITY;
-      if (idxA !== idxB) return idxA - idxB;
-      return String(a[0]).localeCompare(String(b[0]));
-    });
-
-    sortedProviders.forEach(([pid, resps]) => {
-      const name = getProviderName(pid);
-
-      const respsArray = Array.isArray(resps) ? resps : [resps];
-      // Filter out empty responses unless they are streaming/error
-      const validResps = respsArray.filter(r => r.text || r.status === 'streaming' || r.status === 'error');
-
-      validResps.forEach((resp, idx) => {
-        // If there's more than one response for this provider, append number
-        const count = validResps.length;
-        const label = count > 1 ? `${name} ${idx + 1}` : name;
-
-        tabs.push({
-          id: `${pid}-${idx}`,
-          providerId: pid,
-          index: idx,
-          label,
-          response: resp,
-          isLatest: idx === validResps.length - 1
-        });
-      });
-    });
-
-    return tabs;
-  }, [aiTurn.synthesisResponses, aiTurn.synthesisVersion]);
-
-  // Track active tab ID. Default to the very last (latest) tab.
   // We use a ref to detect new arrivals and auto-switch if needed.
-  const [activeSynthTabId, setActiveSynthTabId] = useState<string | null>(null);
-  const prevTabsLengthRef = useRef(0);
-
-  // Auto-select latest tab on mount or when new tabs arrive
-  useEffect(() => {
-    if (synthesisTabs.length > 0) {
-      // If first load (active is null) OR new tabs added (recompute finished)
-      if (activeSynthTabId === null || synthesisTabs.length > prevTabsLengthRef.current) {
-        // Find the "recompute target" if exists, else just the last one
-        const lastTab = synthesisTabs[synthesisTabs.length - 1];
-
-        // If we have a specific active recompute target, prioritize that
-        if (activeRecomputeState?.stepType === "synthesis" && activeRecomputeState.aiTurnId === aiTurn.id) {
-          const targetTab = synthesisTabs.slice().reverse().find(t => t.providerId === activeRecomputeState.providerId);
-          if (targetTab) {
-            setActiveSynthTabId(targetTab.id);
-          } else {
-            setActiveSynthTabId(lastTab.id);
-          }
-        } else {
-          setActiveSynthTabId(lastTab.id);
-        }
-      }
-    }
-    prevTabsLengthRef.current = synthesisTabs.length;
-  }, [synthesisTabs, activeRecomputeState, aiTurn.id]); // activeSynthTabId excluded to allow manual switch
-
-
-  // Derive the effectively active tab (for orbs and display)
-  const effectiveActiveSynthTab = useMemo(() => {
-    if (synthesisTabs.length === 0) return null;
-    return synthesisTabs.find(t => t.id === activeSynthTabId) || synthesisTabs[synthesisTabs.length - 1];
-  }, [synthesisTabs, activeSynthTabId]);
 
 
 
-  const synthesisResponses = useMemo(() => {
-    const synthesis = aiTurn.synthesisResponses || {};
-    const out = LLM_PROVIDERS_CONFIG.reduce<Record<string, ProviderResponse[]>>(
-      (acc, p) => {
-        acc[String(p.id)] = [];
-        return acc;
-      },
-      {}
-    );
-    Object.entries(synthesis).forEach(([pid, resp]) => {
-      out[pid] = normalizeResponseArray(resp);
-    });
-    return out;
-  }, [aiTurn.id, aiTurn.synthesisVersion]);
+
+
+
+
+
+
+
 
   const mappingResponses = useMemo(() => {
     const map = aiTurn.mappingResponses || {};
@@ -321,52 +229,20 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
     [providerIds]
   );
 
-  const globalSynthesisProvider = useAtomValue(synthesisProviderAtom);
 
-  const activeSynthPid = useMemo(() => {
-    // 1. Clip Override (Highest Priority interaction)
-    if (activeSynthesisClipProviderId) return activeSynthesisClipProviderId;
 
-    // 2. Global State
-    if (globalSynthesisProvider) return globalSynthesisProvider;
-
-    // 3. Persisted Metadata
-    const metaSynth = (aiTurn.meta as any)?.synthesizer;
-    if (metaSynth) return metaSynth;
-
-    // 4. Fallback: Check for any completed synthesis response
-    for (const p of LLM_PROVIDERS_CONFIG) {
-      const pid = String(p.id);
-      const responses = synthesisResponses[pid];
-      if (responses?.some(r => r.status === 'completed' || (r.text && r.status !== 'error'))) {
-        return pid;
-      }
-    }
-
-    return undefined;
-  }, [activeSynthesisClipProviderId, globalSynthesisProvider, aiTurn.meta, synthesisResponses]);
-
-  // The provider ID to show as "Voice" (Crown) on the historical orbs
-  const displayedVoicePid = effectiveActiveSynthTab?.providerId || activeSynthPid || "";
 
   const visibleProviderIds = useMemo(() => {
     const ids = new Set(Object.keys(allSources));
-    if (activeSynthPid) ids.add(activeSynthPid);
-    if (effectiveActiveSynthTab?.providerId) ids.add(effectiveActiveSynthTab.providerId);
     if ((aiTurn.meta as any)?.mapper) ids.add((aiTurn.meta as any).mapper);
     return Array.from(ids);
-  }, [allSources, activeSynthPid, effectiveActiveSynthTab, aiTurn.meta]);
+  }, [allSources, aiTurn.meta]);
   const activeMappingPid = computeActiveProvider(
     activeMappingClipProviderId,
     mappingResponses
   );
 
-  const isSynthesisTarget = !!(
-    activeRecomputeState &&
-    activeRecomputeState.aiTurnId === aiTurn.id &&
-    activeRecomputeState.stepType === "synthesis" &&
-    (!activeSynthPid || activeRecomputeState.providerId === activeSynthPid)
-  );
+
 
   const getMappingAndOptions = useCallback(
     (take: ProviderResponse | undefined) => {
@@ -414,8 +290,8 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
     const md = formatTurnForMd(
       aiTurn.id,
       userPrompt,
-      effectiveActiveSynthTab?.response?.text || null,
-      effectiveActiveSynthTab?.providerId,
+      undefined, // No synthesis text
+      undefined, // No synthesis provider
       hasMapping && activeMappingPid ? { narrative: displayedMappingText, options: getOptions(), topology: graphTopology } : null,
       allSources,
       includePromptInCopy
@@ -424,8 +300,6 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
   }, [
     aiTurn.id,
     userPrompt,
-    effectiveActiveSynthTab?.response?.text,
-    effectiveActiveSynthTab?.providerId,
     hasMapping,
     displayedMappingText,
     getOptions,
@@ -460,58 +334,13 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
             <div className="w-full max-w-7xl">
               <div className="flex-1 flex flex-col relative min-w-0" style={{ maxWidth: '820px', margin: '0 auto' }}>
 
-                {(aiTurn.mapperArtifact && aiTurn.exploreAnalysis) && (
-                  <CognitiveOutputRenderer 
-                    aiTurn={aiTurn} 
+                {(aiTurn.mapperArtifact && aiTurn.exploreAnalysis) || aiTurn.understandOutput || aiTurn.gauntletOutput ? (
+                  <CognitiveOutputRenderer
+                    aiTurn={aiTurn}
                     refinerState={{ output: refinerOutput, isLoading: isRefinerLoading }}
                     antagonistState={antagonistState}
                   />
-                )}
-
-                {!aiTurn.understandOutput && !aiTurn.gauntletOutput && (
-                  <SynthesisBubble
-                    aiTurn={aiTurn}
-                    effectiveActiveSynthTab={effectiveActiveSynthTab}
-                    synthesisTabs={synthesisTabs}
-                    activeSynthTabId={activeSynthTabId}
-                    onTabChange={setActiveSynthTabId}
-                    refinerOutput={refinerOutput}
-                    isRefinerLoading={isRefinerLoading}
-                    showEcho={showEcho}
-                    setShowEcho={setShowEcho}
-                    onDecisionMapOpen={() => setIsDecisionMapOpen({ turnId: aiTurn.id })}
-                    onTrustPanelOpen={() => setActiveSplitPanel({ turnId: aiTurn.id, providerId: '__trust__' })}
-                    onGemActionClick={(action) => {
-                      setChatInput(action);
-                      setTrustPanelFocus({ turnId: aiTurn.id, section: 'context' });
-                    }}
-                    wasSynthRequested={wasSynthRequested}
-                    isSynthesisTarget={isSynthesisTarget}
-                    isMappingError={isMappingError}
-                    isMappingLoading={isMappingLoading}
-                    activeMappingClipProviderId={activeMappingClipProviderId}
-                    onClipClick={onClipClick}
-                    latestSynthResponseFallback={activeSynthPid ? getLatestResponse(synthesisResponses[activeSynthPid]) : undefined}
-                    displayedVoicePid={displayedVoicePid}
-                    visibleProviderIds={visibleProviderIds}
-                    isThisTurnActive={isThisTurnActive}
-                    workflowProgress={workflowProgress as any}
-                    onOrbClick={(pid) => setActiveSplitPanel({ turnId: aiTurn.id, providerId: pid })}
-                    isDecisionMapOpen={isDecisionMapOpen?.turnId === aiTurn.id}
-                    onCopyFullTurn={handleCopyFullTurn}
-                    includePromptInCopy={includePromptInCopy}
-                    onToggleIncludePrompt={() => setIncludePromptInCopy(!includePromptInCopy)}
-                    activeAntagonistPid={activeAntagonistPid}
-                    providersConfig={LLM_PROVIDERS_CONFIG}
-                    onArtifactClick={(artifact) => setSelectedArtifact(artifact)}
-                    providerErrors={providerErrors}
-                    retryableProviders={retryableProviders}
-                    onRetryAll={() => aiTurn.sessionId && retryProviders(aiTurn.sessionId as string, aiTurn.id, retryableProviders)}
-                    getProviderName={getProviderName}
-                    onRetryProvider={(pid) => aiTurn.sessionId && retryProviders(aiTurn.sessionId as string, aiTurn.id, [pid])}
-                    CouncilOrbs={CouncilOrbs}
-                  />
-                )}
+                ) : null}
               </div>
             </div>
           </div>

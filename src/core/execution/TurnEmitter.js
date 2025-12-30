@@ -6,7 +6,7 @@ export class TurnEmitter {
   }
 
   _generateId(prefix = "turn") {
-      return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   }
 
   /**
@@ -45,14 +45,12 @@ export class TurnEmitter {
 
       // Collect AI results from step results
       const batchResponses = {};
-      const synthesisResponses = {};
       const mappingResponses = {};
       const refinerResponses = {};
       const antagonistResponses = {};
       const exploreResponses = {};
       const understandResponses = {};
       const gauntletResponses = {};
-      let primarySynthesizer = null;
       let primaryMapper = null;
 
       const stepById = new Map((steps || []).map((s) => [s.stepId, s]));
@@ -75,22 +73,6 @@ export class TurnEmitter {
                   meta: r.meta || {},
                 }];
               });
-              break;
-            }
-            case "synthesis": {
-              const providerId = result?.providerId || step?.payload?.synthesisProvider;
-              if (!providerId) return;
-              if (!synthesisResponses[providerId])
-                synthesisResponses[providerId] = [];
-              synthesisResponses[providerId].push({
-                providerId,
-                text: result?.text || "",
-                status: result?.status || "completed",
-                createdAt: timestamp,
-                updatedAt: timestamp,
-                meta: result?.meta || {},
-              });
-              primarySynthesizer = providerId;
               break;
             }
             case "mapping": {
@@ -205,38 +187,6 @@ export class TurnEmitter {
               });
               break;
             }
-            case "synthesis": {
-              const providerId = step?.payload?.synthesisProvider;
-              if (!providerId) return;
-              if (!synthesisResponses[providerId])
-                synthesisResponses[providerId] = [];
-              synthesisResponses[providerId].push({
-                providerId,
-                text: errorText || "",
-                status: "error",
-                createdAt: timestamp,
-                updatedAt: timestamp,
-                meta: { error: errorText },
-              });
-              if (!primarySynthesizer) primarySynthesizer = providerId;
-              break;
-            }
-            case "mapping": {
-              const providerId = step?.payload?.mappingProvider;
-              if (!providerId) return;
-              if (!mappingResponses[providerId])
-                mappingResponses[providerId] = [];
-              mappingResponses[providerId].push({
-                providerId,
-                text: errorText || "",
-                status: "error",
-                createdAt: timestamp,
-                updatedAt: timestamp,
-                meta: { error: errorText },
-              });
-              if (!primaryMapper) primaryMapper = providerId;
-              break;
-            }
             case "refiner": {
               const providerId = step?.payload?.refinerProvider;
               if (!providerId) return;
@@ -318,7 +268,6 @@ export class TurnEmitter {
 
       const hasData =
         Object.keys(batchResponses).length > 0 ||
-        Object.keys(synthesisResponses).length > 0 ||
         Object.keys(mappingResponses).length > 0 ||
         Object.keys(refinerResponses).length > 0 ||
         Object.keys(antagonistResponses).length > 0 ||
@@ -339,7 +288,6 @@ export class TurnEmitter {
         threadId: "default-thread",
         createdAt: timestamp,
         batchResponses,
-        synthesisResponses,
         mappingResponses,
         refinerResponses,
         antagonistResponses,
@@ -347,10 +295,8 @@ export class TurnEmitter {
         understandResponses,
         gauntletResponses,
         meta: {
-          synthesizer: primarySynthesizer,
           mapper: primaryMapper,
           requestedFeatures: {
-            synthesis: steps.some((s) => s.type === "synthesis"),
             mapping: steps.some((s) => s.type === "mapping"),
             refiner: !!(steps.some((s) => s.type === "refiner") && !context?.workflowControl?.consensusOnly),
             antagonist: !!(steps.some((s) => s.type === "antagonist") && !context?.workflowControl?.consensusOnly),
@@ -366,7 +312,6 @@ export class TurnEmitter {
         userTurnId: userTurn.id,
         aiTurnId: aiTurn.id,
         batchCount: Object.keys(batchResponses).length,
-        synthesisCount: Object.keys(synthesisResponses).length,
         mappingCount: Object.keys(mappingResponses).length,
       });
 

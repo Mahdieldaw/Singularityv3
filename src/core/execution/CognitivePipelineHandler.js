@@ -33,7 +33,11 @@ export class CognitivePipelineHandler {
             const take = stepResults.get(step.stepId);
             const result = take?.status === "completed" ? take.result : null;
             if (!result?.text) continue;
-            mapperArtifact = parseV1MapperToArtifact(result.text, {
+            const text = String(result.text || "");
+            const isLegacyV1 =
+              text.includes("<mapping_output>") || text.includes("<decision_map>");
+            if (!isLegacyV1) continue;
+            mapperArtifact = parseV1MapperToArtifact(text, {
               graphTopology: result?.meta?.graphTopology,
               query: userMessageForExplore,
             });
@@ -119,7 +123,7 @@ export class CognitivePipelineHandler {
   }
 
   async handleContinueRequest(payload, stepExecutor, streamingManager, contextManager) {
-    const { sessionId, aiTurnId, mode, providerId, selectedArtifacts } = payload || {};
+    const { sessionId, aiTurnId, mode, providerId, selectedArtifacts, isRecompute, sourceTurnId } = payload || {};
     console.log(`[CognitiveHandler] Continuing cognitive workflow for turn ${aiTurnId} with mode ${mode}`);
 
     try {
@@ -145,27 +149,6 @@ export class CognitivePipelineHandler {
 
       const priorResponses = await adapter.getResponsesByTurnId(aiTurnId);
       
-      // Categorize responses
-      const batchResponses = {};
-      let synthesisText = "";
-      let understandOutput = aiTurn.understandOutput || null;
-      let gauntletOutput = aiTurn.gauntletOutput || null;
-      let refinerOutput = aiTurn.refinerOutput || null;
-
-      (priorResponses || []).forEach(r => {
-          if (r.responseType === 'batch' && r.text) {
-              batchResponses[r.providerId] = { text: r.text, providerId: r.providerId };
-          } else if (r.responseType === 'synthesis' && !synthesisText) {
-              synthesisText = r.text;
-          } else if (r.responseType === 'understand' && !understandOutput) {
-              understandOutput = r.meta?.understandOutput || null;
-          } else if (r.responseType === 'gauntlet' && !gauntletOutput) {
-              gauntletOutput = r.meta?.gauntletOutput || null;
-          } else if (r.responseType === 'refiner' && !refinerOutput) {
-              refinerOutput = r.meta?.refinerOutput || null;
-          }
-      });
-
       const mappingResponses = (priorResponses || [])
         .filter((r) => r && r.responseType === "mapping" && r.providerId)
         .sort((a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0))
@@ -173,19 +156,16 @@ export class CognitivePipelineHandler {
       const latestMappingText = mappingResponses?.[0]?.text || "";
       const latestMappingMeta = mappingResponses?.[0]?.meta || {};
 
-      let mapperOptionTitles = [];
-      if (latestMappingMeta.allAvailableOptions) {
-          mapperOptionTitles = parseOptionTitles(latestMappingMeta.allAvailableOptions);
-      } else if (latestMappingText) {
-          const parsed = parseMappingResponse(latestMappingText);
-          mapperOptionTitles = parsed.optionTitles || [];
-      }
-
       if (!mapperArtifact && mappingResponses?.[0]) {
-        mapperArtifact = parseV1MapperToArtifact(latestMappingText, {
-          graphTopology: latestMappingMeta?.graphTopology,
-          query: originalPrompt,
-        });
+        const text = String(latestMappingText || "");
+        const isLegacyV1 =
+          text.includes("<mapping_output>") || text.includes("<decision_map>");
+        if (isLegacyV1) {
+          mapperArtifact = parseV1MapperToArtifact(text, {
+            graphTopology: latestMappingMeta?.graphTopology,
+            query: originalPrompt,
+          });
+        }
       }
       if (!exploreAnalysis && mapperArtifact) {
         exploreAnalysis = computeExplore(originalPrompt, mapperArtifact);
@@ -208,8 +188,16 @@ export class CognitivePipelineHandler {
         userMessage: originalPrompt,
       };
 
+      const executorOptions = {
+          streamingManager, 
+          persistenceCoordinator: this.persistenceCoordinator, 
+          contextManager, 
+          sessionManager: this.sessionManager
+      };
+
       let step;
-      const stepId = `${mode}-${preferredProvider}-${Date.now()}`;
+      const stepTypeIdPrefix = mode === "refine" ? "refiner" : mode;
+      const stepId = `${stepTypeIdPrefix}-${preferredProvider}-${Date.now()}`;
 
       if (mode === "understand" || mode === "gauntlet") {
         step = {
@@ -227,25 +215,149 @@ export class CognitivePipelineHandler {
             },
           };
       } else if (mode === "refine") {
+          const hasUnderstand =
+            !!aiTurn.understandOutput ||
+            (priorResponses || []).some(
+              (r) =>
+                r &&
+                r.responseType === "understand" &&
+                ((r.meta && r.meta.understandOutput) ||
+                  (typeof r.text === "string" && r.text.trim().length > 0)),
+            );
+          const hasGauntlet =
+            !!aiTurn.gauntletOutput ||
+            (priorResponses || []).some(
+              (r) =>
+                r &&
+                r.responseType === "gauntlet" &&
+                ((r.meta && r.meta.gauntletOutput) ||
+                  (typeof r.text === "string" && r.text.trim().length > 0)),
+            );
+
+          if (!hasUnderstand && !hasGauntlet) {
+              const pivotMode = "understand";
+              const pivotProvider = mappingProviders[0] || aiTurn.meta?.mapper || preferredProvider;
+              const pivotStepId = `${pivotMode}-${pivotProvider}-${Date.now()}`;
+              const pivotStep = {
+                  stepId: pivotStepId,
+                  type: pivotMode,
+                  payload: {
+                      [`${pivotMode}Provider`]: pivotProvider,
+                      mapperArtifact,
+                      exploreAnalysis,
+                      originalPrompt,
+                      mappingText: latestMappingText,
+                      mappingMeta: latestMappingMeta,
+                      selectedArtifacts: [],
+                      useThinking: false,
+                  },
+              };
+
+              const pivotResult = await stepExecutor.executeUnderstandStep(
+                  pivotStep,
+                  context,
+                  new Map(),
+                  executorOptions,
+              );
+
+              try {
+                  this.port.postMessage({
+                      type: "WORKFLOW_STEP_UPDATE",
+                      sessionId: effectiveSessionId,
+                      stepId: pivotStepId,
+                      status: "completed",
+                      result: pivotResult,
+                      ...(isRecompute ? { isRecompute: true, sourceTurnId: sourceTurnId || aiTurnId } : {}),
+                  });
+              } catch (_) { }
+
+              await this.sessionManager.upsertProviderResponse(
+                  effectiveSessionId,
+                  aiTurnId,
+                  pivotProvider,
+                  pivotMode,
+                  0,
+                  { text: pivotResult?.text || "", status: pivotResult?.status || "completed", meta: pivotResult?.meta || {} },
+              );
+          }
+
           step = {
               stepId,
               type: "refiner",
               payload: {
                   refinerProvider: preferredProvider,
                   originalPrompt,
-                  synthesisText,
                   mappingText: latestMappingText,
-                  understandOutput,
-                  gauntletOutput,
                   mapperArtifact,
-                  mapperOptionTitles,
-                  sourceHistorical: { turnId: aiTurnId, responseType: 'batch' } // So StepExecutor knows to fetch batch
+                  sourceHistorical: { turnId: aiTurnId } 
               }
           };
       } else if (mode === "antagonist") {
-          const optionTitlesBlock = mapperOptionTitles.length > 0
-              ? mapperOptionTitles.map(t => `- ${t}`).join('\n')
-              : '(No mapper options available)';
+          const hasUnderstand =
+            !!aiTurn.understandOutput ||
+            (priorResponses || []).some(
+              (r) =>
+                r &&
+                r.responseType === "understand" &&
+                ((r.meta && r.meta.understandOutput) ||
+                  (typeof r.text === "string" && r.text.trim().length > 0)),
+            );
+          const hasGauntlet =
+            !!aiTurn.gauntletOutput ||
+            (priorResponses || []).some(
+              (r) =>
+                r &&
+                r.responseType === "gauntlet" &&
+                ((r.meta && r.meta.gauntletOutput) ||
+                  (typeof r.text === "string" && r.text.trim().length > 0)),
+            );
+
+          if (!hasUnderstand && !hasGauntlet) {
+              const pivotMode = "understand";
+              const pivotProvider = mappingProviders[0] || aiTurn.meta?.mapper || preferredProvider;
+              const pivotStepId = `${pivotMode}-${pivotProvider}-${Date.now()}`;
+              const pivotStep = {
+                  stepId: pivotStepId,
+                  type: pivotMode,
+                  payload: {
+                      [`${pivotMode}Provider`]: pivotProvider,
+                      mapperArtifact,
+                      exploreAnalysis,
+                      originalPrompt,
+                      mappingText: latestMappingText,
+                      mappingMeta: latestMappingMeta,
+                      selectedArtifacts: [],
+                      useThinking: false,
+                  },
+              };
+
+              const pivotResult = await stepExecutor.executeUnderstandStep(
+                  pivotStep,
+                  context,
+                  new Map(),
+                  executorOptions,
+              );
+
+              try {
+                  this.port.postMessage({
+                      type: "WORKFLOW_STEP_UPDATE",
+                      sessionId: effectiveSessionId,
+                      stepId: pivotStepId,
+                      status: "completed",
+                      result: pivotResult,
+                      ...(isRecompute ? { isRecompute: true, sourceTurnId: sourceTurnId || aiTurnId } : {}),
+                  });
+              } catch (_) { }
+
+              await this.sessionManager.upsertProviderResponse(
+                  effectiveSessionId,
+                  aiTurnId,
+                  pivotProvider,
+                  pivotMode,
+                  0,
+                  { text: pivotResult?.text || "", status: pivotResult?.status || "completed", meta: pivotResult?.meta || {} },
+              );
+          }
 
           step = {
               stepId,
@@ -253,23 +365,12 @@ export class CognitivePipelineHandler {
               payload: {
                   antagonistProvider: preferredProvider,
                   originalPrompt,
-                  synthesisText,
                   mappingText: latestMappingText,
-                  understandOutput,
-                  gauntletOutput,
-                  refinerOutput,
-                  optionTitlesBlock,
-                  sourceHistorical: { turnId: aiTurnId, responseType: 'batch' }
+                  mapperArtifact,
+                  sourceHistorical: { turnId: aiTurnId }
               }
           };
       }
-
-      const executorOptions = {
-          streamingManager, 
-          persistenceCoordinator: this.persistenceCoordinator, 
-          contextManager, 
-          sessionManager: this.sessionManager
-      };
 
       let result;
       if (mode === "understand") {
@@ -289,6 +390,7 @@ export class CognitivePipelineHandler {
           stepId,
           status: "completed",
           result,
+          ...(isRecompute ? { isRecompute: true, sourceTurnId: sourceTurnId || aiTurnId } : {}),
         });
       } catch (_) { }
 
@@ -307,7 +409,6 @@ export class CognitivePipelineHandler {
       const responses = await adapter.getResponsesByTurnId(aiTurnId);
       const buckets = {
         batchResponses: {},
-        synthesisResponses: {},
         mappingResponses: {},
         refinerResponses: {},
         antagonistResponses: {},
@@ -330,19 +431,17 @@ export class CognitivePipelineHandler {
         const target =
           r.responseType === "batch"
             ? buckets.batchResponses
-            : r.responseType === "synthesis"
-              ? buckets.synthesisResponses
-              : r.responseType === "mapping"
-                ? buckets.mappingResponses
-                : r.responseType === "refiner"
-                  ? buckets.refinerResponses
-                  : r.responseType === "antagonist"
-                    ? buckets.antagonistResponses
-                    : r.responseType === "understand"
-                      ? buckets.understandResponses
-                      : r.responseType === "gauntlet"
-                        ? buckets.gauntletResponses
-                        : null;
+            : r.responseType === "mapping"
+              ? buckets.mappingResponses
+              : r.responseType === "refiner"
+                ? buckets.refinerResponses
+                : r.responseType === "antagonist"
+                  ? buckets.antagonistResponses
+                  : r.responseType === "understand"
+                    ? buckets.understandResponses
+                    : r.responseType === "gauntlet"
+                      ? buckets.gauntletResponses
+                      : null;
 
         if (!target || !entry.providerId) continue;
         (target[entry.providerId] ||= []).push(entry);
@@ -356,7 +455,6 @@ export class CognitivePipelineHandler {
 
       const hasAny =
         Object.keys(buckets.batchResponses).length > 0 ||
-        Object.keys(buckets.synthesisResponses).length > 0 ||
         Object.keys(buckets.mappingResponses).length > 0 ||
         Object.keys(buckets.refinerResponses).length > 0 ||
         Object.keys(buckets.antagonistResponses).length > 0 ||
@@ -393,7 +491,6 @@ export class CognitivePipelineHandler {
             threadId: aiTurn.threadId || "default-thread",
             createdAt: aiTurn.createdAt || Date.now(),
             batchResponses: buckets.batchResponses,
-            synthesisResponses: buckets.synthesisResponses,
             mappingResponses: buckets.mappingResponses,
             refinerResponses: buckets.refinerResponses,
             antagonistResponses: buckets.antagonistResponses,
@@ -413,6 +510,7 @@ export class CognitivePipelineHandler {
           stepId: `continue-${mode}-error`,
           status: "failed",
           error: error.message || String(error),
+          ...(isRecompute ? { isRecompute: true, sourceTurnId: sourceTurnId || aiTurnId } : {}),
         });
       } catch (_) { }
     }

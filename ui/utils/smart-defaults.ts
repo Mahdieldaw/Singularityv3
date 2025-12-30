@@ -1,14 +1,5 @@
 
-// Priority list for Synthesis (Single Speaker)
-// Claude as strongest, gemini 3.0 exp next in line, then Qwen, Then gemini 2.5 pro, then chatgpt, then gemini default
-export const SYNTHESIS_PRIORITY = [
-    'qwen',
-    'gemini',
-    'claude',
-    'gemini-pro',
-    'chatgpt',
-    'gemini-exp'
-];
+
 
 // Priority list for Mapping (Decision Map)
 // Best for decision maps: gemini default, qwen, chatgpt, gemini 3.0, claude, gemini 2.5 pro

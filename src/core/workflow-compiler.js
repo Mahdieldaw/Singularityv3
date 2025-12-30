@@ -14,9 +14,6 @@ export class WorkflowCompiler {
     // Store defaults in memory from injected config
     this.defaults = {
       mapper: config.htos_mapping_provider || null,
-      synthesizer: config.htos_last_synthesis_model || null,
-      refiner: config.htos_last_refiner_model || null,
-      antagonist: config.htos_last_antagonist_model || null
     };
   }
 
@@ -93,54 +90,6 @@ export class WorkflowCompiler {
         batchStepId,
       });
       steps.push(mappingStep);
-    }
-
-    // Synthesis step after mapping (so it can reference mapping step IDs)
-    if (this._needsSynthesisStep(request, resolvedContext)) {
-      const lastMappingStep =
-        steps.filter((s) => s.type === "mapping").slice(-1)[0] || null;
-      const synthesisStep = this._createSynthesisStep(
-        request,
-        resolvedContext,
-        {
-          batchStepId,
-          mappingStepId: lastMappingStep?.stepId,
-        },
-      );
-      steps.push(synthesisStep);
-    }
-
-    // Refiner step (if requested and dependencies exist)
-    if (this._needsRefinerStep(request, resolvedContext)) {
-      const lastSynthesisStep =
-        steps.filter((s) => s.type === "synthesis").slice(-1)[0] || null;
-      const lastMappingStep =
-        steps.filter((s) => s.type === "mapping").slice(-1)[0] || null;
-
-      const refinerStep = this._createRefinerStep(request, resolvedContext, {
-        batchStepId,
-        synthesisStepId: lastSynthesisStep?.stepId,
-        mappingStepId: lastMappingStep?.stepId,
-      });
-      steps.push(refinerStep);
-    }
-
-    // Antagonist step (if requested and dependencies exist)
-    if (this._needsAntagonistStep(request, resolvedContext)) {
-      const lastSynthesisStep =
-        steps.filter((s) => s.type === "synthesis").slice(-1)[0] || null;
-      const lastMappingStep =
-        steps.filter((s) => s.type === "mapping").slice(-1)[0] || null;
-      const lastRefinerStep =
-        steps.filter((s) => s.type === "refiner").slice(-1)[0] || null;
-
-      const antagonistStep = this._createAntagonistStep(request, resolvedContext, {
-        batchStepId,
-        synthesisStepId: lastSynthesisStep?.stepId,
-        mappingStepId: lastMappingStep?.stepId,
-        refinerStepId: lastRefinerStep?.stepId,
-      });
-      steps.push(antagonistStep);
     }
 
     const workflowContext = this._buildWorkflowContext(
@@ -224,131 +173,6 @@ export class WorkflowCompiler {
     };
   }
 
-  _createSynthesisStep(request, context, linkIds = {}) {
-    // Include provider in stepId so UI can derive provider on failure without result payload
-    const synthesisProviderId =
-      context.type === "recompute"
-        ? context.targetProvider
-        : request.synthesizer || this._getDefaultSynthesizer(request);
-    const synthStepId = `synthesis-${synthesisProviderId}-${Date.now()}`;
-
-    if (context.type === "recompute") {
-      return {
-        stepId: synthStepId,
-        type: "synthesis",
-        payload: {
-          synthesisProvider: context.targetProvider,
-          sourceHistorical: {
-            turnId: context.sourceTurnId,
-            responseType: "batch",
-          },
-          originalPrompt: context.sourceUserMessage,
-          useThinking: !!request.useThinking,
-          attemptNumber: 1,
-          strategy: "continuation",
-          // For recompute, mapping results are fetched historically via resolvedContext
-        },
-      };
-    }
-
-    // Use synthesizer from primitive
-    const synthesizer = synthesisProviderId;
-
-    return {
-      stepId: synthStepId,
-      type: "synthesis",
-      payload: {
-        synthesisProvider: synthesizer,
-        sourceStepIds: linkIds.batchStepId ? [linkIds.batchStepId] : undefined,
-        mappingStepIds: linkIds.mappingStepId
-          ? [linkIds.mappingStepId]
-          : undefined,
-        originalPrompt: request.userMessage,
-        useThinking: !!request.useThinking && synthesizer === "chatgpt",
-        attemptNumber: 1,
-        strategy: "continuation",
-      },
-    };
-  }
-
-  _createRefinerStep(request, context, linkIds = {}) {
-    // defaults to synthesizer if not specified
-    const refinerProvider =
-      context.type === "recompute"
-        ? context.targetProvider
-        : request.refiner || this._getDefaultRefiner(request);
-
-    const stepId = `refiner-${refinerProvider}-${Date.now()}`;
-
-    if (context.type === "recompute") {
-      return {
-        stepId,
-        type: "refiner",
-        payload: {
-          refinerProvider,
-          sourceHistorical: {
-            turnId: context.sourceTurnId,
-            responseType: "batch",
-          },
-          originalPrompt: context.sourceUserMessage,
-        },
-      };
-    }
-
-    return {
-      stepId,
-      type: "refiner",
-      payload: {
-        refinerProvider,
-        sourceStepIds: linkIds.batchStepId ? [linkIds.batchStepId] : undefined,
-        synthesisStepIds: linkIds.synthesisStepId
-          ? [linkIds.synthesisStepId]
-          : undefined,
-        mappingStepIds: linkIds.mappingStepId ? [linkIds.mappingStepId] : undefined,
-        originalPrompt: request.userMessage,
-      },
-    };
-  }
-
-  _createAntagonistStep(request, context, linkIds = {}) {
-    const antagonistProvider =
-      context.type === "recompute"
-        ? context.targetProvider
-        : request.antagonist || this._getDefaultAntagonist(request);
-
-    const stepId = `antagonist-${antagonistProvider}-${Date.now()}`;
-
-    if (context.type === "recompute") {
-      return {
-        stepId,
-        type: "antagonist",
-        payload: {
-          antagonistProvider,
-          sourceHistorical: {
-            turnId: context.sourceTurnId,
-            responseType: "batch",
-          },
-          originalPrompt: context.sourceUserMessage,
-        },
-      };
-    }
-
-    return {
-      stepId,
-      type: "antagonist",
-      payload: {
-        antagonistProvider,
-        sourceStepIds: linkIds.batchStepId ? [linkIds.batchStepId] : undefined,
-        synthesisStepIds: linkIds.synthesisStepId
-          ? [linkIds.synthesisStepId]
-          : undefined,
-        mappingStepIds: linkIds.mappingStepId ? [linkIds.mappingStepId] : undefined,
-        refinerStepIds: linkIds.refinerStepId ? [linkIds.refinerStepId] : undefined,
-        originalPrompt: request.userMessage,
-      },
-    };
-  }
-
   // ============================================================================
   // DECISION LOGIC (Pure)
   // ============================================================================
@@ -359,33 +183,6 @@ export class WorkflowCompiler {
     }
     // Check primitive property
     return !!request.includeMapping;
-  }
-
-  _needsSynthesisStep(request, context) {
-    if (context.type === "recompute") {
-      return context.stepType === "synthesis";
-    }
-    // Check primitive property
-    return !!request.includeSynthesis;
-  }
-
-  _needsRefinerStep(request, context) {
-    if (context.type === "recompute") {
-      return context.stepType === "refiner";
-    }
-    // Check primitive property: Refiner requires synthesis
-    return !!request.includeSynthesis && !!request.includeRefiner;
-  }
-
-  _needsAntagonistStep(request, context) {
-    if (context.type === "recompute") {
-      return context.stepType === "antagonist";
-    }
-    // Antagonist requires refiner to be present
-    return (
-      !!request.includeRefiner &&
-      !!request.includeAntagonist
-    );
   }
 
   // ============================================================================
@@ -437,18 +234,6 @@ export class WorkflowCompiler {
     return request.providers?.[0] || this.defaults.mapper;
   }
 
-  _getDefaultSynthesizer(request) {
-    return request.providers?.[0] || this.defaults.synthesizer;
-  }
-
-  _getDefaultRefiner(request) {
-    return request.providers?.[0] || this.defaults.refiner;
-  }
-
-  _getDefaultAntagonist(request) {
-    return request.providers?.[0] || this.defaults.antagonist;
-  }
-
   _generateWorkflowId(contextType) {
     return `wf-${contextType}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
   }
@@ -492,6 +277,11 @@ export class WorkflowCompiler {
           throw new Error("[Compiler] Recompute: stepType required");
         if (!request.targetProvider)
           throw new Error("[Compiler] Recompute: targetProvider required");
+        if (!["batch", "mapping"].includes(request.stepType)) {
+          throw new Error(
+            `[Compiler] Recompute: unsupported stepType '${request.stepType}' for foundation compiler`,
+          );
+        }
         break;
     }
   }
