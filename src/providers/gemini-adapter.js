@@ -24,7 +24,6 @@ export class GeminiAdapter {
       needsOffscreen: false,
       supportsStreaming: false, // Non-streaming to avoid canvas/immersive documents
       supportsContinuation: true,
-      synthesis: false,
       // Only allow model selection if NOT explicitly Pro (Pro is fixed)
       supportsModelSelection: this.id !== "gemini-pro",
     };

@@ -81,7 +81,7 @@ export class SessionManager {
    * @param {string} sessionId
    * @param {string} aiTurnId
    * @param {string} providerId
-   * @param {"batch"|"synthesis"|"mapping"|"refiner"|"antagonist"} responseType
+   * @param {"batch"|"mapping"|"refiner"|"antagonist"|"understand"|"gauntlet"} responseType
    * @param {number} responseIndex
    * @param {{ text?: string, status?: string, meta?: any, createdAt?: number }} payload
    */
@@ -135,7 +135,7 @@ export class SessionManager {
    * Routes to appropriate primitive-specific handler
    * @param {Object} request - { type, sessionId, userMessage, sourceTurnId?, stepType?, targetProvider? }
    * @param {Object} context - ResolvedContext from ContextResolver
-   * @param {Object} result - { batchOutputs, synthesisOutputs, mappingOutputs }
+   * @param {Object} result - { batchOutputs, mappingOutputs, refinerOutputs, antagonistOutputs, understandOutputs, gauntletOutputs }
    * @returns {Promise<{sessionId, userTurnId?, aiTurnId?}>}
    */
   async persist(request, context, result) {
@@ -720,10 +720,10 @@ export class SessionManager {
   }
 
   /**
-   * Append provider responses (mapping/synthesis/batch) to an existing AI turn
+   * Append provider responses (mapping/batch) to an existing AI turn
    * that follows the given historical user turn. Used to persist historical reruns
    * without creating a new user/ai turn pair.
-   * additions shape: { batchResponses?, synthesisResponses?, mappingResponses? }
+   * additions shape: { batchResponses?, mappingResponses? }
    */
 
   /**
@@ -1195,15 +1195,15 @@ export class SessionManager {
   }
 
   /**
-   * Combine synthesis + mapping extracts into context blob
+   * Combine extracted answers + artifacts into context blob
    */
   _buildContextSummary(result, request) {
     let summary = "";
 
     if (request?.understandOutput?.short_answer) {
-      summary += `<previous_synthesis>\n${request.understandOutput.short_answer}\n</previous_synthesis>\n\n`;
+      summary += `<previous_answer>\n${request.understandOutput.short_answer}\n</previous_answer>\n\n`;
     } else if (request?.gauntletOutput?.the_answer?.statement) {
-      summary += `<previous_synthesis>\n${request.gauntletOutput.the_answer.statement}\n</previous_synthesis>\n\n`;
+      summary += `<previous_answer>\n${request.gauntletOutput.the_answer.statement}\n</previous_answer>\n\n`;
     }
 
     if (request?.mapperArtifact) {
@@ -1218,7 +1218,7 @@ export class SessionManager {
     console.log("[SessionManager] Built Context Summary:", {
       length: finalSummary.length,
       preview: finalSummary.slice(0, 100).replace(/\n/g, "\\n") + "...",
-      hasPreviousAnswer: finalSummary.includes("<previous_synthesis>"),
+      hasPreviousAnswer: finalSummary.includes("<previous_answer>"),
       hasMapping: finalSummary.includes("<council_views>")
     });
 

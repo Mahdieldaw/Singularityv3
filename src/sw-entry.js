@@ -74,7 +74,6 @@ async function handleStartup(reason) {
   try {
     prefs = await chrome.storage.local.get([
       "htos_mapping_provider",
-      "htos_last_synthesis_model",
       "htos_last_refiner_model",
       "USE_COGNITIVE_PIPELINE"
     ]);

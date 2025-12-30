@@ -330,7 +330,6 @@ export class ConnectionHandler {
                   userTurnId: userTurnIdEarly,
                   aiTurnId: existing.entityId,
                   providers: executeRequest.providers || [],
-                  synthesisProvider: executeRequest.synthesizer || null,
                   mappingProvider: executeRequest.mapper || null,
                 });
               }
@@ -568,7 +567,7 @@ export class ConnectionHandler {
    * - Runs after Context Resolution, before Compilation.
    * - Caches auth status for 60s to avoid repeated cookie reads.
    * - Filters unauth providers from batch.
-   * - Selects synthesizer/mapper defaults when missing.
+   * - Selects mapper/refiner/antagonist defaults when missing.
    * - Applies ephemeral fallback when a locked provider is unavailable.
    */
   async _applyPreflightSmartDefaults(executeRequest) {

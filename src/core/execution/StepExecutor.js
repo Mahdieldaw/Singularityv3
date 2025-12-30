@@ -283,14 +283,13 @@ Answer the user's message directly. Use context only to disambiguate.
 
             const failedProviders = providerStatuses.filter((p) => p.status === 'failed');
             const successfulProviders = providerStatuses.filter((p) => p.status === 'completed');
-            if (failedProviders.length > 0) {
+              if (failedProviders.length > 0) {
               streamingManager.port.postMessage({
                 type: 'WORKFLOW_PARTIAL_COMPLETE',
                 sessionId: context.sessionId,
                 aiTurnId: context.canonicalAiTurnId || 'unknown',
                 successfulProviders: successfulProviders.map((p) => p.providerId),
                 failedProviders: failedProviders.map((p) => ({ providerId: p.providerId, error: p.error })),
-                synthesisCompleted: false,
                 mappingCompleted: false,
               });
             }

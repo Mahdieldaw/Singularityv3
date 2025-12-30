@@ -317,10 +317,10 @@ export class WorkflowCompiler {
           throw new Error("[Compiler] Recompute: stepType required");
         if (!context.targetProvider)
           throw new Error("[Compiler] Recompute: targetProvider required");
-        // Only require frozenBatchOutputs for synthesis/mapping historical recomputes
+        // Only require frozenBatchOutputs for non-batch historical recomputes
         if (context.stepType !== "batch" && !context.frozenBatchOutputs) {
           throw new Error(
-            "[Compiler] Recompute: frozenBatchOutputs required for synthesis/mapping",
+            "[Compiler] Recompute: frozenBatchOutputs required for non-batch recompute",
           );
         }
         break;

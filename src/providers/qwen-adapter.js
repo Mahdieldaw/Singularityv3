@@ -23,7 +23,6 @@ export class QwenAdapter {
       needsOffscreen: false,
       supportsStreaming: true,
       supportsContinuation: true,
-      synthesis: true,
     };
     this.controller = controller;
   }

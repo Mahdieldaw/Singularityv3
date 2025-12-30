@@ -27,7 +27,6 @@ export class ClaudeAdapter {
       needsOffscreen: false,
       supportsStreaming: true,
       supportsContinuation: true,
-      synthesis: false,
     };
     this.controller = controller;
   }

@@ -26,7 +26,6 @@ export class ChatGPTAdapter {
       needsOffscreen: true, // Requires oi Arkose/PoW pipeline
       supportsStreaming: true, // Enable streaming for orchestrator/UI
       supportsContinuation: true,
-      synthesis: true,
       supportsThinking: true, // new flag: supports Think-mode
     };
     this.controller = controller;
