@@ -12,24 +12,31 @@ export type WorkflowStepType = "prompt" | "mapping" | "refiner" | "antagonist" |
 export type CognitiveMode = "auto" | "understand" | "decide";
 
 export interface GauntletOutput {
+  optimal_end: string;
   the_answer: {
     statement: string;
     reasoning: string;
     next_step: string;
   };
   survivors: {
-    primary: { claim: string; survived_because: string };
-    supporting: Array<{ claim: string; relationship: string }>;
-    conditional: Array<{ claim: string; condition: string }>;
+    primary: {
+      claim: string;
+      survived_because: string;
+      extent: string;
+      breaking_point: string;
+      presumptions: string[];
+    };
+    supporting: Array<{ claim: string; relationship: string; extent?: string }>;
+    conditional: Array<{ claim: string; condition: string; becomes_primary_if?: string }>;
   };
   eliminated: {
     from_consensus: Array<{ claim: string; killed_because: string }>;
     from_outliers: Array<{ claim: string; source: string; killed_because: string }>;
     ghost: string | null;
   };
+  the_void: string;
   confidence: {
     score: number; // 0-1
-    display: string; // dots
     notes: string[];
   };
   souvenir: string;

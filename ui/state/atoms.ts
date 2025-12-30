@@ -70,6 +70,7 @@ export const providerResponseArrayFamily = atomFamily(
       if (!turn || turn.type !== "ai") return [];
 
       const aiTurn = turn as AiTurn;
+
       const responses = aiTurn.batchResponses?.[providerId];
 
       // Always return array, normalize if needed

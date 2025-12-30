@@ -1,5 +1,5 @@
 // ui/hooks/useRoundActions.ts - PRIMITIVES-ALIGNED VERSION
-import { useCallback } from "react";
+import { useCallback, useRef } from "react";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 
 import {
@@ -555,6 +555,12 @@ export function useRoundActions() {
   // ============================================================================
   // UI STATE HELPERS (For controlling per-turn settings)
   // ============================================================================
+
+  /**
+  
+   * NOTE: This uses userTurnId as the key for backward compatibility with existing UI state.
+   */
+
 
   /**
    * Select mapping provider for a specific user turn.

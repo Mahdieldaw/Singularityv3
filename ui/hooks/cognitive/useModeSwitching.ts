@@ -5,7 +5,8 @@ import { CognitiveTransitionOptions, useCognitiveMode } from "./useCognitiveMode
 import { useCallback } from "react";
 
 /**
- * Hook to manage switching between cognitive views and triggering backend transitions if data isn't present yet.
+ * Hook to manage switching between cognitive views
+ * and triggering backend transitions if data isn't present yet.
  */
 export function useModeSwitching(aiTurnId: string) {
     const [activeMode, setActiveMode] = useAtom(turnCognitiveModeFamily(aiTurnId));

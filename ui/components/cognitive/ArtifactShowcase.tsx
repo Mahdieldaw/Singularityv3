@@ -6,12 +6,14 @@ import { RawResponseCard } from "./cards/RawResponseCard";
 
 import { selectedArtifactsAtom, selectedModelsAtom } from "../../state/atoms";
 import { SelectionBar } from "./SelectionBar";
-import { useAtom, useAtomValue } from "jotai";
+import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { SouvenirCard } from "./cards/SouvenirCard";
 import { ConsensusCard } from "./cards/ConsensusCard";
 import { OutlierCard } from "./cards/OutlierCard";
 import { GhostCard } from "./cards/GhostCard";
 import { GapsCard } from "./cards/GapsCard";
+import { CouncilOrbs } from "../CouncilOrbs";
+import { activeSplitPanelAtom } from "../../state/atoms";
 import {
     buildComparisonContent,
     buildDecisionTreeContent,
@@ -47,6 +49,7 @@ export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
     const [dimensionViewOpen, setDimensionViewOpen] = useState(false);
     const selectedModels = useAtomValue(selectedModelsAtom);
     const [allEdits] = useAtom(artifactEditsAtom);
+    const setActiveSplitPanel = useSetAtom(activeSplitPanelAtom);
 
     // Get modified artifact
     const currentTurnId = turn?.id || mapperArtifact.turn.toString();
@@ -58,6 +61,10 @@ export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
         const enabled = LLM_PROVIDERS_CONFIG.filter((p) => !!selectedModels?.[p.id]);
         return enabled.length > 0 ? enabled : LLM_PROVIDERS_CONFIG;
     }, [selectedModels]);
+
+    const visibleProviderIds = useMemo(() => {
+        return Object.keys(turn?.batchResponses || {});
+    }, [turn]);
 
     const [nextProviderId, setNextProviderId] = useState<string>(() => availableProviders[0]?.id || "gemini");
 
@@ -189,6 +196,18 @@ export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-surface-highlight/30 border border-border-subtle text-xs text-text-secondary">
                     Dims: {dimsFoundCount}
                 </span>
+            </div>
+
+            {/* Source Layer: Council Orbs */}
+            <div className="mb-2">
+                <CouncilOrbs
+                    providers={LLM_PROVIDERS_CONFIG}
+                    turnId={currentTurnId}
+                    voiceProviderId={null}
+                    visibleProviderIds={visibleProviderIds}
+                    variant="historical"
+                    onOrbClick={(pid) => setActiveSplitPanel({ turnId: currentTurnId, providerId: pid })}
+                />
             </div>
 
             {mapperArtifact.souvenir && <SouvenirCard content={mapperArtifact.souvenir} />}

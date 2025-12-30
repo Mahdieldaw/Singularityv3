@@ -11,6 +11,8 @@ import { AiTurn } from '../../types';
 import RefinerDot from '../refinerui/RefinerDot';
 import AntagonistCard from '../antagonist/AntagonistCard';
 
+import { CouncilOrbs } from '../CouncilOrbs';
+
 // Icons
 const ChevronDown = ({ className }: { className?: string }) => (
     <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="m6 9 6 6 6-6" /></svg>
@@ -35,6 +37,9 @@ const Sparkles = ({ className }: { className?: string }) => (
 );
 const Wind = ({ className }: { className?: string }) => (
     <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M17.7 7.7A2.5 2.5 0 1 1 20 12h-3.3" /><path d="M9.6 4.6A2 2 0 1 1 11 8H2" /><path d="M12.6 19.4A2 2 0 1 0 14 16H2" /></svg>
+);
+const MapIcon = ({ className }: { className?: string }) => (
+    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><rect width="18" height="18" x="3" y="3" rx="2" ry="2" /><line x1="3" x2="21" y1="9" y2="9" /><line x1="9" x2="9" y1="21" y2="9" /></svg>
 );
 
 interface GauntletOutputViewProps {
@@ -91,8 +96,16 @@ const GauntletOutputView: React.FC<GauntletOutputViewProps> = ({
 
     const refinerOutput = refinerState.output;
 
+    // Collapsed state for reasoning/confidence details
+    const [detailsOpen, setDetailsOpen] = useState(false);
+
+    // Anchor toggle states
+    const [voidOpen, setVoidOpen] = useState(false);
+    const [breakOpen, setBreakOpen] = useState(false);
+    const [presumptionsOpen, setPresumptionsOpen] = useState(false);
+
     return (
-        <div className="flex flex-col gap-6 p-1 max-w-full overflow-hidden text-sm">
+        <div className="flex flex-col gap-5 p-1 max-w-full overflow-hidden text-sm">
             {/* HER0 - THE ANSWER */}
             <motion.div
                 initial={{ opacity: 0, y: 10 }}
@@ -102,33 +115,189 @@ const GauntletOutputView: React.FC<GauntletOutputViewProps> = ({
                 {/* Decorative background glow */}
                 <div className="absolute top-0 right-0 w-32 h-32 bg-accent-primary/5 rounded-full blur-3xl -translate-y-1/2 translate-x-1/3 pointer-events-none" />
 
-                <div className="flex items-start justify-between gap-4 mb-4">
+                <div className="flex items-start justify-between gap-4 mb-3">
                     <div className="flex flex-col gap-1">
-                        <h2 className="text-lg font-semibold text-text-primary tracking-tight m-0">The Answer</h2>
-                        <div className="flex items-center gap-2 text-xs font-mono text-text-tertiary bg-surface-highlight/50 px-2 py-1 rounded w-fit">
-                            <span>Confidence</span>
-                            <span className="text-accent-primary tracking-widest font-bold">{output.confidence.display}</span>
+                        <div className="flex items-center gap-2">
+                            <h2 className="text-lg font-semibold text-text-primary tracking-tight m-0">The Answer</h2>
+                            {output.optimal_end && (
+                                <div className="hidden sm:flex items-center gap-2 px-2 py-0.5 rounded-full bg-surface-highlight/50 border border-border-subtle/50">
+                                    <span className="text-[10px] uppercase font-bold text-text-tertiary">Goal</span>
+                                    <span className="text-xs text-text-secondary truncate max-w-[200px]" title={output.optimal_end}>{output.optimal_end}</span>
+                                </div>
+                            )}
                         </div>
                     </div>
-                    <RefinerDot 
-                        refiner={refinerOutput} 
-                        isLoading={refinerState.isLoading} 
-                        onClick={() => setActiveSplitPanel({ turnId: aiTurn.id, providerId: '__trust__' })}
-                    />
+                    <div className="flex items-center gap-2">
+                        <button
+                            onClick={() => setActiveSplitPanel({ turnId: aiTurn.id, providerId: 'decision_map' })}
+                            className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-surface-raised hover:bg-surface-highlight border border-border-subtle text-xs text-text-secondary transition-colors"
+                            title="Open Decision Map"
+                        >
+                            <MapIcon className="w-3.5 h-3.5" />
+                            <span>Map</span>
+                        </button>
+                        <RefinerDot
+                            refiner={refinerOutput}
+                            isLoading={refinerState.isLoading}
+                            onClick={() => setActiveSplitPanel({ turnId: aiTurn.id, providerId: '__trust__' })}
+                        />
+                    </div>
                 </div>
+
+                {/* COUNCIL ORBS (Historic View - Source Layer) */}
+
+
+                {/* Mobile-only optimal end */}
+                {output.optimal_end && (
+                    <div className="sm:hidden mb-3 flex items-start gap-2 px-2 py-1.5 rounded-lg bg-surface-highlight/30 border border-border-subtle/30">
+                        <span className="text-[10px] uppercase font-bold text-text-tertiary mt-0.5">Goal</span>
+                        <span className="text-xs text-text-secondary leading-snug">{output.optimal_end}</span>
+                    </div>
+                )}
 
                 <div className="prose prose-sm max-w-none text-text-primary mb-4">
                     <p className="font-medium text-base leading-relaxed">{output.the_answer.statement}</p>
-                    <p className="text-text-secondary leading-relaxed mt-2 opacity-90">{output.the_answer.reasoning}</p>
                 </div>
 
                 {output.the_answer.next_step && (
-                    <div className="bg-surface-highlight/30 border-l-2 border-accent-primary pl-3 py-2 mt-4">
+                    <div className="bg-surface-highlight/30 border-l-2 border-accent-primary pl-3 py-2 mb-4">
                         <span className="text-xs uppercase tracking-wider font-semibold text-accent-primary block mb-1">Next Step</span>
                         <p className="text-text-primary">{output.the_answer.next_step}</p>
                     </div>
                 )}
+
+                {/* Collapsible Details: Reasoning & Confidence */}
+                <div className="border-t border-border-subtle pt-2 mt-2">
+                    <button
+                        onClick={() => setDetailsOpen(!detailsOpen)}
+                        className="flex items-center gap-1.5 text-xs text-text-tertiary hover:text-text-secondary transition-colors"
+                    >
+                        {detailsOpen ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+                        <span>Why this survived & confidence notes</span>
+                    </button>
+
+                    <AnimatePresence>
+                        {detailsOpen && (
+                            <motion.div
+                                initial={{ height: 0, opacity: 0 }}
+                                animate={{ height: 'auto', opacity: 1 }}
+                                exit={{ height: 0, opacity: 0 }}
+                                className="overflow-hidden"
+                            >
+                                <div className="pt-3 pb-1 space-y-3">
+                                    <div>
+                                        <span className="text-xs font-semibold text-text-secondary block mb-1">Survival Verification</span>
+                                        <p className="text-xs text-text-secondary leading-relaxed opacity-90">{output.the_answer.reasoning}</p>
+                                    </div>
+                                    {output.confidence.notes && output.confidence.notes.length > 0 && (
+                                        <div>
+                                            <span className="text-xs font-semibold text-text-secondary block mb-1">Confidence Signals</span>
+                                            <ul className="list-disc list-inside text-xs text-text-secondary opacity-90">
+                                                {output.confidence.notes.map((note, i) => (
+                                                    <li key={i}>{note}</li>
+                                                ))}
+                                            </ul>
+                                        </div>
+                                    )}
+                                </div>
+                            </motion.div>
+                        )}
+                    </AnimatePresence>
+                </div>
             </motion.div>
+
+            {/* COGNITIVE ANCHORS ROW (The Void, Breaking Point, Presumptions) */}
+            <div className="flex flex-col gap-1.5">
+
+                {/* THE VOID (Primary Anchor) */}
+                {output.the_void && (
+                    <div className="rounded-lg border border-fuchsia-500/15 bg-fuchsia-500/[0.03] overflow-hidden">
+                        <button
+                            onClick={() => setVoidOpen(!voidOpen)}
+                            className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-fuchsia-500/5 transition-colors"
+                        >
+                            {voidOpen ? <ChevronDown className="text-fuchsia-600/60 flex-shrink-0" /> : <ChevronRight className="text-fuchsia-600/60 flex-shrink-0" />}
+                            <span className="text-xs font-medium text-fuchsia-700/70">The Void</span>
+                            <span className="text-[11px] text-text-muted/70 ml-1">— Missing Dimension</span>
+                        </button>
+                        <AnimatePresence>
+                            {voidOpen && (
+                                <motion.div
+                                    initial={{ height: 0 }}
+                                    animate={{ height: 'auto' }}
+                                    exit={{ height: 0 }}
+                                    className="overflow-hidden"
+                                >
+                                    <div className="px-3 pb-3 pt-0">
+                                        <p className="text-sm text-text-primary leading-relaxed">{output.the_void}</p>
+                                        <p className="text-[10px] text-text-muted/60 mt-2">What no surviving claim covers — the remaining gap toward the optimal end.</p>
+                                    </div>
+                                </motion.div>
+                            )}
+                        </AnimatePresence>
+                    </div>
+                )}
+
+                {/* BREAKING POINT */}
+                {output.survivors.primary.breaking_point && (
+                    <div className="rounded-lg border border-orange-500/15 bg-orange-500/[0.03] overflow-hidden">
+                        <button
+                            onClick={() => setBreakOpen(!breakOpen)}
+                            className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-orange-500/5 transition-colors"
+                        >
+                            {breakOpen ? <ChevronDown className="text-orange-600/60 flex-shrink-0" /> : <ChevronRight className="text-orange-600/60 flex-shrink-0" />}
+                            <span className="text-xs font-medium text-orange-700/70">Breaking Point</span>
+                            <span className="text-[11px] text-text-muted/70 ml-1">— Boundary Condition</span>
+                        </button>
+                        <AnimatePresence>
+                            {breakOpen && (
+                                <motion.div
+                                    initial={{ height: 0 }}
+                                    animate={{ height: 'auto' }}
+                                    exit={{ height: 0 }}
+                                    className="overflow-hidden"
+                                >
+                                    <div className="px-3 pb-3 pt-0">
+                                        <p className="text-sm text-text-primary leading-relaxed">{output.survivors.primary.breaking_point}</p>
+                                    </div>
+                                </motion.div>
+                            )}
+                        </AnimatePresence>
+                    </div>
+                )}
+
+                {/* PRESUMPTIONS */}
+                {output.survivors.primary.presumptions && output.survivors.primary.presumptions.length > 0 && (
+                    <div className="rounded-lg border border-blue-500/15 bg-blue-500/[0.03] overflow-hidden">
+                        <button
+                            onClick={() => setPresumptionsOpen(!presumptionsOpen)}
+                            className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-blue-500/5 transition-colors"
+                        >
+                            {presumptionsOpen ? <ChevronDown className="text-blue-600/60 flex-shrink-0" /> : <ChevronRight className="text-blue-600/60 flex-shrink-0" />}
+                            <span className="text-xs font-medium text-blue-700/70">Presumptions</span>
+                            <span className="text-[11px] text-text-muted/70 ml-1">— Required Reality</span>
+                        </button>
+                        <AnimatePresence>
+                            {presumptionsOpen && (
+                                <motion.div
+                                    initial={{ height: 0 }}
+                                    animate={{ height: 'auto' }}
+                                    exit={{ height: 0 }}
+                                    className="overflow-hidden"
+                                >
+                                    <div className="px-3 pb-3 pt-0">
+                                        <ul className="list-disc list-inside space-y-1">
+                                            {output.survivors.primary.presumptions.map((p, i) => (
+                                                <li key={i} className="text-sm text-text-primary leading-relaxed">{p}</li>
+                                            ))}
+                                        </ul>
+                                    </div>
+                                </motion.div>
+                            )}
+                        </AnimatePresence>
+                    </div>
+                )}
+            </div>
 
             {/* REFINER INLINE SIGNALS (GEM / ECHO / NEXT) */}
             {refinerOutput && (
@@ -218,7 +387,13 @@ const GauntletOutputView: React.FC<GauntletOutputViewProps> = ({
                                     <div className="bg-green-500/10 border border-green-500/20 rounded p-3">
                                         <div className="text-xs font-semibold text-green-600 mb-1">PRIMARY CLAIM</div>
                                         <div className="text-text-primary mb-1">{output.survivors.primary.claim}</div>
-                                        <div className="text-xs text-text-secondary italic">Survived because: {output.survivors.primary.survived_because}</div>
+                                        <div className="text-xs text-text-secondary italic mb-2">Survived because: {output.survivors.primary.survived_because}</div>
+                                        {output.survivors.primary.extent && (
+                                            <div className="mt-2 pt-2 border-t border-green-500/20 text-xs">
+                                                <span className="font-semibold text-green-700/70 uppercase tracking-wide">Extent of Realization:</span>
+                                                <span className="text-text-secondary ml-1">{output.survivors.primary.extent}</span>
+                                            </div>
+                                        )}
                                     </div>
 
                                     {output.survivors.supporting.length > 0 && (
@@ -316,8 +491,8 @@ const GauntletOutputView: React.FC<GauntletOutputViewProps> = ({
             {/* ANTAGONIST INLINE */}
             {antagonistState.output && (
                 <div className="animate-in fade-in slide-in-from-bottom-2 duration-500">
-                    <AntagonistCard 
-                        aiTurn={aiTurn} 
+                    <AntagonistCard
+                        aiTurn={aiTurn}
                         activeProviderId={antagonistState.providerId || undefined}
                     />
                 </div>
@@ -326,9 +501,9 @@ const GauntletOutputView: React.FC<GauntletOutputViewProps> = ({
             {/* SOUVENIR */}
             {output.souvenir && (
                 <div className="flex items-center justify-between bg-surface-highlight/30 rounded-lg py-2.5 px-3 border border-border-subtle/50">
-                    <div className="flex items-center gap-2 overflow-hidden">
-                        <span className="text-lg">💎</span>
-                        <span className="text-xs italic font-serif text-text-secondary truncate">"{output.souvenir}"</span>
+                    <div className="flex items-start gap-2">
+                        <span className="text-lg flex-shrink-0 mt-0.5">💎</span>
+                        <span className="text-xs italic font-serif text-text-secondary leading-relaxed">"{output.souvenir}"</span>
                     </div>
                     <button
                         onClick={handleCopySouvenir}
