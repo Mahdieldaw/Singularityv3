@@ -306,7 +306,7 @@ export function useChat() {
 
         /**
          * CRITICAL FIX: Transform backend "rounds" format
-         * Backend sends: { userTurnId, aiTurnId, user: {...}, providers: {...}, synthesisResponses, mappingResponses }
+         * Backend sends: { userTurnId, aiTurnId, user: {...}, providers: {...}, mappingResponses, ... }
          */
         const newIds: string[] = [];
         const newMap = new Map<string, TurnMessage>();

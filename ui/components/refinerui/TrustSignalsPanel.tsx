@@ -1,6 +1,6 @@
 /**
  * TrustSignalsPanel - Simplified for new RefinerOutput structure.
- * Now displays only SynthesisPlus content with attribution click handling.
+ * Displays enhanced trust insights with attribution click handling.
  */
 
 import React, { useState, useCallback, useMemo } from 'react';
@@ -130,7 +130,7 @@ export function TrustSignalsPanel({
       <div className="flex items-center justify-between p-3 border-b border-border-subtle bg-surface-raised">
         <div className="flex items-center gap-2">
           <span className="text-lg">✨</span>
-          <span className="font-semibold text-text-primary">Synthesis+</span>
+          <span className="font-semibold text-text-primary">Trust Insights</span>
         </div>
         {onClose && (
           <button
@@ -189,20 +189,20 @@ export function TrustSignalsPanel({
           </div>
         )}
 
-        {refiner?.synthesisPlus ? (
+        {refiner?.trustInsights ? (
           <div className="prose prose-sm max-w-none dark:prose-invert">
             <div className="text-text-primary leading-relaxed">
-              {parseAttributions(refiner.synthesisPlus, handleModelClick)}
+              {parseAttributions(refiner.trustInsights, handleModelClick)}
             </div>
           </div>
         ) : isLoading ? (
           <div className="flex items-center justify-center gap-2 text-text-muted py-8">
-            <span className="italic">Generating Synthesis+...</span>
+            <span className="italic">Generating trust insights...</span>
             <span className="streaming-dots" />
           </div>
         ) : !isError && !refiner?.gem && (
           <div className="text-text-muted italic text-center py-8">
-            No enhanced synthesis available.
+            No trust insights available.
           </div>
         )}
 

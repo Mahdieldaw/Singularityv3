@@ -1,11 +1,5 @@
 export const PROVIDER_PRIORITIES = {
     /**
-     * For synthesis: Quality of prose/narrative consolidation
-     * Claude > Gemini 2.0 Exp > Qwen > Gemini 2.5 Pro > ChatGPT > Gemini
-     */
-    synthesis: ['claude', 'gemini-exp', 'qwen', 'gemini-pro', 'chatgpt', 'gemini'],
-
-    /**
      * For mapping: Structured reasoning / decision tree quality
      * Gemini > Qwen > ChatGPT > Gemini Exp > Claude > Gemini Pro
      */

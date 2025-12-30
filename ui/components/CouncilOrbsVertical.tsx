@@ -32,11 +32,9 @@ export const CouncilOrbsVertical: React.FC<CouncilOrbsVerticalProps> = React.mem
         if (!turn || turn.type !== 'ai') return [];
         const aiTurn = turn as unknown as AiTurn; // Safe cast since we checked type === 'ai'
         const batchKeys = Object.keys(aiTurn.batchResponses || {});
-        const synthesizerKey = aiTurn.meta?.synthesizer;
         const mapperKey = aiTurn.meta?.mapper;
         return Array.from(new Set([
             ...batchKeys,
-            ...(synthesizerKey ? [synthesizerKey] : []),
             ...(mapperKey ? [mapperKey] : []),
         ]));
     }, [turn]);
@@ -44,8 +42,7 @@ export const CouncilOrbsVertical: React.FC<CouncilOrbsVerticalProps> = React.mem
     // Filter display providers to only those that contributed
     const displayProviders = allProviders.filter(p => contributingIds.includes(String(p.id)));
 
-    // Condition for trust button
-    const showTrustButton = !!(refinerOutput?.gem || refinerOutput?.synthesisPlus);
+    const showTrustButton = !!(refinerOutput?.gem || refinerOutput?.trustInsights);
     const isTrustActive = activeProviderId === '__trust__';
     const middleIndex = Math.max(0, Math.floor(displayProviders.length / 2));
 

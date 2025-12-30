@@ -557,12 +557,6 @@ export function useRoundActions() {
   // ============================================================================
 
   /**
-   * Toggle synthesis provider selection for a specific user turn.
-   * NOTE: This uses userTurnId as the key for backward compatibility with existing UI state.
-   */
-
-
-  /**
    * Select mapping provider for a specific user turn.
    * NOTE: This uses userTurnId as the key for backward compatibility with existing UI state.
    */

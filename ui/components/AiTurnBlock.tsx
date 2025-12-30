@@ -85,14 +85,14 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
 
 
   const onClipClick = useCallback(
-    (type: "synthesis" | "mapping" | "antagonist", pid: string) => {
+    (type: "mapping" | "antagonist", pid: string) => {
       void handleClipClick(aiTurn.id, type, pid);
     },
     [handleClipClick, aiTurn.id]
   );
 
 
-  // Filter activeRecomputeState to only include synthesis/mapping (AiTurnBlock doesn't handle batch)
+  // Filter activeRecomputeState to only include mapping (AiTurnBlock doesn't handle batch)
   const activeRecomputeState = useMemo(() => {
     if (!globalActiveRecomputeState) return null;
     if (globalActiveRecomputeState.stepType === 'mapping') {
@@ -101,8 +101,6 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
     return null;
   }, [globalActiveRecomputeState]);
 
-  // Use global synthesis provider, or fall back to the provider used for generation
-  const activeSynthesisClipProviderId = aiTurn.meta?.synthesizer;
 
   // For mapping, if no explicit global selection and meta.mapper is missing,
   // default to the first provider that has mapping responses
@@ -275,11 +273,6 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
   const hasMapping = !!(activeMappingPid && displayedMappingTake?.text);
 
 
-  const requestedSynth = (aiTurn.meta as any)?.requestedFeatures?.synthesis;
-  const wasSynthRequested =
-    requestedSynth === undefined ? true : !!requestedSynth;
-
-
   const userPrompt: string | null =
     (aiTurn as any)?.userPrompt ??
     (aiTurn as any)?.prompt ??
@@ -290,8 +283,6 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
     const md = formatTurnForMd(
       aiTurn.id,
       userPrompt,
-      undefined, // No synthesis text
-      undefined, // No synthesis provider
       hasMapping && activeMappingPid ? { narrative: displayedMappingText, options: getOptions(), topology: graphTopology } : null,
       allSources,
       includePromptInCopy

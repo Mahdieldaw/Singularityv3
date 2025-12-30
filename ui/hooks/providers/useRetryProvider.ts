@@ -8,7 +8,7 @@ export function useRetryProvider() {
       sessionId: string,
       aiTurnId: string,
       providerIds: string[],
-      retryScope: 'batch' | 'synthesis' | 'mapping' = 'batch'
+      retryScope: 'batch' | 'mapping' = 'batch'
     ) => {
       try {
         const port = await api.ensurePort();

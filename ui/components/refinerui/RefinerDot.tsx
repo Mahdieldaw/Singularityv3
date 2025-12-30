@@ -49,7 +49,7 @@ export const RefinerDot: React.FC<RefinerDotProps> = ({ refiner, onClick, isActi
                     }
                     ${isActive ? 'ring-2 ring-brand-500/60' : ''}
                 `}
-                aria-label={hasGem ? "View gem insight" : "View synthesis+"}
+                aria-label={hasGem ? "View gem insight" : "View insights"}
             >
                 {hasGem ? (
                     <span className="pointer-events-none">💎</span>

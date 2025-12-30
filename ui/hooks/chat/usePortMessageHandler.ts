@@ -39,7 +39,7 @@ const PORT_DEBUG_UI = false;
 
 /**
  * CRITICAL: Step type detection must match backend stepId patterns
- * Backend generates: 'batch-<timestamp>', 'synthesis-<provider>-<timestamp>', 'mapping-<provider>-<timestamp>'
+ * Backend generates: 'batch-<timestamp>', 'mapping-<provider>-<timestamp>', 'refiner-<provider>-<timestamp>', etc.
  */
 function getStepType(stepId: string): "batch" | "mapping" | "refiner" | "antagonist" | "understand" | "gauntlet" | null {
   if (!stepId || typeof stepId !== "string") return null;
@@ -62,8 +62,8 @@ function getStepType(stepId: string): "batch" | "mapping" | "refiner" | "antagon
 }
 
 /**
- * Extract provider ID from stepId for synthesis/mapping steps
- * Backend format: 'synthesis-gemini-1234567890' or 'mapping-chatgpt-1234567890'
+ * Extract provider ID from stepId for mapping/refiner/antagonist steps
+ * Backend format: 'mapping-chatgpt-1234567890'
  */
 function extractProviderFromStepId(
   stepId: string,
@@ -381,7 +381,7 @@ export function usePortMessageHandler() {
             return;
           }
 
-          // Some backends omit providerId for synthesis/mapping partials; derive from stepId if needed
+          // Some backends omit providerId for mapping partials; derive from stepId if needed
           let pid: string | null | undefined = providerId;
           if (
             (!pid || typeof pid !== "string") &&
@@ -825,10 +825,10 @@ export function usePortMessageHandler() {
             const { providerStatuses, phase } = message as any;
             const mapStatusToStage = (
               status: 'queued' | 'active' | 'streaming' | 'completed' | 'failed',
-              phase: 'batch' | 'synthesis' | 'mapping'
+              phase: 'batch' | 'mapping'
             ) => {
               if (status === 'queued') return 'idle';
-              if (status === 'active') return phase === 'synthesis' ? 'synthesizing' : 'thinking';
+              if (status === 'active') return 'thinking';
               if (status === 'streaming') return 'streaming';
               if (status === 'completed') return 'complete';
               if (status === 'failed') return 'error';

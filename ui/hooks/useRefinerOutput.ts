@@ -74,7 +74,7 @@ export function useRefinerOutput(aiTurnId: string | null, forcedProviderId?: str
             const current = state || memoResult;
             const hasCore = !!current?.output;
             // Check for richer data using new structure
-            const hasRicher = !!current?.output?.synthesisPlus ||
+            const hasRicher = !!current?.output?.trustInsights ||
                 !!current?.output?.gem ||
                 !!current?.output?.leap?.action;
 
@@ -106,7 +106,7 @@ export function useRefinerOutput(aiTurnId: string | null, forcedProviderId?: str
 
                     if (parsed) {
                         // Check for richer data using new structure
-                        const richer = !!parsed.synthesisPlus ||
+                        const richer = !!parsed.trustInsights ||
                             !!parsed.gem ||
                             !!parsed.leap?.action;
                         if (!hasCore || richer) {
@@ -129,4 +129,3 @@ export function useRefinerOutput(aiTurnId: string | null, forcedProviderId?: str
 
     return state || memoResult;
 }
-

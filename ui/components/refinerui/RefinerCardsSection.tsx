@@ -14,28 +14,6 @@ interface RefinerSectionProps {
 }
 
 /**
- * Renders a compact summary of critical signals.
- * Intended for insertion directly below the synthesis bubble in the chat stream.
- */
-export const RefinerSynthesisAccuracy: React.FC<RefinerSectionProps> = ({ output, className = "" }) => {
-    const { blockerSignals, riskSignals } = categorizeSignals(output.signals);
-
-    // Only show if there are blockers or risks
-    if (blockerSignals.length === 0 && riskSignals.length === 0) return null;
-
-    return (
-        <div className={`mt-2 space-y-2 ${className}`}>
-            {blockerSignals.slice(0, 2).map((signal, idx) => (
-                <SignalCard key={`b-${idx}`} signal={signal} variant="compact" />
-            ))}
-            {riskSignals.slice(0, 2).map((signal, idx) => (
-                <SignalCard key={`r-${idx}`} signal={signal} variant="compact" />
-            ))}
-        </div>
-    );
-};
-
-/**
  * Renders the full epistemic audit (all signals, next step, etc.).
  * Intended for the Decision Map Sheet.
  */

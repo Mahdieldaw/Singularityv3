@@ -2,7 +2,6 @@ import { useEffect, useRef } from 'react';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import {
     providerAuthStatusAtom,
-    synthesisProviderAtom,
     mappingProviderAtom,
     antagonistProviderAtom,
     refinerProviderAtom,
@@ -27,7 +26,6 @@ import {
  */
 export function useSmartProviderDefaults() {
     const authStatus = useAtomValue(providerAuthStatusAtom);
-    const [synthesisProvider, setSynthesisProvider] = useAtom(synthesisProviderAtom);
     const [mappingProvider, setMappingProvider] = useAtom(mappingProviderAtom);
     const [antagonistProvider, setAntagonistProvider] = useAtom(antagonistProviderAtom);
     const [refinerProvider, setRefinerProvider] = useAtom(refinerProviderAtom);
@@ -48,19 +46,6 @@ export function useSmartProviderDefaults() {
     useEffect(() => {
         // Skip if no auth data yet
         if (Object.keys(authStatus).length === 0) return;
-
-        // === Synthesis Provider ===
-        if (!locks.synthesis) {
-            const currentValid = synthesisProvider && isProviderAuthorized(synthesisProvider, authStatus);
-
-            if (!currentValid) {
-                const best = selectBestProvider('synthesis', authStatus);
-                if (best && best !== synthesisProvider) {
-                    console.log(`[SmartDefaults] Synthesis: ${synthesisProvider} → ${best}`);
-                    setSynthesisProvider(best);
-                }
-            }
-        }
 
         // === Mapping Provider ===
         if (!locks.mapping) {
@@ -102,7 +87,7 @@ export function useSmartProviderDefaults() {
         }
 
         initializedRef.current = true;
-    }, [authStatus, locks, synthesisProvider, mappingProvider, antagonistProvider, refinerProvider, setSynthesisProvider, setMappingProvider, setAntagonistProvider, setRefinerProvider]);
+    }, [authStatus, locks, mappingProvider, antagonistProvider, refinerProvider, setMappingProvider, setAntagonistProvider, setRefinerProvider]);
 
     return { isInitialized: initializedRef.current };
 }

@@ -131,12 +131,11 @@ export default function SettingsPanel() {
         </h3>
         <div className="mode-item flex items-center justify-between p-3 bg-chip border border-border-subtle rounded-lg mb-2">
           <div className="flex flex-col">
-            <span className="text-text-secondary">Power User Mode</span>
-            <span className="text-xs text-text-muted mt-0.5">
-              Enable multi-synthesis selection
-            </span>
-          </div>
-          <div
+                      <span className="text-text-secondary">Power User Mode</span>
+                      <span className="text-xs text-text-muted mt-0.5">
+                        Enable advanced features
+                      </span>
+                    </div>          <div
             className={`mode-toggle relative w-10 h-5 rounded-full cursor-pointer transition-all duration-200 ${powerUserMode ? "bg-brand-500" : "bg-border-strong"
               }`}
             onClick={() => setPowerUserMode(!powerUserMode)}

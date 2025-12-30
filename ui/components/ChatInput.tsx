@@ -16,7 +16,6 @@ import {
   originalPromptAtom,
 
   currentRefinementStateAtom, // used in nudgeVariant
-  synthesisProviderAtom,
   workflowProgressAtom,
   isRoundActiveAtom,
   selectedModeAtom,
@@ -147,7 +146,6 @@ const ChatInput = ({
 
   // Input Length Validation State
   const [selectedModels] = useAtom(selectedModelsAtom);
-  const [synthesisProvider, setSynthesisProvider] = useAtom(synthesisProviderAtom);
   const [maxLength, setMaxLength] = useState<number>(Infinity);
   const [warnThreshold, setWarnThreshold] = useState<number>(Infinity);
   const [limitingProvider, setLimitingProvider] = useState<string>("");
@@ -420,12 +418,10 @@ const ChatInput = ({
         <div className="relative w-full max-w-[min(900px,calc(100%-24px))] flex justify-center mb-[-8px] z-10 !bg-transparent">
           <CouncilOrbs
             providers={LLM_PROVIDERS_CONFIG}
-            voiceProviderId={synthesisProvider}
             variant="active"
             workflowProgress={workflowProgress as any}
             onCrownMove={(pid) => {
-              setSynthesisProvider(pid);
-              setProviderLock('synthesis', true);
+              // No-op
             }}
           />
         </div>
@@ -439,7 +435,7 @@ const ChatInput = ({
         </div>
       )}
 
-      {/* Main chat input container - wider to match/exceed synthesis bubble width */}
+      {/* Main chat input container - wider layout */}
       <div className="flex gap-2 items-center relative w-full max-w-[min(900px,calc(100%-24px))] p-2.5 bg-surface border border-border-subtle/60 rounded-t-2xl rounded-b-2xl flex-wrap z-[100] shadow-elevated">
 
         {/* Targeted Mode Banner */}

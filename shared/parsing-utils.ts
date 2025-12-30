@@ -350,7 +350,7 @@ export interface Leap {
 }
 
 export interface RefinerOutput {
-    synthesisPlus: string | null;
+    trustInsights: string | null;
     gem: Gem | null;
     outlier: Outlier | null;
     attributions: Attribution[];
@@ -377,9 +377,9 @@ export function parseRefinerOutput(text: string): RefinerOutput {
         return { ...jsonResult, rawText: text };
     }
 
-    // 2. Fallback to Regex extraction with robust patterns
+    const insights = extractTrustInsights(normalized);
     return {
-        synthesisPlus: extractSynthesisPlus(normalized),
+        trustInsights: insights,
         gem: extractGem(normalized),
         outlier: extractOutlier(normalized),
         attributions: extractAttributions(normalized),
@@ -390,7 +390,7 @@ export function parseRefinerOutput(text: string): RefinerOutput {
 
 function createEmptyRefinerOutput(rawText: string = ''): RefinerOutput {
     return {
-        synthesisPlus: null,
+        trustInsights: null,
         gem: null,
         outlier: null,
         attributions: [],
@@ -450,15 +450,15 @@ function tryParseJsonRefinerOutput(text: string): Omit<RefinerOutput, 'rawText'>
 }
 
 function normalizeRefinerObject(parsed: any): Omit<RefinerOutput, 'rawText'> | null {
-    const hasLegacyShape = 'synthesisPlus' in parsed || 'gem' in parsed || 'leap' in parsed;
+    const hasLegacyShape = 'gem' in parsed || 'leap' in parsed;
     const hasSignalShape = 'final_word' in parsed || 'the_one' in parsed || 'the_step' in parsed || 'the_echo' in parsed;
 
     if (!hasLegacyShape && !hasSignalShape) {
         return null;
     }
 
-    const rawFinalWord = parsed.synthesisPlus ?? parsed.final_word ?? null;
-    const synthesisPlus = rawFinalWord != null ? String(rawFinalWord) : null;
+    const rawFinalWord = parsed.final_word ?? null;
+    const trustInsights = rawFinalWord != null ? String(rawFinalWord) : null;
 
     const gemSource = parsed.gem || parsed.the_one || null;
     let gem: Gem | null = null;
@@ -524,7 +524,7 @@ function normalizeRefinerObject(parsed: any): Omit<RefinerOutput, 'rawText'> | n
         : null;
 
     return {
-        synthesisPlus,
+        trustInsights,
         gem,
         outlier,
         attributions,
@@ -986,10 +986,7 @@ function extractLabeledValue(text: string, label: string): string | null {
 // NEW EXTRACTORS
 // ============================================================================
 
-/**
- * Extract synthesisPlus content from text
- */
-function extractSynthesisPlus(text: string): string | null {
+function extractTrustInsights(text: string): string | null {
     const section = extractSection(text, 'Synthesis+') ||
         extractSection(text, 'SynthesisPlus') ||
         extractSection(text, 'Enhanced Synthesis') ||

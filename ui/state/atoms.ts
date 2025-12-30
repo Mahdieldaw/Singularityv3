@@ -319,9 +319,6 @@ export const activeProviderTargetAtom = atom<{
 // -----------------------------
 // Round-level selections
 // -----------------------------
-export const synthRecomputeSelectionsByRoundAtom = atomWithImmer<
-  Record<string, Record<string, boolean>>
->({});
 export const mappingRecomputeSelectionByRoundAtom = atomWithImmer<
   Record<string, string | null>
 >({});
@@ -337,7 +334,6 @@ export const providerHistoryExpandedFamily = atomFamily(
   (a, b) => a === b,
 );
 
-export const thinkSynthByRoundAtom = atomWithImmer<Record<string, boolean>>({});
 export const thinkMappingByRoundAtom = atomWithImmer<Record<string, boolean>>(
   {},
 );

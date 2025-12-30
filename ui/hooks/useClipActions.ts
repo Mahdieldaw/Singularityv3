@@ -1,13 +1,12 @@
 import { useCallback } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
-import { turnsMapAtom, alertTextAtom, synthesisProviderAtom, mappingProviderAtom, refinerProviderAtom, antagonistProviderAtom } from "../state/atoms";
+import { turnsMapAtom, alertTextAtom, mappingProviderAtom, refinerProviderAtom, antagonistProviderAtom } from "../state/atoms";
 import { useRoundActions } from "./chat/useRoundActions";
 import type { AiTurn } from "../types";
 import { PRIMARY_STREAMING_PROVIDER_IDS } from "../constants";
 
 export function useClipActions() {
   const turnsMap = useAtomValue(turnsMapAtom);
-  const setSynthesisProvider = useSetAtom(synthesisProviderAtom);
   const setMappingProvider = useSetAtom(mappingProviderAtom);
   const setRefinerProvider = useSetAtom(refinerProviderAtom);
   const setAntagonistProvider = useSetAtom(antagonistProviderAtom);
@@ -18,7 +17,7 @@ export function useClipActions() {
   const handleClipClick = useCallback(
     async (
       aiTurnId: string,
-      type: "synthesis" | "mapping" | "refiner" | "antagonist",
+      type: "mapping" | "refiner" | "antagonist",
       providerId: string,
     ) => {
       try {
@@ -43,9 +42,7 @@ export function useClipActions() {
         }
 
         const responsesMap =
-          type === "synthesis"
-            ? aiTurn.synthesisResponses || {}
-            : type === "mapping"
+            type === "mapping"
               ? aiTurn.mappingResponses || {}
               : type === "refiner"
                 ? aiTurn.refinerResponses || {}
@@ -61,9 +58,7 @@ export function useClipActions() {
         const hasValidExisting = lastResponse && lastResponse.status !== "error";
 
         // Update global provider preference (Crown Move / Mapper Select)
-        if (type === "synthesis") {
-          setSynthesisProvider(providerId);
-        } else if (type === "mapping") {
+        if (type === "mapping") {
           setMappingProvider(providerId);
         } else if (type === "refiner") {
           setRefinerProvider(providerId);
@@ -98,9 +93,7 @@ export function useClipActions() {
 
         if (hasValidExisting) return;
 
-        if (type === "synthesis") {
-          setAlertText("Synthesis recompute is currently disabled.");
-        } else if (type === "mapping") {
+        if (type === "mapping") {
           await runMappingForAiTurn(aiTurnId, providerId);
         } else if (type === "refiner") {
           // Refiner Recompute
@@ -119,8 +112,6 @@ export function useClipActions() {
       runRefinerForAiTurn,
       setAlertText,
       setTurnsMap,
-      setSynthesisProvider,
-      setSynthesisProvider,
       setMappingProvider,
       setRefinerProvider,
       setAntagonistProvider,

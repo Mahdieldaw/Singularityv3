@@ -3,11 +3,11 @@ import { LLM_PROVIDERS_CONFIG } from '../constants';
 import clsx from 'clsx';
 
 interface PipelineErrorBannerProps {
-    type: 'mapping' | 'synthesis' | 'refiner' | 'antagonist';
+    type: 'mapping' | 'refiner' | 'antagonist';
     failedProviderId: string;
     onRetry: (pid: string) => void;
-    onExplore?: () => void; // For synth failure -> explore map
-    onContinue?: () => void; // For mapper failure -> continue with raw
+    onExplore?: () => void;
+    onContinue?: () => void;
     compact?: boolean;
 }
 
@@ -24,7 +24,6 @@ export const PipelineErrorBanner: React.FC<PipelineErrorBannerProps> = ({
     const getTitle = () => {
         switch (type) {
             case 'mapping': return 'Mapping unavailable';
-            case 'synthesis': return 'Frame synthesis unavailable';
             case 'refiner': return 'Enhancement unavailable';
             case 'antagonist': return 'Context refinement unavailable';
             default: return 'Step unavailable';
@@ -33,8 +32,7 @@ export const PipelineErrorBanner: React.FC<PipelineErrorBannerProps> = ({
 
     const getDescription = () => {
         switch (type) {
-            case 'mapping': return 'Synthesis and advanced insights require a successful cross-reference of multiple sources.';
-            case 'synthesis': return 'We couldn\'t generate a combined summary. You can still explore individual responses or the decision map.';
+            case 'mapping': return 'Advanced insights require a successful cross-reference of multiple sources.';
             case 'refiner': return 'We couldn\'t generate additional insights or actions for this response.';
             case 'antagonist': return 'Prompt refinement and context checking are currently unavailable.';
             default: return 'An error occurred during this pipeline step.';
@@ -44,7 +42,6 @@ export const PipelineErrorBanner: React.FC<PipelineErrorBannerProps> = ({
     const getIcon = () => {
         switch (type) {
             case 'mapping': return '📊';
-            case 'synthesis': return '✨';
             case 'refiner': return '💎';
             case 'antagonist': return '💭';
             default: return '⚠️';
