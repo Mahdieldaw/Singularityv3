@@ -256,10 +256,36 @@ Answer the user's message directly. Use context only to disambiguate.
               r.status === "completed" && r.text && r.text.trim().length > 0,
           );
 
+          // ✅ CRITICAL FIX: Ensure skipped/failed providers are included in formattedResults
+          providerStatuses.forEach(p => {
+            if ((p.status === 'skipped' || p.status === 'failed') && !formattedResults[p.providerId]) {
+              formattedResults[p.providerId] = {
+                providerId: p.providerId,
+                text: "",
+                status: p.status === 'skipped' ? 'skipped' : 'failed', // Map to valid status
+                meta: {
+                  error: p.error?.message || p.skippedReason || "Skipped or failed",
+                  skipped: p.status === 'skipped',
+                  reason: p.skippedReason
+                }
+              };
+            }
+          });
+
           if (!hasAnyValidResults) {
             if (authErrors.length > 0 && authErrors.length === errors.size) {
               const providerIds = Array.from(errors.keys());
               reject(createMultiProviderAuthError(providerIds, "Multiple authentication errors occurred."));
+              return;
+            }
+
+            // Even if no valid results, we might want to return the skipped/failed ones instead of rejecting
+            // if we want the UI to show them as "failed" orbs.
+            if (providerStatuses.length > 0) {
+              resolve({
+                results: formattedResults,
+                errors: Object.fromEntries(errors),
+              });
               return;
             }
 
@@ -283,7 +309,7 @@ Answer the user's message directly. Use context only to disambiguate.
 
             const failedProviders = providerStatuses.filter((p) => p.status === 'failed');
             const successfulProviders = providerStatuses.filter((p) => p.status === 'completed');
-              if (failedProviders.length > 0) {
+            if (failedProviders.length > 0) {
               streamingManager.port.postMessage({
                 type: 'WORKFLOW_PARTIAL_COMPLETE',
                 sessionId: context.sessionId,
@@ -783,14 +809,14 @@ Answer the user's message directly. Use context only to disambiguate.
           if (item.text) batchResponses[item.providerId] = { text: item.text, providerId: item.providerId };
         });
       } catch (_) { }
-      
+
       try {
-          const data = await this._resolveSourceData({ sourceHistorical: { turnId, responseType: 'understand' } }, context, stepResults, options);
-          if (data[0]?.meta?.understandOutput) understandOutput = data[0].meta.understandOutput;
+        const data = await this._resolveSourceData({ sourceHistorical: { turnId, responseType: 'understand' } }, context, stepResults, options);
+        if (data[0]?.meta?.understandOutput) understandOutput = data[0].meta.understandOutput;
       } catch (_) { }
       try {
-          const data = await this._resolveSourceData({ sourceHistorical: { turnId, responseType: 'gauntlet' } }, context, stepResults, options);
-          if (data[0]?.meta?.gauntletOutput) gauntletOutput = data[0].meta.gauntletOutput;
+        const data = await this._resolveSourceData({ sourceHistorical: { turnId, responseType: 'gauntlet' } }, context, stepResults, options);
+        if (data[0]?.meta?.gauntletOutput) gauntletOutput = data[0].meta.gauntletOutput;
       } catch (_) { }
 
       try {
@@ -804,7 +830,7 @@ Answer the user's message directly. Use context only to disambiguate.
       Object.entries(batchStepResults).forEach(([pid, res]) => {
         if (res && res.text) batchResponses[pid] = { text: res.text, providerId: pid };
       });
-      
+
       if (mappingStepIds && mappingStepIds.length > 0) {
         for (const id of mappingStepIds) {
           const res = stepResults.get(id);
@@ -850,8 +876,8 @@ Answer the user's message directly. Use context only to disambiguate.
     } catch (_) { }
 
     return this._executeGenericSingleStep(
-        step, context, refinerProvider, refinerPrompt, "Refiner", options,
-        (text) => responseProcessor.parseRefinerResponse(responseProcessor.extractContent(text))
+      step, context, refinerProvider, refinerPrompt, "Refiner", options,
+      (text) => responseProcessor.parseRefinerResponse(responseProcessor.extractContent(text))
     );
   }
 
@@ -881,21 +907,21 @@ Answer the user's message directly. Use context only to disambiguate.
           if (item.text) batchResponses[item.providerId] = { text: item.text, providerId: item.providerId };
         });
       } catch (_) { }
-      
+
       try {
-          const data = await this._resolveSourceData({ sourceHistorical: { turnId, responseType: 'understand' } }, context, stepResults, options);
-          if (data[0]?.meta?.understandOutput) understandOutput = data[0].meta.understandOutput;
+        const data = await this._resolveSourceData({ sourceHistorical: { turnId, responseType: 'understand' } }, context, stepResults, options);
+        if (data[0]?.meta?.understandOutput) understandOutput = data[0].meta.understandOutput;
       } catch (_) { }
       try {
-          const data = await this._resolveSourceData({ sourceHistorical: { turnId, responseType: 'gauntlet' } }, context, stepResults, options);
-          if (data[0]?.meta?.gauntletOutput) gauntletOutput = data[0].meta.gauntletOutput;
+        const data = await this._resolveSourceData({ sourceHistorical: { turnId, responseType: 'gauntlet' } }, context, stepResults, options);
+        if (data[0]?.meta?.gauntletOutput) gauntletOutput = data[0].meta.gauntletOutput;
       } catch (_) { }
 
       try {
         const data = await this._resolveSourceData({ sourceHistorical: { turnId, responseType: 'mapping' } }, context, stepResults, options);
         if (data[0]?.text) {
-            const parsed = responseProcessor.processMappingResponse(data[0].text);
-            fullOptionsText = parsed.options || "";
+          const parsed = responseProcessor.processMappingResponse(data[0].text);
+          fullOptionsText = parsed.options || "";
         }
       } catch (_) { }
       try {
@@ -908,13 +934,13 @@ Answer the user's message directly. Use context only to disambiguate.
       Object.entries(batchStepResults).forEach(([pid, res]) => {
         if (res && res.text) batchResponses[pid] = { text: res.text, providerId: pid };
       });
-      
+
       if (mappingStepIds) {
         for (const id of mappingStepIds) {
           const res = stepResults.get(id);
           if (res?.status === "completed" && res.result?.text) {
-              const parsed = responseProcessor.processMappingResponse(res.result.text);
-              fullOptionsText = parsed.options || "";
+            const parsed = responseProcessor.processMappingResponse(res.result.text);
+            fullOptionsText = parsed.options || "";
           }
         }
       }
@@ -971,8 +997,8 @@ Answer the user's message directly. Use context only to disambiguate.
     } catch (_) { }
 
     return this._executeGenericSingleStep(
-        step, context, antagonistProvider, antagonistPrompt, "Antagonist", options,
-        (text) => responseProcessor.extractContent(text) 
+      step, context, antagonistProvider, antagonistPrompt, "Antagonist", options,
+      (text) => responseProcessor.extractContent(text)
     );
   }
 
@@ -1002,22 +1028,22 @@ Answer the user's message directly. Use context only to disambiguate.
 
     const mappingText = payload.mappingText || "";
     if (mappingText) {
-        const parsed = parseUnifiedMapperOutput(mappingText);
-        if (!graphTopology) graphTopology = parsed.topology;
-        narrativeSummary = parsed.narrative;
-        const optionsStr = parsed.options || "";
-        if (optionsStr) {
-            const lines = optionsStr.split('\n');
-            for (const line of lines) {
-                const match = line.match(/^\s*(?:\d+\.|\-|\*|•)\s*\*?\*?([^:*]+)\*?\*?:\s*(.*)$/);
-                if (match) {
-                    optionsInventory.push({
-                        label: match[1].trim().replace(/^\*\*|\*\*$/g, ''),
-                        summary: match[2].trim().replace(/\s*\[\d+(?:\s*,\s*\d+)*\]/g, '')
-                    });
-                }
-            }
+      const parsed = parseUnifiedMapperOutput(mappingText);
+      if (!graphTopology) graphTopology = parsed.topology;
+      narrativeSummary = parsed.narrative;
+      const optionsStr = parsed.options || "";
+      if (optionsStr) {
+        const lines = optionsStr.split('\n');
+        for (const line of lines) {
+          const match = line.match(/^\s*(?:\d+\.|\-|\*|•)\s*\*?\*?([^:*]+)\*?\*?:\s*(.*)$/);
+          if (match) {
+            optionsInventory.push({
+              label: match[1].trim().replace(/^\*\*|\*\*$/g, ''),
+              summary: match[2].trim().replace(/\s*\[\d+(?:\s*,\s*\d+)*\]/g, '')
+            });
+          }
         }
+      }
     }
 
     let understandPrompt = this.promptService.buildUnderstandPrompt(
@@ -1058,8 +1084,8 @@ Answer the user's message directly. Use context only to disambiguate.
     }
 
     return this._executeGenericSingleStep(
-        step, context, payload.understandProvider, understandPrompt, "Understand", options,
-        (text) => parseUnderstandOutput(text)
+      step, context, payload.understandProvider, understandPrompt, "Understand", options,
+      (text) => parseUnderstandOutput(text)
     );
   }
 
@@ -1118,8 +1144,8 @@ Answer the user's message directly. Use context only to disambiguate.
     }
 
     return this._executeGenericSingleStep(
-        step, context, payload.gauntletProvider, gauntletPrompt, "Gauntlet", options,
-        (text) => parseGauntletOutput(text)
+      step, context, payload.gauntletProvider, gauntletPrompt, "Gauntlet", options,
+      (text) => parseGauntletOutput(text)
     );
   }
 

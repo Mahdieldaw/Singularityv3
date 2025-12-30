@@ -11,7 +11,6 @@ import { AiTurn } from '../../types';
 import AntagonistCard from '../antagonist/AntagonistCard';
 import RefinerDot from '../refinerui/RefinerDot';
 import CognitiveAnchors from './CognitiveAnchors';
-import { CouncilOrbs } from '../CouncilOrbs';
 
 // Icons
 const ChevronDown = ({ className }: { className?: string }) => (

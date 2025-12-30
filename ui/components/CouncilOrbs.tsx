@@ -606,7 +606,11 @@ const Orb: React.FC<OrbProps> = ({
 
     // For active variant, we don't use turn state status, we use selection state
     const isStreaming = variant !== "active" && state.latestResponse?.status === 'streaming';
-    const hasError = variant !== "active" && state.latestResponse?.status === 'error';
+    const hasError = variant !== "active" && (
+        state.latestResponse?.status === 'error' ||
+        (state.latestResponse?.status as any) === 'failed' ||
+        (state.latestResponse?.status as any) === 'skipped'
+    );
     const isHovered = hoveredOrb === pid;
 
     // Get colors and logo

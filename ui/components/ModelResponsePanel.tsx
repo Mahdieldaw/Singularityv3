@@ -65,9 +65,10 @@ export const ModelResponsePanel: React.FC<ModelResponsePanelProps> = React.memo(
         const artifacts = (latestResponse?.artifacts || []) as Artifact[];
         const hasText = !!text.trim();
         const isStreaming = status === 'streaming' || streamingState.activeProviderId === providerId;
-        const isError = status === 'error';
+        const isError = status === 'error' || (status as string) === 'failed' || (status as string) === 'skipped';
+        const errorMsg = (latestResponse?.meta as any)?.error || (latestResponse?.meta as any)?.skippedReason || ((status as string) === 'skipped' ? "Skipped by system" : "Error occurred");
 
-        return { status, text, hasText, isStreaming, isError, artifacts };
+        return { status, text, hasText, isStreaming, isError, artifacts, errorMsg };
     }, [latestResponse, streamingState.activeProviderId, providerId]);
 
     const {
@@ -210,7 +211,7 @@ export const ModelResponsePanel: React.FC<ModelResponsePanelProps> = React.memo(
             <div className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden p-4 custom-scrollbar relative z-10" style={{ paddingBottom: (chatInputHeight || 80) + 24 }}>
                 {/* Main response */}
                 <div className="prose prose-sm max-w-none dark:prose-invert break-words" style={{ overflowWrap: 'anywhere' }}>
-                    <MarkdownDisplay content={derivedState.text || (derivedState.isError ? "Error occurred" : "Empty response")} />
+                    <MarkdownDisplay content={derivedState.text || ((derivedState as any).errorMsg || (derivedState.isError ? "Error occurred" : "Empty response"))} />
                     {derivedState.isStreaming && <span className="streaming-dots" />}
                 </div>
 
