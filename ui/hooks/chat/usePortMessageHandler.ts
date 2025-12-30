@@ -825,7 +825,6 @@ export function usePortMessageHandler() {
             const { providerStatuses, phase } = message as any;
             const mapStatusToStage = (
               status: 'queued' | 'active' | 'streaming' | 'completed' | 'failed',
-              phase: 'batch' | 'mapping'
             ) => {
               if (status === 'queued') return 'idle';
               if (status === 'active') return 'thinking';
@@ -839,7 +838,7 @@ export function usePortMessageHandler() {
               for (const ps of providerStatuses) {
                 const pid = String(ps.providerId);
                 progressMap[pid] = {
-                  stage: mapStatusToStage(ps.status, phase),
+                  stage: mapStatusToStage(ps.status),
                   progress: typeof ps.progress === 'number' ? ps.progress : undefined,
                   error: ps.error,
                 };

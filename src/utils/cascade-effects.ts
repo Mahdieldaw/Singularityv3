@@ -1,10 +1,9 @@
 import type { CascadeEffects } from "../types/context-bridge";
-import type { GraphTopology, MapperArtifact } from "../../shared/contract";
+import type { GraphTopology } from "../../shared/contract";
 
 export function computeCascadeEffects(
   removedClaimIds: string[],
   graphTopology: GraphTopology,
-  artifact: MapperArtifact,
 ): CascadeEffects {
   const effects: CascadeEffects = {
     orphanedClaims: [],
@@ -83,4 +82,3 @@ export function computeCascadeEffects(
 
   return effects;
 }
-

@@ -29,7 +29,6 @@ export function classifyClaimsWithSignals(
     return allClaims.map((claim: any) => ({ claim, signalType: "unticked" }));
   }
 
-  const addedIds = new Set((edits.edits.added || []).map((a) => a.claim.id));
   const removedIds = new Set((edits.edits.removed || []).map((r) => r.claimId));
   const modifiedMap = new Map(
     (edits.edits.modified || []).map((m) => [m.originalId, m]),
@@ -172,7 +171,8 @@ export function buildAntagonistSignalInjection(
 ): string {
   const additions = classified.filter((c) => c.signalType === "addition");
   const ticked = classified.filter((c) => c.signalType === "ticked");
-  let injection = `\n---\n\n## User Curation Signal (Antagonist-Specific)\n\n`;
+  const modeLabel = inputType === "understand" ? "Understand" : "Gauntlet";
+  let injection = `\n---\n\n## User Curation Signal (Antagonist-Specific — ${modeLabel} Mode)\n\n`;
   if (ghostOverride && ghostOverride.trim().length > 0) {
     injection += `### Ghost Override (Primary Target)\n`;
     injection += `"${ghostOverride}"\n\n`;

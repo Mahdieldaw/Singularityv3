@@ -25,7 +25,6 @@ import api from "../services/extension-api";
 import { LLM_PROVIDERS_CONFIG } from "../constants";
 import { getProviderName } from "../utils/provider-helpers";
 import { PROVIDER_LIMITS } from "../../shared/provider-limits";
-import { setProviderLock } from "../../shared/provider-locks";
 import { CouncilOrbs } from "./CouncilOrbs";
 
 interface ChatInputProps {
@@ -418,9 +417,10 @@ const ChatInput = ({
         <div className="relative w-full max-w-[min(900px,calc(100%-24px))] flex justify-center mb-[-8px] z-10 !bg-transparent">
           <CouncilOrbs
             providers={LLM_PROVIDERS_CONFIG}
+            voiceProviderId={null}
             variant="active"
             workflowProgress={workflowProgress as any}
-            onCrownMove={(pid) => {
+            onCrownMove={() => {
               // No-op
             }}
           />

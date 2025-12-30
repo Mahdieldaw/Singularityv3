@@ -97,7 +97,6 @@ export function buildContextBridge(turnState: any): ContextBridge {
       bridge.cascadeEffects = computeCascadeEffects(
         removedIds,
         turnState.mapper.graphTopology,
-        turnState.mapper.artifact,
       );
     }
   }
@@ -122,4 +121,3 @@ export function buildContextBridge(turnState: any): ContextBridge {
     null;
   return bridge;
 }
-

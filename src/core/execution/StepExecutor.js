@@ -1,7 +1,7 @@
 
 import { ArtifactProcessor } from '../../../shared/artifact-processor';
 import { PROVIDER_LIMITS } from '../../../shared/provider-limits';
-import { formatArtifactAsOptions, parseMapperArtifact, parseExploreOutput, parseGauntletOutput, parseUnderstandOutput, parseUnifiedMapperOutput, parseV1MapperToArtifact } from '../../../shared/parsing-utils';
+import { parseGauntletOutput, parseUnderstandOutput, parseUnifiedMapperOutput, parseV1MapperToArtifact } from '../../../shared/parsing-utils';
 import { classifyError } from '../error-classifier.js';
 import {
   errorHandler,
@@ -977,7 +977,6 @@ Answer the user's message directly. Use context only to disambiguate.
   }
 
   async executeUnderstandStep(step, context, _previousResults, options) {
-    const { streamingManager } = options;
     const payload = step.payload;
 
     const mapperArtifact =

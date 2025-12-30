@@ -483,7 +483,7 @@ ${modelOutputsBlock}
     // ═══════════════════════════════════════════════════════════════
     const consensusDimensions = new Set(artifact.consensus.claims.map(c => c.dimension).filter(Boolean));
     const outlierDimensions = new Set(artifact.outliers.map(o => o.dimension).filter(Boolean));
-    const gapDimensions = [...outlierDimensions].filter(d => !consensusDimensions.has(d));
+    const gapDimensions = Array.from(outlierDimensions).filter(d => !consensusDimensions.has(d));
 
     const gapsBlock = gapDimensions.length > 0
       ? gapDimensions.map(dim => {

@@ -1198,6 +1198,7 @@ export class SessionManager {
    * Combine extracted answers + artifacts into context blob
    */
   _buildContextSummary(result, request) {
+    void result;
     let summary = "";
 
     if (request?.understandOutput?.short_answer) {
@@ -1234,6 +1235,7 @@ export class SessionManager {
   }
 
   async persistArtifactEdit(sessionId, turnId, edit) {
+    void sessionId;
     try {
       if (!this.adapter) return;
       const turn = await this.adapter.get("turns", turnId);
