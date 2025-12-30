@@ -20,10 +20,10 @@ interface CognitiveOutputRendererProps {
  * Manages the transition between the initial "Landscape" (PostMapper/ArtifactShowcase)
  * and specialized outcomes (Understand/Decide).
  */
-export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = ({ 
-    aiTurn, 
-    refinerState, 
-    antagonistState 
+export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = ({
+    aiTurn,
+    refinerState,
+    antagonistState
 }) => {
     const {
         activeMode,
@@ -81,8 +81,8 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
             <div className="w-full">
                 {activeMode === 'artifact' && (
                     <ArtifactShowcase
-                        mapperArtifact={aiTurn.mapperArtifact!}
-                        analysis={aiTurn.exploreAnalysis!}
+                        mapperArtifact={aiTurn.mapperArtifact || undefined}
+                        analysis={aiTurn.exploreAnalysis || undefined}
                         turn={aiTurn}
                         onUnderstand={(options) => triggerAndSwitch('understand', options)}
                         onDecide={(options) => triggerAndSwitch('gauntlet', options)}
@@ -91,8 +91,8 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
                 )}
 
                 {activeMode === 'understand' && aiTurn.understandOutput && (
-                    <UnderstandOutputView 
-                        output={aiTurn.understandOutput} 
+                    <UnderstandOutputView
+                        output={aiTurn.understandOutput}
                         onRecompute={(options) => triggerAndSwitch('understand', options)}
                         onRefine={(options) => triggerAndSwitch('refine', options)}
                         onAntagonist={(options) => triggerAndSwitch('antagonist', options)}
@@ -104,8 +104,8 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
                 )}
 
                 {activeMode === 'gauntlet' && aiTurn.gauntletOutput && (
-                    <GauntletOutputView 
-                        output={aiTurn.gauntletOutput} 
+                    <GauntletOutputView
+                        output={aiTurn.gauntletOutput}
                         onRecompute={(options) => triggerAndSwitch('gauntlet', options)}
                         onRefine={(options) => triggerAndSwitch('refine', options)}
                         onAntagonist={(options) => triggerAndSwitch('antagonist', options)}

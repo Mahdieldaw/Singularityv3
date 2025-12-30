@@ -66,7 +66,7 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
             <div className="w-full max-w-7xl">
               <div className="flex-1 flex flex-col relative min-w-0" style={{ maxWidth: '820px', margin: '0 auto' }}>
 
-                {(aiTurn.mapperArtifact && aiTurn.exploreAnalysis) || aiTurn.understandOutput || aiTurn.gauntletOutput ? (
+                {aiTurn.type === 'ai' ? (
                   <CognitiveOutputRenderer
                     aiTurn={aiTurn}
                     refinerState={{ output: refinerOutput, isLoading: isRefinerLoading }}

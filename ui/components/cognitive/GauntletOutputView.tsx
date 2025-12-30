@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { GauntletOutput } from '../../../shared/contract';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { selectedModelsAtom, activeSplitPanelAtom } from '../../state/atoms';
+import { selectedModelsAtom, activeSplitPanelAtom, isDecisionMapOpenAtom } from '../../state/atoms';
 import { LLM_PROVIDERS_CONFIG } from '../../constants';
 import type { CognitiveTransitionOptions } from '../../hooks/cognitive/useCognitiveMode';
 import { AntagonistOutputState } from '../../hooks/useAntagonistOutput';
@@ -66,6 +66,7 @@ const GauntletOutputView: React.FC<GauntletOutputViewProps> = ({
     const [copied, setCopied] = useState(false);
     const selectedModels = useAtomValue(selectedModelsAtom);
     const setActiveSplitPanel = useSetAtom(activeSplitPanelAtom);
+    const setIsDecisionMapOpen = useSetAtom(isDecisionMapOpenAtom);
 
     const availableProviders = useMemo(() => {
         const enabled = LLM_PROVIDERS_CONFIG.filter((p) => !!selectedModels?.[p.id]);
@@ -127,7 +128,7 @@ const GauntletOutputView: React.FC<GauntletOutputViewProps> = ({
                     </div>
                     <div className="flex items-center gap-2">
                         <button
-                            onClick={() => setActiveSplitPanel({ turnId: aiTurn.id, providerId: 'decision_map' })}
+                            onClick={() => setIsDecisionMapOpen({ turnId: aiTurn.id })}
                             className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-surface-raised hover:bg-surface-highlight border border-border-subtle text-xs text-text-secondary transition-colors"
                             title="Open Decision Map"
                         >

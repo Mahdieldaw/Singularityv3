@@ -4,7 +4,7 @@ import { applyEdits } from "../../utils/apply-artifact-edits";
 import { artifactEditsAtom } from "../../state/artifact-edits";
 import { RawResponseCard } from "./cards/RawResponseCard";
 
-import { selectedArtifactsAtom, selectedModelsAtom } from "../../state/atoms";
+import { selectedArtifactsAtom, selectedModelsAtom, workflowProgressForTurnFamily } from "../../state/atoms";
 import { SelectionBar } from "./SelectionBar";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { SouvenirCard } from "./cards/SouvenirCard";
@@ -29,8 +29,8 @@ import { LLM_PROVIDERS_CONFIG } from "../../constants";
 import type { CognitiveTransitionOptions, SelectedArtifact } from "../../hooks/cognitive/useCognitiveMode";
 
 interface ArtifactShowcaseProps {
-    mapperArtifact: MapperArtifact;
-    analysis: ExploreAnalysis;
+    mapperArtifact?: MapperArtifact;
+    analysis?: ExploreAnalysis;
     turn: AiTurn;
     onUnderstand?: (options?: CognitiveTransitionOptions) => void;
     onDecide?: (options?: CognitiveTransitionOptions) => void;
@@ -52,10 +52,12 @@ export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
     const setActiveSplitPanel = useSetAtom(activeSplitPanelAtom);
 
     // Get modified artifact
-    const currentTurnId = turn?.id || mapperArtifact.turn.toString();
+    const currentTurnId = turn?.id || mapperArtifact?.turn?.toString() || "";
     const edits = allEdits.get(currentTurnId);
-    const modifiedArtifact = useMemo(() => applyEdits(mapperArtifact, edits), [mapperArtifact, edits]);
+    const modifiedArtifact = useMemo(() => mapperArtifact ? applyEdits(mapperArtifact, edits) : null, [mapperArtifact, edits]);
     const userNotes = edits?.userNotes;
+
+    const workflowProgress = useAtomValue(workflowProgressForTurnFamily(currentTurnId));
 
     const availableProviders = useMemo(() => {
         const enabled = LLM_PROVIDERS_CONFIG.filter((p) => !!selectedModels?.[p.id]);
@@ -63,8 +65,11 @@ export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
     }, [selectedModels]);
 
     const visibleProviderIds = useMemo(() => {
-        return Object.keys(turn?.batchResponses || {});
-    }, [turn]);
+        const keys = Object.keys(turn?.batchResponses || {});
+        if (keys.length > 0) return keys;
+        // Fallback to currently selected models if no responses yet (early loading)
+        return LLM_PROVIDERS_CONFIG.filter(p => !!selectedModels?.[p.id]).map(p => p.id);
+    }, [turn, selectedModels]);
 
     const [nextProviderId, setNextProviderId] = useState<string>(() => availableProviders[0]?.id || "gemini");
 
@@ -129,7 +134,7 @@ export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
         });
     };
 
-    const dimensionCoverage = analysis.dimensionCoverage || [];
+    const dimensionCoverage = analysis?.dimensionCoverage || [];
 
     const gaps = useMemo(() => dimensionCoverage.filter((d) => d.is_gap), [dimensionCoverage]);
 
@@ -140,16 +145,17 @@ export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
     );
     const totalDims = dimensionCoverage.length;
     const settledCount = Math.max(0, totalDims - gapsCount - contestedCount);
-    const ghostPresent = Boolean(mapperArtifact.ghost);
-    const dimsFoundCount = mapperArtifact.dimensions_found?.length ?? totalDims;
+    const ghostPresent = Boolean(mapperArtifact?.ghost);
+    const dimsFoundCount = mapperArtifact?.dimensions_found?.length ?? totalDims;
 
     const isKnownContainerType =
-        analysis.containerType === "comparison_matrix" ||
-        analysis.containerType === "exploration_space" ||
-        analysis.containerType === "decision_tree" ||
-        analysis.containerType === "direct_answer";
+        analysis?.containerType === "comparison_matrix" ||
+        analysis?.containerType === "exploration_space" ||
+        analysis?.containerType === "decision_tree" ||
+        analysis?.containerType === "direct_answer";
 
     const renderContent = () => {
+        if (!mapperArtifact || !analysis) return null;
         switch (analysis.containerType) {
             case "comparison_matrix":
                 return <ComparisonMatrixContainer content={buildComparisonContent(mapperArtifact, analysis)} />;
@@ -175,28 +181,30 @@ export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
 
     return (
         <div className="w-full max-w-3xl mx-auto space-y-4 pb-12 animate-in fade-in duration-500">
-            <div className="flex flex-wrap gap-2 items-center">
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-surface-highlight/30 border border-border-subtle text-xs text-text-secondary">
-                    🔶 Gaps: {gapsCount}
-                </span>
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-surface-highlight/30 border border-border-subtle text-xs text-text-secondary">
-                    ⚔️ Contested: {contestedCount}
-                </span>
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-surface-highlight/30 border border-border-subtle text-xs text-text-secondary">
-                    ✅ Settled: {settledCount}
-                </span>
-                {ghostPresent && (
+            {mapperArtifact && (
+                <div className="flex flex-wrap gap-2 items-center">
                     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-surface-highlight/30 border border-border-subtle text-xs text-text-secondary">
-                        👻 Ghost present
+                        🔶 Gaps: {gapsCount}
                     </span>
-                )}
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-surface-highlight/30 border border-border-subtle text-xs text-text-secondary">
-                    Models: {mapperArtifact.model_count}
-                </span>
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-surface-highlight/30 border border-border-subtle text-xs text-text-secondary">
-                    Dims: {dimsFoundCount}
-                </span>
-            </div>
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-surface-highlight/30 border border-border-subtle text-xs text-text-secondary">
+                        ⚔️ Contested: {contestedCount}
+                    </span>
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-surface-highlight/30 border border-border-subtle text-xs text-text-secondary">
+                        ✅ Settled: {settledCount}
+                    </span>
+                    {ghostPresent && (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-surface-highlight/30 border border-border-subtle text-xs text-text-secondary">
+                            👻 Ghost present
+                        </span>
+                    )}
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-surface-highlight/30 border border-border-subtle text-xs text-text-secondary">
+                        Models: {mapperArtifact.model_count}
+                    </span>
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-surface-highlight/30 border border-border-subtle text-xs text-text-secondary">
+                        Dims: {dimsFoundCount}
+                    </span>
+                </div>
+            )}
 
             {/* Source Layer: Council Orbs */}
             <div className="mb-2">
@@ -205,25 +213,35 @@ export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
                     turnId={currentTurnId}
                     voiceProviderId={null}
                     visibleProviderIds={visibleProviderIds}
-                    variant="historical"
+                    variant={!mapperArtifact ? "active" : "historical"}
+                    workflowProgress={workflowProgress}
                     onOrbClick={(pid) => setActiveSplitPanel({ turnId: currentTurnId, providerId: pid })}
                 />
             </div>
 
-            {mapperArtifact.souvenir && <SouvenirCard content={mapperArtifact.souvenir} />}
+            {mapperArtifact && analysis ? (
+                <>
+                    {mapperArtifact.souvenir && <SouvenirCard content={mapperArtifact.souvenir} />}
 
-            <GapsCard artifact={mapperArtifact} gaps={gaps} />
+                    <GapsCard artifact={mapperArtifact!} gaps={gaps} />
 
-            {renderContent()}
+                    {renderContent()}
 
-            {isKnownContainerType && (
-                <div className="space-y-3 opacity-95">
-                    <ConsensusCard consensus={mapperArtifact.consensus} selectedIds={selectedIds} onToggle={toggleSelection} />
-                    <OutlierCard
-                        outliers={mapperArtifact.outliers}
-                        selectedIds={selectedIds}
-                        onToggle={(id) => toggleSelection(id)}
-                    />
+                    {isKnownContainerType && (
+                        <div className="space-y-3 opacity-95">
+                            <ConsensusCard consensus={mapperArtifact.consensus} selectedIds={selectedIds} onToggle={toggleSelection} />
+                            <OutlierCard
+                                outliers={mapperArtifact.outliers}
+                                selectedIds={selectedIds}
+                                onToggle={(id) => toggleSelection(id)}
+                            />
+                        </div>
+                    )}
+                </>
+            ) : (
+                <div className="flex flex-col items-center justify-center p-12 bg-surface-highlight/10 rounded-xl border border-dashed border-border-subtle animate-pulse">
+                    <div className="text-3xl mb-4">🧩</div>
+                    <div className="text-text-secondary font-medium">Assemblying Mapper Artifact...</div>
                 </div>
             )}
 
@@ -241,7 +259,7 @@ export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
                     </button>
                     {dimensionViewOpen && (
                         <div className="px-3 pb-3">
-                            <DimensionFirstView artifact={mapperArtifact} analysis={analysis} />
+                            <DimensionFirstView artifact={mapperArtifact!} analysis={analysis!} />
                         </div>
                     )}
                 </div>
@@ -266,41 +284,43 @@ export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
                 </div>
             </div>
 
-            <div className="flex gap-3 mt-6 pt-2">
-                <button
-                    onClick={() => onUnderstand?.({
-                        providerId: nextProviderId,
-                        selectedArtifacts,
-                        mapperArtifact: modifiedArtifact,
-                        userNotes
-                    })}
-                    disabled={isLoading}
-                    className="flex-1 px-4 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 
-                               hover:from-blue-500 hover:to-indigo-500 
-                               text-white rounded-lg font-medium transition-all
-                               disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                    🧠 Understand
-                </button>
-                <button
-                    onClick={() => onDecide?.({
-                        providerId: nextProviderId,
-                        selectedArtifacts,
-                        mapperArtifact: modifiedArtifact,
-                        userNotes
-                    })}
-                    disabled={isLoading}
-                    className={`flex-1 px-4 py-3 text-white rounded-lg font-medium transition-all
-                               disabled:opacity-50 disabled:cursor-not-allowed
-                               ${analysis.escapeVelocity
-                            ? "bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 border border-emerald-400/30"
-                            : "bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500"}`}
-                >
-                    {analysis.escapeVelocity ? "🚀 Ready to Decide" : "⚡ Decide"}
-                </button>
-            </div>
+            {mapperArtifact && analysis && (
+                <div className="flex gap-3 mt-6 pt-2">
+                    <button
+                        onClick={() => onUnderstand?.({
+                            providerId: nextProviderId,
+                            selectedArtifacts,
+                            mapperArtifact: modifiedArtifact!, // null check done above
+                            userNotes
+                        })}
+                        disabled={isLoading}
+                        className="flex-1 px-4 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 
+                                hover:from-blue-500 hover:to-indigo-500 
+                                text-white rounded-lg font-medium transition-all
+                                disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                        🧠 Understand
+                    </button>
+                    <button
+                        onClick={() => onDecide?.({
+                            providerId: nextProviderId,
+                            selectedArtifacts,
+                            mapperArtifact: modifiedArtifact!,
+                            userNotes
+                        })}
+                        disabled={isLoading}
+                        className={`flex-1 px-4 py-3 text-white rounded-lg font-medium transition-all
+                                disabled:opacity-50 disabled:cursor-not-allowed
+                                ${analysis.escapeVelocity
+                                ? "bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 border border-emerald-400/30"
+                                : "bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500"}`}
+                    >
+                        {analysis.escapeVelocity ? "🚀 Ready to Decide" : "⚡ Decide"}
+                    </button>
+                </div>
+            )}
 
-            {mapperArtifact.ghost && <GhostCard ghost={mapperArtifact.ghost} />}
+            {mapperArtifact?.ghost && <GhostCard ghost={mapperArtifact.ghost} />}
 
             <RawResponseCard turn={turn} />
 
