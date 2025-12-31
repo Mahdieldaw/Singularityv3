@@ -14,11 +14,12 @@ import {
   currentSessionIdAtom,
   activeRecomputeStateAtom,
   originalPromptAtom,
-
   currentRefinementStateAtom, // used in nudgeVariant
   workflowProgressAtom,
   isRoundActiveAtom,
   selectedModeAtom,
+  mappingProviderAtom,
+  providerLocksAtom,
 } from "../state/atoms";
 import { useChat } from "../hooks/chat/useChat";
 import api from "../services/extension-api";
@@ -65,6 +66,9 @@ const ChatInput = ({
   const [activeTarget, setActiveTarget] = useAtom(activeProviderTargetAtom);
   const [currentSessionId] = useAtom(currentSessionIdAtom);
   const setActiveRecomputeState = useSetAtom(activeRecomputeStateAtom);
+  const [mappingProvider, setMappingProvider] = useAtom(mappingProviderAtom);
+  const setLocks = useSetAtom(providerLocksAtom);
+
 
   // New refinement state replaced by Launchpad; keeping minimal local state for original prompt tracking if needed
   // actually, we might not even need these atoms if useChat handles it.
@@ -412,16 +416,27 @@ const ChatInput = ({
     <div className="flex justify-center flex-col items-center pointer-events-auto">
 
 
-      {/* Config Orbs - Float above input, hugging the top edge */}
       {!isRoundActive && (
         <div className="relative w-full max-w-[min(900px,calc(100%-24px))] flex justify-center mb-[-8px] z-10 !bg-transparent">
           <CouncilOrbs
             providers={LLM_PROVIDERS_CONFIG}
-            voiceProviderId={null}
+            voiceProviderId={mappingProvider}
             variant="active"
             workflowProgress={workflowProgress as any}
-            onCrownMove={() => {
-              // No-op
+            onCrownMove={(pid) => {
+              setMappingProvider(pid);
+              // Also lock it to preserve user choice
+              setLocks(prev => ({ ...prev, mapping: true }));
+              try {
+                localStorage.setItem('htos_mapping_locked', 'true');
+                chrome?.storage?.local?.set?.({
+                  provider_lock_settings: {
+                    mapping_locked: true
+                  }
+                });
+              } catch (e) {
+                console.error("Failed to save mapping lock:", e);
+              }
             }}
           />
         </div>

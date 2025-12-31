@@ -13,7 +13,8 @@ import { OutlierCard } from "./cards/OutlierCard";
 import { GhostCard } from "./cards/GhostCard";
 import { GapsCard } from "./cards/GapsCard";
 import { CouncilOrbs } from "../CouncilOrbs";
-import { activeSplitPanelAtom, includePromptInCopyAtom } from "../../state/atoms";
+import RefinerDot from '../refinerui/RefinerDot';
+import { activeSplitPanelAtom, includePromptInCopyAtom, isDecisionMapOpenAtom } from "../../state/atoms";
 import { formatTurnForMd, formatDecisionMapForMd } from "../../utils/copy-format-utils";
 import { getLatestResponse } from "../../utils/turn-helpers";
 import { useRefinerOutput } from "../../hooks/useRefinerOutput";
@@ -32,6 +33,10 @@ import { ExplorationSpaceContainer } from "./containers/ExplorationSpaceContaine
 import { DimensionFirstView } from "./DimensionFirstView";
 import { LLM_PROVIDERS_CONFIG } from "../../constants";
 import type { CognitiveTransitionOptions, SelectedArtifact } from "../../hooks/cognitive/useCognitiveMode";
+
+const MapIcon = ({ className }: { className?: string }) => (
+    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><rect width="18" height="18" x="3" y="3" rx="2" ry="2" /><line x1="3" x2="21" y1="9" y2="9" /><line x1="9" x2="9" y1="21" y2="9" /></svg>
+);
 
 interface ArtifactShowcaseProps {
     mapperArtifact?: MapperArtifact;
@@ -56,6 +61,7 @@ export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
     const [allEdits] = useAtom(artifactEditsAtom);
     const setActiveSplitPanel = useSetAtom(activeSplitPanelAtom);
     const includePromptInCopy = useAtomValue(includePromptInCopyAtom);
+    const setIsDecisionMapOpen = useSetAtom(isDecisionMapOpenAtom);
 
     // Hooks for Refiner and Antagonist
     const { output: refinerOutput, providerId: refinerPid } = useRefinerOutput(turn?.id);
@@ -245,26 +251,53 @@ export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
         <div className="w-full max-w-3xl mx-auto space-y-4 pb-12 animate-in fade-in duration-500">
             {mapperArtifact && (
                 <div className="flex flex-wrap gap-2 items-center">
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-surface-highlight/30 border border-border-subtle text-xs text-text-secondary">
-                        🔶 Gaps: {gapsCount}
-                    </span>
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-surface-highlight/30 border border-border-subtle text-xs text-text-secondary">
-                        ⚔️ Contested: {contestedCount}
-                    </span>
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-surface-highlight/30 border border-border-subtle text-xs text-text-secondary">
-                        ✅ Settled: {settledCount}
-                    </span>
-                    {ghostPresent && (
+                    <div className="flex flex-wrap gap-2 items-center flex-1">
                         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-surface-highlight/30 border border-border-subtle text-xs text-text-secondary">
-                            👻 Ghost present
+                            🔶 Gaps: {gapsCount}
                         </span>
-                    )}
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-surface-highlight/30 border border-border-subtle text-xs text-text-secondary">
-                        Models: {mapperArtifact.model_count}
-                    </span>
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-surface-highlight/30 border border-border-subtle text-xs text-text-secondary">
-                        Dims: {dimsFoundCount}
-                    </span>
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-surface-highlight/30 border border-border-subtle text-xs text-text-secondary">
+                            ⚔️ Contested: {contestedCount}
+                        </span>
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-surface-highlight/30 border border-border-subtle text-xs text-text-secondary">
+                            ✅ Settled: {settledCount}
+                        </span>
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-surface-highlight/30 border border-border-subtle text-xs text-text-secondary">
+                            Models: {mapperArtifact.model_count}
+                        </span>
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-surface-highlight/30 border border-border-subtle text-xs text-text-secondary">
+                            Dims: {dimsFoundCount}
+                        </span>
+                        {ghostPresent && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-surface-highlight/30 border border-border-subtle text-xs text-text-secondary">
+                                👻 Ghost present
+                            </span>
+                        )}
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                        <button
+                            onClick={() => setIsDecisionMapOpen({ turnId: turn.id })}
+                            className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-surface-raised hover:bg-surface-highlight border border-border-subtle text-xs text-text-secondary transition-colors"
+                            title="Open Decision Map"
+                        >
+                            <MapIcon className="w-3.5 h-3.5" />
+                            <span>Map</span>
+                        </button>
+
+                        <div className="flex items-center gap-1.5">
+                            <RefinerDot
+                                refiner={refinerOutput}
+                                isLoading={false}
+                                onClick={() => setActiveSplitPanel({ turnId: turn.id, providerId: '__trust__' })}
+                            />
+                        </div>
+                        <div className="border-l border-border-subtle h-4 mx-1" />
+                        <CopyButton
+                            onCopy={handleCopyMapper}
+                            label="Copy Mapper Output"
+                            variant="icon"
+                        />
+                    </div>
                 </div>
             )}
 
@@ -273,7 +306,7 @@ export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
                 <CouncilOrbs
                     providers={LLM_PROVIDERS_CONFIG}
                     turnId={currentTurnId}
-                    voiceProviderId={null}
+                    voiceProviderId={turn.meta?.mapper || Object.keys(turn.mappingResponses || {})[0] || null}
                     visibleProviderIds={visibleProviderIds}
                     variant={!mapperArtifact ? "active" : "historical"}
                     workflowProgress={workflowProgress}
@@ -394,14 +427,14 @@ export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
 
             <SelectionBar />
 
-            {/* Fixed Copy Turn Button */}
-            <div className="fixed bottom-6 left-6 z-50">
+            {/* Contextual Copy Turn Button */}
+            <div className="mt-6 pt-4 border-t border-border-subtle/30">
                 <CopyButton
                     onCopy={handleCopyTurn}
                     label="Copy Full Turn"
-                    className="bg-surface/90 backdrop-blur-sm shadow-xl rounded-lg text-xs font-semibold px-4 py-2 border border-border-subtle hover:scale-105 transition-transform"
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surface-raised hover:bg-surface-highlight border border-border-subtle text-xs text-text-secondary transition-all"
                 >
-                    📋 Copy Turn
+                    <span>📋 Copy Turn</span>
                 </CopyButton>
             </div>
         </div>

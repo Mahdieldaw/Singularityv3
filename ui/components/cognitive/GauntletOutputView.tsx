@@ -558,14 +558,14 @@ const GauntletOutputView: React.FC<GauntletOutputViewProps> = ({
                 </button>
             </div>
 
-            {/* Fixed Copy Turn Button */}
-            <div className="fixed bottom-6 left-6 z-50">
+            {/* Contextual Copy Turn Button */}
+            <div className="mt-8 pt-4 border-t border-border-subtle/30">
                 <CopyButton
                     onCopy={handleCopyTurn}
                     label="Copy Full Turn"
-                    className="bg-surface/90 backdrop-blur-sm shadow-xl rounded-lg text-xs font-semibold px-4 py-2 border border-border-subtle hover:scale-105 transition-transform"
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surface-raised hover:bg-surface-highlight border border-border-subtle text-xs text-text-secondary transition-all"
                 >
-                    📋 Copy Turn
+                    <span>📋 Copy Turn</span>
                 </CopyButton>
             </div>
         </div>

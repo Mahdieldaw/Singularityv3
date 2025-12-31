@@ -103,6 +103,20 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
     const handleOrbClickInternal = (e: React.MouseEvent, providerId: string) => {
         e.stopPropagation();
 
+        // If a turnId is provided, we treat this as an interaction with a specific turn step.
+        // Clicks should open the response panel OR move the crown (if in crown mode).
+        // They should NOT toggle the global model selection (which is the fallback for the config tray).
+        if (turnId) {
+            if (isCrownMode && onCrownMove) {
+                onCrownMove(providerId);
+                setIsCrownMode(false);
+            } else if (onOrbClick) {
+                onOrbClick(providerId);
+            }
+            return;
+        }
+
+        // --- GLOBAL CONFIGURATION TRAY BEHAVIOR (no turnId) ---
         if (variant === "active") {
             // Toggle witness
             const isUnauthorized = authStatus && authStatus[providerId] === false;
@@ -120,7 +134,7 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
                 setSelectedModels({ ...selectedModels, [providerId]: !isSelected });
             }
         } else {
-            // Historical / Standard behavior
+            // Tray/Historical/etc. without turnId
             if (isCrownMode && onCrownMove) {
                 onCrownMove(providerId);
                 setIsCrownMode(false);

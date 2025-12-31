@@ -62,6 +62,7 @@ export class SimpleIndexedDBAdapter {
           "provider_responses",
           "provider_contexts",
           "metadata",
+          "context_bridges",
         ];
         const missingStores = requiredStores.filter(
           (storeName) => !this.db!.objectStoreNames.contains(storeName),

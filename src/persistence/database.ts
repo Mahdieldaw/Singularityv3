@@ -3,8 +3,8 @@
 import { StoreConfig, MetadataRecord } from "./types";
 
 export const DB_NAME = "OpusDeusDB";
-export const DB_VERSION = 6;
-export const SCHEMA_VERSION = 6;
+export const DB_VERSION = 7;
+export const SCHEMA_VERSION = 7;
 
 // Store configurations - conversation-only architecture
 export const STORE_CONFIGS: StoreConfig[] = [
@@ -98,6 +98,15 @@ export const STORE_CONFIGS: StoreConfig[] = [
       { name: "byEntityId", keyPath: "entityId", unique: false },
     ],
   },
+
+  // 7. Context Bridges Store
+  {
+    name: "context_bridges",
+    keyPath: "turnId",
+    indices: [
+      { name: "bySessionId", keyPath: "sessionId", unique: false },
+    ],
+  },
 ];
 
 /**
@@ -188,7 +197,35 @@ export async function openDatabase(): Promise<IDBDatabase> {
             updatedAt: now,
           };
           metadataStore.put(rec);
-        } catch (_) {}
+        } catch (_) { }
+      }
+
+      // Migration to v7: Add context_bridges store
+      if (oldVersion < 7) {
+        try {
+          if (!db.objectStoreNames.contains("context_bridges")) {
+            const bridgeStore = db.createObjectStore("context_bridges", {
+              keyPath: "turnId",
+            });
+            bridgeStore.createIndex("bySessionId", "sessionId", {
+              unique: false,
+            });
+            console.log("Created context_bridges store during v7 migration");
+          }
+
+          const metadataStore = transaction.objectStore("metadata");
+          const now = Date.now();
+          const rec: MetadataRecord = {
+            id: "schema_version_record",
+            key: "schema_version",
+            value: SCHEMA_VERSION,
+            createdAt: now,
+            updatedAt: now,
+          };
+          metadataStore.put(rec);
+        } catch (e) {
+          console.warn("Failed to complete v7 migration:", e);
+        }
       }
     };
 
