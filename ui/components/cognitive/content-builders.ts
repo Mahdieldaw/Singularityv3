@@ -55,6 +55,17 @@ const normalizeForMatch = (text: string): string =>
         .replace(/\s+/g, " ")
         .trim();
 
+const splitTitleDesc = (text: string): { title: string; desc?: string } => {
+    const t = String(text || "").trim();
+    const m = t.match(/^\s*([^:]{3,}?)\s*:\s*(.+)$/);
+    if (m) {
+        const title = m[1].trim();
+        const desc = m[2].trim();
+        return { title, desc: desc || undefined };
+    }
+    return { title: t || "", desc: undefined };
+};
+
 const tokens = (text: string): string[] => {
     const t = normalizeForMatch(text);
     if (!t) return [];
@@ -166,9 +177,11 @@ export function processArtifactForShowcase(
     const items: SelectableShowcaseItem[] = [];
 
     (artifact?.consensus?.claims || []).forEach((claim, i) => {
+        const parsed = splitTitleDesc(claim.text);
         items.push({
             id: `consensus-${i}`,
-            text: claim.text,
+            text: parsed.title,
+            detail: parsed.desc,
             type: "consensus",
             dimension: claim.dimension,
             applies_when: claim.applies_when,
@@ -178,9 +191,11 @@ export function processArtifactForShowcase(
     });
 
     (artifact?.outliers || []).forEach((o, i) => {
+        const parsed = splitTitleDesc(o.insight);
         items.push({
             id: `outlier-${i}`,
-            text: o.insight,
+            text: parsed.title,
+            detail: parsed.desc,
             type: o.type === "frame_challenger" ? "frame_challenger" : "supplemental",
             dimension: o.dimension,
             applies_when: o.applies_when,
