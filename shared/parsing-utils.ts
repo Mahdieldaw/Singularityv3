@@ -32,6 +32,313 @@ export interface GraphTopology {
 }
 
 // ============================================================================
+// CENTRALIZED JSON EXTRACTION
+// ============================================================================
+
+export function repairJson(text: string): string {
+    const input = String(text ?? '');
+    if (!input) return '';
+
+    const stripComments = (src: string): string => {
+        let out = '';
+        let quote: '"' | "'" | null = null;
+        let esc = false;
+
+        for (let i = 0; i < src.length; i++) {
+            const ch = src[i];
+            const next = i + 1 < src.length ? src[i + 1] : '';
+
+            if (quote) {
+                out += ch;
+                if (esc) {
+                    esc = false;
+                    continue;
+                }
+                if (ch === '\\') {
+                    esc = true;
+                    continue;
+                }
+                if (ch === quote) {
+                    quote = null;
+                }
+                continue;
+            }
+
+            if (ch === '"' || ch === "'") {
+                quote = ch as any;
+                out += ch;
+                continue;
+            }
+
+            if (ch === '/' && next === '/') {
+                while (i < src.length && src[i] !== '\n') i++;
+                if (i < src.length && src[i] === '\n') out += '\n';
+                continue;
+            }
+
+            if (ch === '/' && next === '*') {
+                i += 2;
+                while (i < src.length) {
+                    const a = src[i];
+                    const b = i + 1 < src.length ? src[i + 1] : '';
+                    if (a === '*' && b === '/') {
+                        i++;
+                        break;
+                    }
+                    i++;
+                }
+                continue;
+            }
+
+            out += ch;
+        }
+
+        return out;
+    };
+
+    const removeTrailingCommas = (src: string): string => {
+        let out = '';
+        let quote: '"' | "'" | null = null;
+        let esc = false;
+
+        for (let i = 0; i < src.length; i++) {
+            const ch = src[i];
+
+            if (quote) {
+                out += ch;
+                if (esc) {
+                    esc = false;
+                    continue;
+                }
+                if (ch === '\\') {
+                    esc = true;
+                    continue;
+                }
+                if (ch === quote) {
+                    quote = null;
+                }
+                continue;
+            }
+
+            if (ch === '"' || ch === "'") {
+                quote = ch as any;
+                out += ch;
+                continue;
+            }
+
+            if (ch === ',') {
+                let j = i + 1;
+                while (j < src.length && /\s/.test(src[j])) j++;
+                const nextNonWs = j < src.length ? src[j] : '';
+                if (nextNonWs === '}' || nextNonWs === ']') {
+                    continue;
+                }
+            }
+
+            out += ch;
+        }
+
+        return out;
+    };
+
+    const quoteUnquotedKeys = (src: string): string => {
+        let out = '';
+        let quote: '"' | "'" | null = null;
+        let esc = false;
+        let expectingKey = false;
+
+        const isKeyStart = (c: string) => /[A-Za-z_]/.test(c);
+        const isKeyChar = (c: string) => /[A-Za-z0-9_]/.test(c);
+
+        for (let i = 0; i < src.length; i++) {
+            const ch = src[i];
+
+            if (quote) {
+                out += ch;
+                if (esc) {
+                    esc = false;
+                    continue;
+                }
+                if (ch === '\\') {
+                    esc = true;
+                    continue;
+                }
+                if (ch === quote) {
+                    quote = null;
+                }
+                continue;
+            }
+
+            if (ch === '"' || ch === "'") {
+                quote = ch as any;
+                out += ch;
+                expectingKey = false;
+                continue;
+            }
+
+            if (ch === '{' || ch === ',') {
+                expectingKey = true;
+                out += ch;
+                continue;
+            }
+
+            if (expectingKey) {
+                if (/\s/.test(ch)) {
+                    out += ch;
+                    continue;
+                }
+                if (ch === '}') {
+                    expectingKey = false;
+                    out += ch;
+                    continue;
+                }
+                if (ch === '"' || ch === "'") {
+                    quote = ch as any;
+                    out += ch;
+                    expectingKey = false;
+                    continue;
+                }
+                if (isKeyStart(ch)) {
+                    let key = ch;
+                    let k = i + 1;
+                    while (k < src.length && isKeyChar(src[k])) {
+                        key += src[k];
+                        k++;
+                    }
+                    let ws = '';
+                    let j = k;
+                    while (j < src.length && /\s/.test(src[j])) {
+                        ws += src[j];
+                        j++;
+                    }
+                    if (j < src.length && src[j] === ':') {
+                        out += `"${key}"${ws}:`;
+                        i = j;
+                        expectingKey = false;
+                        continue;
+                    }
+                    out += key;
+                    i = k - 1;
+                    expectingKey = false;
+                    continue;
+                }
+                expectingKey = false;
+            }
+
+            out += ch;
+        }
+
+        return out;
+    };
+
+    const noComments = stripComments(input);
+    const noTrailing = removeTrailingCommas(noComments);
+    const quotedKeys = quoteUnquotedKeys(noTrailing);
+    return quotedKeys;
+}
+
+export function extractJsonObject(text: string): { json: any | null; path: string } {
+    const raw = String(text ?? '').trim();
+    if (!raw) return { json: null, path: 'none' };
+
+    const tryParse = (candidate: string): { ok: boolean; value: any } => {
+        try {
+            const parsed = JSON.parse(candidate);
+            if (parsed && typeof parsed === 'object') return { ok: true, value: parsed };
+            if (typeof parsed === 'string') {
+                try {
+                    const parsed2 = JSON.parse(parsed);
+                    if (parsed2 && typeof parsed2 === 'object') return { ok: true, value: parsed2 };
+                } catch {
+                    return { ok: false, value: null };
+                }
+            }
+        } catch {
+            return { ok: false, value: null };
+        }
+        return { ok: false, value: null };
+    };
+
+    const tryParseWithRepair = (candidate: string): { ok: boolean; value: any; repaired: boolean } => {
+        const direct = tryParse(candidate);
+        if (direct.ok) return { ok: true, value: direct.value, repaired: false };
+        const repairedText = repairJson(candidate);
+        if (repairedText && repairedText !== candidate) {
+            const repaired = tryParse(repairedText);
+            if (repaired.ok) return { ok: true, value: repaired.value, repaired: true };
+        }
+        return { ok: false, value: null, repaired: false };
+    };
+
+    const extractCodeBlock = (src: string): string | null => {
+        const m = src.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/i);
+        return m?.[1]?.trim() ? m[1].trim() : null;
+    };
+
+    const extractBalancedBraces = (src: string): string | null => {
+        const startObj = src.indexOf('{');
+        if (startObj === -1) return null;
+        let depth = 0;
+        let quote: '"' | "'" | null = null;
+        let esc = false;
+
+        for (let i = startObj; i < src.length; i++) {
+            const ch = src[i];
+            if (quote) {
+                if (esc) {
+                    esc = false;
+                    continue;
+                }
+                if (ch === '\\') {
+                    esc = true;
+                    continue;
+                }
+                if (ch === quote) {
+                    quote = null;
+                }
+                continue;
+            }
+
+            if (ch === '"' || ch === "'") {
+                quote = ch as any;
+                continue;
+            }
+
+            if (ch === '{') depth++;
+            if (ch === '}') {
+                depth--;
+                if (depth === 0) {
+                    return src.slice(startObj, i + 1);
+                }
+            }
+        }
+        return null;
+    };
+
+    const direct = tryParseWithRepair(raw);
+    if (direct.ok) return { json: direct.value, path: direct.repaired ? 'repaired' : 'direct' };
+
+    const code = extractCodeBlock(raw);
+    if (code) {
+        const fromCode = tryParseWithRepair(code);
+        if (fromCode.ok) return { json: fromCode.value, path: fromCode.repaired ? 'repaired' : 'code_block' };
+        const braceInCode = extractBalancedBraces(code);
+        if (braceInCode) {
+            const fromBrace = tryParseWithRepair(braceInCode);
+            if (fromBrace.ok) return { json: fromBrace.value, path: fromBrace.repaired ? 'repaired' : 'brace_match' };
+        }
+    }
+
+    const brace = extractBalancedBraces(raw);
+    if (brace) {
+        const fromBrace = tryParseWithRepair(brace);
+        if (fromBrace.ok) return { json: fromBrace.value, path: fromBrace.repaired ? 'repaired' : 'brace_match' };
+    }
+
+    return { json: null, path: 'none' };
+}
+
+// ============================================================================
 // NORMALIZATION
 // ============================================================================
 
@@ -503,45 +810,13 @@ function createEmptyRefinerOutput(rawText: string = ''): RefinerOutput {
 // ============================================================================
 
 function tryParseJsonRefinerOutput(text: string): Omit<RefinerOutput, 'rawText'> | null {
+    const extracted = extractJsonObject(text);
+    if (!extracted.json || typeof extracted.json !== 'object') return null;
     try {
-        let jsonText = text.trim();
-
-        // Handle code blocks
-        const codeBlockMatch = jsonText.match(/```(?:json)?\s*([\s\S]*?)```/i);
-        if (codeBlockMatch) {
-            jsonText = codeBlockMatch[1].trim();
-        }
-
-        // Handle double-stringified JSON
-        if (jsonText.startsWith('"') && jsonText.endsWith('"')) {
-            try {
-                const unquoted = JSON.parse(jsonText);
-                if (typeof unquoted === 'string') {
-                    jsonText = unquoted.trim();
-                } else if (typeof unquoted === 'object') {
-                    return normalizeRefinerObject(unquoted);
-                }
-            } catch {
-                // Continue with original text
-            }
-        }
-
-        // Find JSON boundaries
-        const firstBrace = jsonText.indexOf('{');
-        const lastBrace = jsonText.lastIndexOf('}');
-
-        if (firstBrace === -1 || lastBrace === -1) return null;
-
-        const candidate = jsonText.substring(firstBrace, lastBrace + 1);
-        const parsed = JSON.parse(candidate);
-
-        if (parsed && typeof parsed === 'object') {
-            return normalizeRefinerObject(parsed);
-        }
+        return normalizeRefinerObject(extracted.json);
     } catch {
-        // Silent failure, fall back to regex parsing
+        return null;
     }
-    return null;
 }
 
 function normalizeRefinerObject(parsed: any): Omit<RefinerOutput, 'rawText'> | null {
@@ -703,8 +978,51 @@ function tryPatterns(text: string, patterns: RegExp[]): string | null {
     return null;
 }
 
+interface PatternMatch {
+    content: string;
+    patternIndex: number;
+    position: number;
+    length: number;
+}
+
+function bestPatternMatchFromSources(sources: Array<string | null | undefined>, patterns: RegExp[]): PatternMatch | null {
+    let best: { match: PatternMatch; score: number } | null = null;
+
+    for (let s = 0; s < sources.length; s++) {
+        const src = sources[s];
+        if (!src) continue;
+
+        for (let p = 0; p < patterns.length; p++) {
+            const re = patterns[p];
+            const cloned = new RegExp(re.source, re.flags);
+            const m = cloned.exec(src);
+            if (!m || !m[1] || !String(m[1]).trim()) continue;
+            const content = String(m[1]).trim();
+
+            const position = typeof (m as any).index === 'number' ? (m as any).index : src.indexOf(m[0] || '');
+            const length = content.length;
+
+            let score = (patterns.length - p) * 1_000_000 + length;
+            if (length > src.length * 0.9) score -= 500_000;
+            score -= Math.max(0, position);
+
+            if (!best || score > best.score) {
+                best = {
+                    match: { content, patternIndex: p, position: Math.max(0, position), length },
+                    score,
+                };
+            }
+        }
+    }
+
+    return best ? best.match : null;
+}
+
 function extractJsonFromContent(content: string | null): any | null {
     if (!content) return null;
+
+    const extracted = extractJsonObject(content);
+    if (extracted.json) return extracted.json;
 
     let jsonText = content.trim();
     const codeFenceMatch = jsonText.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
@@ -741,6 +1059,8 @@ export function parseUnifiedMapperOutput(text: string): {
 
     const normalizedText = text.replace(/\\</g, '<').replace(/\\>/g, '>');
     const extractWithPatterns = (patterns: RegExp[]): string | null => {
+        const best = bestPatternMatchFromSources([normalizedText, text], patterns);
+        if (best?.content) return best.content;
         const first = tryPatterns(normalizedText, patterns);
         if (first) return first;
         return tryPatterns(text, patterns);
@@ -1580,22 +1900,18 @@ export function parseExploreOutput(text: string): ExploreOutput {
 
     // 1. Try JSON parsing first (primary method)
     try {
-        const jsonMatch = normalized.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/) || normalized.match(/^\{[\s\S]*\}$/);
-        if (jsonMatch) {
-            const jsonText = jsonMatch[1] || jsonMatch[0];
-            const parsed = JSON.parse(jsonText);
-            if (parsed && typeof parsed === 'object' && parsed.container && parsed.content) {
-                return {
-                    container: parsed.container,
-                    content: parsed.content,
-                    souvenir: parsed.souvenir || "",
-                    alternatives: parsed.alternatives || [],
-                    artifact_id: parsed.artifact_id || `explore-${Date.now()}`
-                } as ExploreOutput;
-            }
+        const extracted = extractJsonObject(normalized);
+        const parsed: any = extracted.json;
+        if (parsed && typeof parsed === 'object' && parsed.container && parsed.content) {
+            return {
+                container: parsed.container,
+                content: parsed.content,
+                souvenir: parsed.souvenir || "",
+                alternatives: parsed.alternatives || [],
+                artifact_id: parsed.artifact_id || `explore-${Date.now()}`
+            } as ExploreOutput;
         }
-    } catch (e) {
-        // JSON parsing failed
+    } catch {
     }
 
     // 2. Fallback: Parse markdown if JSON fails (implementing a basic graceful degradation)
@@ -1650,17 +1966,14 @@ export function parseGauntletOutput(text: string): GauntletOutput {
 
     // 1. Try JSON First
     try {
-        const jsonMatch = normalized.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/) || normalized.match(/^\{[\s\S]*\}$/);
-        if (jsonMatch) {
-            const jsonText = jsonMatch[1] || jsonMatch[0];
-            const parsed = JSON.parse(jsonText);
-            if (parsed && typeof parsed === 'object' && parsed.the_answer) {
-                return {
-                    ...createEmptyGauntletOutput(),
-                    ...parsed,
-                    artifact_id: parsed.artifact_id || `gauntlet-${Date.now()}`
-                };
-            }
+        const extracted = extractJsonObject(normalized);
+        const parsed: any = extracted.json;
+        if (parsed && typeof parsed === 'object' && parsed.the_answer) {
+            return {
+                ...createEmptyGauntletOutput(),
+                ...parsed,
+                artifact_id: parsed.artifact_id || `gauntlet-${Date.now()}`
+            };
         }
     } catch (e) {
         console.warn("[parsing-utils] Gauntlet JSON parse failed, falling back to heuristics", e);
@@ -1764,17 +2077,14 @@ export function parseUnderstandOutput(text: string): UnderstandOutput {
 
     // 1. Try JSON parsing first
     try {
-        const jsonMatch = normalized.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/) || normalized.match(/^\{[\s\S]*\}$/);
-        if (jsonMatch) {
-            const jsonText = jsonMatch[1] || jsonMatch[0];
-            const parsed = JSON.parse(jsonText);
-            if (parsed && typeof parsed === 'object') {
-                return {
-                    ...createEmptyUnderstandOutput(),
-                    ...parsed,
-                    artifact_id: parsed.artifact_id || `understand-${Date.now()}`
-                };
-            }
+        const extracted = extractJsonObject(normalized);
+        const parsed: any = extracted.json;
+        if (parsed && typeof parsed === 'object') {
+            return {
+                ...createEmptyUnderstandOutput(),
+                ...parsed,
+                artifact_id: parsed.artifact_id || `understand-${Date.now()}`
+            };
         }
     } catch (e) {
         // JSON parsing failed

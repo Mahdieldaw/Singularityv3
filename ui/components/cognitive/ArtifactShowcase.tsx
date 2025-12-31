@@ -3,7 +3,7 @@ import { MapperArtifact, AiTurn, ExploreAnalysis, ProviderResponse } from "../..
 import { applyEdits } from "../../utils/apply-artifact-edits";
 import { artifactEditsAtom } from "../../state/artifact-edits";
 import { RawResponseCard } from "./cards/RawResponseCard";
-import { cleanOptionsText, extractGraphTopologyAndStrip, parseMappingResponse, parseOptionTitles } from "../../../shared/parsing-utils";
+import { cleanOptionsText, extractGraphTopologyAndStrip, parseMappingResponse } from "../../../shared/parsing-utils";
 
 import { selectedArtifactsAtom, selectedModelsAtom, workflowProgressForTurnFamily } from "../../state/atoms";
 import { SelectionBar } from "./SelectionBar";
@@ -677,35 +677,8 @@ export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
 
     const processed: ProcessedShowcase | null = useMemo(() => {
         if (!artifactForDisplay) return null;
-        const titles = parseOptionTitles(mapperOptionsText || "");
-        const existingKeys = new Set<string>();
-        for (const c of artifactForDisplay.consensus?.claims || []) {
-            existingKeys.add(normalizeTitleKey(c.text));
-        }
-        for (const o of artifactForDisplay.outliers || []) {
-            existingKeys.add(normalizeTitleKey(o.insight));
-        }
-        const missingTitles = titles.filter((t) => t && !existingKeys.has(normalizeTitleKey(t)));
-        const augmented = missingTitles.length
-            ? {
-                ...artifactForDisplay,
-                outliers: [
-                    ...(artifactForDisplay.outliers || []),
-                    ...missingTitles.map((t) => ({
-                        insight: t,
-                        source: "Mapper Options",
-                        source_index: -1,
-                        type: "supplemental" as const,
-                        raw_context: "",
-                        dimension: undefined,
-                        applies_when: undefined,
-                        challenges: undefined,
-                    })),
-                ],
-            }
-            : artifactForDisplay;
-        return processArtifactForShowcase(augmented, graphTopology);
-    }, [artifactForDisplay, graphTopology, mapperOptionsText]);
+        return processArtifactForShowcase(artifactForDisplay, graphTopology);
+    }, [artifactForDisplay, graphTopology]);
 
     const processedWithDetails: ProcessedShowcase | null = useMemo(() => {
         if (!processed) return null;
@@ -735,7 +708,7 @@ export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
             })),
             independentAnchors: processed.independentAnchors.map(attach),
         };
-    }, [processed, optionDetailMap]);
+    }, [processed, artifactDetailMap, optionDetailMap]);
 
     const renderContainerPreview = () => {
         if (!artifactForDisplay || !analysis) return null;
