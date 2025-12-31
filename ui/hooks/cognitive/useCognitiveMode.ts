@@ -72,6 +72,16 @@ export function useCognitiveMode(trackedAiTurnId?: string) {
                 });
             }
 
+            // Proactively bind/reconnect the port scoped to the target session
+            try {
+                await api.ensurePort({ sessionId });
+            } catch (e) {
+                console.warn(
+                    "[useCognitiveMode] ensurePort failed prior to transition; proceeding with sendPortMessage",
+                    e,
+                );
+            }
+
             await api.sendPortMessage({
                 type: "CONTINUE_COGNITIVE_WORKFLOW",
                 payload: {
@@ -86,6 +96,7 @@ export function useCognitiveMode(trackedAiTurnId?: string) {
                     sourceTurnId: options.sourceTurnId,
                 },
             });
+
         } catch (err: any) {
             console.error(`[useCognitiveMode] Transition failed:`, err);
             setError(err.message || String(err));

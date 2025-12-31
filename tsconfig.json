@@ -49,6 +49,8 @@
   "exclude": [
     "dist",
     "node_modules",
-    "old ui"
+    "old ui",
+    "oldaiturnblock.tsx",
+    "oldsynthesisbubble.tsx"
   ]
 }

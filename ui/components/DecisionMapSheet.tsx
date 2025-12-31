@@ -174,6 +174,34 @@ function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+function tryParseJsonObject(text: string): any | null {
+  if (!text) return null;
+  let t = String(text).trim();
+  const codeBlockMatch = t.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (codeBlockMatch) t = codeBlockMatch[1].trim();
+  const firstBrace = t.indexOf('{');
+  const lastBrace = t.lastIndexOf('}');
+  if (firstBrace === -1 || lastBrace === -1 || lastBrace <= firstBrace) return null;
+  try {
+    return JSON.parse(t.slice(firstBrace, lastBrace + 1));
+  } catch {
+    return null;
+  }
+}
+
+function normalizeGraphTopologyCandidate(value: any): any | null {
+  if (!value) return null;
+  let candidate: any = value;
+  if (typeof candidate === 'string') {
+    candidate = tryParseJsonObject(candidate);
+  }
+  if (!candidate || typeof candidate !== 'object') return null;
+  if (Array.isArray(candidate.nodes) && Array.isArray(candidate.edges)) return candidate;
+  if (candidate.topology && Array.isArray(candidate.topology.nodes) && Array.isArray(candidate.topology.edges)) return candidate.topology;
+  if (candidate.graphTopology && Array.isArray(candidate.graphTopology.nodes) && Array.isArray(candidate.graphTopology.edges)) return candidate.graphTopology;
+  return null;
+}
+
 // ============================================================================
 // SUPPORTER ORBS COMPONENT
 // ============================================================================
@@ -840,45 +868,59 @@ export const DecisionMapSheet = React.memo(() => {
 
   const activeMappingPid = useMemo(() => {
     if (!aiTurn) return undefined;
-    if (mappingProvider) return mappingProvider;
-    if (aiTurn.meta?.mapper) return aiTurn.meta.mapper;
-    const keys = Object.keys(aiTurn.mappingResponses || {});
-    return keys.length > 0 ? keys[0] : undefined;
-  }, [aiTurn, mappingProvider]);
+    const availableKeys = Object.keys(aiTurn.mappingResponses || {});
+    const hasData = (pid: string | undefined) => {
+      if (!pid) return false;
+      return (mappingResponses[pid]?.length || 0) > 0;
+    };
+
+    if (mappingProvider && hasData(mappingProvider)) return mappingProvider;
+    if (aiTurn.meta?.mapper && hasData(aiTurn.meta.mapper)) return aiTurn.meta.mapper;
+
+    const firstWithData = availableKeys.find((k) => hasData(k));
+    if (firstWithData) return firstWithData;
+    return availableKeys.length > 0 ? availableKeys[0] : undefined;
+  }, [aiTurn, mappingProvider, mappingResponses]);
 
   const latestMapping = useMemo(() => {
     if (!activeMappingPid) return undefined;
     return getLatestResponse(mappingResponses[activeMappingPid]);
   }, [activeMappingPid, mappingResponses]);
 
-  const graphTopology = useMemo(() => {
-    const fromMeta = latestMapping?.meta?.graphTopology || null;
-    if (fromMeta) return fromMeta;
-    const rawText = latestMapping?.text || null;
-    // USE SHARED UTILS (Renamed call to match import)
-    return extractGraphTopologyAndStrip(rawText || '').topology;
+  const parsedMapping = useMemo(() => {
+    const rawText = latestMapping?.text || '';
+    return parseMappingResponse(String(rawText));
   }, [latestMapping]);
+
+  const graphTopology = useMemo(() => {
+    const meta: any = latestMapping?.meta || null;
+    const fromMeta =
+      normalizeGraphTopologyCandidate(meta?.graphTopology) ||
+      normalizeGraphTopologyCandidate(meta?.graph_topology) ||
+      normalizeGraphTopologyCandidate(meta?.topology) ||
+      null;
+    if (fromMeta) return fromMeta;
+    const fromParsed = normalizeGraphTopologyCandidate(parsedMapping.graphTopology) || null;
+    if (fromParsed) return fromParsed;
+    const rawText = latestMapping?.text || null;
+    return extractGraphTopologyAndStrip(rawText || '').topology;
+  }, [latestMapping, parsedMapping.graphTopology]);
 
   const adapted = useMemo(() => adaptGraphTopology(graphTopology), [graphTopology]);
 
   const mappingText = useMemo(() => {
-    const t = latestMapping?.text || '';
-    // USE SHARED PARSER
-    const { narrative } = parseMappingResponse(String(t));
-    return narrative;
-  }, [latestMapping]);
+    return parsedMapping.narrative || '';
+  }, [parsedMapping.narrative]);
 
   const optionsText = useMemo(() => {
-    let fromMeta = latestMapping?.meta?.allAvailableOptions || null;
+    const meta: any = latestMapping?.meta || null;
+    let fromMeta = meta?.allAvailableOptions || meta?.all_available_options || meta?.options || null;
     if (fromMeta) {
       // Use shared cleanup function to strip any trailing GRAPH_TOPOLOGY
       return cleanOptionsText(fromMeta);
     }
-    const t = latestMapping?.text || '';
-    // USE SHARED PARSER
-    const { options } = parseMappingResponse(String(t));
-    return options;
-  }, [latestMapping]);
+    return parsedMapping.options;
+  }, [latestMapping, parsedMapping.options]);
 
   const parsedThemes = useMemo(() => {
     const themes = parseOptionsIntoThemes(optionsText || '');
@@ -1220,6 +1262,16 @@ export const DecisionMapSheet = React.memo(() => {
                       </div>
                     )}
                     <OptionsTab themes={parsedThemes} citationSourceOrder={citationSourceOrder} onCitationClick={handleCitationClick} />
+                    <div className="px-6 pb-6 pt-2">
+                      <div className="text-xs font-semibold uppercase tracking-wider text-text-muted mb-3">Graph topology</div>
+                      {graphTopology ? (
+                        <div className="bg-surface border border-border-subtle rounded-xl p-4">
+                          <MarkdownDisplay content={formatGraphForMd(graphTopology)} />
+                        </div>
+                      ) : (
+                        <div className="text-text-muted text-sm">No graph topology available.</div>
+                      )}
+                    </div>
                   </m.div>
                 )}
 

@@ -161,13 +161,21 @@ class ExtensionAPI {
     }
   }
 
-  async sendPortMessage(message: { type: string; payload?: any;[key: string]: any }): Promise<void> {
+  async sendPortMessage(
+    message: { type: string; payload?: any;[key: string]: any },
+  ): Promise<void> {
     try {
       const port = await this.ensurePort();
+      this.portHealthManager?.checkHealth();
       port.postMessage(message);
     } catch (error) {
-      console.error("[ExtensionAPI] Failed to send port message:", error);
-      throw error;
+      console.error(
+        "[ExtensionAPI] Failed to send port message, attempting reconnect:",
+        error,
+      );
+      // Attempt a single reconnect and retry
+      const newPort = await this.ensurePort({ force: true });
+      newPort.postMessage(message);
     }
   }
 

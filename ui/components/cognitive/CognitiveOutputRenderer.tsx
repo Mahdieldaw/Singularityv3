@@ -1,5 +1,5 @@
 
-import React, { useMemo, useEffect, useRef } from 'react';
+import React, { useMemo } from 'react';
 import { AiTurn, CognitiveViewMode } from '../../types';
 import { useModeSwitching } from '../../hooks/cognitive/useModeSwitching';
 import { ArtifactShowcase } from './ArtifactShowcase';
@@ -40,28 +40,6 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
         return modes;
     }, [aiTurn.understandOutput, aiTurn.gauntletOutput]);
 
-    // Track previous state to detect *new* data arrival
-    const prevUnderstand = useRef(aiTurn.understandOutput);
-    const prevGauntlet = useRef(aiTurn.gauntletOutput);
-
-    // Auto-switch UI to the new mode ONLY when data newly arrives
-    useEffect(() => {
-        const hasUnderstand = !!aiTurn.understandOutput;
-        const hadUnderstand = !!prevUnderstand.current;
-        const hasGauntlet = !!aiTurn.gauntletOutput;
-        const hadGauntlet = !!prevGauntlet.current;
-
-        if (!hadUnderstand && hasUnderstand && activeMode === 'artifact') {
-            setActiveMode('understand');
-        } else if (!hadGauntlet && hasGauntlet && activeMode === 'artifact') {
-            setActiveMode('gauntlet');
-        }
-
-        // Update refs
-        prevUnderstand.current = aiTurn.understandOutput;
-        prevGauntlet.current = aiTurn.gauntletOutput;
-    }, [aiTurn.understandOutput, aiTurn.gauntletOutput, activeMode, setActiveMode]);
-
     // Derived flags
     const hasSpecializedOutput = aiTurn.understandOutput || aiTurn.gauntletOutput;
 
@@ -86,7 +64,7 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
                         turn={aiTurn}
                         onUnderstand={(options) => triggerAndSwitch('understand', options)}
                         onDecide={(options) => triggerAndSwitch('gauntlet', options)}
-                        isLoading={isTransitioning || !!hasSpecializedOutput}
+                        isLoading={isTransitioning}
                     />
                 )}
 

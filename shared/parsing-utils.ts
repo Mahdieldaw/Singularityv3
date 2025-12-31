@@ -51,6 +51,76 @@ export function normalizeText(text: string): string {
         .replace(/\uFF1D/g, '=');
 }
 
+export function parseProseGraphTopology(text: string): GraphTopology | null {
+    if (!text) return null;
+
+    const nodes: GraphNode[] = [];
+    const edges: GraphEdge[] = [];
+    const nodeMap = new Map<string, string>();
+    let nodeCounter = 1;
+
+    const normalizeLabel = (label: string): string => {
+        return label
+            .trim()
+            .replace(/^\*\*|\*\*$/g, '')
+            .replace(/^["']|["']$/g, '')
+            .trim();
+    };
+
+    const getOrCreateNodeId = (rawLabel: string): string => {
+        const label = normalizeLabel(rawLabel);
+        if (!label) return '';
+        const existing = nodeMap.get(label);
+        if (existing) return existing;
+
+        const id = `opt_${nodeCounter++}`;
+        nodeMap.set(label, id);
+        nodes.push({
+            id,
+            label,
+            theme: '',
+            supporters: [],
+            support_count: 1,
+        });
+        return id;
+    };
+
+    const edgePatterns: RegExp[] = [
+        /\*\*([^*]+)\*\*\s*--\[(\w+)\]-->\s*\*\*([^*\n]+)\*\*/g,
+        /^[-*•]?\s*([A-Z][^-\n]*?)\s*--\[(\w+)\]-->\s*([^\n]+)/gm,
+        /["']([^"']+)["']\s*--\[(\w+)\]-->\s*["']([^"'\n]+)["']/g,
+        /([^-\n\[\]]{3,}?)\s*--\[(\w+)\]-->\s*([^\n]+)/g,
+    ];
+
+    for (const pattern of edgePatterns) {
+        pattern.lastIndex = 0;
+        let match: RegExpExecArray | null;
+        while ((match = pattern.exec(text)) !== null) {
+            const sourceLabel = String(match[1] || '').trim();
+            const edgeType = String(match[2] || '').toLowerCase();
+            const targetLabel = String(match[3] || '').trim();
+
+            const sourceId = getOrCreateNodeId(sourceLabel);
+            const targetId = getOrCreateNodeId(targetLabel);
+
+            if (!sourceId || !targetId || !edgeType) continue;
+
+            const exists = edges.some((e) => e.source === sourceId && e.target === targetId && e.type === edgeType);
+            if (exists) continue;
+
+            edges.push({
+                source: sourceId,
+                target: targetId,
+                type: edgeType as any,
+                reason: '',
+            });
+        }
+    }
+
+    if (nodes.length === 0 || edges.length === 0) return null;
+    return { nodes, edges };
+}
+
 // ============================================================================
 // GRAPH_TOPOLOGY PARSING
 // ============================================================================
@@ -78,14 +148,14 @@ export function extractGraphTopologyAndStrip(text: string): { text: string; topo
     const match = normalized.match(GRAPH_TOPOLOGY_PATTERN);
 
     if (!match || typeof match.index !== 'number') {
-        return { text: normalized, topology: null };
+        return { text: normalized, topology: parseProseGraphTopology(normalized) };
     }
 
     const start = match.index + match[0].length;
     let rest = normalized.slice(start).trim();
 
     // Handle code block wrapped JSON
-    const codeBlockMatch = rest.match(/^```(?:json)?\s*\n([\s\S]*?)\n```/);
+    const codeBlockMatch = rest.match(/^```(?:json)?\s*\n?([\s\S]*?)\n?```/);
     if (codeBlockMatch) {
         rest = codeBlockMatch[1].trim();
     }
@@ -93,7 +163,11 @@ export function extractGraphTopologyAndStrip(text: string): { text: string; topo
     // Find JSON object
     let i = 0;
     while (i < rest.length && rest[i] !== '{') i++;
-    if (i >= rest.length) return { text: normalized.slice(0, match.index).trim(), topology: null };
+    if (i >= rest.length) {
+        const prose = parseProseGraphTopology(rest);
+        if (prose) return { text: normalized.slice(0, match.index).trim(), topology: prose };
+        return { text: normalized.slice(0, match.index).trim(), topology: null };
+    }
 
     // Parse JSON with balanced braces
     let depth = 0;
@@ -135,6 +209,11 @@ export function extractGraphTopologyAndStrip(text: string): { text: string; topo
                 }
             }
         }
+    }
+
+    const prose = parseProseGraphTopology(rest);
+    if (prose) {
+        return { text: normalized.slice(0, match.index).trim(), topology: prose };
     }
 
     return { text: normalized.slice(0, match.index).trim(), topology: null };
@@ -258,8 +337,20 @@ export function parseMappingResponse(response: string | null | undefined): {
 } {
     if (!response) return { narrative: '', options: null, optionTitles: [], graphTopology: null };
 
-    // 0. Check for Unified Tagged Output first
-    if (response.includes('<narrative_summary>') || response.includes('<options_inventory>')) {
+    const hasUnifiedTags =
+        response.includes('<narrative_summary>') ||
+        response.includes('<options_inventory>') ||
+        response.includes('<mapper_artifact>') ||
+        response.includes('<graph_topology>') ||
+        response.includes('\\<narrative_summary\\>') ||
+        response.includes('\\<options_inventory\\>') ||
+        response.includes('\\<mapper_artifact\\>') ||
+        response.includes('\\<graph_topology\\>') ||
+        /#{1,3}\s*(?:\d+\.)?\s*\\?<(?:narrative_summary|options_inventory|mapper_artifact|graph_topology)\\?>/i.test(response) ||
+        /#{1,3}\s*(?:\d+\.)?\s*(?:narrative[_\s]*summary|options[_\s]*inventory|mapper[_\s]*artifact|graph[_\s]*topology)\s*\n/i.test(response) ||
+        /\*\*(?:narrative[_\s]*summary|options[_\s]*inventory|mapper[_\s]*artifact|graph[_\s]*topology)\*\*/i.test(response);
+
+    if (hasUnifiedTags) {
         const unified = parseUnifiedMapperOutput(response);
         const optionTitles = unified.options ? parseOptionTitles(unified.options) : [];
         return {
@@ -567,6 +658,73 @@ export function createEmptyMapperArtifact(): MapperArtifact {
     };
 }
 
+const NARRATIVE_SUMMARY_PATTERNS: RegExp[] = [
+    /<narrative_summary>([\s\S]*?)<\/narrative_summary>/i,
+    /\\<narrative_summary\\>([\s\S]*?)\\<\/narrative_summary\\>/i,
+    /#{1,3}\s*(?:\d+\.)?\s*\\?<narrative_summary\\?>\s*\n([\s\S]*?)(?=#{1,3}\s*(?:\d+\.)?\s*\\?<|$)/i,
+    /#{1,3}\s*(?:\d+\.)?\s*\\?<narrative_summary\\?>\s*\n([\s\S]*?)\\?<\/narrative_summary\\?>/i,
+    /#{1,3}\s*(?:\d+\.)?\s*narrative[_\s]*summary\s*\n([\s\S]*?)(?=#{1,3}\s*(?:\d+\.)?\s*(?:options|mapper|graph)|$)/i,
+    /\*\*narrative[_\s]*summary\*\*[:\s]*\n([\s\S]*?)(?=\*\*(?:options|mapper|graph)|#{1,3}|$)/i,
+];
+
+const OPTIONS_INVENTORY_PATTERNS: RegExp[] = [
+    /<options_inventory>([\s\S]*?)<\/options_inventory>/i,
+    /\\<options_inventory\\>([\s\S]*?)\\<\/options_inventory\\>/i,
+    /#{1,3}\s*(?:\d+\.)?\s*\\?<options_inventory\\?>\s*\n([\s\S]*?)(?=#{1,3}\s*(?:\d+\.)?\s*\\?<|$)/i,
+    /#{1,3}\s*(?:\d+\.)?\s*\\?<options_inventory\\?>\s*\n([\s\S]*?)\\?<\/options_inventory\\?>/i,
+    /#{1,3}\s*(?:\d+\.)?\s*options[_\s]*inventory\s*\n([\s\S]*?)(?=#{1,3}\s*(?:\d+\.)?\s*(?:narrative|mapper|graph)|$)/i,
+    /\*\*options[_\s]*inventory\*\*[:\s]*\n([\s\S]*?)(?=\*\*(?:narrative|mapper|graph)|#{1,3}|$)/i,
+];
+
+const MAPPER_ARTIFACT_PATTERNS: RegExp[] = [
+    /<mapper_artifact>([\s\S]*?)<\/mapper_artifact>/i,
+    /\\<mapper_artifact\\>([\s\S]*?)\\<\/mapper_artifact\\>/i,
+    /#{1,3}\s*(?:\d+\.)?\s*\\?<mapper_artifact\\?>\s*\n([\s\S]*?)(?=#{1,3}\s*(?:\d+\.)?\s*\\?<|$)/i,
+    /#{1,3}\s*(?:\d+\.)?\s*\\?<mapper_artifact\\?>\s*\n([\s\S]*?)(?:\\?<\/mapper_artifact\\?>|(?=#{1,3}\s*(?:\d+\.)?\s*(?:graph|$)))/i,
+    /#{1,3}\s*(?:\d+\.)?\s*mapper[_\s]*artifact\s*\n([\s\S]*?)(?=#{1,3}\s*(?:\d+\.)?\s*(?:narrative|options|graph)|$)/i,
+    /\*\*mapper[_\s]*artifact\*\*[:\s]*\n([\s\S]*?)(?=\*\*(?:narrative|options|graph)|#{1,3}|$)/i,
+    /mapper[_\s]*artifact[:\s]*\n*```(?:json)?\s*\n?(\{[\s\S]*?"consensus"[\s\S]*?"claims"[\s\S]*?\})\s*\n?```/i,
+];
+
+const GRAPH_TOPOLOGY_TAG_PATTERNS: RegExp[] = [
+    /<graph_topology>([\s\S]*?)<\/graph_topology>/i,
+    /\\<graph_topology\\>([\s\S]*?)\\<\/graph_topology\\>/i,
+    /#{1,3}\s*(?:\d+\.)?\s*\\?<graph_topology\\?>\s*\n([\s\S]*?)(?=#{1,3}\s*(?:\d+\.)?\s*\\?<|$)/i,
+    /#{1,3}\s*(?:\d+\.)?\s*\\?<graph_topology\\?>\s*\n([\s\S]*?)\\?<\/graph_topology\\?>/i,
+    /#{1,3}\s*(?:\d+\.)?\s*graph[_\s]*topology\s*\n([\s\S]*?)(?=#{1,3}\s|$)/i,
+    /\*\*graph[_\s]*topology\*\*[:\s]*\n([\s\S]*?)(?=\*\*|#{1,3}|$)/i,
+];
+
+function tryPatterns(text: string, patterns: RegExp[]): string | null {
+    for (const pattern of patterns) {
+        const match = text.match(pattern);
+        if (match?.[1]?.trim()) return match[1].trim();
+    }
+    return null;
+}
+
+function extractJsonFromContent(content: string | null): any | null {
+    if (!content) return null;
+
+    let jsonText = content.trim();
+    const codeFenceMatch = jsonText.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
+    if (codeFenceMatch) jsonText = codeFenceMatch[1].trim();
+
+    const firstBrace = jsonText.indexOf('{');
+    const lastBrace = jsonText.lastIndexOf('}');
+    if (firstBrace !== -1 && lastBrace > firstBrace) {
+        try {
+            return JSON.parse(jsonText.substring(firstBrace, lastBrace + 1));
+        } catch { }
+    }
+
+    try {
+        return JSON.parse(jsonText);
+    } catch {
+        return null;
+    }
+}
+
 /**
  * Parse Unified Mapper Output
  * Extracts content from <raw_narrative>, <options_inventory>, <mapper_artifact>, and <graph_topology> tags.
@@ -581,57 +739,84 @@ export function parseUnifiedMapperOutput(text: string): {
         return { narrative: "", options: null, artifact: null, topology: null };
     }
 
-    const extractTag = (tag: string) => {
-        const pattern = new RegExp(`<${tag}>([\\s\\S]*?)<\\/${tag}>`, 'i');
-        const match = text.match(pattern);
-        return match ? match[1].trim() : null;
+    const normalizedText = text.replace(/\\</g, '<').replace(/\\>/g, '>');
+    const extractWithPatterns = (patterns: RegExp[]): string | null => {
+        const first = tryPatterns(normalizedText, patterns);
+        if (first) return first;
+        return tryPatterns(text, patterns);
     };
 
-    const narrativeSummary = extractTag('narrative_summary');
-    const optionsInventory = extractTag('options_inventory');
-    const mapperArtifactJson = extractTag('mapper_artifact');
-    const graphTopologyJson = extractTag('graph_topology');
+    const narrativeSummary = extractWithPatterns(NARRATIVE_SUMMARY_PATTERNS);
+    const optionsInventory = extractWithPatterns(OPTIONS_INVENTORY_PATTERNS);
+    const mapperArtifactRaw = extractWithPatterns(MAPPER_ARTIFACT_PATTERNS);
+    const graphTopologyRaw = extractWithPatterns(GRAPH_TOPOLOGY_TAG_PATTERNS);
+
+    const empty = createEmptyMapperArtifact();
 
     let artifact: MapperArtifact | null = null;
-    if (mapperArtifactJson) {
-        try {
-            // Support both fenced and raw JSON within tags
-            const cleanJson = mapperArtifactJson.replace(/```(?:json)?\s*([\s\S]*?)```/i, '$1').trim();
-            const parsed = JSON.parse(cleanJson);
-            if (parsed && typeof parsed === 'object') {
-                artifact = {
-                    ...createEmptyMapperArtifact(),
-                    ...parsed,
-                    consensus: {
-                        ...createEmptyMapperArtifact().consensus,
-                        ...(parsed.consensus || {})
-                    }
-                };
-            }
-        } catch (e) {
-            console.warn("[parsing-utils] Failed to parse <mapper_artifact> JSON", e);
+    if (mapperArtifactRaw) {
+        const parsed = extractJsonFromContent(mapperArtifactRaw);
+        if (parsed && typeof parsed === 'object' && (parsed as any).consensus) {
+            artifact = {
+                ...empty,
+                ...(parsed as any),
+                consensus: {
+                    ...empty.consensus,
+                    ...((parsed as any).consensus || {}),
+                },
+            };
+        }
+    }
+
+    if (!artifact) {
+        const embeddedPatterns: RegExp[] = [
+            /```(?:json)?\s*\n?(\{[\s\S]*?"consensus"[\s\S]*?"claims"[\s\S]*?\})\s*\n?```/i,
+            /(\{[\s\S]*?"consensus"\s*:\s*\{[\s\S]*?"claims"\s*:\s*\[[\s\S]*?\][\s\S]*?\}[\s\S]*?\})/i,
+        ];
+
+        for (const pattern of embeddedPatterns) {
+            const match = normalizedText.match(pattern);
+            if (!match?.[1]) continue;
+            const parsed = extractJsonFromContent(match[1]);
+            const claims = (parsed as any)?.consensus?.claims;
+            if (!Array.isArray(claims) || claims.length === 0) continue;
+            const hasFullText = claims.some((c: any) => typeof c?.text === 'string' && c.text.split(' ').length > 5);
+            if (!hasFullText) continue;
+
+            artifact = {
+                ...empty,
+                ...(parsed as any),
+                consensus: {
+                    ...empty.consensus,
+                    ...((parsed as any).consensus || {}),
+                },
+            };
+            break;
         }
     }
 
     let topology: GraphTopology | null = null;
-    if (graphTopologyJson) {
-        try {
-            const cleanJson = graphTopologyJson.replace(/```(?:json)?\s*([\s\S]*?)```/i, '$1').trim();
-            topology = JSON.parse(cleanJson);
-        } catch (e) {
-            console.warn("[parsing-utils] Failed to parse <graph_topology> JSON", e);
+    if (graphTopologyRaw) {
+        const parsed = extractJsonFromContent(graphTopologyRaw);
+        if (parsed && Array.isArray((parsed as any).nodes)) {
+            topology = parsed as GraphTopology;
+        } else {
+            topology = parseProseGraphTopology(graphTopologyRaw);
         }
     }
 
-    // Fallback: If tags are missing, try legacy parsing
-    if (!narrativeSummary && !mapperArtifactJson) {
-        const legacy = parseMappingResponse(text);
-        const legacyArtifact = parseV1MapperToArtifact(text, { graphTopology: legacy.graphTopology });
+    if (!topology) {
+        topology = parseProseGraphTopology(text);
+    }
+
+    if (!narrativeSummary && !optionsInventory && !mapperArtifactRaw && !graphTopologyRaw) {
+        const { text: textWithoutTopology, topology: legacyTopology } = extractGraphTopologyAndStrip(text);
+        const { text: narrative, options } = extractOptionsAndStrip(textWithoutTopology);
         return {
-            narrative: legacy.narrative || text,
-            options: legacy.options,
-            artifact: legacyArtifact,
-            topology: legacy.graphTopology
+            narrative: cleanNarrativeText(narrative),
+            options: options ? cleanOptionsText(options) : null,
+            artifact: null,
+            topology: legacyTopology || topology,
         };
     }
 
@@ -654,7 +839,13 @@ export function parseMapperArtifact(text: string): MapperArtifact {
     const artifact = createEmptyMapperArtifact();
 
     // 1. Try Unified Tagged Parser first
-    if (normalized.includes('<mapper_artifact>')) {
+    if (
+        normalized.includes('<mapper_artifact>') ||
+        normalized.includes('\\<mapper_artifact\\>') ||
+        /#{1,3}\s*(?:\d+\.)?\s*\\?<mapper_artifact\\?>/i.test(text) ||
+        /#{1,3}\s*(?:\d+\.)?\s*mapper[_\s]*artifact\s*\n/i.test(text) ||
+        /\*\*mapper[_\s]*artifact\*\*/i.test(text)
+    ) {
         const unified = parseUnifiedMapperOutput(text);
         if (unified.artifact) return unified.artifact;
     }
@@ -800,7 +991,7 @@ export function parseV1MapperToArtifact(
     options: { graphTopology?: any; query?: string; turn?: number; timestamp?: string } = {},
 ): MapperArtifact {
     // 1. Check for Unified Tagged Output first
-    if (v1Output && v1Output.includes('<mapper_artifact>')) {
+    if (v1Output && (v1Output.includes('<mapper_artifact>') || v1Output.includes('\\<mapper_artifact\\>'))) {
         const unified = parseUnifiedMapperOutput(v1Output);
         if (unified.artifact) {
             return {
@@ -810,6 +1001,35 @@ export function parseV1MapperToArtifact(
                 timestamp: options.timestamp || unified.artifact.timestamp || new Date().toISOString()
             };
         }
+    }
+
+    const normalizedOutput = String(v1Output || '').replace(/\\</g, '<').replace(/\\>/g, '>');
+    const artifactJsonPatterns: RegExp[] = [
+        /```(?:json)?\s*(\{[\s\S]*?"consensus"[\s\S]*?"claims"[\s\S]*?\})\s*```/i,
+        /(\{[\s\S]*?"consensus"\s*:\s*\{[\s\S]*?"claims"\s*:\s*\[[\s\S]*?\][\s\S]*?\})/i,
+    ];
+
+    for (const pattern of artifactJsonPatterns) {
+        const match = normalizedOutput.match(pattern);
+        if (!match?.[1]) continue;
+        const parsed = extractJsonFromContent(match[1]);
+        const claims = (parsed as any)?.consensus?.claims;
+        if (!Array.isArray(claims) || claims.length === 0) continue;
+        const hasFullText = claims.some((c: any) => typeof c?.text === 'string' && c.text.split(' ').length > 5);
+        if (!hasFullText) continue;
+
+        const empty = createEmptyMapperArtifact();
+        return {
+            ...empty,
+            ...(parsed as any),
+            query: options.query || (parsed as any)?.query || "",
+            turn: options.turn || (parsed as any)?.turn || 0,
+            timestamp: options.timestamp || (parsed as any)?.timestamp || new Date().toISOString(),
+            consensus: {
+                ...empty.consensus,
+                ...((parsed as any)?.consensus || {}),
+            },
+        };
     }
 
     const artifact = createEmptyMapperArtifact();
