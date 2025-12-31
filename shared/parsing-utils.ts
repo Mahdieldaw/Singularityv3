@@ -353,6 +353,8 @@ export interface RefinerOutput {
     trustInsights: string | null;
     gem: Gem | null;
     outlier: Outlier | null;
+    the_one?: Gem | null;
+    the_echo?: Outlier | null;
     attributions: Attribution[];
     leap: Leap;
     signals?: Signal[];
@@ -393,6 +395,8 @@ function createEmptyRefinerOutput(rawText: string = ''): RefinerOutput {
         trustInsights: null,
         gem: null,
         outlier: null,
+        the_one: null,
+        the_echo: null,
         attributions: [],
         leap: { action: '', rationale: '' },
         signals: [],
@@ -527,6 +531,8 @@ function normalizeRefinerObject(parsed: any): Omit<RefinerOutput, 'rawText'> | n
         trustInsights,
         gem,
         outlier,
+        the_one: gem,
+        the_echo: outlier,
         attributions,
         leap,
         signals,
@@ -1392,9 +1398,16 @@ export function parseExploreOutput(text: string): ExploreOutput {
 
 export function createEmptyGauntletOutput(): GauntletOutput {
     return {
+        optimal_end: "",
         the_answer: { statement: "", reasoning: "", next_step: "" },
         survivors: {
-            primary: { claim: "", survived_because: "" },
+            primary: {
+                claim: "",
+                survived_because: "",
+                extent: "",
+                breaking_point: "",
+                presumptions: []
+            },
             supporting: [],
             conditional: []
         },
@@ -1403,7 +1416,8 @@ export function createEmptyGauntletOutput(): GauntletOutput {
             from_outliers: [],
             ghost: null
         },
-        confidence: { score: 0, display: "", notes: [] },
+        confidence: { score: 0, notes: [] },
+        the_void: "",
         souvenir: "",
         artifact_id: ""
     };
@@ -1421,17 +1435,9 @@ export function parseGauntletOutput(text: string): GauntletOutput {
             const jsonText = jsonMatch[1] || jsonMatch[0];
             const parsed = JSON.parse(jsonText);
             if (parsed && typeof parsed === 'object' && parsed.the_answer) {
-                // Calculate display dots derived from score if missing
-                const score = parsed.confidence?.score || 0;
-                const display = parsed.confidence?.display || "•".repeat(Math.round(score * 5)) || "•";
-
                 return {
                     ...createEmptyGauntletOutput(),
                     ...parsed,
-                    confidence: {
-                        ...parsed.confidence,
-                        display
-                    },
                     artifact_id: parsed.artifact_id || `gauntlet-${Date.now()}`
                 };
             }
@@ -1508,8 +1514,8 @@ export function parseGauntletOutput(text: string): GauntletOutput {
         }
     }
 
-    // Normalize display
-    output.confidence.display = "•".repeat(Math.round(output.confidence.score * 5)) || "•••";
+    // Normalize
+    output.souvenir = extractSectionFlexible(['SOUVENIR', 'TAKEAWAY', 'MANTRA']) || "The gauntlet has been run.";
     output.souvenir = extractSectionFlexible(['SOUVENIR', 'TAKEAWAY', 'MANTRA']) || "The gauntlet has been run.";
     output.artifact_id = `gauntlet-heuristic-${Date.now()}`;
 

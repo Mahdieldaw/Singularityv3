@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useState } from "react";
-import { MapperArtifact, AiTurn, ExploreAnalysis } from "../../../shared/contract";
+import React, { useEffect, useMemo, useState, useCallback } from "react";
+import { MapperArtifact, AiTurn, ExploreAnalysis, ProviderResponse } from "../../../shared/contract";
 import { applyEdits } from "../../utils/apply-artifact-edits";
 import { artifactEditsAtom } from "../../state/artifact-edits";
 import { RawResponseCard } from "./cards/RawResponseCard";
@@ -13,7 +13,12 @@ import { OutlierCard } from "./cards/OutlierCard";
 import { GhostCard } from "./cards/GhostCard";
 import { GapsCard } from "./cards/GapsCard";
 import { CouncilOrbs } from "../CouncilOrbs";
-import { activeSplitPanelAtom } from "../../state/atoms";
+import { activeSplitPanelAtom, includePromptInCopyAtom } from "../../state/atoms";
+import { formatTurnForMd, formatDecisionMapForMd } from "../../utils/copy-format-utils";
+import { getLatestResponse } from "../../utils/turn-helpers";
+import { useRefinerOutput } from "../../hooks/useRefinerOutput";
+import { useAntagonistOutput } from "../../hooks/useAntagonistOutput";
+import { CopyButton } from "../CopyButton";
 import {
     buildComparisonContent,
     buildDecisionTreeContent,
@@ -50,6 +55,11 @@ export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
     const selectedModels = useAtomValue(selectedModelsAtom);
     const [allEdits] = useAtom(artifactEditsAtom);
     const setActiveSplitPanel = useSetAtom(activeSplitPanelAtom);
+    const includePromptInCopy = useAtomValue(includePromptInCopyAtom);
+
+    // Hooks for Refiner and Antagonist
+    const { output: refinerOutput, providerId: refinerPid } = useRefinerOutput(turn?.id);
+    const { output: antagonistOutput, providerId: antagonistPid } = useAntagonistOutput(turn?.id);
 
     // Get modified artifact
     const currentTurnId = turn?.id || mapperArtifact?.turn?.toString() || "";
@@ -139,6 +149,58 @@ export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
     const gaps = useMemo(() => dimensionCoverage.filter((d) => d.is_gap), [dimensionCoverage]);
 
     const gapsCount = gaps.length;
+
+    // Copy Handlers
+    const handleCopyMapper = useCallback(() => {
+        if (!mapperArtifact) return;
+
+        // Find latest mapper response to get raw narrative/options
+        const activeMapperPid = turn.meta?.mapper || Object.keys(turn.mappingResponses || {})[0];
+        const mapperResp = activeMapperPid ? getLatestResponse(turn.mappingResponses?.[activeMapperPid]) : null;
+
+        const narrative = mapperResp?.text || "";
+        const options = (mapperResp?.meta as any)?.allAvailableOptions || null;
+        const topology = (mapperResp?.meta as any)?.graphTopology || null;
+
+        const md = formatDecisionMapForMd(narrative, options, topology);
+        navigator.clipboard.writeText(md);
+    }, [turn, mapperArtifact]);
+
+    const handleCopyTurn = useCallback(() => {
+        // Gather Batch Responses (latest for each provider)
+        const batchResponses: Record<string, ProviderResponse> = {};
+        Object.entries(turn.batchResponses || {}).forEach(([pid, resps]) => {
+            const latest = getLatestResponse(resps);
+            if (latest) batchResponses[pid] = latest;
+        });
+
+        // Mapping Data
+        const activeMapperPid = turn.meta?.mapper || Object.keys(turn.mappingResponses || {})[0];
+        const mapperResp = activeMapperPid ? getLatestResponse(turn.mappingResponses?.[activeMapperPid]) : null;
+        const decisionMap = mapperResp ? {
+            narrative: mapperResp.text || "",
+            options: (mapperResp.meta as any)?.allAvailableOptions || null,
+            topology: (mapperResp.meta as any)?.graphTopology || null
+        } : null;
+
+        const userPrompt = (turn as any)?.userPrompt ?? (turn as any)?.prompt ?? null;
+
+        const md = formatTurnForMd(
+            turn.id,
+            userPrompt,
+            null, // Analysis (Understand/Gauntlet) - not available in artifact view yet
+            undefined,
+            decisionMap,
+            batchResponses,
+            includePromptInCopy,
+            refinerOutput,
+            refinerPid,
+            antagonistOutput,
+            antagonistPid
+        );
+        navigator.clipboard.writeText(md);
+    }, [turn, refinerOutput, refinerPid, antagonistOutput, antagonistPid, includePromptInCopy]);
+
     const contestedCount = useMemo(
         () => dimensionCoverage.filter((d) => d.is_contested).length,
         [dimensionCoverage]
@@ -282,6 +344,12 @@ export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
                 <div className="text-xs text-text-muted tabular-nums">
                     {selectedArtifacts.length > 0 ? `${selectedArtifacts.length} selected` : "None selected"}
                 </div>
+                <div className="border-l border-border-subtle h-4 mx-1" />
+                <CopyButton
+                    onCopy={handleCopyMapper}
+                    label="Copy Mapper Output"
+                    variant="icon"
+                />
             </div>
 
             {mapperArtifact && analysis && (
@@ -325,6 +393,17 @@ export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
             <RawResponseCard turn={turn} />
 
             <SelectionBar />
+
+            {/* Fixed Copy Turn Button */}
+            <div className="fixed bottom-6 left-6 z-50">
+                <CopyButton
+                    onCopy={handleCopyTurn}
+                    label="Copy Full Turn"
+                    className="bg-surface/90 backdrop-blur-sm shadow-xl rounded-lg text-xs font-semibold px-4 py-2 border border-border-subtle hover:scale-105 transition-transform"
+                >
+                    📋 Copy Turn
+                </CopyButton>
+            </div>
         </div>
     );
 };

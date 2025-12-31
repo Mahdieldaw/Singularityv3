@@ -1,16 +1,20 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { UnderstandOutput } from '../../../shared/contract';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { selectedModelsAtom, activeSplitPanelAtom, isDecisionMapOpenAtom } from '../../state/atoms';
+import { selectedModelsAtom, activeSplitPanelAtom, isDecisionMapOpenAtom, chatInputValueAtom, includePromptInCopyAtom } from '../../state/atoms';
+import { formatTurnForMd, formatAnalysisContextForMd } from '../../utils/copy-format-utils';
+import { getLatestResponse } from '../../utils/turn-helpers';
+import { CopyButton } from '../CopyButton';
 import { LLM_PROVIDERS_CONFIG } from '../../constants';
 import type { CognitiveTransitionOptions } from '../../hooks/cognitive/useCognitiveMode';
 import { AntagonistOutputState } from '../../hooks/useAntagonistOutput';
 import { RefinerOutput } from '../../../shared/parsing-utils';
-import { AiTurn } from '../../types';
+import { AiTurn, ProviderResponse } from '../../types';
 import AntagonistCard from '../antagonist/AntagonistCard';
 import RefinerDot from '../refinerui/RefinerDot';
 import CognitiveAnchors from './CognitiveAnchors';
+import { getProviderName } from '../../utils/provider-helpers';
 
 // Icons
 const ChevronDown = ({ className }: { className?: string }) => (
@@ -55,7 +59,8 @@ const UnderstandOutputView: React.FC<UnderstandOutputViewProps> = ({
     const selectedModels = useAtomValue(selectedModelsAtom);
     const setActiveSplitPanel = useSetAtom(activeSplitPanelAtom);
     const setIsDecisionMapOpen = useSetAtom(isDecisionMapOpenAtom);
-
+    const setChatInputValue = useSetAtom(chatInputValueAtom);
+    const includePromptInCopy = useAtomValue(includePromptInCopyAtom);
     const availableProviders = useMemo(() => {
         const enabled = LLM_PROVIDERS_CONFIG.filter((p) => !!selectedModels?.[p.id]);
         return enabled.length > 0 ? enabled : LLM_PROVIDERS_CONFIG;
@@ -68,6 +73,48 @@ const UnderstandOutputView: React.FC<UnderstandOutputViewProps> = ({
             setNextProviderId(availableProviders[0]?.id || "gemini");
         }
     }, [availableProviders, nextProviderId]);
+
+    // Copy Handlers
+    const handleCopyUnderstand = useCallback(() => {
+        const providerName = getProviderName(nextProviderId);
+        const md = formatAnalysisContextForMd(output, providerName);
+        navigator.clipboard.writeText(md);
+    }, [output, nextProviderId]);
+
+    const handleCopyTurn = useCallback(() => {
+        // Gather Batch Responses (latest for each provider)
+        const batchResponses: Record<string, ProviderResponse> = {};
+        Object.entries(aiTurn.batchResponses || {}).forEach(([pid, resps]) => {
+            const latest = getLatestResponse(resps);
+            if (latest) batchResponses[pid] = latest;
+        });
+
+        // Mapping Data
+        const activeMapperPid = aiTurn.meta?.mapper || Object.keys(aiTurn.mappingResponses || {})[0];
+        const mapperResp = activeMapperPid ? getLatestResponse(aiTurn.mappingResponses?.[activeMapperPid]) : null;
+        const decisionMap = mapperResp ? {
+            narrative: mapperResp.text || "",
+            options: (mapperResp.meta as any)?.allAvailableOptions || null,
+            topology: (mapperResp.meta as any)?.graphTopology || null
+        } : null;
+
+        const userPrompt = (aiTurn as any)?.userPrompt ?? (aiTurn as any)?.prompt ?? null;
+
+        const md = formatTurnForMd(
+            aiTurn.id,
+            userPrompt,
+            output, // Analysis (Understand/Gauntlet)
+            nextProviderId, // Analysis Provider ID
+            decisionMap,
+            batchResponses,
+            includePromptInCopy,
+            refinerState.output,
+            refinerState.isLoading ? null : aiTurn.refinerResponses && Object.keys(aiTurn.refinerResponses).length > 0 ? Object.keys(aiTurn.refinerResponses)[0] : null,
+            antagonistState.output,
+            antagonistState.providerId
+        );
+        navigator.clipboard.writeText(md);
+    }, [aiTurn, output, nextProviderId, includePromptInCopy, refinerState, antagonistState]);
 
     const handleCopySouvenir = () => {
         if (output.souvenir) {
@@ -108,6 +155,12 @@ const UnderstandOutputView: React.FC<UnderstandOutputViewProps> = ({
                             isLoading={refinerState.isLoading}
                             onClick={() => setActiveSplitPanel({ turnId: aiTurn.id, providerId: '__trust__' })}
                         />
+                        <div className="border-l border-border-subtle h-4 mx-1" />
+                        <CopyButton
+                            onCopy={handleCopyUnderstand}
+                            label="Copy Understand Output"
+                            variant="icon"
+                        />
                     </div>
                 </div>
 
@@ -131,6 +184,7 @@ const UnderstandOutputView: React.FC<UnderstandOutputViewProps> = ({
                     <AntagonistCard
                         aiTurn={aiTurn}
                         activeProviderId={antagonistState.providerId || undefined}
+                        onUsePrompt={(text) => setChatInputValue(text)}
                     />
                 </div>
             )}
@@ -230,6 +284,17 @@ const UnderstandOutputView: React.FC<UnderstandOutputViewProps> = ({
                 >
                     ⏭️ Next
                 </button>
+            </div>
+
+            {/* Fixed Copy Turn Button */}
+            <div className="fixed bottom-6 left-6 z-50">
+                <CopyButton
+                    onCopy={handleCopyTurn}
+                    label="Copy Full Turn"
+                    className="bg-surface/90 backdrop-blur-sm shadow-xl rounded-lg text-xs font-semibold px-4 py-2 border border-border-subtle hover:scale-105 transition-transform"
+                >
+                    📋 Copy Turn
+                </CopyButton>
             </div>
         </div>
     );

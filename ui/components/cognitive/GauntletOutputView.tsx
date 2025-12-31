@@ -1,15 +1,20 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { GauntletOutput } from '../../../shared/contract';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { selectedModelsAtom, activeSplitPanelAtom, isDecisionMapOpenAtom } from '../../state/atoms';
+import { selectedModelsAtom, activeSplitPanelAtom, isDecisionMapOpenAtom, chatInputValueAtom, includePromptInCopyAtom } from '../../state/atoms';
+import { formatTurnForMd, formatAnalysisContextForMd } from '../../utils/copy-format-utils';
+import { getLatestResponse } from '../../utils/turn-helpers';
+import { CopyButton } from '../CopyButton';
+import { getProviderName } from '../../utils/provider-helpers';
 import { LLM_PROVIDERS_CONFIG } from '../../constants';
 import type { CognitiveTransitionOptions } from '../../hooks/cognitive/useCognitiveMode';
 import { AntagonistOutputState } from '../../hooks/useAntagonistOutput';
 import { RefinerOutput } from '../../../shared/parsing-utils';
-import { AiTurn } from '../../types';
+import { AiTurn, ProviderResponse } from '../../types';
 import RefinerDot from '../refinerui/RefinerDot';
 import AntagonistCard from '../antagonist/AntagonistCard';
+import CognitiveAnchors from './CognitiveAnchors';
 
 // Icons
 const ChevronDown = ({ className }: { className?: string }) => (
@@ -67,6 +72,7 @@ const GauntletOutputView: React.FC<GauntletOutputViewProps> = ({
     const selectedModels = useAtomValue(selectedModelsAtom);
     const setActiveSplitPanel = useSetAtom(activeSplitPanelAtom);
     const setIsDecisionMapOpen = useSetAtom(isDecisionMapOpenAtom);
+    const setChatInputValue = useSetAtom(chatInputValueAtom);
 
     const availableProviders = useMemo(() => {
         const enabled = LLM_PROVIDERS_CONFIG.filter((p) => !!selectedModels?.[p.id]);
@@ -80,6 +86,50 @@ const GauntletOutputView: React.FC<GauntletOutputViewProps> = ({
             setNextProviderId(availableProviders[0]?.id || "gemini");
         }
     }, [availableProviders, nextProviderId]);
+
+    const includePromptInCopy = useAtomValue(includePromptInCopyAtom);
+
+    // Copy Handlers
+    const handleCopyGauntlet = useCallback(() => {
+        const providerName = getProviderName(nextProviderId);
+        const md = formatAnalysisContextForMd(output, providerName);
+        navigator.clipboard.writeText(md);
+    }, [output, nextProviderId]);
+
+    const handleCopyTurn = useCallback(() => {
+        // Gather Batch Responses (latest for each provider)
+        const batchResponses: Record<string, ProviderResponse> = {};
+        Object.entries(aiTurn.batchResponses || {}).forEach(([pid, resps]) => {
+            const latest = getLatestResponse(resps);
+            if (latest) batchResponses[pid] = latest;
+        });
+
+        // Mapping Data
+        const activeMapperPid = aiTurn.meta?.mapper || Object.keys(aiTurn.mappingResponses || {})[0];
+        const mapperResp = activeMapperPid ? getLatestResponse(aiTurn.mappingResponses?.[activeMapperPid]) : null;
+        const decisionMap = mapperResp ? {
+            narrative: mapperResp.text || "",
+            options: (mapperResp.meta as any)?.allAvailableOptions || null,
+            topology: (mapperResp.meta as any)?.graphTopology || null
+        } : null;
+
+        const userPrompt = (aiTurn as any)?.userPrompt ?? (aiTurn as any)?.prompt ?? null;
+
+        const md = formatTurnForMd(
+            aiTurn.id,
+            userPrompt,
+            output, // Analysis (Understand/Gauntlet)
+            nextProviderId, // Analysis Provider ID
+            decisionMap,
+            batchResponses,
+            includePromptInCopy,
+            refinerState.output,
+            refinerState.isLoading ? null : aiTurn.refinerResponses && Object.keys(aiTurn.refinerResponses).length > 0 ? Object.keys(aiTurn.refinerResponses)[0] : null,
+            antagonistState.output,
+            antagonistState.providerId
+        );
+        navigator.clipboard.writeText(md);
+    }, [aiTurn, output, nextProviderId, includePromptInCopy, refinerState, antagonistState]);
 
     const handleCopySouvenir = () => {
         if (output.souvenir) {
@@ -117,7 +167,7 @@ const GauntletOutputView: React.FC<GauntletOutputViewProps> = ({
                 <div className="flex items-start justify-between gap-4 mb-3">
                     <div className="flex flex-col gap-1">
                         <div className="flex items-center gap-2">
-                            <h2 className="text-lg font-semibold text-text-primary tracking-tight m-0">The Answer</h2>
+                            <h2 className="text-lg font-semibold text-text-primary tracking-tight m-0">The Verdict</h2>
                             {output.optimal_end && (
                                 <div className="hidden sm:flex items-center gap-2 px-2 py-0.5 rounded-full bg-surface-highlight/50 border border-border-subtle/50">
                                     <span className="text-[10px] uppercase font-bold text-text-tertiary">Goal</span>
@@ -135,10 +185,35 @@ const GauntletOutputView: React.FC<GauntletOutputViewProps> = ({
                             <MapIcon className="w-3.5 h-3.5" />
                             <span>Map</span>
                         </button>
-                        <RefinerDot
-                            refiner={refinerOutput}
-                            isLoading={refinerState.isLoading}
-                            onClick={() => setActiveSplitPanel({ turnId: aiTurn.id, providerId: '__trust__' })}
+
+                        {/* Header with Refiner Indicators */}
+                        <div className="flex items-center gap-1.5">
+                            {/* Indicator dots - only show when refiner has findings */}
+                            {refinerOutput?.the_one && (
+                                <button
+                                    onClick={() => setActiveSplitPanel({ turnId: aiTurn.id, providerId: '__trust__' })}
+                                    className="w-2 h-2 rounded-full bg-amber-500/80 hover:bg-amber-400 transition-colors"
+                                    title="Refiner found a missed insight"
+                                />
+                            )}
+                            {refinerOutput?.the_echo && (
+                                <button
+                                    onClick={() => setActiveSplitPanel({ turnId: aiTurn.id, providerId: '__trust__' })}
+                                    className="w-2 h-2 rounded-full bg-indigo-500/80 hover:bg-indigo-400 transition-colors"
+                                    title="Refiner found an edge case"
+                                />
+                            )}
+                            <RefinerDot
+                                refiner={refinerOutput}
+                                isLoading={refinerState.isLoading}
+                                onClick={() => setActiveSplitPanel({ turnId: aiTurn.id, providerId: '__trust__' })}
+                            />
+                        </div>
+                        <div className="border-l border-border-subtle h-4 mx-1" />
+                        <CopyButton
+                            onCopy={handleCopyGauntlet}
+                            label="Copy Gauntlet Output"
+                            variant="icon"
                         />
                     </div>
                 </div>
@@ -165,44 +240,6 @@ const GauntletOutputView: React.FC<GauntletOutputViewProps> = ({
                     </div>
                 )}
 
-                {/* Collapsible Details: Reasoning & Confidence */}
-                <div className="border-t border-border-subtle pt-2 mt-2">
-                    <button
-                        onClick={() => setDetailsOpen(!detailsOpen)}
-                        className="flex items-center gap-1.5 text-xs text-text-tertiary hover:text-text-secondary transition-colors"
-                    >
-                        {detailsOpen ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
-                        <span>Why this survived & confidence notes</span>
-                    </button>
-
-                    <AnimatePresence>
-                        {detailsOpen && (
-                            <motion.div
-                                initial={{ height: 0, opacity: 0 }}
-                                animate={{ height: 'auto', opacity: 1 }}
-                                exit={{ height: 0, opacity: 0 }}
-                                className="overflow-hidden"
-                            >
-                                <div className="pt-3 pb-1 space-y-3">
-                                    <div>
-                                        <span className="text-xs font-semibold text-text-secondary block mb-1">Survival Verification</span>
-                                        <p className="text-xs text-text-secondary leading-relaxed opacity-90">{output.the_answer.reasoning}</p>
-                                    </div>
-                                    {output.confidence.notes && output.confidence.notes.length > 0 && (
-                                        <div>
-                                            <span className="text-xs font-semibold text-text-secondary block mb-1">Confidence Signals</span>
-                                            <ul className="list-disc list-inside text-xs text-text-secondary opacity-90">
-                                                {output.confidence.notes.map((note, i) => (
-                                                    <li key={i}>{note}</li>
-                                                ))}
-                                            </ul>
-                                        </div>
-                                    )}
-                                </div>
-                            </motion.div>
-                        )}
-                    </AnimatePresence>
-                </div>
             </motion.div>
 
             {/* COGNITIVE ANCHORS ROW (The Void, Breaking Point, Presumptions) */}
@@ -298,65 +335,26 @@ const GauntletOutputView: React.FC<GauntletOutputViewProps> = ({
                 )}
             </div>
 
-            {/* REFINER INLINE SIGNALS (GEM / ECHO / NEXT) */}
-            {refinerOutput && (
-                <div className="flex flex-col gap-4 animate-in fade-in slide-in-from-bottom-2 duration-500">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        {refinerOutput.gem && (
-                            <div className="bg-amber-500/5 border border-amber-500/20 rounded-xl p-4">
-                                <div className="flex items-center gap-2 mb-2">
-                                    <Sparkles className="text-amber-500" />
-                                    <span className="text-xs font-bold uppercase tracking-wider text-amber-600">The Insight</span>
-                                </div>
-                                <p className="text-text-primary font-medium leading-normal mb-1">
-                                    {refinerOutput.gem.insight}
-                                </p>
-                                {refinerOutput.gem.impact && (
-                                    <p className="text-xs text-text-secondary italic">
-                                        {refinerOutput.gem.impact}
-                                    </p>
-                                )}
-                            </div>
-                        )}
-                        {refinerOutput.outlier && (
-                            <div className="bg-indigo-500/5 border border-indigo-500/20 rounded-xl p-4">
-                                <div className="flex items-center gap-2 mb-2">
-                                    <Wind className="text-indigo-500" />
-                                    <span className="text-xs font-bold uppercase tracking-wider text-indigo-600">Contrarian View</span>
-                                </div>
-                                <p className="text-text-primary font-medium leading-normal mb-1">
-                                    {refinerOutput.outlier.position}
-                                </p>
-                                {refinerOutput.outlier.why && (
-                                    <p className="text-xs text-text-secondary italic">
-                                        {refinerOutput.outlier.why}
-                                    </p>
-                                )}
-                            </div>
-                        )}
-                    </div>
-
-                    {refinerOutput.leap && refinerOutput.leap.action && (
-                        <div className="bg-brand-500/10 border border-brand-500/20 rounded-xl p-4">
-                            <div className="flex items-center gap-2 mb-2">
-                                <span className="w-2 h-2 rounded-full bg-brand-400" />
-                                <span className="text-xs font-bold text-brand-400 uppercase tracking-wider">Refiner's Next Move</span>
-                            </div>
-                            <div className="text-sm font-bold text-text-primary mb-1">
-                                {refinerOutput.leap.action}
-                            </div>
-                            {refinerOutput.leap.rationale && (
-                                <div className="text-xs text-text-secondary italic">
-                                    {refinerOutput.leap.rationale}
-                                </div>
-                            )}
-                        </div>
+            {/* REASONING DISCLOSURE - Outside hero, between anchors and trial summary */}
+            <details className="text-xs text-text-tertiary group">
+                <summary className="cursor-pointer hover:text-text-secondary flex items-center gap-1.5 py-2">
+                    <ChevronRight className="w-3 h-3 group-open:rotate-90 transition-transform" />
+                    <span>Why this survived</span>
+                </summary>
+                <div className="pl-5 pb-3 space-y-2">
+                    <p className="text-text-secondary leading-relaxed">{output.the_answer.reasoning}</p>
+                    {output.confidence.notes && output.confidence.notes.length > 0 && (
+                        <ul className="list-disc list-inside text-text-secondary/80 space-y-1">
+                            {output.confidence.notes.map((note, i) => (
+                                <li key={i}>{note}</li>
+                            ))}
+                        </ul>
                     )}
                 </div>
-            )}
+            </details>
 
-            {/* SECTIONS GRID */}
-            <div className="grid grid-cols-1 gap-4">
+            {/* TRIAL SUMMARY - Horizontal */}
+            <div className="grid grid-cols-2 gap-3">
 
                 {/* SURVIVORS */}
                 <div className="border border-border-subtle rounded-lg bg-surface-base/50 overflow-hidden">
@@ -366,7 +364,7 @@ const GauntletOutputView: React.FC<GauntletOutputViewProps> = ({
                     >
                         <div className="flex items-center gap-2">
                             <ShieldCheck className="text-green-500" />
-                            <span className="font-medium text-text-primary">Survivors</span>
+                            <span className="font-medium text-text-primary text-sm">Survived</span>
                             <span className="text-xs text-text-tertiary bg-surface-highlight px-1.5 py-0.5 rounded-full">
                                 {1 + output.survivors.supporting.length + output.survivors.conditional.length}
                             </span>
@@ -384,36 +382,35 @@ const GauntletOutputView: React.FC<GauntletOutputViewProps> = ({
                             >
                                 <div className="p-3 pt-0 flex flex-col gap-3">
                                     <div className="bg-green-500/10 border border-green-500/20 rounded p-3">
-                                        <div className="text-xs font-semibold text-green-600 mb-1">PRIMARY CLAIM</div>
-                                        <div className="text-text-primary mb-1">{output.survivors.primary.claim}</div>
-                                        <div className="text-xs text-text-secondary italic mb-2">Survived because: {output.survivors.primary.survived_because}</div>
+                                        <div className="text-[10px] font-bold text-green-600 mb-1 uppercase tracking-tight">PRIMARY CLAIM</div>
+                                        <div className="text-text-primary text-xs mb-1 font-medium">{output.survivors.primary.claim}</div>
+                                        <div className="text-[10px] text-text-secondary italic mb-2 leading-tight">Survived because: {output.survivors.primary.survived_because}</div>
                                         {output.survivors.primary.extent && (
-                                            <div className="mt-2 pt-2 border-t border-green-500/20 text-xs">
-                                                <span className="font-semibold text-green-700/70 uppercase tracking-wide">Extent of Realization:</span>
+                                            <div className="mt-2 pt-2 border-t border-green-500/20 text-[10px]">
+                                                <span className="font-semibold text-green-700/70 uppercase tracking-wide">Extent:</span>
                                                 <span className="text-text-secondary ml-1">{output.survivors.primary.extent}</span>
                                             </div>
                                         )}
                                     </div>
 
                                     {output.survivors.supporting.length > 0 && (
-                                        <div className="space-y-2">
-                                            <div className="text-xs font-mono text-text-tertiary uppercase">Supporting</div>
+                                        <div className="space-y-1.5">
+                                            <div className="text-[10px] font-bold text-text-tertiary uppercase tracking-wider">Supporting</div>
                                             {output.survivors.supporting.map((s, i) => (
-                                                <div key={i} className="pl-3 border-l border-border-subtle text-sm">
+                                                <div key={i} className="pl-2 border-l border-border-subtle text-xs leading-tight">
                                                     <span className="text-text-primary">{s.claim}</span>
-                                                    <span className="text-text-tertiary ml-2 text-xs">({s.relationship})</span>
                                                 </div>
                                             ))}
                                         </div>
                                     )}
 
                                     {output.survivors.conditional.length > 0 && (
-                                        <div className="space-y-2">
-                                            <div className="text-xs font-mono text-text-tertiary uppercase">Conditional</div>
+                                        <div className="space-y-1.5">
+                                            <div className="text-[10px] font-bold text-text-tertiary uppercase tracking-wider">Conditional</div>
                                             {output.survivors.conditional.map((s, i) => (
-                                                <div key={i} className="pl-3 border-l border-orange-500/30 text-sm">
+                                                <div key={i} className="pl-2 border-l border-orange-500/30 text-xs leading-tight">
                                                     <span className="text-text-primary">{s.claim}</span>
-                                                    <span className="text-orange-500/80 ml-2 text-xs">IF {s.condition}</span>
+                                                    <div className="text-orange-500/80 text-[10px] font-medium mt-0.5">IF {s.condition}</div>
                                                 </div>
                                             ))}
                                         </div>
@@ -432,7 +429,7 @@ const GauntletOutputView: React.FC<GauntletOutputViewProps> = ({
                     >
                         <div className="flex items-center gap-2">
                             <Skull className="text-red-500" />
-                            <span className="font-medium text-text-primary">Eliminated</span>
+                            <span className="font-medium text-text-primary text-sm">Eliminated</span>
                             <span className="text-xs text-text-tertiary bg-surface-highlight px-1.5 py-0.5 rounded-full">
                                 {output.eliminated.from_consensus.length + output.eliminated.from_outliers.length}
                             </span>
@@ -451,11 +448,11 @@ const GauntletOutputView: React.FC<GauntletOutputViewProps> = ({
                                 <div className="p-3 pt-0 flex flex-col gap-3">
                                     {output.eliminated.from_consensus.length > 0 && (
                                         <div className="space-y-2">
-                                            <div className="text-xs font-mono text-text-tertiary uppercase">From Consensus</div>
+                                            <div className="text-[10px] font-bold text-text-tertiary uppercase tracking-wider">From Consensus</div>
                                             {output.eliminated.from_consensus.map((e, i) => (
-                                                <div key={i} className="flex gap-2 items-start text-sm group">
-                                                    <span className="text-text-tertiary line-through decoration-red-500/50 decoration-2">{e.claim}</span>
-                                                    <span className="text-red-500 text-xs mt-0.5 opacity-70 group-hover:opacity-100 transition-opacity whitespace-nowrap">killed: {e.killed_because}</span>
+                                                <div key={i} className="flex flex-col gap-1 text-xs">
+                                                    <span className="text-text-tertiary line-through decoration-red-500/30">{e.claim}</span>
+                                                    <span className="text-red-500/70 text-[10px] italic">killed: {e.killed_because}</span>
                                                 </div>
                                             ))}
                                         </div>
@@ -463,19 +460,19 @@ const GauntletOutputView: React.FC<GauntletOutputViewProps> = ({
 
                                     {output.eliminated.from_outliers.length > 0 && (
                                         <div className="space-y-2">
-                                            <div className="text-xs font-mono text-text-tertiary uppercase">From Outliers</div>
+                                            <div className="text-[10px] font-bold text-text-tertiary uppercase tracking-wider">From Outliers</div>
                                             {output.eliminated.from_outliers.map((e, i) => (
-                                                <div key={i} className="flex gap-2 items-start text-sm group">
-                                                    <span className="text-text-tertiary line-through decoration-red-500/50 decoration-2">{e.claim}</span>
-                                                    <span className="text-red-500 text-xs mt-0.5 opacity-70 group-hover:opacity-100 transition-opacity whitespace-nowrap">killed: {e.killed_because}</span>
+                                                <div key={i} className="flex flex-col gap-1 text-xs">
+                                                    <span className="text-text-tertiary line-through decoration-red-500/30">{e.claim}</span>
+                                                    <span className="text-red-500/70 text-[10px] italic">killed: {e.killed_because}</span>
                                                 </div>
                                             ))}
                                         </div>
                                     )}
 
                                     {output.eliminated.ghost && (
-                                        <div className="bg-purple-500/5 border border-purple-500/10 rounded p-2 text-xs">
-                                            <span className="font-semibold text-purple-600 mr-2">GHOST IDENTIFIED:</span>
+                                        <div className="bg-purple-500/5 border border-purple-500/10 rounded p-2 text-[10px]">
+                                            <span className="font-semibold text-purple-600 mr-2">GHOST:</span>
                                             <span className="text-text-secondary">{output.eliminated.ghost}</span>
                                         </div>
                                     )}
@@ -484,7 +481,6 @@ const GauntletOutputView: React.FC<GauntletOutputViewProps> = ({
                         )}
                     </AnimatePresence>
                 </div>
-
             </div>
 
             {/* ANTAGONIST INLINE */}
@@ -493,6 +489,7 @@ const GauntletOutputView: React.FC<GauntletOutputViewProps> = ({
                     <AntagonistCard
                         aiTurn={aiTurn}
                         activeProviderId={antagonistState.providerId || undefined}
+                        onUsePrompt={(text) => setChatInputValue(text)}
                     />
                 </div>
             )}
@@ -559,6 +556,17 @@ const GauntletOutputView: React.FC<GauntletOutputViewProps> = ({
                 >
                     ⏭️ Next
                 </button>
+            </div>
+
+            {/* Fixed Copy Turn Button */}
+            <div className="fixed bottom-6 left-6 z-50">
+                <CopyButton
+                    onCopy={handleCopyTurn}
+                    label="Copy Full Turn"
+                    className="bg-surface/90 backdrop-blur-sm shadow-xl rounded-lg text-xs font-semibold px-4 py-2 border border-border-subtle hover:scale-105 transition-transform"
+                >
+                    📋 Copy Turn
+                </CopyButton>
             </div>
         </div>
     );

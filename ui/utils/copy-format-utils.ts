@@ -1,6 +1,7 @@
 import { AiTurn, GraphTopology, ProviderResponse, UserTurn, TurnMessage, isUserTurn, isAiTurn } from "../types";
 import { LLM_PROVIDERS_CONFIG } from "../constants";
 import { getProviderName } from "./provider-helpers";
+import { RefinerOutput, AntagonistOutput } from "../../shared/parsing-utils";
 
 // ============================================================================
 // MARKDOWN FORMATTING UTILITIES
@@ -80,16 +81,32 @@ export function formatTurnForMd(
     analysisProviderId: string | undefined,
     decisionMap: { narrative?: string; options?: string | null; topology?: GraphTopology | null } | null,
     batchResponses: Record<string, ProviderResponse>,
-    includePrompt: boolean = true
+    includePrompt: boolean = true,
+    refinerOutput?: RefinerOutput | null,
+    refinerProviderId?: string | null,
+    antagonistOutput?: AntagonistOutput | null,
+    antagonistProviderId?: string | null
 ): string {
     let md = "";
 
-    // 1. User Prompt
+    // 0. User Prompt
     if (includePrompt && userPrompt) {
         md += `## User\n\n${userPrompt}\n\n`;
     }
 
-    // 2. Analysis / Verdict
+    // 1. Antagonist
+    if (antagonistOutput) {
+        const providerName = antagonistProviderId ? getProviderName(antagonistProviderId) : "Antagonist";
+        md += formatAntagonistOutputForMd(antagonistOutput, providerName);
+    }
+
+    // 2. Refiner
+    if (refinerOutput) {
+        const providerName = refinerProviderId ? getProviderName(refinerProviderId) : "Refiner";
+        md += formatRefinerOutputForMd(refinerOutput, providerName);
+    }
+
+    // 3. Analysis / Verdict (Understand/Gauntlet)
     if (analysisOutput) {
         const providerName = analysisProviderId
             ? getProviderName(analysisProviderId)
@@ -97,7 +114,7 @@ export function formatTurnForMd(
         md += formatAnalysisContextForMd(analysisOutput, providerName);
     }
 
-    // 3. Decision Map
+    // 4. Decision Map (Mappers)
     if (decisionMap) {
         md += formatDecisionMapForMd(
             decisionMap.narrative || "",
@@ -106,7 +123,7 @@ export function formatTurnForMd(
         );
     }
 
-    // 4. Raw Responses (Collapsible)
+    // 5. Raw Responses (Collapsible Council)
     const providers = LLM_PROVIDERS_CONFIG;
     const responsesWithContent = providers
         .map(p => ({
@@ -458,4 +475,83 @@ export function sanitizeSessionForExport(
     }
 
     return exportObj;
+}
+
+/**
+ * Formats Refiner output into Markdown.
+ */
+export function formatRefinerOutputForMd(output: RefinerOutput, providerName: string = "Refiner"): string {
+    if (!output) return "";
+    let md = `## Refiner Analysis (via ${providerName})\n\n`;
+
+    if (output.trustInsights) {
+        md += `### Trust Insights\n\n${output.trustInsights}\n\n`;
+    }
+
+    if (output.gem) {
+        md += `### Hidden Gem\n\n`;
+        md += `**Insight:** ${output.gem.insight}\n`;
+        md += `**Source:** ${output.gem.source}\n`;
+        md += `**Impact:** ${output.gem.impact}\n\n`;
+    }
+
+    if (output.outlier) {
+        md += `### Dissenting Outlier\n\n`;
+        md += `**Position:** ${output.outlier.position}\n`;
+        md += `**Source:** ${output.outlier.source}\n`;
+        md += `**Why:** ${output.outlier.why}\n\n`;
+    }
+
+    if (output.attributions && output.attributions.length > 0) {
+        md += `### Attributions\n\n`;
+        output.attributions.forEach(a => {
+            md += `- ${a.claim} (${a.source})\n`;
+        });
+        md += `\n`;
+    }
+
+    if (output.leap && output.leap.rationale) {
+        md += `### The Next Step\n\n`;
+        md += `**Action:** ${output.leap.action.toUpperCase()}\n`;
+        md += `**Rationale:** ${output.leap.rationale}\n\n`;
+    }
+
+    return md;
+}
+
+/**
+ * Formats Antagonist output into Markdown.
+ */
+export function formatAntagonistOutputForMd(output: AntagonistOutput, providerName: string = "Antagonist"): string {
+    if (!output) return "";
+    let md = `## Antagonist Stress-Test (via ${providerName})\n\n`;
+
+    if (output.the_audit && output.the_audit.missed && output.the_audit.missed.length > 0) {
+        md += `### Missed Approaches\n\n`;
+        output.the_audit.missed.forEach(m => {
+            md += `- **${m.approach}** (Source: ${m.source})\n`;
+        });
+        md += `\n`;
+    }
+
+    if (output.the_prompt && output.the_prompt.text) {
+        md += `### Generated Stress-Test Prompt\n\n${output.the_prompt.text}\n\n`;
+
+        if (output.the_prompt.dimensions && output.the_prompt.dimensions.length > 0) {
+            md += `#### Key Dimensions\n\n`;
+            output.the_prompt.dimensions.forEach(d => {
+                md += `- **${d.variable}**: ${d.options}\n  *Why:* ${d.why}\n`;
+            });
+            md += `\n`;
+        }
+
+        if (output.the_prompt.grounding) {
+            md += `**Grounding:** ${output.the_prompt.grounding}\n\n`;
+        }
+        if (output.the_prompt.payoff) {
+            md += `**Expected Payoff:** ${output.the_prompt.payoff}\n\n`;
+        }
+    }
+
+    return md;
 }

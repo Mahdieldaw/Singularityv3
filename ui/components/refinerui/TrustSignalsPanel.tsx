@@ -9,6 +9,8 @@ import { activeSplitPanelAtom, providerIdsForTurnFamily } from '../../state/atom
 import type { RefinerOutput } from '../../../shared/parsing-utils';
 import { LLM_PROVIDERS_CONFIG } from '../../constants';
 import { PipelineErrorBanner } from '../PipelineErrorBanner';
+import { CopyButton } from '../CopyButton';
+import { formatRefinerOutputForMd } from '../../utils/copy-format-utils';
 
 interface TrustSignalsPanelProps {
   refiner: RefinerOutput | null;
@@ -132,14 +134,23 @@ export function TrustSignalsPanel({
           <span className="text-lg">✨</span>
           <span className="font-semibold text-text-primary">Trust Insights</span>
         </div>
-        {onClose && (
-          <button
-            onClick={onClose}
-            className="text-text-muted hover:text-text-primary transition-colors"
-          >
-            ✕
-          </button>
-        )}
+        <div className="flex items-center gap-2">
+          {refiner && (
+            <CopyButton
+              text={formatRefinerOutputForMd(refiner, providerId && providersById[providerId] ? providersById[providerId].name : undefined)}
+              label="Copy Trust Insights"
+              variant="icon"
+            />
+          )}
+          {onClose && (
+            <button
+              onClick={onClose}
+              className="text-text-muted hover:text-text-primary transition-colors"
+            >
+              ✕
+            </button>
+          )}
+        </div>
       </div>
 
       <div

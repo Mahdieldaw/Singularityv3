@@ -1275,6 +1275,27 @@ export const DecisionMapSheet = React.memo(() => {
                               <span>{antagonistOutput.the_prompt.payoff}</span>
                             </div>
                           )}
+
+                          {/* Dimensions Educational Section */}
+                          {antagonistOutput.the_prompt.dimensions.length > 0 && (
+                            <div className="mt-6 border-t border-border-subtle pt-4">
+                              <div className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-4 flex items-center gap-2">
+                                <span>📖</span>
+                                <span>Dimension definitions</span>
+                              </div>
+                              <div className="grid gap-4">
+                                {antagonistOutput.the_prompt.dimensions.map((dim, i) => (
+                                  <div key={i} className="flex flex-col gap-1.5 p-3 rounded-lg bg-surface-raised/50 border border-border-subtle/30">
+                                    <div className="flex items-center justify-between">
+                                      <span className="font-mono text-xs font-bold text-brand-400">{dim.variable}</span>
+                                      <span className="text-[10px] text-text-tertiary font-medium bg-surface-highlight px-2 py-0.5 rounded-full">{dim.options}</span>
+                                    </div>
+                                    <div className="text-sm text-text-secondary leading-relaxed">{dim.why}</div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
                         </div>
 
                         {/* Audit Section */}

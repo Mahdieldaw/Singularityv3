@@ -7,6 +7,7 @@ interface DimensionDropdownProps {
     options: string[];
     selectedValue: string | null;
     onSelect: (value: string) => void;
+    title?: string;
 }
 
 export const DimensionDropdown: React.FC<DimensionDropdownProps> = ({
@@ -14,6 +15,7 @@ export const DimensionDropdown: React.FC<DimensionDropdownProps> = ({
     options,
     selectedValue,
     onSelect,
+    title,
 }) => {
     const [isOpen, setIsOpen] = useState(false);
     const containerRef = useRef<HTMLSpanElement>(null);
@@ -54,7 +56,7 @@ export const DimensionDropdown: React.FC<DimensionDropdownProps> = ({
                 type="button"
                 onClick={handleTriggerClick}
                 className="dimension-dropdown-trigger"
-                title={variable}
+                title={title || variable}
             >
                 <span className="dropdown-value">{displayValue}</span>
                 <span className="dropdown-chevron">{isOpen ? '▴' : '▾'}</span>
