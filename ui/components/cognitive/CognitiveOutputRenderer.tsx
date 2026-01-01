@@ -1,4 +1,3 @@
-
 import React, { useMemo } from 'react';
 import { AiTurn, CognitiveViewMode } from '../../types';
 import { useModeSwitching } from '../../hooks/cognitive/useModeSwitching';
@@ -6,12 +5,14 @@ import { ArtifactShowcase } from './ArtifactShowcase';
 import UnderstandOutputView from './UnderstandOutputView';
 import GauntletOutputView from './GauntletOutputView';
 import TransitionBar from './TransitionBar';
+import { PipelineErrorBanner } from '../PipelineErrorBanner';
 import { AntagonistOutputState } from '../../hooks/useAntagonistOutput';
-import { RefinerOutput } from '../../../shared/parsing-utils';
+import { RefinerOutputState } from '../../hooks/useRefinerOutput';
+import { useProviderActions } from '../../hooks/providers/useProviderActions';
 
 interface CognitiveOutputRendererProps {
     aiTurn: AiTurn;
-    refinerState: { output: RefinerOutput | null; isLoading: boolean };
+    refinerState: RefinerOutputState;
     antagonistState: AntagonistOutputState;
 }
 
@@ -32,16 +33,33 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
         isTransitioning
     } = useModeSwitching(aiTurn.id);
 
+    const { handleRetryProvider } = useProviderActions(undefined, aiTurn.id);
+
     // Determine available modes based on turn data
     const availableModes = useMemo(() => {
         const modes: CognitiveViewMode[] = ['artifact'];
         if (aiTurn.understandOutput) modes.push('understand');
         if (aiTurn.gauntletOutput) modes.push('gauntlet');
         return modes;
-    }, [aiTurn.understandOutput, aiTurn.gauntletOutput]);
+    }, [aiTurn.understandOutput, aiTurn.gauntletOutput, aiTurn.understandResponses, aiTurn.gauntletResponses]);
+
+    // Check for errors in specialized modes
+    const understandErrorResponse = useMemo(() => {
+        if (aiTurn.understandOutput) return null;
+        const resps = Object.values(aiTurn.understandResponses || {}).flat();
+        const latest = resps.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))[0];
+        return latest?.status === 'error' ? latest : null;
+    }, [aiTurn.understandResponses, aiTurn.understandOutput]);
+
+    const gauntletErrorResponse = useMemo(() => {
+        if (aiTurn.gauntletOutput) return null;
+        const resps = Object.values(aiTurn.gauntletResponses || {}).flat();
+        const latest = resps.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))[0];
+        return latest?.status === 'error' ? latest : null;
+    }, [aiTurn.gauntletResponses, aiTurn.gauntletOutput]);
 
     // Derived flags
-    const hasSpecializedOutput = aiTurn.understandOutput || aiTurn.gauntletOutput;
+    const hasSpecializedOutput = aiTurn.understandOutput || aiTurn.gauntletOutput || understandErrorResponse || gauntletErrorResponse;
 
     return (
         <div className="flex flex-col w-full">
@@ -64,38 +82,63 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
                         turn={aiTurn}
                         onUnderstand={(options) => triggerAndSwitch('understand', options)}
                         onDecide={(options) => triggerAndSwitch('gauntlet', options)}
+                        onRetryMapping={(pid) => handleRetryProvider(pid)}
                         isLoading={isTransitioning}
                     />
                 )}
 
-                {activeMode === 'understand' && aiTurn.understandOutput && (
-                    <UnderstandOutputView
-                        output={aiTurn.understandOutput}
-                        onRecompute={(options) => triggerAndSwitch('understand', options)}
-                        onRefine={(options) => triggerAndSwitch('refine', options)}
-                        onAntagonist={(options) => triggerAndSwitch('antagonist', options)}
-                        isLoading={isTransitioning}
-                        refinerState={refinerState}
-                        antagonistState={antagonistState}
-                        aiTurn={aiTurn}
-                    />
+                {activeMode === 'understand' && (
+                    aiTurn.understandOutput ? (
+                        <UnderstandOutputView
+                            output={aiTurn.understandOutput}
+                            onRecompute={(options) => triggerAndSwitch('understand', options)}
+                            onRefine={(options) => triggerAndSwitch('refine', options)}
+                            onAntagonist={(options) => triggerAndSwitch('antagonist', options)}
+                            isLoading={isTransitioning}
+                            refinerState={refinerState}
+                            antagonistState={antagonistState}
+                            aiTurn={aiTurn}
+                        />
+                    ) : understandErrorResponse ? (
+                        <div className="py-8">
+                            <PipelineErrorBanner
+                                type="understand"
+                                onRetry={() => handleRetryProvider(understandErrorResponse.providerId, 'understand')}
+                                errorMessage={understandErrorResponse.meta?._rawError || "Analysis failed."}
+                                requiresReauth={(understandErrorResponse as any).meta?.requiresReauth}
+                                failedProviderId={understandErrorResponse.providerId}
+                            />
+                        </div>
+                    ) : null
                 )}
 
-                {activeMode === 'gauntlet' && aiTurn.gauntletOutput && (
-                    <GauntletOutputView
-                        output={aiTurn.gauntletOutput}
-                        onRecompute={(options) => triggerAndSwitch('gauntlet', options)}
-                        onRefine={(options) => triggerAndSwitch('refine', options)}
-                        onAntagonist={(options) => triggerAndSwitch('antagonist', options)}
-                        isLoading={isTransitioning}
-                        refinerState={refinerState}
-                        antagonistState={antagonistState}
-                        aiTurn={aiTurn}
-                    />
+                {activeMode === 'gauntlet' && (
+                    aiTurn.gauntletOutput ? (
+                        <GauntletOutputView
+                            output={aiTurn.gauntletOutput}
+                            onRecompute={(options) => triggerAndSwitch('gauntlet', options)}
+                            onRefine={(options) => triggerAndSwitch('refine', options)}
+                            onAntagonist={(options) => triggerAndSwitch('antagonist', options)}
+                            isLoading={isTransitioning}
+                            refinerState={refinerState}
+                            antagonistState={antagonistState}
+                            aiTurn={aiTurn}
+                        />
+                    ) : gauntletErrorResponse ? (
+                        <div className="py-8">
+                            <PipelineErrorBanner
+                                type="gauntlet"
+                                onRetry={() => handleRetryProvider(gauntletErrorResponse.providerId, 'gauntlet')}
+                                errorMessage={gauntletErrorResponse.meta?._rawError || "Gauntlet failed."}
+                                requiresReauth={(gauntletErrorResponse as any).meta?.requiresReauth}
+                                failedProviderId={gauntletErrorResponse.providerId}
+                            />
+                        </div>
+                    ) : null
                 )}
 
-                {/* Loading state for specialized modes without data yet */}
-                {isTransitioning && activeMode !== 'artifact' && !aiTurn.understandOutput && !aiTurn.gauntletOutput && (
+                {/* Loading state for specialized modes without data yet and NO error */}
+                {isTransitioning && activeMode !== 'artifact' && !aiTurn.understandOutput && !aiTurn.gauntletOutput && !understandErrorResponse && !gauntletErrorResponse && (
                     <div className="flex flex-col items-center justify-center p-12 bg-surface-highlight/10 rounded-xl border border-dashed border-border-subtle animate-pulse">
                         <div className="text-3xl mb-4">
                             {activeMode === 'understand' ? '🧠' : '⚖️'}

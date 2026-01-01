@@ -14,7 +14,6 @@ import { RefinerOutput } from '../../../shared/parsing-utils';
 import { AiTurn, ProviderResponse } from '../../types';
 import RefinerDot from '../refinerui/RefinerDot';
 import AntagonistCard from '../antagonist/AntagonistCard';
-import CognitiveAnchors from './CognitiveAnchors';
 
 // Icons
 const ChevronDown = ({ className }: { className?: string }) => (
@@ -34,12 +33,6 @@ const CopyIcon = ({ className }: { className?: string }) => (
 );
 const CheckIcon = ({ className }: { className?: string }) => (
     <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M20 6 9 17l-5-5" /></svg>
-);
-const Sparkles = ({ className }: { className?: string }) => (
-    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" /><path d="M5 3v4" /><path d="M19 17v4" /><path d="M3 5h4" /><path d="M17 19h4" /></svg>
-);
-const Wind = ({ className }: { className?: string }) => (
-    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M17.7 7.7A2.5 2.5 0 1 1 20 12h-3.3" /><path d="M9.6 4.6A2 2 0 1 1 11 8H2" /><path d="M12.6 19.4A2 2 0 1 0 14 16H2" /></svg>
 );
 const MapIcon = ({ className }: { className?: string }) => (
     <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><rect width="18" height="18" x="3" y="3" rx="2" ry="2" /><line x1="3" x2="21" y1="9" y2="9" /><line x1="9" x2="9" y1="21" y2="9" /></svg>
@@ -145,8 +138,6 @@ const GauntletOutputView: React.FC<GauntletOutputViewProps> = ({
 
     const refinerOutput = refinerState.output;
 
-    // Collapsed state for reasoning/confidence details
-    const [detailsOpen, setDetailsOpen] = useState(false);
 
     // Anchor toggle states
     const [voidOpen, setVoidOpen] = useState(false);

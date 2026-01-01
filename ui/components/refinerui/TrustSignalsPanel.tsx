@@ -22,6 +22,7 @@ interface TrustSignalsPanelProps {
   onClose?: () => void;
   bottomPadding?: number;
   turnId?: string;
+  error?: any;
 }
 
 function parseAttributions(text: string, onModelClick: (modelName: string) => void): React.ReactNode {
@@ -57,7 +58,8 @@ export function TrustSignalsPanel({
   rawText,
   onClose,
   bottomPadding,
-  turnId
+  turnId,
+  error
 }: TrustSignalsPanelProps) {
   const [showRaw, setShowRaw] = useState(false);
   const setActiveSplitPanel = useSetAtom(activeSplitPanelAtom);
@@ -154,7 +156,7 @@ export function TrustSignalsPanel({
       </div>
 
       <div
-        className="flex-1 overflow-y-auto p-4 space-y-4"
+        className="flex-1 overflow-y-auto p-4 space-y-4 shadow-inner"
         style={{ paddingBottom: bottomPadding ?? 160 }}
       >
         {isError && (
@@ -163,13 +165,15 @@ export function TrustSignalsPanel({
               type="refiner"
               failedProviderId={providerId || ""}
               onRetry={onRetry || (() => { })}
+              errorMessage={error?.message}
+              requiresReauth={!!error?.requiresReauth}
               compact
             />
           </div>
         )}
 
         {refiner?.gem && (
-          <div className="gem-callout bg-gradient-to-br from-amber-400/10 via-amber-50/5 to-white/0 border border-amber-400/40 rounded-xl p-4">
+          <div className="gem-callout bg-gradient-to-br from-amber-400/10 via-amber-50/5 to-white/0 border border-amber-400/40 rounded-xl p-4 shadow-sm">
             <div className="flex items-center justify-between mb-2">
               <div className="font-semibold text-sm text-text-primary flex items-center gap-2">
                 <span>💎</span>
@@ -229,7 +233,7 @@ export function TrustSignalsPanel({
               {showRaw ? '▼ Hide Raw Output' : '▶ Show Raw Output'}
             </button>
             {showRaw && (
-              <div className="mt-2 bg-black/40 rounded-lg p-4 font-mono text-xs text-white/60 whitespace-pre-wrap border border-white/10 overflow-x-auto max-h-64">
+              <div className="mt-2 bg-black/40 rounded-lg p-4 font-mono text-xs text-white/60 whitespace-pre-wrap border border-white/10 overflow-x-auto max-h-64 shadow-inner">
                 {rawText}
               </div>
             )}

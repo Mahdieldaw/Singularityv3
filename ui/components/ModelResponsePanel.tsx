@@ -66,9 +66,14 @@ export const ModelResponsePanel: React.FC<ModelResponsePanelProps> = React.memo(
         const hasText = !!text.trim();
         const isStreaming = status === 'streaming' || streamingState.activeProviderId === providerId;
         const isError = status === 'error' || (status as string) === 'failed' || (status as string) === 'skipped';
-        const errorMsg = (latestResponse?.meta as any)?.error || (latestResponse?.meta as any)?.skippedReason || ((status as string) === 'skipped' ? "Skipped by system" : "Error occurred");
 
-        return { status, text, hasText, isStreaming, isError, artifacts, errorMsg };
+        const errorObj = (latestResponse?.meta as any)?.error;
+        const errorMsg = typeof errorObj === 'string'
+            ? errorObj
+            : (errorObj?.message || (latestResponse?.meta as any)?.skippedReason || ((status as string) === 'skipped' ? "Skipped by system" : "Error occurred"));
+        const requiresReauth = !!errorObj?.requiresReauth;
+
+        return { status, text, hasText, isStreaming, isError, artifacts, errorMsg, requiresReauth };
     }, [latestResponse, streamingState.activeProviderId, providerId]);
 
     const {
@@ -76,7 +81,8 @@ export const ModelResponsePanel: React.FC<ModelResponsePanelProps> = React.memo(
         isLoading: isRefinerLoading,
         isError: isRefinerError,
         providerId: refinerPid,
-        rawText: refinerRawText
+        rawText: refinerRawText,
+        error: refinerError
     } = useRefinerOutput(turnId);
     const chatInputHeight = useAtomValue(chatInputHeightAtom);
 
@@ -102,6 +108,7 @@ export const ModelResponsePanel: React.FC<ModelResponsePanelProps> = React.memo(
                     onClose={onClose}
                     bottomPadding={(chatInputHeight || 80) + 32}
                     turnId={turnId}
+                    error={refinerError}
                 />
             </div>
         );
@@ -172,6 +179,21 @@ export const ModelResponsePanel: React.FC<ModelResponsePanelProps> = React.memo(
                     >
                         🌿 Branch
                     </button>
+
+                    {/* Re-auth button */}
+                    {derivedState.requiresReauth && (
+                        <button
+                            onClick={() => {
+                                window.dispatchEvent(
+                                    new CustomEvent('provider-reauth', { detail: { providerId } })
+                                );
+                            }}
+                            className="text-xs bg-intent-danger text-white px-2 py-1 rounded hover:bg-intent-danger/90 transition-colors"
+                            title="Log in to this provider"
+                        >
+                            🔑 Log In
+                        </button>
+                    )}
 
                     {/* Retry button (for errors or empty responses) */}
                     {(derivedState.isError || (derivedState.status === 'completed' && !derivedState.hasText)) && (

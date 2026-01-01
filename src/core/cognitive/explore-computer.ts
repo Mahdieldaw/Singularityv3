@@ -75,37 +75,37 @@ export function classifyQueryType(query: string): QueryType {
     const q = query.toLowerCase().trim();
 
     // Informational queries
-    if (/^(what is|define|explain|describe|tell me about|what are)\b/.test(q)) {
+    if (/^(what is|define|explain|describe|tell me about|what are|i need to know|give me a summary)\b/.test(q)) {
         return "informational";
     }
 
     // Procedural queries
-    if (/^(how do i|how to|steps to|guide|show me how|walk me through)\b/.test(q)) {
+    if (/^(how do i|how to|steps to|guide|show me how|walk me through|i need to|how can i)\b/.test(q)) {
         return "procedural";
     }
 
     // Advisory queries
-    if (/^(should i|what's best|what is best|recommend|which should|what do you suggest)\b/.test(q)) {
+    if (/^(should i|what's best|what is best|recommend|which should|what do you suggest|i need to decide|help me choose|i'm torn between)\b/.test(q)) {
         return "advisory";
     }
 
     // Comparative queries
-    if (/(compare|vs|versus|difference between|or|better|worse|which is)\b/.test(q)) {
+    if (/(compare|vs|versus|difference between|or|better|worse|which is|pros and cons)\b/.test(q)) {
         return "comparative";
     }
 
     // Creative queries
-    if (/^(write|create|generate|brainstorm|come up with|design|build)\b/.test(q)) {
+    if (/^(write|create|generate|brainstorm|come up with|design|build|draft)\b/.test(q)) {
         return "creative";
     }
 
     // Predictive queries
-    if (/(what if|will .* happen|predict|forecast|future of|what will)\b/.test(q)) {
+    if (/(what if|will .* happen|predict|forecast|future of|what will|likelihood)\b/.test(q)) {
         return "predictive";
     }
 
     // Interpretive queries
-    if (/(why did|what caused|meaning of|significance|interpret)\b/.test(q)) {
+    if (/(^why|why did|what caused|meaning of|significance|interpret|the reason for)\b/.test(q)) {
         return "interpretive";
     }
 

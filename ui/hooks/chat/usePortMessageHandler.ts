@@ -825,7 +825,7 @@ export function usePortMessageHandler() {
             const { providerStatuses, phase } = message as any;
             const mapStatusToStage = (
               status: 'queued' | 'active' | 'streaming' | 'completed' | 'failed',
-              phase: 'batch' | 'mapping'
+              _phase: 'batch' | 'mapping'
             ) => {
               if (status === 'queued') return 'idle';
               if (status === 'active') return 'thinking';

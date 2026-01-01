@@ -29,11 +29,7 @@ interface CognitiveAnchorsProps {
     } | null;
 }
 
-// Truncate helper
-function truncate(text: string, maxLength: number): string {
-    if (text.length <= maxLength) return text;
-    return text.substring(0, maxLength).trimEnd() + '...';
-}
+
 
 export const CognitiveAnchors: React.FC<CognitiveAnchorsProps> = ({ one, echo }) => {
     const [oneOpen, setOneOpen] = useState(false);

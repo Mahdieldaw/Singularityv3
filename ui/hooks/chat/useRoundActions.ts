@@ -1,5 +1,5 @@
 // ui/hooks/useRoundActions.ts - PRIMITIVES-ALIGNED VERSION
-import { useCallback, useRef } from "react";
+import { useCallback } from "react";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 
 import {

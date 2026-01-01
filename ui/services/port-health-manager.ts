@@ -18,6 +18,9 @@ export class PortHealthManager {
   private isConnected = false;
   private lastPongTimestamp = 0;
 
+  private readyResolve: (() => void) | null = null;
+  private readyPromise: Promise<void> | null = null;
+
   constructor(
     private portName: string = "htos-popup",
     private options: {
@@ -25,7 +28,7 @@ export class PortHealthManager {
       onUnhealthy?: () => void;
       onReconnect?: () => void;
     } = {},
-  ) {}
+  ) { }
 
   connect(
     messageHandler: (msg: any) => void,
@@ -35,8 +38,9 @@ export class PortHealthManager {
     this.onDisconnectCallback = onDisconnect;
 
     this.port = chrome.runtime.connect({ name: this.portName });
-    this.isConnected = true;
+    this.isConnected = false;
     this.reconnectAttempts = 0;
+
 
     this.port.onMessage.addListener(this.handleMessage.bind(this));
     this.port.onDisconnect.addListener(this.handleDisconnect.bind(this));
@@ -45,6 +49,16 @@ export class PortHealthManager {
 
     console.log("[PortHealthManager] Connected to service worker");
     return this.port;
+  }
+
+  async waitForReady(): Promise<void> {
+    if (this.isConnected) return;
+    if (!this.readyPromise) {
+      this.readyPromise = new Promise((resolve) => {
+        this.readyResolve = resolve;
+      });
+    }
+    return this.readyPromise;
   }
 
   private sendKeepalivePing() {
@@ -104,11 +118,11 @@ export class PortHealthManager {
                 if (chrome.runtime && chrome.runtime.lastError) {
                   /* ignore transient delivery errors */
                 }
-              } catch (_) {}
+              } catch (_) { }
             },
           );
         }
-      } catch (e) {}
+      } catch (e) { }
     }
 
     if (message.type === "KEEPALIVE_PONG") {
@@ -123,6 +137,11 @@ export class PortHealthManager {
     if (message.type === "HANDLER_READY") {
       console.log("[PortHealthManager] Service worker handler ready");
       this.isConnected = true;
+      if (this.readyResolve) {
+        this.readyResolve();
+        this.readyResolve = null;
+        this.readyPromise = null;
+      }
       return;
     }
 
@@ -183,7 +202,7 @@ export class PortHealthManager {
     if (this.port) {
       try {
         this.port.disconnect();
-      } catch (e) {}
+      } catch (e) { }
       this.port = null;
     }
   }

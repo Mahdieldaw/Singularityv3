@@ -24,7 +24,7 @@ export const AntagonistCard: React.FC<AntagonistCardProps> = ({
     onProviderSelect,
     onUsePrompt,
 }) => {
-    const { output, isLoading, isError, providerId } = useAntagonistOutput(aiTurn.id, activeProviderId);
+    const { output, isLoading, isError, providerId, error } = useAntagonistOutput(aiTurn.id, activeProviderId);
     const [selections, setSelections] = useState<Record<string, string>>({});
     const [copied, setCopied] = useState(false);
     const [dimensionsOpen, setDimensionsOpen] = useState(false);
@@ -92,6 +92,8 @@ export const AntagonistCard: React.FC<AntagonistCardProps> = ({
                     type="antagonist"
                     failedProviderId={providerId || ""}
                     onRetry={(pid) => handleProviderChange(pid)}
+                    errorMessage={error?.message}
+                    requiresReauth={!!error?.requiresReauth}
                     compact
                 />
             </div>

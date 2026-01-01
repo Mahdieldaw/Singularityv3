@@ -25,6 +25,10 @@ export interface SelectableShowcaseItem {
     applies_when?: string;
     source?: string;
     challenges?: string;
+    unifiedSource?: UnifiedOption["source"];
+    matchConfidence?: UnifiedOption["matchConfidence"];
+    inventoryIndex?: number;
+    artifactOriginalId?: string;
     graphNodeId?: string;
     graphSupportCount?: number;
     graphSupporters?: Array<number | string>;
@@ -45,6 +49,45 @@ export interface ProcessedShowcase {
     }>;
     independentAnchors: Array<SelectableShowcaseItem>;
     ghost: string | null;
+}
+
+export interface ParsedInventoryItem {
+    index: number;
+    label: string;
+    summary: string;
+    citations: number[];
+    rawText: string;
+}
+
+export interface UnifiedOption {
+    id: string;
+    label: string;
+    summary: string;
+    citations: number[];
+    source: "matched" | "inventory_only" | "artifact_only";
+    inventoryIndex?: number;
+    artifactData?: {
+        type: "consensus" | "supplemental" | "frame_challenger";
+        originalId: string;
+        dimension?: string;
+        applies_when?: string;
+        support_count?: number;
+        supporters?: number[];
+        source?: string;
+        challenges?: string;
+    };
+    matchConfidence: "exact" | "high" | "medium" | "low" | "none";
+}
+
+export interface ReconciliationResult {
+    options: UnifiedOption[];
+    stats: {
+        totalOptions: number;
+        matched: number;
+        inventoryOnly: number;
+        artifactOnly: number;
+        matchQuality: "good" | "partial" | "poor";
+    };
 }
 
 const normalizeForMatch = (text: string): string =>
@@ -98,6 +141,368 @@ const textSimilarity = (a: string, b: string): number => {
 };
 
 const normalizeEdgeType = (t: string): string => String(t || "").toLowerCase().trim();
+
+const parseCitationNumbers = (text: string): number[] => {
+    const out: number[] = [];
+    const t = String(text || "");
+
+    const bracketMatches = t.matchAll(/\[(\d+(?:\s*,\s*\d+)*)\]/g);
+    for (const m of bracketMatches) {
+        const nums = String(m[1] || "")
+            .split(/\s*,\s*/)
+            .map((x) => Number.parseInt(x, 10))
+            .filter((n) => Number.isFinite(n) && n > 0);
+        out.push(...nums);
+    }
+
+    const modelParen = t.matchAll(/\(\s*Model(?:s)?\s*([\d\s,]+)\)/gi);
+    for (const m of modelParen) {
+        const nums = String(m[1] || "")
+            .split(/\s*,\s*/)
+            .map((x) => Number.parseInt(x, 10))
+            .filter((n) => Number.isFinite(n) && n > 0);
+        out.push(...nums);
+    }
+
+    const unique = Array.from(new Set(out));
+    unique.sort((a, b) => a - b);
+    return unique;
+};
+
+const stripCitationSyntax = (text: string): string => {
+    return String(text || "")
+        .replace(/\s*\[(?:\d+(?:\s*,\s*\d+)*)\]\s*/g, " ")
+        .replace(/\s*\(\s*Model(?:s)?\s*[\d\s,]+\)\s*/gi, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+};
+
+const isThemeHeaderLine = (line: string): boolean => {
+    const t = String(line || "").trim();
+    if (!t) return false;
+    if (/^Theme:\s*/i.test(t)) return true;
+    if (/^#+\s+/.test(t)) return true;
+    if (/^[\u{1F300}-\u{1FAD6}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/u.test(t)) return true;
+    return false;
+};
+
+export function parseOptionsInventory(text: string | null | undefined): ParsedInventoryItem[] {
+    if (!text || typeof text !== "string") return [];
+
+    const lines = String(text).split("\n");
+    const items: ParsedInventoryItem[] = [];
+    let itemIndex = 0;
+
+    let current: {
+        label: string;
+        summaryParts: string[];
+        citations: number[];
+        rawLines: string[];
+    } | null = null;
+
+    const flush = () => {
+        if (!current) return;
+        const label = String(current.label || "").trim();
+        const summary = stripCitationSyntax(current.summaryParts.join(" "));
+        const citations = Array.from(new Set(current.citations));
+        citations.sort((a, b) => a - b);
+        if (label) {
+            items.push({
+                index: itemIndex,
+                label,
+                summary,
+                citations,
+                rawText: current.rawLines.join("\n"),
+            });
+        }
+        current = null;
+    };
+
+    const itemLineMatch = (line: string): { label: string; rest: string } | null => {
+        const t = String(line || "").trim();
+        if (!t) return null;
+        if (isThemeHeaderLine(t)) return null;
+        const m = t.match(/^\s*(?:[-*•]|\d+[.)])?\s*(?:\*\*([^*]+)\*\*|([^:]{3,}?))\s*:\s*(.+)$/);
+        if (!m) return null;
+        const label = String(m[1] || m[2] || "").trim().replace(/^\*\*|\*\*$/g, "");
+        const rest = String(m[3] || "").trim();
+        if (!label || !rest) return null;
+        return { label, rest };
+    };
+
+    for (const rawLine of lines) {
+        const line = String(rawLine || "");
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        if (isThemeHeaderLine(trimmed)) {
+            flush();
+            continue;
+        }
+
+        const m = itemLineMatch(line);
+        if (m) {
+            flush();
+            itemIndex += 1;
+            current = {
+                label: m.label,
+                summaryParts: [m.rest],
+                citations: parseCitationNumbers(m.rest),
+                rawLines: [line],
+            };
+            continue;
+        }
+
+        if (current) {
+            current.summaryParts.push(trimmed.replace(/^\s*[-*•]\s+/, ""));
+            current.citations.push(...parseCitationNumbers(trimmed));
+            current.rawLines.push(line);
+        }
+    }
+
+    flush();
+    return items;
+}
+
+type InventoryMatch = {
+    kind: "consensus" | "outlier";
+    index: number;
+    confidence: UnifiedOption["matchConfidence"];
+    score: number;
+};
+
+const confidenceFromScore = (score: number): UnifiedOption["matchConfidence"] => {
+    if (score >= 0.98) return "exact";
+    if (score >= 0.85) return "high";
+    if (score >= 0.72) return "medium";
+    if (score >= 0.55) return "low";
+    return "none";
+};
+
+export function matchInventoryToArtifact(
+    inventory: ParsedInventoryItem[],
+    artifact: MapperArtifact | null
+): Map<number, InventoryMatch> {
+    const matches = new Map<number, InventoryMatch>();
+    if (!artifact) return matches;
+    if (!Array.isArray(inventory) || inventory.length === 0) return matches;
+
+    const candidates: Array<{ kind: "consensus" | "outlier"; index: number; title: string; full: string }> = [];
+    (artifact.consensus?.claims || []).forEach((c, i) => {
+        const parsed = splitTitleDesc(c.text);
+        candidates.push({ kind: "consensus", index: i, title: parsed.title, full: c.text });
+    });
+    (artifact.outliers || []).forEach((o, i) => {
+        const parsed = splitTitleDesc(o.insight);
+        candidates.push({ kind: "outlier", index: i, title: parsed.title, full: o.insight });
+    });
+
+    const pairs: Array<{ invIndex: number; candKey: string; match: InventoryMatch }> = [];
+    for (const inv of inventory) {
+        const invText = `${inv.label} ${inv.summary}`.trim();
+        for (const cand of candidates) {
+            const score = Math.max(
+                textSimilarity(inv.label, cand.title),
+                textSimilarity(inv.label, cand.full),
+                textSimilarity(invText, cand.full) * 0.95
+            );
+            if (score < 0.55) continue;
+            const candKey = `${cand.kind}-${cand.index}`;
+            pairs.push({
+                invIndex: inv.index,
+                candKey,
+                match: {
+                    kind: cand.kind,
+                    index: cand.index,
+                    confidence: confidenceFromScore(score),
+                    score,
+                },
+            });
+        }
+    }
+
+    pairs.sort((a, b) => b.match.score - a.match.score);
+
+    const usedInv = new Set<number>();
+    const usedCand = new Set<string>();
+
+    for (const p of pairs) {
+        if (usedInv.has(p.invIndex)) continue;
+        if (usedCand.has(p.candKey)) continue;
+        usedInv.add(p.invIndex);
+        usedCand.add(p.candKey);
+        matches.set(p.invIndex, p.match);
+    }
+
+    return matches;
+}
+
+export function reconcileOptions(
+    optionsInventoryText: string | null | undefined,
+    artifact: MapperArtifact | null
+): ReconciliationResult {
+    const parsedInventory = parseOptionsInventory(optionsInventoryText);
+    const matches = matchInventoryToArtifact(parsedInventory, artifact);
+
+    const options: UnifiedOption[] = [];
+    const matchedArtifactIds = new Set<string>();
+
+    for (const item of parsedInventory) {
+        const match = matches.get(item.index);
+        if (match && artifact) {
+            const artifactId = `${match.kind === "consensus" ? "consensus" : "outlier"}-${match.index}`;
+            matchedArtifactIds.add(artifactId);
+
+            let artifactData: UnifiedOption["artifactData"];
+            if (match.kind === "consensus") {
+                const claim = artifact.consensus?.claims?.[match.index];
+                artifactData = {
+                    type: "consensus",
+                    originalId: artifactId,
+                    dimension: claim?.dimension,
+                    applies_when: claim?.applies_when,
+                    support_count: claim?.support_count,
+                    supporters: claim?.supporters,
+                };
+            } else {
+                const outlier = artifact.outliers?.[match.index];
+                artifactData = {
+                    type: outlier?.type === "frame_challenger" ? "frame_challenger" : "supplemental",
+                    originalId: artifactId,
+                    dimension: outlier?.dimension,
+                    applies_when: outlier?.applies_when,
+                    source: outlier?.source,
+                    challenges: outlier?.challenges,
+                };
+            }
+
+            const supportersFallback = artifactData?.supporters || [];
+            const outlierIndexFallback =
+                match.kind === "outlier" && typeof artifact.outliers?.[match.index]?.source_index === "number"
+                    ? [artifact.outliers[match.index].source_index]
+                    : [];
+
+            options.push({
+                id: `unified-${item.index}`,
+                label: item.label,
+                summary: item.summary,
+                citations: item.citations.length > 0 ? item.citations : (supportersFallback.length > 0 ? supportersFallback : outlierIndexFallback),
+                source: "matched",
+                inventoryIndex: item.index,
+                artifactData,
+                matchConfidence: match.confidence,
+            });
+        } else {
+            options.push({
+                id: `unified-${item.index}`,
+                label: item.label,
+                summary: item.summary,
+                citations: item.citations,
+                source: "inventory_only",
+                inventoryIndex: item.index,
+                matchConfidence: "none",
+            });
+        }
+    }
+
+    if (artifact) {
+        (artifact.consensus?.claims || []).forEach((claim, i) => {
+            const id = `consensus-${i}`;
+            if (matchedArtifactIds.has(id)) return;
+            const parsed = splitTitleDesc(claim.text);
+            options.push({
+                id: `unified-artifact-consensus-${i}`,
+                label: parsed.title,
+                summary: parsed.desc || "",
+                citations: claim.supporters || [],
+                source: "artifact_only",
+                artifactData: {
+                    type: "consensus",
+                    originalId: id,
+                    dimension: claim.dimension,
+                    applies_when: claim.applies_when,
+                    support_count: claim.support_count,
+                    supporters: claim.supporters,
+                },
+                matchConfidence: "none",
+            });
+        });
+
+        (artifact.outliers || []).forEach((outlier, i) => {
+            const id = `outlier-${i}`;
+            if (matchedArtifactIds.has(id)) return;
+            const parsed = splitTitleDesc(outlier.insight);
+            options.push({
+                id: `unified-artifact-outlier-${i}`,
+                label: parsed.title,
+                summary: parsed.desc || outlier.raw_context || "",
+                citations: typeof outlier.source_index === "number" ? [outlier.source_index] : [],
+                source: "artifact_only",
+                artifactData: {
+                    type: outlier.type === "frame_challenger" ? "frame_challenger" : "supplemental",
+                    originalId: id,
+                    dimension: outlier.dimension,
+                    applies_when: outlier.applies_when,
+                    source: outlier.source,
+                    challenges: outlier.challenges,
+                },
+                matchConfidence: "none",
+            });
+        });
+    }
+
+    const matched = options.filter((o) => o.source === "matched").length;
+    const inventoryOnly = options.filter((o) => o.source === "inventory_only").length;
+    const artifactOnly = options.filter((o) => o.source === "artifact_only").length;
+    const invDenom = Math.max(1, parsedInventory.length);
+    const matchRatio = matched / invDenom;
+    const matchQuality: ReconciliationResult["stats"]["matchQuality"] =
+        matchRatio >= 0.8 ? "good" : matchRatio >= 0.4 ? "partial" : "poor";
+
+    return {
+        options,
+        stats: {
+            totalOptions: options.length,
+            matched,
+            inventoryOnly,
+            artifactOnly,
+            matchQuality,
+        },
+    };
+}
+
+export function unifiedOptionsToShowcaseItems(reconciliation: ReconciliationResult): SelectableShowcaseItem[] {
+    return (reconciliation?.options || []).map((opt) => {
+        let type: ShowcaseItemType = "supplemental";
+        if (opt.artifactData?.type === "consensus") type = "consensus";
+        else if (opt.artifactData?.type === "frame_challenger") type = "frame_challenger";
+        else if (opt.artifactData?.type === "supplemental") type = "supplemental";
+        else if (opt.source === "inventory_only") type = "supplemental";
+
+        const item: SelectableShowcaseItem = {
+            id: opt.id,
+            text: opt.label,
+            type,
+            detail: opt.summary || undefined,
+            dimension: opt.artifactData?.dimension,
+            applies_when: opt.artifactData?.applies_when,
+            source: opt.artifactData?.source,
+            challenges: opt.artifactData?.challenges,
+            unifiedSource: opt.source,
+            matchConfidence: opt.matchConfidence,
+            inventoryIndex: opt.inventoryIndex,
+            artifactOriginalId: opt.artifactData?.originalId,
+        };
+
+        if (opt.artifactData?.type === "consensus") {
+            item.graphSupportCount = opt.artifactData.support_count;
+            item.graphSupporters = opt.artifactData.supporters;
+        } else if (Array.isArray(opt.citations) && opt.citations.length > 0) {
+            item.graphSupporters = opt.citations;
+        }
+
+        return item;
+    });
+}
 
 const isConflictEdge = (e: GraphEdge): boolean => {
     const t = normalizeEdgeType(e.type);
@@ -171,9 +576,6 @@ export function processArtifactForShowcase(
     artifact: MapperArtifact,
     graphTopology?: GraphTopology | null
 ): ProcessedShowcase {
-    const nodes = Array.isArray(graphTopology?.nodes) ? graphTopology!.nodes : [];
-    const edges = Array.isArray(graphTopology?.edges) ? graphTopology!.edges : [];
-
     const items: SelectableShowcaseItem[] = [];
 
     (artifact?.consensus?.claims || []).forEach((claim, i) => {
@@ -203,6 +605,17 @@ export function processArtifactForShowcase(
             challenges: o.challenges,
         });
     });
+
+    return processShowcaseItems(items, graphTopology, artifact?.ghost ?? null);
+}
+
+export function processShowcaseItems(
+    items: SelectableShowcaseItem[],
+    graphTopology?: GraphTopology | null,
+    ghost: string | null = null
+): ProcessedShowcase {
+    const nodes = Array.isArray(graphTopology?.nodes) ? graphTopology!.nodes : [];
+    const edges = Array.isArray(graphTopology?.edges) ? graphTopology!.edges : [];
 
     if (nodes.length > 0) {
         for (const item of items) {
@@ -317,7 +730,7 @@ export function processArtifactForShowcase(
         bifurcations,
         bundles,
         independentAnchors,
-        ghost: artifact?.ghost ?? null,
+        ghost,
     };
 }
 

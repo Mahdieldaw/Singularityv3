@@ -17,13 +17,16 @@ import { formatTurnForMd, formatDecisionMapForMd } from "../../utils/copy-format
 import { getLatestResponse } from "../../utils/turn-helpers";
 import { useRefinerOutput } from "../../hooks/useRefinerOutput";
 import { useAntagonistOutput } from "../../hooks/useAntagonistOutput";
+import { PipelineErrorBanner } from "../PipelineErrorBanner";
 import { CopyButton } from "../CopyButton";
 import {
     buildComparisonContent,
     buildDecisionTreeContent,
     buildDirectAnswerContent,
     buildExplorationContent,
-    processArtifactForShowcase,
+    reconcileOptions,
+    unifiedOptionsToShowcaseItems,
+    processShowcaseItems,
     type ProcessedShowcase,
     type SelectableShowcaseItem
 } from "./content-builders";
@@ -41,6 +44,65 @@ const DimensionBadge: React.FC<{ dimension?: string }> = ({ dimension }) => {
         <span className="text-[10px] px-1.5 py-0.5 rounded bg-surface-highlight/40 border border-border-subtle text-text-muted uppercase tracking-wide">
             {dimension.replace(/_/g, " ")}
         </span>
+    );
+};
+
+const UnifiedMetaBadges: React.FC<{ item: SelectableShowcaseItem }> = ({ item }) => {
+    const src = item.unifiedSource;
+    const confidence = item.matchConfidence;
+
+    const sourceBadge = (() => {
+        if (!src) return null;
+        if (src === "matched") {
+            return (
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/20 text-emerald-200 uppercase tracking-wide">
+                    matched
+                </span>
+            );
+        }
+        if (src === "inventory_only") {
+            return (
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-sky-500/10 border border-sky-500/20 text-sky-200 uppercase tracking-wide">
+                    options only
+                </span>
+            );
+        }
+        return (
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-violet-500/10 border border-violet-500/20 text-violet-200 uppercase tracking-wide">
+                artifact only
+            </span>
+        );
+    })();
+
+    const confidenceBadge =
+        src === "matched" && confidence && confidence !== "none" ? (
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-surface-highlight/30 border border-border-subtle text-text-muted tabular-nums">
+                match: {confidence}
+            </span>
+        ) : null;
+
+    const inventoryBadge =
+        typeof item.inventoryIndex === "number" && item.inventoryIndex > 0 ? (
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-surface-highlight/30 border border-border-subtle text-text-muted tabular-nums">
+                opt #{item.inventoryIndex}
+            </span>
+        ) : null;
+
+    const artifactIdBadge = item.artifactOriginalId ? (
+        <span className="text-[10px] text-text-muted font-mono px-1.5 py-0.5 rounded bg-surface-highlight/30 border border-border-subtle">
+            {item.artifactOriginalId}
+        </span>
+    ) : null;
+
+    if (!sourceBadge && !confidenceBadge && !inventoryBadge && !artifactIdBadge) return null;
+
+    return (
+        <>
+            {sourceBadge}
+            {confidenceBadge}
+            {inventoryBadge}
+            {artifactIdBadge}
+        </>
     );
 };
 
@@ -228,6 +290,7 @@ const SelectableCard: React.FC<{
                         <div className="text-sm text-text-primary leading-relaxed font-medium">{item.text}</div>
                         {subtitle}
                         <div className="flex items-center gap-2">
+                            <UnifiedMetaBadges item={item} />
                             <DimensionBadge dimension={item.dimension} />
                             <SupportMeta supportCount={item.graphSupportCount} modelCount={modelCount} />
                             {item.source && (
@@ -461,6 +524,7 @@ interface ArtifactShowcaseProps {
     turn: AiTurn;
     onUnderstand?: (options?: CognitiveTransitionOptions) => void;
     onDecide?: (options?: CognitiveTransitionOptions) => void;
+    onRetryMapping?: (pid: string) => void;
     isLoading?: boolean;
 }
 
@@ -470,6 +534,7 @@ export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
     turn,
     onUnderstand,
     onDecide,
+    onRetryMapping,
     isLoading = false,
 }) => {
     const [selectedIds, setSelectedIds] = useAtom(selectedArtifactsAtom);
@@ -481,8 +546,8 @@ export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
     const setIsDecisionMapOpen = useSetAtom(isDecisionMapOpenAtom);
 
     // Hooks for Refiner and Antagonist
-    const { output: refinerOutput, providerId: refinerPid } = useRefinerOutput(turn?.id);
-    const { output: antagonistOutput, providerId: antagonistPid } = useAntagonistOutput(turn?.id);
+    const { output: refinerOutput, providerId: refinerPid, error: refinerError } = useRefinerOutput(turn?.id);
+    const { output: antagonistOutput, providerId: antagonistPid, error: antagonistError } = useAntagonistOutput(turn?.id);
 
     // Get modified artifact
     const currentTurnId = turn?.id || mapperArtifact?.turn?.toString() || "";
@@ -490,6 +555,58 @@ export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
     const modifiedArtifact = useMemo(() => mapperArtifact ? applyEdits(mapperArtifact, edits) : null, [mapperArtifact, edits]);
     const userNotes = edits?.userNotes;
     const artifactForDisplay = modifiedArtifact || mapperArtifact || null;
+
+    const activeMapperPid = useMemo(() => {
+        if (turn.meta?.mapper) return turn.meta.mapper;
+        const keys = Object.keys(turn.mappingResponses || {});
+        return keys.length > 0 ? keys[0] : undefined;
+    }, [turn.meta?.mapper, turn.mappingResponses]);
+
+    const latestMapping = useMemo(() => {
+        if (!activeMapperPid) return null;
+        return getLatestResponse((turn.mappingResponses || {})[activeMapperPid]);
+    }, [turn.mappingResponses, activeMapperPid]);
+
+    const graphTopology = useMemo(() => {
+        const fromMeta = (latestMapping?.meta as any)?.graphTopology || null;
+        if (fromMeta) return fromMeta;
+        const raw = String(latestMapping?.text || "");
+        return extractGraphTopologyAndStrip(raw).topology;
+    }, [latestMapping]);
+
+    const mapperNarrative = useMemo(() => {
+        const raw = String(latestMapping?.text || "");
+        const parsed = parseMappingResponse(raw);
+        return parsed.narrative || "";
+    }, [latestMapping]);
+
+    const mapperOptionsText = useMemo(() => {
+        const fromMeta =
+            (latestMapping?.meta as any)?.allAvailableOptions ||
+            (latestMapping?.meta as any)?.all_available_options ||
+            (latestMapping?.meta as any)?.options ||
+            null;
+        if (fromMeta) {
+            return cleanOptionsText(normalizeMaybeEscapedText(String(fromMeta)));
+        }
+        const raw = String(latestMapping?.text || "");
+        const parsed = parseMappingResponse(raw);
+        return parsed.options ? cleanOptionsText(normalizeMaybeEscapedText(parsed.options)) : null;
+    }, [latestMapping]);
+
+    const artifactDetailMap = useMemo(() => buildArtifactDetailMap(artifactForDisplay), [artifactForDisplay]);
+    const optionDetailMap = useMemo(() => buildOptionDetailMap(mapperOptionsText), [mapperOptionsText]);
+
+    const reconciliation = useMemo(
+        () => reconcileOptions(mapperOptionsText, artifactForDisplay),
+        [mapperOptionsText, artifactForDisplay]
+    );
+
+    const optionById = useMemo(() => {
+        const map = new Map<string, (typeof reconciliation.options)[number]>();
+        for (const opt of reconciliation.options) map.set(opt.id, opt);
+        return map;
+    }, [reconciliation]);
 
     const workflowProgress = useAtomValue(workflowProgressForTurnFamily(currentTurnId));
 
@@ -518,6 +635,69 @@ export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
         const ids = Array.from(selectedIds);
         ids.sort();
         for (const id of ids) {
+            const unified = optionById.get(id);
+            if (unified) {
+                const ad = unified.artifactData;
+
+                let kind = "inventory_option";
+                let text = unified.label;
+                let dimension = ad?.dimension;
+                let source = ad?.source;
+
+                const meta: any = {
+                    summary: unified.summary,
+                    citations: unified.citations,
+                    source: unified.source,
+                    inventoryIndex: unified.inventoryIndex,
+                    matchConfidence: unified.matchConfidence,
+                    artifact: ad || null,
+                };
+
+                if (ad?.originalId && artifactForDisplay) {
+                    if (ad.originalId.startsWith("consensus-")) {
+                        const idx = Number(ad.originalId.slice("consensus-".length));
+                        const claim = artifactForDisplay?.consensus?.claims?.[idx];
+                        if (claim) {
+                            kind = "consensus_claim";
+                            text = claim.text;
+                            dimension = claim.dimension;
+                            meta.applies_when = claim.applies_when;
+                            meta.support_count = claim.support_count;
+                            meta.supporters = claim.supporters;
+                        }
+                    } else if (ad.originalId.startsWith("outlier-")) {
+                        const idx = Number(ad.originalId.slice("outlier-".length));
+                        const o = artifactForDisplay?.outliers?.[idx];
+                        if (o) {
+                            kind = "outlier";
+                            text = o.insight;
+                            dimension = o.dimension;
+                            source = o.source;
+                            meta.type = o.type;
+                            meta.raw_context = o.raw_context;
+                            meta.applies_when = o.applies_when;
+                            meta.source_index = o.source_index;
+                        }
+                    }
+                } else if (ad) {
+                    if (ad.type === "consensus") kind = "consensus_claim";
+                    else kind = "outlier";
+                    meta.applies_when = ad.applies_when;
+                    meta.support_count = ad.support_count;
+                    meta.supporters = ad.supporters;
+                    meta.type = ad.type;
+                }
+
+                out.push({
+                    id,
+                    kind,
+                    text,
+                    dimension,
+                    source,
+                    meta,
+                });
+                continue;
+            }
             if (id.startsWith("consensus-")) {
                 const idx = Number(id.slice("consensus-".length));
                 const claim = artifactForDisplay?.consensus?.claims?.[idx];
@@ -556,7 +736,7 @@ export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
             }
         }
         return out;
-    }, [artifactForDisplay, selectedIds]);
+    }, [artifactForDisplay, selectedIds, optionById]);
 
     const toggleSelection = (id: string) => {
         setSelectedIds((draft) => {
@@ -634,51 +814,11 @@ export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
     const ghostPresent = Boolean(mapperArtifact?.ghost);
     const dimsFoundCount = mapperArtifact?.dimensions_found?.length ?? totalDims;
 
-    const activeMapperPid = useMemo(() => {
-        if (turn.meta?.mapper) return turn.meta.mapper;
-        const keys = Object.keys(turn.mappingResponses || {});
-        return keys.length > 0 ? keys[0] : undefined;
-    }, [turn.meta?.mapper, turn.mappingResponses]);
-
-    const latestMapping = useMemo(() => {
-        if (!activeMapperPid) return null;
-        return getLatestResponse((turn.mappingResponses || {})[activeMapperPid]);
-    }, [turn.mappingResponses, activeMapperPid]);
-
-    const graphTopology = useMemo(() => {
-        const fromMeta = (latestMapping?.meta as any)?.graphTopology || null;
-        if (fromMeta) return fromMeta;
-        const raw = String(latestMapping?.text || "");
-        return extractGraphTopologyAndStrip(raw).topology;
-    }, [latestMapping]);
-
-    const mapperNarrative = useMemo(() => {
-        const raw = String(latestMapping?.text || "");
-        const parsed = parseMappingResponse(raw);
-        return parsed.narrative || "";
-    }, [latestMapping]);
-
-    const mapperOptionsText = useMemo(() => {
-        const fromMeta =
-            (latestMapping?.meta as any)?.allAvailableOptions ||
-            (latestMapping?.meta as any)?.all_available_options ||
-            (latestMapping?.meta as any)?.options ||
-            null;
-        if (fromMeta) {
-            return cleanOptionsText(normalizeMaybeEscapedText(String(fromMeta)));
-        }
-        const raw = String(latestMapping?.text || "");
-        const parsed = parseMappingResponse(raw);
-        return parsed.options ? cleanOptionsText(normalizeMaybeEscapedText(parsed.options)) : null;
-    }, [latestMapping]);
-
-    const artifactDetailMap = useMemo(() => buildArtifactDetailMap(artifactForDisplay), [artifactForDisplay]);
-    const optionDetailMap = useMemo(() => buildOptionDetailMap(mapperOptionsText), [mapperOptionsText]);
-
     const processed: ProcessedShowcase | null = useMemo(() => {
         if (!artifactForDisplay) return null;
-        return processArtifactForShowcase(artifactForDisplay, graphTopology);
-    }, [artifactForDisplay, graphTopology]);
+        const reconciledItems = unifiedOptionsToShowcaseItems(reconciliation);
+        return processShowcaseItems(reconciledItems, graphTopology, artifactForDisplay?.ghost ?? null);
+    }, [artifactForDisplay, graphTopology, reconciliation]);
 
     const processedWithDetails: ProcessedShowcase | null = useMemo(() => {
         if (!processed) return null;
@@ -978,6 +1118,16 @@ export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
                         </div>
                     )}
                 </>
+            ) : (latestMapping?.status === 'error' || (latestMapping?.status as string) === 'failed') ? (
+                <div className="py-4">
+                    <PipelineErrorBanner
+                        type="mapping"
+                        failedProviderId={activeMapperPid || ""}
+                        onRetry={(pid) => onRetryMapping?.(pid)}
+                        errorMessage={typeof (latestMapping?.meta as any)?.error === 'string' ? (latestMapping?.meta as any)?.error : (latestMapping?.meta as any)?.error?.message}
+                        requiresReauth={!!(latestMapping?.meta as any)?.error?.requiresReauth}
+                    />
+                </div>
             ) : (
                 <div className="flex flex-col items-center justify-center p-12 bg-surface-highlight/10 rounded-xl border border-dashed border-border-subtle animate-pulse">
                     <div className="text-3xl mb-4">🧩</div>

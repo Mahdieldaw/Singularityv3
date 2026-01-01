@@ -111,6 +111,7 @@ class ExtensionAPI {
           this.port = null;
         },
       );
+      await this.portHealthManager.waitForReady();
       return this.port;
     }
 
@@ -125,8 +126,10 @@ class ExtensionAPI {
       console.warn("[ExtensionAPI] Port disconnected (fallback)");
       this.port = null;
     });
+    // Fallback doesn't have PortHealthManager to wait on, but it's rarely used
     return this.port;
   }
+
 
   setPortMessageHandler(handler: ((message: any) => void) | null): void {
     this.portMessageHandler = handler;
@@ -175,7 +178,9 @@ class ExtensionAPI {
       );
       // Attempt a single reconnect and retry
       const newPort = await this.ensurePort({ force: true });
+      await this.portHealthManager?.waitForReady();
       newPort.postMessage(message);
+
     }
   }
 

@@ -3,12 +3,14 @@ import { LLM_PROVIDERS_CONFIG } from '../constants';
 import clsx from 'clsx';
 
 interface PipelineErrorBannerProps {
-    type: 'mapping' | 'refiner' | 'antagonist';
+    type: 'mapping' | 'refiner' | 'antagonist' | 'understand' | 'gauntlet';
     failedProviderId: string;
     onRetry: (pid: string) => void;
     onExplore?: () => void;
     onContinue?: () => void;
     compact?: boolean;
+    errorMessage?: string;
+    requiresReauth?: boolean;
 }
 
 export const PipelineErrorBanner: React.FC<PipelineErrorBannerProps> = ({
@@ -18,6 +20,8 @@ export const PipelineErrorBanner: React.FC<PipelineErrorBannerProps> = ({
     onExplore,
     onContinue,
     compact = false,
+    errorMessage,
+    requiresReauth = false,
 }) => {
     const [showDropdown, setShowDropdown] = useState(false);
 
@@ -26,15 +30,20 @@ export const PipelineErrorBanner: React.FC<PipelineErrorBannerProps> = ({
             case 'mapping': return 'Mapping unavailable';
             case 'refiner': return 'Enhancement unavailable';
             case 'antagonist': return 'Context refinement unavailable';
+            case 'understand': return 'Understanding unavailable';
+            case 'gauntlet': return 'Decision unavailable';
             default: return 'Step unavailable';
         }
     };
 
     const getDescription = () => {
+        if (errorMessage) return errorMessage;
         switch (type) {
             case 'mapping': return 'Advanced insights require a successful cross-reference of multiple sources.';
             case 'refiner': return 'We couldn\'t generate additional insights or actions for this response.';
             case 'antagonist': return 'Prompt refinement and context checking are currently unavailable.';
+            case 'understand': return 'The synthesis of perspectives into a coherent frame is currently unavailable.';
+            case 'gauntlet': return 'The final verdict and stress-testing of claims are currently unavailable.';
             default: return 'An error occurred during this pipeline step.';
         }
     };
@@ -44,11 +53,19 @@ export const PipelineErrorBanner: React.FC<PipelineErrorBannerProps> = ({
             case 'mapping': return '📊';
             case 'refiner': return '💎';
             case 'antagonist': return '💭';
+            case 'understand': return '🧠';
+            case 'gauntlet': return '🗡️';
             default: return '⚠️';
         }
     };
 
     const failedModelName = LLM_PROVIDERS_CONFIG.find(p => p.id === failedProviderId)?.name || failedProviderId;
+
+    const handleReauth = () => {
+        window.dispatchEvent(
+            new CustomEvent('provider-reauth', { detail: { providerId: failedProviderId } })
+        );
+    };
 
     return (
         <div className={clsx(
@@ -71,6 +88,11 @@ export const PipelineErrorBanner: React.FC<PipelineErrorBannerProps> = ({
                             {getDescription()}
                         </p>
                     )}
+                    {compact && errorMessage && (
+                        <p className="text-[11px] text-intent-danger mt-0.5 font-medium">
+                            {errorMessage}
+                        </p>
+                    )}
                 </div>
             </div>
 
@@ -81,6 +103,15 @@ export const PipelineErrorBanner: React.FC<PipelineErrorBannerProps> = ({
                 >
                     <span>🔄</span> Retry {failedModelName}
                 </button>
+
+                {requiresReauth && (
+                    <button
+                        onClick={handleReauth}
+                        className="px-3 py-1.5 rounded-lg bg-intent-danger/10 border border-intent-danger/20 text-xs font-medium text-intent-danger hover:bg-intent-danger/20 transition-all flex items-center gap-1.5"
+                    >
+                        <span>🔑</span> Log In
+                    </button>
+                )}
 
                 <div className="relative">
                     <button

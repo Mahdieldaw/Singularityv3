@@ -11,6 +11,7 @@ export interface RefinerOutputState {
     isError: boolean;
     providerId?: string | null;
     rawText?: string;
+    error?: any;
 }
 
 export function useRefinerOutput(aiTurnId: string | null, forcedProviderId?: string | null): RefinerOutputState {
@@ -59,7 +60,8 @@ export function useRefinerOutput(aiTurnId: string | null, forcedProviderId?: str
             isLoading,
             isError,
             providerId,
-            rawText: latestResponse.text
+            rawText: latestResponse.text,
+            error: (latestResponse.meta as any)?.error
         };
     }, [aiTurnId, turnsMap, forcedProviderId]);
 

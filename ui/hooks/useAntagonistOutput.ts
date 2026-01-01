@@ -11,6 +11,7 @@ export interface AntagonistOutputState {
     isError: boolean;
     providerId?: string | null;
     rawText?: string;
+    error?: any;
 }
 
 export function useAntagonistOutput(aiTurnId: string | null, forcedProviderId?: string | null): AntagonistOutputState {
@@ -59,7 +60,8 @@ export function useAntagonistOutput(aiTurnId: string | null, forcedProviderId?: 
             isLoading,
             isError,
             providerId,
-            rawText: latestResponse.text
+            rawText: latestResponse.text,
+            error: (latestResponse.meta as any)?.error
         };
     }, [aiTurnId, turnsMap, forcedProviderId]);
 

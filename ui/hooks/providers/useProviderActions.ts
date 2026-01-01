@@ -25,8 +25,8 @@ export function useProviderActions(
     const setActiveRecomputeState = useSetAtom(activeRecomputeStateAtom);
     const [activeTarget, setActiveTarget] = useAtom(activeProviderTargetAtom);
 
-    // Retry: same prompt, same provider (recompute-batch)
-    const handleRetryProvider = useCallback(async (providerId: string) => {
+    // Retry: same prompt, same provider (recompute-batch or specific step)
+    const handleRetryProvider = useCallback(async (providerId: string, stepType: "batch" | "mapping" | "understand" | "gauntlet" = "batch") => {
         if (!sessionId || !aiTurn) {
             console.warn("[useProviderActions] Cannot retry: missing session or turn");
             return;
@@ -34,9 +34,9 @@ export function useProviderActions(
 
         console.log(`[useProviderActions] Retrying provider: ${providerId}`, { aiTurnId, sessionId });
 
-        // Set recompute state to show branching indicator
+        // Set recompute state to show branching indicator (or loading state for others)
         try {
-            setActiveRecomputeState({ aiTurnId, stepType: "batch" as any, providerId });
+            setActiveRecomputeState({ aiTurnId, stepType: stepType as any, providerId });
         } catch (_) { /* non-fatal */ }
 
         // Get original user message for retry
@@ -53,7 +53,7 @@ export function useProviderActions(
             type: "recompute",
             sessionId,
             sourceTurnId: aiTurnId,
-            stepType: "batch" as any,
+            stepType: stepType as any,
             targetProvider: providerId as ProviderKey,
             userMessage,
             useThinking: false,

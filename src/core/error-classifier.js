@@ -7,11 +7,11 @@ export function classifyError(error) {
   if (error && error.code === "RATE_LIMITED") {
     const retryAfterMs =
       parseRetryAfter(error) || parseRateLimitResetMsFromMessage(error) || 60000;
+    const retryText = retryAfterMs > 0 ? ` Retry available in ${formatRetryAfter(retryAfterMs)}.` : "";
     return {
       type: "rate_limit",
       message:
-        error.message ||
-        "Rate limit reached. Please wait before retrying.",
+        (error.message || "Rate limit reached.") + retryText,
       retryable: true,
       retryAfterMs,
     };
@@ -24,9 +24,10 @@ export function classifyError(error) {
     if (status === 429) {
       const retryAfterMs =
         parseRetryAfter(error) || parseRateLimitResetMsFromMessage(error) || 60000;
+      const retryText = retryAfterMs > 0 ? ` Retry available in ${formatRetryAfter(retryAfterMs)}.` : "";
       return {
         type: "rate_limit",
-        message: "Rate limit reached. Please wait before retrying.",
+        message: "Rate limit reached." + retryText,
         retryable: true,
         retryAfterMs,
       };
@@ -68,15 +69,17 @@ export function classifyError(error) {
 
   if (
     errorType === "rate_limit_error" ||
+    errorType === "tooManyRequests" ||
     errorType === "RATE_LIMITED" ||
     nestedErrorType === "rate_limit_error" ||
     /rate[_\s-]?limit/i.test(message)
   ) {
     const retryAfterMs =
       parseRetryAfter(error) || parseRateLimitResetMsFromMessage(error) || 60000;
+    const retryText = retryAfterMs > 0 ? ` Retry available in ${formatRetryAfter(retryAfterMs)}.` : "";
     return {
       type: "rate_limit",
-      message: "Rate limit reached. Please wait before retrying.",
+      message: "Rate limit reached." + retryText,
       retryable: true,
       retryAfterMs,
     };
@@ -157,9 +160,25 @@ function parseRateLimitResetMsFromMessage(error) {
   if (error && error.error && typeof error.error.message === "string") {
     candidates.push(error.error.message);
   }
-  if (error && error.details && typeof error.details.message === "string") {
-    candidates.push(error.details.message);
+
+  // Claude-specific: error.details might be the parsed JSON object
+  if (error && error.details) {
+    if (typeof error.details === "string") {
+      candidates.push(error.details);
+    } else if (typeof error.details === "object") {
+      // Check for direct properties if it's already an object
+      const d = error.details;
+      const resetsAt = d.resetsAt || d.resets_at || d.error?.resetsAt || d.error?.resets_at;
+      if (typeof resetsAt === "number" && isFinite(resetsAt)) {
+        const ms = (resetsAt > 10000000000 ? resetsAt : resetsAt * 1000) - Date.now();
+        if (ms > 0) return ms;
+      }
+      // Also check standard string candidates within the object
+      if (typeof d.message === "string") candidates.push(d.message);
+      if (typeof d.error?.message === "string") candidates.push(d.error.message);
+    }
   }
+
   if (
     original &&
     original.error &&
@@ -174,22 +193,43 @@ function parseRateLimitResetMsFromMessage(error) {
     if (!trimmed.startsWith("{")) continue;
     try {
       const parsed = JSON.parse(trimmed);
-      const direct = parsed.resetsAt || parsed.resets_at;
+      const direct = parsed.resetsAt || parsed.resets_at || parsed.error?.resetsAt || parsed.error?.resets_at;
       if (typeof direct === "number" && isFinite(direct)) {
-        const ms = direct * 1000 - Date.now();
+        // Handle both seconds and milliseconds (Claude usually does seconds epoch)
+        const ms = (direct > 10000000000 ? direct : direct * 1000) - Date.now();
         if (ms > 0) return ms;
       }
       const win = parsed.windows && (parsed.windows["5h"] || parsed.windows["1h"]);
       const winReset =
         win && (win.resets_at || win.resetsAt);
       if (typeof winReset === "number" && isFinite(winReset)) {
-        const ms = winReset * 1000 - Date.now();
+        const ms = (winReset > 10000000000 ? winReset : winReset * 1000) - Date.now();
         if (ms > 0) return ms;
       }
     } catch {
     }
   }
   return null;
+}
+
+/**
+ * Formats a retry-after duration into a human-readable string
+ */
+export function formatRetryAfter(ms) {
+  if (!ms || ms <= 0) return "";
+  const totalSeconds = Math.ceil(ms / 1000);
+  if (totalSeconds < 60) return `${totalSeconds}s`;
+
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+
+  if (minutes < 60) {
+    return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
+  }
+
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  return remainingMinutes > 0 ? `${hours}h ${remainingMinutes}m` : `${hours}h`;
 }
 
 /**
