@@ -1,5 +1,6 @@
-// ResizableSplitLayout.tsx - PRODUCTION-GRADE FIX
-// Fixes: Right pane width expansion bug when content has long unbreakable strings
+// ResizableSplitLayout.tsx - CSS GRID REFACTOR
+// Replaces flexbox with CSS Grid for deterministic layout control
+// GRID GUARANTEES: Content cannot expand beyond defined tracks
 
 import React, { useRef, useState, useCallback } from 'react';
 import clsx from 'clsx';
@@ -36,9 +37,12 @@ export const ResizableSplitLayout: React.FC<ResizableSplitLayoutProps> = ({
     // Use controlled ratio if provided, otherwise internal
     const ratio = controlledRatio ?? internalRatio;
 
-    // Calculate effective ratio - if split is closed, left is 100%
-    const leftWidth = isSplitOpen ? ratio : 100;
-    const rightWidth = 100 - ratio; // Store for clarity
+    // Calculate grid columns based on split state
+    // When closed: single column (100%)
+    // When open: left% + divider(6px) + right%
+    const gridTemplateColumns = isSplitOpen
+        ? `${ratio}fr 6px ${100 - ratio}fr`
+        : '1fr';
 
     const handlePointerDown = useCallback((e: React.PointerEvent) => {
         if (!isSplitOpen) return;
@@ -84,38 +88,47 @@ export const ResizableSplitLayout: React.FC<ResizableSplitLayoutProps> = ({
     return (
         <div
             ref={containerRef}
-            className={clsx("flex h-full w-full overflow-hidden", className)}
-            style={style}
+            className={clsx("h-full w-full overflow-hidden", className)}
+            style={{
+                ...style,
+                display: 'grid',
+                gridTemplateColumns,
+                transition: isDragging ? 'none' : 'grid-template-columns 75ms ease-out',
+            }}
         >
             {/* ============================================
-                LEFT PANE
-                - flex-shrink-0: Prevent collapsing below width
-                - min-w-0: Allow content to scroll/clip
-                - overflow-hidden: Clip overflowing content
+                LEFT PANE - GRID CELL 1
+                ============================================
+                Grid cell properties:
+                - min-width: 0 (allow shrinking below content)
+                - overflow: hidden (clip overflowing content)
+                - Grid automatically constrains to track size
                 ============================================ */}
             <div
-                style={{ width: `${leftWidth}%` }}
-                className={clsx(
-                    "h-full flex-shrink-0 min-w-0 overflow-hidden transition-[width] duration-75 ease-out",
-                    isDragging && "transition-none"
-                )}
+                className="h-full min-w-0 overflow-hidden"
+                style={{
+                    gridColumn: '1',
+                }}
             >
                 {leftPane}
             </div>
 
-            {/* Divider and Right Pane (only if open) */}
+            {/* ============================================
+                DIVIDER + RIGHT PANE (only if split open)
+                ============================================ */}
             {isSplitOpen && (
                 <>
-                    {/* ============================================
-                        DIVIDER HANDLE
-                        ============================================ */}
+                    {/* DIVIDER - GRID CELL 2 (6px track) */}
                     <div
-                        className="w-1.5 h-full bg-border-subtle hover:bg-brand-500/50 transition-colors cursor-col-resize relative z-10 shrink-0 select-none touch-none"
+                        className="h-full bg-border-subtle hover:bg-brand-500/50 transition-colors cursor-col-resize relative select-none touch-none"
+                        style={{
+                            gridColumn: '2',
+                        }}
                         onPointerDown={handlePointerDown}
                         onPointerMove={handlePointerMove}
                         onPointerUp={handlePointerUp}
                     >
-                        {/* Centered Divider Content (Orbs) */}
+                        {/* Divider Content (Orbs) */}
                         <div
                             className="absolute top-0 bottom-0 left-0 w-0 flex flex-col items-center justify-center overflow-visible pointer-events-none"
                         >
@@ -126,30 +139,23 @@ export const ResizableSplitLayout: React.FC<ResizableSplitLayoutProps> = ({
                     </div>
 
                     {/* ============================================
-                        RIGHT PANE - CRITICAL FIXES APPLIED
+                        RIGHT PANE - GRID CELL 3
                         ============================================
+                        CRITICAL GRID PROPERTIES:
+                        - Grid track is explicitly sized (${100-ratio}fr)
+                        - min-width: 0 forces content to respect track
+                        - overflow: hidden clips anything exceeding track
+                        - Content CANNOT expand the grid track
                         
-                        🔥 KEY CHANGES:
-                        1. REMOVED flex-1 (was causing expansion)
-                        2. ADDED flex-shrink-0 (prevents collapse)
-                        3. ADDED max-width to enforce boundary
-                        4. ADDED overflow-hidden for containment
-                        
-                        WHY THIS WORKS:
-                        - width + max-width with same value = hard constraint
-                        - flex-shrink-0 prevents compression
-                        - overflow-hidden clips content instead of expanding
-                        - min-w-0 allows internal scrolling
+                        This is the key difference from flexbox:
+                        Flexbox: Content can expand parent
+                        Grid: Parent size is fixed, content must fit
                         ============================================ */}
                     <div
+                        className="h-full min-w-0 overflow-hidden"
                         style={{
-                            width: `${rightWidth}%`,
-                            maxWidth: `${rightWidth}%`, // ⭐ CRITICAL: Enforce as maximum
+                            gridColumn: '3',
                         }}
-                        className={clsx(
-                            "h-full flex-shrink-0 min-w-0 overflow-hidden transition-[width] duration-75 ease-out",
-                            isDragging && "transition-none"
-                        )}
                     >
                         {rightPane}
                     </div>
@@ -160,15 +166,85 @@ export const ResizableSplitLayout: React.FC<ResizableSplitLayoutProps> = ({
 };
 
 // ============================================
-// TECHNICAL DEBT NOTICE
+// ARCHITECTURAL ANALYSIS: GRID VS FLEXBOX
 // ============================================
-// This fix addresses a fundamental CSS flexbox behavior where:
-// 1. Percentage widths are treated as "suggestions" not constraints
-// 2. Content with intrinsic width can override flexible containers
-// 3. The combination of flex-1 + percentage width creates ambiguity
 //
-// FUTURE IMPROVEMENT:
-// Consider migrating to CSS Grid for more predictable layout control:
-// grid-template-columns: ${ratio}% 6px 1fr;
-// This would eliminate the flex ambiguity entirely.
+// FLEXBOX BEHAVIOR (what we had):
+// ┌─────────────────────────────────────────┐
+// │ Container (display: flex)               │
+// │ ┌───────────┐ ┌────────────────────┐   │
+// │ │ Left      │ │ Right (flex-1)     │   │
+// │ │ (70%)     │ │ ↓                  │   │
+// │ │           │ │ Content wants      │   │
+// │ │           │ │ 2000px width       │   │
+// │ │           │ │ ↓                  │   │
+// │ │           │ │ EXPANDS! →→→→→→→→→→│→→→(off-screen)
+// │ └───────────┘ └────────────────────┘   │
+// └─────────────────────────────────────────┘
+//
+// GRID BEHAVIOR (what we now have):
+// ┌─────────────────────────────────────────┐
+// │ Container (display: grid)               │
+// │ grid-template-columns: 70fr 6px 30fr    │
+// │ ┌───────────┐│┌────────────────────┐   │
+// │ │ Left      ││┤ Right              │   │
+// │ │ [Track 1] ││┤ [Track 3]          │   │
+// │ │           ││┤ Content wants      │   │
+// │ │           ││┤ 2000px width       │   │
+// │ │           ││┤ ↓                  │   │
+// │ │           ││┤ CLIPPED! (max 30%) │   │
+// │ └───────────┘│└────────────────────┘   │
+// └─────────────────────────────────────────┘
+//
+// KEY INSIGHT:
+// Grid tracks are EXPLICIT and IMMUTABLE.
+// Content cannot change track size.
+// This gives us DETERMINISTIC behavior.
+//
+// ============================================
+// PRODUCTION BENEFITS
+// ============================================
+//
+// 1. DETERMINISTIC LAYOUT
+//    - Track sizes are calculated once
+//    - Content cannot alter them
+//    - No "flexbox negotiation" phase
+//
+// 2. SIMPLER OVERFLOW HANDLING
+//    - Just add min-width: 0 and overflow: hidden
+//    - No need for max-width hacks
+//    - No fighting with flex-shrink/flex-grow
+//
+// 3. BETTER PERFORMANCE
+//    - Grid layout is faster than flexbox for fixed layouts
+//    - Single layout pass vs multiple flex negotiations
+//    - Smoother resize animations
+//
+// 4. EASIER TO REASON ABOUT
+//    - "3 columns: left, divider, right"
+//    - No implicit flex calculations
+//    - Clear mental model
+//
+// 5. FUTURE-PROOF
+//    - Can add more columns/rows trivially
+//    - Subgrid support for nested layouts
+//    - Better alignment tools
+//
+// ============================================
+// MIGRATION NOTES
+// ============================================
+//
+// This is a DROP-IN REPLACEMENT for the flexbox version.
+// - Same props API
+// - Same behavior from parent's perspective
+// - All child components work unchanged
+//
+// TESTING CHECKLIST:
+// □ Resize handle works smoothly
+// □ Long content doesn't break layout
+// □ Both panes stay visible
+// □ Transitions are smooth
+// □ No horizontal scroll on container
+// □ Content scrolls within panes
+//
 // ============================================
