@@ -16,10 +16,22 @@ export function useConnectionMonitoring() {
       console.log(
         `[useConnectionMonitoring] Connection state updated: ${isConnected}`,
       );
-      setConnectionStatus({
-        isConnected: isConnected,
-        // We can infer reconnecting status. If we get a 'false', it's trying.
-        isReconnecting: !isConnected,
+      setConnectionStatus((prev) => {
+        const prevState =
+          prev || { isConnected: false, isReconnecting: false, hasEverConnected: false };
+        if (isConnected) {
+          return {
+            isConnected: true,
+            isReconnecting: false,
+            hasEverConnected: true,
+          };
+        }
+        const hasEverConnected = prevState.hasEverConnected;
+        return {
+          isConnected: false,
+          isReconnecting: hasEverConnected,
+          hasEverConnected,
+        };
       });
     });
 

@@ -23,11 +23,19 @@ import {
   parseUnifiedMapperOutput,
   cleanOptionsText,
 } from "../../shared/parsing-utils";
+import { computeProblemStructureFromArtifact } from "../../src/core/PromptService";
 import { normalizeProviderId } from "../utils/provider-id-mapper";
 
 import { useRefinerOutput } from "../hooks/useRefinerOutput";
 import { useAntagonistOutput } from "../hooks/useAntagonistOutput";
 import { RefinerEpistemicAudit } from "./refinerui/RefinerCardsSection";
+import { MetricsRibbon } from "./cognitive/MetricsRibbon";
+import { StructuralInsight } from "./StructuralInsight";
+
+const DEBUG_DECISION_MAP_SHEET = false;
+const decisionMapSheetDbg = (...args: any[]) => {
+  if (DEBUG_DECISION_MAP_SHEET) console.debug("[DecisionMapSheet]", ...args);
+};
 
 // ============================================================================
 // OPTIONS PARSING - Handle both emoji-prefixed themes and "Theme:" headers
@@ -379,9 +387,10 @@ interface DetailViewProps {
   citationSourceOrder?: Record<number, string>;
   onBack: () => void;
   onOrbClick: (providerId: string) => void;
+  structural: any | null;
 }
 
-const DetailView: React.FC<DetailViewProps> = ({ node, narrativeExcerpt, citationSourceOrder, onBack, onOrbClick }) => {
+const DetailView: React.FC<DetailViewProps> = ({ node, narrativeExcerpt, citationSourceOrder, onBack, onOrbClick, structural }) => {
   // Get color from first supporter using citationSourceOrder
   const getNodeColor = () => {
     if (!node.supporters || node.supporters.length === 0) return '#8b5cf6';
@@ -398,6 +407,98 @@ const DetailView: React.FC<DetailViewProps> = ({ node, narrativeExcerpt, citatio
   };
 
   const nodeColor = getNodeColor();
+
+  const structuralInsights = React.useMemo(() => {
+    if (!structural) return [];
+
+    const insights: Array<{ type: any; metadata: any }> = [];
+
+    const leverageInversion = structural.patterns.leverageInversions.find((inv: any) => inv.claimId === node.id);
+
+    if (leverageInversion && leverageInversion.reason === "singular_foundation") {
+      const cascade = structural.patterns.cascadeRisks.find((r: any) => r.sourceId === node.id);
+      insights.push({
+        type: "fragile_foundation",
+        metadata: {
+          dependentCount: leverageInversion.affectedClaims.length,
+          dependentLabels: cascade?.dependentLabels || [],
+        },
+      });
+    }
+
+    const claimWithLeverage = structural.claimsWithLeverage.find((c: any) => c.id === node.id);
+    if (claimWithLeverage && claimWithLeverage.leverage > 8) {
+      const cascade = structural.patterns.cascadeRisks.find((r: any) => r.sourceId === node.id);
+      if (cascade && cascade.dependentIds.length >= 3) {
+        insights.push({
+          type: "keystone",
+          metadata: {
+            dependentCount: cascade.dependentIds.length,
+            dependentLabels: cascade.dependentLabels,
+          },
+        });
+      }
+    }
+
+    const conflict = structural.patterns.conflicts.find(
+      (c: any) =>
+        (c.claimA.id === node.id || c.claimB.id === node.id) && c.isBothConsensus
+    );
+    if (conflict) {
+      const otherClaim = conflict.claimA.id === node.id ? conflict.claimB : conflict.claimA;
+      insights.push({
+        type: "consensus_conflict",
+        metadata: {
+          conflictsWith: otherClaim.label,
+        },
+      });
+    }
+
+    if (leverageInversion && leverageInversion.reason === "high_connectivity_low_support") {
+      insights.push({
+        type: "high_leverage_singular",
+        metadata: {
+          leverageScore: claimWithLeverage?.leverage,
+        },
+      });
+    }
+
+    const cascade = structural.patterns.cascadeRisks.find((r: any) => r.sourceId === node.id);
+    if (cascade && cascade.depth >= 3) {
+      insights.push({
+        type: "cascade_risk",
+        metadata: {
+          dependentCount: cascade.dependentIds.length,
+          cascadeDepth: cascade.depth,
+          dependentLabels: cascade.dependentLabels,
+        },
+      });
+    }
+
+    if (claimWithLeverage && claimWithLeverage.isEvidenceGap) {
+      const gapCascade = structural.patterns.cascadeRisks.find((r: any) => r.sourceId === node.id);
+      insights.push({
+        type: "evidence_gap",
+        metadata: {
+          gapScore: claimWithLeverage.evidenceGapScore,
+          dependentCount: gapCascade?.dependentIds.length || 0,
+          dependentLabels: gapCascade?.dependentLabels || [],
+        },
+      });
+    }
+
+    if (claimWithLeverage && claimWithLeverage.isOutlier) {
+      insights.push({
+        type: "support_outlier",
+        metadata: {
+          skew: claimWithLeverage.supportSkew,
+          supporterCount: node.supporters.length,
+        },
+      });
+    }
+
+    return insights;
+  }, [node.id, node.supporters.length, structural]);
 
   return (
     <m.div
@@ -457,6 +558,20 @@ const DetailView: React.FC<DetailViewProps> = ({ node, narrativeExcerpt, citatio
           size="large"
         />
       </div>
+
+      {structuralInsights.length > 0 && (
+        <div className="mb-8 space-y-3">
+          <h3 className="text-sm font-medium text-text-muted mb-3">Structural Analysis</h3>
+          {structuralInsights.map((insight, idx) => (
+            <StructuralInsight
+              key={idx}
+              type={insight.type}
+              claim={node}
+              metadata={insight.metadata}
+            />
+          ))}
+        </div>
+      )}
 
       {/* Narrative excerpt */}
       {narrativeExcerpt && (
@@ -898,10 +1013,15 @@ export const DecisionMapSheet = React.memo(() => {
       normalizeGraphTopologyCandidate(meta?.graph_topology) ||
       normalizeGraphTopologyCandidate(meta?.topology) ||
       null;
-    if (fromMeta) return fromMeta;
     const fromParsed = normalizeGraphTopologyCandidate(parsedMapping.topology) || null;
-    if (fromParsed) return fromParsed;
-    return null;
+    const picked = fromMeta || fromParsed || null;
+    decisionMapSheetDbg("graphTopology source", {
+      fromMeta: Boolean(fromMeta),
+      fromParsed: Boolean(fromParsed),
+      nodes: picked ? (picked as any)?.nodes?.length : 0,
+      edges: picked ? (picked as any)?.edges?.length : 0,
+    });
+    return picked;
   }, [latestMapping, parsedMapping.topology]);
 
   const graphData = useMemo(() => {
@@ -912,11 +1032,50 @@ export const DecisionMapSheet = React.memo(() => {
     const edges = edgesFromMap || (Array.isArray(parsedMapping.edges) ? parsedMapping.edges : []);
 
     if (claims.length > 0 || edges.length > 0) {
+      decisionMapSheetDbg("graphData source", {
+        source: claimsFromMap || edgesFromMap ? "map" : "parsed",
+        claims: claims.length,
+        edges: edges.length,
+      });
       return { claims, edges };
     }
 
+    decisionMapSheetDbg("graphData source", {
+      source: "topology",
+      claims: 0,
+      edges: 0,
+    });
     return adaptGraphTopology(graphTopology);
   }, [parsedMapping, graphTopology]);
+
+  const artifactForStructure = useMemo(() => {
+    const artifact =
+      (aiTurn as any)?.mapperArtifact ||
+      (parsedMapping as any)?.artifact ||
+      (graphData.claims.length > 0 || graphData.edges.length > 0
+        ? {
+          claims: graphData.claims,
+          edges: graphData.edges,
+          ghosts: Array.isArray((parsedMapping as any)?.ghosts) ? (parsedMapping as any).ghosts : null,
+          query: (latestMapping as any)?.meta?.query || null,
+        }
+        : null);
+
+    if (!artifact || !Array.isArray((artifact as any).claims) || (artifact as any).claims.length === 0) return null;
+    return artifact;
+  }, [aiTurn, parsedMapping, graphData, latestMapping]);
+
+  const problemStructure = useMemo(() => {
+    if (!artifactForStructure) return null;
+    try {
+      const structure = computeProblemStructureFromArtifact(artifactForStructure as any);
+      decisionMapSheetDbg("problemStructure", structure);
+      return structure;
+    } catch (e) {
+      console.warn("[DecisionMapSheet] problemStructure compute failed", e);
+      return null;
+    }
+  }, [artifactForStructure]);
 
   const mappingText = useMemo(() => {
     return parsedMapping.narrative || '';
@@ -1196,10 +1355,20 @@ export const DecisionMapSheet = React.memo(() => {
                         />
                       </div>
                     )}
+                    {problemStructure && (
+                      <div className="absolute top-4 left-4 z-50 px-3 py-1.5 rounded-full bg-black/70 border border-white/10 text-xs font-medium text-white/90">
+                        <span className="opacity-60 mr-2">Structure:</span>
+                        <span className="capitalize">{problemStructure.primaryPattern}</span>
+                        {problemStructure.confidence < 0.7 && (
+                          <span className="ml-2 text-amber-400">(?)</span>
+                        )}
+                      </div>
+                    )}
                     <Suspense fallback={<div className="w-full h-full flex items-center justify-center opacity-50"><div className="w-8 h-8 rounded-full border-2 border-brand-500 border-t-transparent animate-spin" /></div>}>
                       <DecisionMapGraph
                         claims={graphData.claims}
                         edges={graphData.edges}
+                        problemStructure={problemStructure || undefined}
                         citationSourceOrder={citationSourceOrder}
                         width={dims.w}
                         height={dims.h}
@@ -1223,6 +1392,7 @@ export const DecisionMapSheet = React.memo(() => {
                       citationSourceOrder={citationSourceOrder}
                       onBack={() => setSelectedNode(null)}
                       onOrbClick={handleDetailOrbClick}
+                      structural={artifactForStructure ? (null as any) : null}
                     />
                   </m.div>
                 )}

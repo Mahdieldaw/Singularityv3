@@ -15,6 +15,7 @@ import { RefinerOutput } from '../../../shared/parsing-utils';
 import { AiTurn, ProviderResponse } from '../../types';
 import RefinerDot from '../refinerui/RefinerDot';
 import AntagonistCard from '../antagonist/AntagonistCard';
+import clsx from 'clsx';
 
 // Icons
 const ChevronDown = ({ className }: { className?: string }) => (
@@ -63,6 +64,8 @@ const GauntletOutputView: React.FC<GauntletOutputViewProps> = ({
     const [survivorsOpen, setSurvivorsOpen] = useState(false);
     const [eliminatedOpen, setEliminatedOpen] = useState(false);
     const [copied, setCopied] = useState(false);
+    const [activeTabId, setActiveTabId] = useState<string | null>(null);
+    const [showConfirm, setShowConfirm] = useState(false);
     const selectedModels = useAtomValue(selectedModelsAtom);
     const setActiveSplitPanel = useSetAtom(activeSplitPanelAtom);
     const setIsDecisionMapOpen = useSetAtom(isDecisionMapOpenAtom);
@@ -73,14 +76,63 @@ const GauntletOutputView: React.FC<GauntletOutputViewProps> = ({
         return enabled.length > 0 ? enabled : LLM_PROVIDERS_CONFIG;
     }, [selectedModels]);
 
-    // Determine actual provider who performed this step
-    const actualProviderId = useMemo(() => {
-        if (!aiTurn?.gauntletResponses) return null;
-        const keys = Object.keys(aiTurn.gauntletResponses);
-        return keys.length > 0 ? keys[0] : null;
-    }, [aiTurn]);
+    const gauntletTabs = useMemo(() => {
+        if (!aiTurn.gauntletResponses) return [];
 
-    const actualProviderName = actualProviderId ? getProviderName(actualProviderId) : "";
+        interface GauntletTab {
+            id: string;
+            providerId: string;
+            index: number;
+            label: string;
+            response: ProviderResponse;
+            isLatest: boolean;
+            structuredOutput?: GauntletOutput;
+        }
+
+        const tabs: GauntletTab[] = [];
+        const providerOrder = new Map(
+            LLM_PROVIDERS_CONFIG.map((p, idx) => [String(p.id), idx] as const)
+        );
+        const providersWithResponses = Object.entries(aiTurn.gauntletResponses)
+            .filter(([_, resps]) => Array.isArray(resps) && resps.length > 0);
+
+        const sortedProviders = providersWithResponses.sort((a, b) => {
+            const idxA = providerOrder.get(a[0]) ?? Number.POSITIVE_INFINITY;
+            const idxB = providerOrder.get(b[0]) ?? Number.POSITIVE_INFINITY;
+            if (idxA !== idxB) return idxA - idxB;
+            return String(a[0]).localeCompare(String(b[0]));
+        });
+
+        sortedProviders.forEach(([pid, resps]) => {
+            const name = getProviderName(pid);
+            const respsArray = Array.isArray(resps) ? resps : [resps];
+            const validResps = respsArray.filter((r) => {
+                if (!r) return false;
+                const hasText = typeof r.text === 'string' && r.text.trim().length > 0;
+                const hasStatus = r.status === 'streaming' || r.status === 'pending' || r.status === 'error';
+                const hasStructured = !!(r.meta as any)?.gauntletOutput;
+                return hasText || hasStatus || hasStructured;
+            });
+
+            validResps.forEach((resp, idx) => {
+                const count = validResps.length;
+                const label = count > 1 ? `${name} ${idx + 1}` : name;
+                const structuredOutput = (resp.meta as any)?.gauntletOutput as GauntletOutput | undefined;
+
+                tabs.push({
+                    id: `${pid}-${idx}`,
+                    providerId: pid,
+                    index: idx,
+                    label,
+                    response: resp,
+                    isLatest: idx === validResps.length - 1,
+                    structuredOutput,
+                });
+            });
+        });
+
+        return tabs;
+    }, [aiTurn.gauntletResponses]);
 
     const [nextProviderId, setNextProviderId] = useState<string>(() => availableProviders[0]?.id || "gemini");
 
@@ -90,15 +142,47 @@ const GauntletOutputView: React.FC<GauntletOutputViewProps> = ({
         }
     }, [availableProviders, nextProviderId]);
 
+    useEffect(() => {
+        if (gauntletTabs.length === 0) return;
+        if (activeTabId && gauntletTabs.some((t) => t.id === activeTabId)) return;
+        const latestWithOutput = [...gauntletTabs].reverse().find((t) => t.structuredOutput);
+        const target = latestWithOutput || gauntletTabs[gauntletTabs.length - 1];
+        setActiveTabId(target.id);
+    }, [gauntletTabs, activeTabId]);
+
+    const activeTab = useMemo(() => {
+        if (gauntletTabs.length === 0) return null;
+        return gauntletTabs.find((t) => t.id === activeTabId) || gauntletTabs[gauntletTabs.length - 1];
+    }, [gauntletTabs, activeTabId]);
+
+    useEffect(() => {
+        if (activeTab) {
+            setNextProviderId(activeTab.providerId);
+        }
+    }, [activeTab]);
+
+    const activeOutput: GauntletOutput = useMemo(() => {
+        const fromTab = activeTab?.structuredOutput;
+        if (fromTab) return fromTab;
+        return output;
+    }, [activeTab, output]);
+
+    const actualProviderId = useMemo(() => {
+        if (activeTab) return activeTab.providerId;
+        if (!aiTurn?.gauntletResponses) return null;
+        const keys = Object.keys(aiTurn.gauntletResponses);
+        return keys.length > 0 ? keys[0] : null;
+    }, [activeTab, aiTurn]);
+
+    const actualProviderName = actualProviderId ? getProviderName(actualProviderId) : "";
+
     const includePromptInCopy = useAtomValue(includePromptInCopyAtom);
 
-    // Copy Handlers
     const handleCopyGauntlet = useCallback(() => {
-        // Use actual provider name for attribution, fallback to next if not found
         const providerName = actualProviderName || getProviderName(nextProviderId);
-        const md = formatAnalysisContextForMd(output, providerName);
+        const md = formatAnalysisContextForMd(activeOutput, providerName);
         navigator.clipboard.writeText(md);
-    }, [output, nextProviderId, actualProviderName]);
+    }, [activeOutput, nextProviderId, actualProviderName]);
 
     const handleCopyTurn = useCallback(() => {
         // Gather Batch Responses (latest for each provider)
@@ -122,7 +206,7 @@ const GauntletOutputView: React.FC<GauntletOutputViewProps> = ({
         const md = formatTurnForMd(
             aiTurn.id,
             userPrompt,
-            output, // Analysis (Understand/Gauntlet)
+            activeOutput,
             nextProviderId, // Analysis Provider ID
             decisionMap,
             batchResponses,
@@ -136,26 +220,34 @@ const GauntletOutputView: React.FC<GauntletOutputViewProps> = ({
     }, [aiTurn, output, nextProviderId, includePromptInCopy, refinerState, antagonistState]);
 
     const handleCopySouvenir = () => {
-        if (output.souvenir) {
-            navigator.clipboard.writeText(output.souvenir);
+        if (activeOutput.souvenir) {
+            navigator.clipboard.writeText(activeOutput.souvenir);
             setCopied(true);
             setTimeout(() => setCopied(false), 2000);
         }
     };
 
-    if (!output.the_answer.statement && !output.souvenir) {
+    const handleRecomputeClick = () => {
+        const hasExisting = !!aiTurn.gauntletResponses?.[nextProviderId]?.length;
+        if (hasExisting) {
+            setShowConfirm(true);
+            return;
+        }
+        onRecompute?.({ providerId: nextProviderId, isRecompute: true, sourceTurnId: aiTurn.id });
+    };
+
+    if (!activeOutput.the_answer.statement && !activeOutput.souvenir) {
         return <div className="p-4 text-text-secondary italic">Gauntlet is empty.</div>;
     }
 
     const refinerOutput = refinerState.output;
 
-
-    // Anchor toggle states
     const [voidOpen, setVoidOpen] = useState(false);
     const [breakOpen, setBreakOpen] = useState(false);
     const [presumptionsOpen, setPresumptionsOpen] = useState(false);
 
     return (
+        <>
         <div className="flex flex-col gap-5 p-1 max-w-full overflow-hidden text-sm">
             {/* HER0 - THE ANSWER */}
             <motion.div
@@ -173,10 +265,10 @@ const GauntletOutputView: React.FC<GauntletOutputViewProps> = ({
                             {actualProviderName && (
                                 <span className="text-[11px] text-text-tertiary">by {actualProviderName}</span>
                             )}
-                            {output.optimal_end && (
+                            {activeOutput.optimal_end && (
                                 <div className="hidden sm:flex items-center gap-2 px-2 py-0.5 rounded-full bg-surface-highlight/50 border border-border-subtle/50">
                                     <span className="text-[10px] uppercase font-bold text-text-tertiary">Goal</span>
-                                    <span className="text-xs text-text-secondary truncate max-w-[200px]" title={output.optimal_end}>{output.optimal_end}</span>
+                                    <span className="text-xs text-text-secondary truncate max-w-[200px]" title={activeOutput.optimal_end}>{activeOutput.optimal_end}</span>
                                 </div>
                             )}
                         </div>
@@ -227,21 +319,21 @@ const GauntletOutputView: React.FC<GauntletOutputViewProps> = ({
 
 
                 {/* Mobile-only optimal end */}
-                {output.optimal_end && (
+                {activeOutput.optimal_end && (
                     <div className="sm:hidden mb-3 flex items-start gap-2 px-2 py-1.5 rounded-lg bg-surface-highlight/30 border border-border-subtle/30">
                         <span className="text-[10px] uppercase font-bold text-text-tertiary mt-0.5">Goal</span>
-                        <span className="text-xs text-text-secondary leading-snug">{output.optimal_end}</span>
+                        <span className="text-xs text-text-secondary leading-snug">{activeOutput.optimal_end}</span>
                     </div>
                 )}
 
                 <div className="prose prose-sm max-w-none text-text-primary mb-4">
-                    <p className="font-medium text-base leading-relaxed">{output.the_answer.statement}</p>
+                    <p className="font-medium text-base leading-relaxed">{activeOutput.the_answer.statement}</p>
                 </div>
 
-                {output.the_answer.next_step && (
+                {activeOutput.the_answer.next_step && (
                     <div className="bg-surface-highlight/30 border-l-2 border-accent-primary pl-3 py-2 mb-4">
                         <span className="text-xs uppercase tracking-wider font-semibold text-accent-primary block mb-1">Next Step</span>
-                        <p className="text-text-primary">{output.the_answer.next_step}</p>
+                        <p className="text-text-primary">{activeOutput.the_answer.next_step}</p>
                     </div>
                 )}
 
@@ -250,8 +342,7 @@ const GauntletOutputView: React.FC<GauntletOutputViewProps> = ({
             {/* COGNITIVE ANCHORS ROW (The Void, Breaking Point, Presumptions) */}
             <div className="flex flex-col gap-1.5">
 
-                {/* THE VOID (Primary Anchor) */}
-                {output.the_void && (
+                {activeOutput.the_void && (
                     <div className="rounded-lg border border-fuchsia-500/15 bg-fuchsia-500/[0.03] overflow-hidden">
                         <button
                             onClick={() => setVoidOpen(!voidOpen)}
@@ -269,8 +360,8 @@ const GauntletOutputView: React.FC<GauntletOutputViewProps> = ({
                                     exit={{ height: 0 }}
                                     className="overflow-hidden"
                                 >
-                                    <div className="px-3 pb-3 pt-0">
-                                        <p className="text-sm text-text-primary leading-relaxed">{output.the_void}</p>
+                                <div className="px-3 pb-3 pt-0">
+                                        <p className="text-sm text-text-primary leading-relaxed">{activeOutput.the_void}</p>
                                         <p className="text-[10px] text-text-muted/60 mt-2">What no surviving claim covers — the remaining gap toward the optimal end.</p>
                                     </div>
                                 </motion.div>
@@ -279,8 +370,7 @@ const GauntletOutputView: React.FC<GauntletOutputViewProps> = ({
                     </div>
                 )}
 
-                {/* BREAKING POINT */}
-                {output.survivors.primary.breaking_point && (
+                {activeOutput.survivors.primary.breaking_point && (
                     <div className="rounded-lg border border-orange-500/15 bg-orange-500/[0.03] overflow-hidden">
                         <button
                             onClick={() => setBreakOpen(!breakOpen)}
@@ -299,7 +389,7 @@ const GauntletOutputView: React.FC<GauntletOutputViewProps> = ({
                                     className="overflow-hidden"
                                 >
                                     <div className="px-3 pb-3 pt-0">
-                                        <p className="text-sm text-text-primary leading-relaxed">{output.survivors.primary.breaking_point}</p>
+                                        <p className="text-sm text-text-primary leading-relaxed">{activeOutput.survivors.primary.breaking_point}</p>
                                     </div>
                                 </motion.div>
                             )}
@@ -307,8 +397,7 @@ const GauntletOutputView: React.FC<GauntletOutputViewProps> = ({
                     </div>
                 )}
 
-                {/* PRESUMPTIONS */}
-                {output.survivors.primary.presumptions && output.survivors.primary.presumptions.length > 0 && (
+                {activeOutput.survivors.primary.presumptions && activeOutput.survivors.primary.presumptions.length > 0 && (
                     <div className="rounded-lg border border-blue-500/15 bg-blue-500/[0.03] overflow-hidden">
                         <button
                             onClick={() => setPresumptionsOpen(!presumptionsOpen)}
@@ -328,7 +417,7 @@ const GauntletOutputView: React.FC<GauntletOutputViewProps> = ({
                                 >
                                     <div className="px-3 pb-3 pt-0">
                                         <ul className="list-disc list-inside space-y-1">
-                                            {output.survivors.primary.presumptions.map((p, i) => (
+                                            {activeOutput.survivors.primary.presumptions.map((p, i) => (
                                                 <li key={i} className="text-sm text-text-primary leading-relaxed">{p}</li>
                                             ))}
                                         </ul>
@@ -348,9 +437,9 @@ const GauntletOutputView: React.FC<GauntletOutputViewProps> = ({
                 </summary>
                 <div className="pl-5 pb-3 space-y-2">
                     <p className="text-text-secondary leading-relaxed">{output.the_answer.reasoning}</p>
-                    {output.confidence.notes && output.confidence.notes.length > 0 && (
+                    {activeOutput.confidence.notes && activeOutput.confidence.notes.length > 0 && (
                         <ul className="list-disc list-inside text-text-secondary/80 space-y-1">
-                            {output.confidence.notes.map((note, i) => (
+                            {activeOutput.confidence.notes.map((note, i) => (
                                 <li key={i}>{note}</li>
                             ))}
                         </ul>
@@ -371,7 +460,7 @@ const GauntletOutputView: React.FC<GauntletOutputViewProps> = ({
                             <ShieldCheck className="text-green-500" />
                             <span className="font-medium text-text-primary text-sm">Survived</span>
                             <span className="text-xs text-text-tertiary bg-surface-highlight px-1.5 py-0.5 rounded-full">
-                                {1 + output.survivors.supporting.length + output.survivors.conditional.length}
+                                {1 + activeOutput.survivors.supporting.length + activeOutput.survivors.conditional.length}
                             </span>
                         </div>
                         {survivorsOpen ? <ChevronDown className="text-text-tertiary" /> : <ChevronRight className="text-text-tertiary" />}
@@ -388,20 +477,20 @@ const GauntletOutputView: React.FC<GauntletOutputViewProps> = ({
                                 <div className="p-3 pt-0 flex flex-col gap-3">
                                     <div className="bg-green-500/10 border border-green-500/20 rounded p-3">
                                         <div className="text-[10px] font-bold text-green-600 mb-1 uppercase tracking-tight">PRIMARY CLAIM</div>
-                                        <div className="text-text-primary text-xs mb-1 font-medium">{output.survivors.primary.claim}</div>
-                                        <div className="text-[10px] text-text-secondary italic mb-2 leading-tight">Survived because: {output.survivors.primary.survived_because}</div>
-                                        {output.survivors.primary.extent && (
+                                        <div className="text-text-primary text-xs mb-1 font-medium">{activeOutput.survivors.primary.claim}</div>
+                                        <div className="text-[10px] text-text-secondary italic mb-2 leading-tight">Survived because: {activeOutput.survivors.primary.survived_because}</div>
+                                        {activeOutput.survivors.primary.extent && (
                                             <div className="mt-2 pt-2 border-t border-green-500/20 text-[10px]">
                                                 <span className="font-semibold text-green-700/70 uppercase tracking-wide">Extent:</span>
-                                                <span className="text-text-secondary ml-1">{output.survivors.primary.extent}</span>
+                                                <span className="text-text-secondary ml-1">{activeOutput.survivors.primary.extent}</span>
                                             </div>
                                         )}
                                     </div>
 
-                                    {output.survivors.supporting.length > 0 && (
+                                    {activeOutput.survivors.supporting.length > 0 && (
                                         <div className="space-y-1.5">
                                             <div className="text-[10px] font-bold text-text-tertiary uppercase tracking-wider">Supporting</div>
-                                            {output.survivors.supporting.map((s, i) => (
+                                            {activeOutput.survivors.supporting.map((s, i) => (
                                                 <div key={i} className="pl-2 border-l border-border-subtle text-xs leading-tight">
                                                     <span className="text-text-primary">{s.claim}</span>
                                                 </div>
@@ -409,10 +498,10 @@ const GauntletOutputView: React.FC<GauntletOutputViewProps> = ({
                                         </div>
                                     )}
 
-                                    {output.survivors.conditional.length > 0 && (
+                                    {activeOutput.survivors.conditional.length > 0 && (
                                         <div className="space-y-1.5">
                                             <div className="text-[10px] font-bold text-text-tertiary uppercase tracking-wider">Conditional</div>
-                                            {output.survivors.conditional.map((s, i) => (
+                                            {activeOutput.survivors.conditional.map((s, i) => (
                                                 <div key={i} className="pl-2 border-l border-orange-500/30 text-xs leading-tight">
                                                     <span className="text-text-primary">{s.claim}</span>
                                                     <div className="text-orange-500/80 text-[10px] font-medium mt-0.5">IF {s.condition}</div>
@@ -436,7 +525,7 @@ const GauntletOutputView: React.FC<GauntletOutputViewProps> = ({
                             <Skull className="text-red-500" />
                             <span className="font-medium text-text-primary text-sm">Eliminated</span>
                             <span className="text-xs text-text-tertiary bg-surface-highlight px-1.5 py-0.5 rounded-full">
-                                {output.eliminated.from_consensus.length + output.eliminated.from_outliers.length}
+                                {activeOutput.eliminated.from_consensus.length + activeOutput.eliminated.from_outliers.length}
                             </span>
                         </div>
                         {eliminatedOpen ? <ChevronDown className="text-text-tertiary" /> : <ChevronRight className="text-text-tertiary" />}
@@ -451,10 +540,10 @@ const GauntletOutputView: React.FC<GauntletOutputViewProps> = ({
                                 className="overflow-hidden"
                             >
                                 <div className="p-3 pt-0 flex flex-col gap-3">
-                                    {output.eliminated.from_consensus.length > 0 && (
+                                    {activeOutput.eliminated.from_consensus.length > 0 && (
                                         <div className="space-y-2">
                                             <div className="text-[10px] font-bold text-text-tertiary uppercase tracking-wider">From Consensus</div>
-                                            {output.eliminated.from_consensus.map((e, i) => (
+                                            {activeOutput.eliminated.from_consensus.map((e, i) => (
                                                 <div key={i} className="flex flex-col gap-1 text-xs">
                                                     <span className="text-text-tertiary line-through decoration-red-500/30">{e.claim}</span>
                                                     <span className="text-red-500/70 text-[10px] italic">killed: {e.killed_because}</span>
@@ -463,10 +552,10 @@ const GauntletOutputView: React.FC<GauntletOutputViewProps> = ({
                                         </div>
                                     )}
 
-                                    {output.eliminated.from_outliers.length > 0 && (
+                                    {activeOutput.eliminated.from_outliers.length > 0 && (
                                         <div className="space-y-2">
                                             <div className="text-[10px] font-bold text-text-tertiary uppercase tracking-wider">From Outliers</div>
-                                            {output.eliminated.from_outliers.map((e, i) => (
+                                            {activeOutput.eliminated.from_outliers.map((e, i) => (
                                                 <div key={i} className="flex flex-col gap-1 text-xs">
                                                     <span className="text-text-tertiary line-through decoration-red-500/30">{e.claim}</span>
                                                     <span className="text-red-500/70 text-[10px] italic">killed: {e.killed_because}</span>
@@ -475,10 +564,10 @@ const GauntletOutputView: React.FC<GauntletOutputViewProps> = ({
                                         </div>
                                     )}
 
-                                    {output.eliminated.ghost && (
+                                    {activeOutput.eliminated.ghost && (
                                         <div className="bg-purple-500/5 border border-purple-500/10 rounded p-2 text-[10px]">
                                             <span className="font-semibold text-purple-600 mr-2">GHOST:</span>
-                                            <span className="text-text-secondary">{output.eliminated.ghost}</span>
+                                            <span className="text-text-secondary">{activeOutput.eliminated.ghost}</span>
                                         </div>
                                     )}
                                 </div>
@@ -488,7 +577,6 @@ const GauntletOutputView: React.FC<GauntletOutputViewProps> = ({
                 </div>
             </div>
 
-            {/* ANTAGONIST INLINE */}
             {antagonistState.output && (
                 <div className="animate-in fade-in slide-in-from-bottom-2 duration-500">
                     <AntagonistCard
@@ -499,12 +587,11 @@ const GauntletOutputView: React.FC<GauntletOutputViewProps> = ({
                 </div>
             )}
 
-            {/* SOUVENIR */}
-            {output.souvenir && (
+            {activeOutput.souvenir && (
                 <div className="flex items-center justify-between bg-surface-highlight/30 rounded-lg py-2.5 px-3 border border-border-subtle/50">
                     <div className="flex items-start gap-2">
                         <span className="text-lg flex-shrink-0 mt-0.5">💎</span>
-                        <span className="text-xs italic font-serif text-text-secondary leading-relaxed">"{output.souvenir}"</span>
+                        <span className="text-xs italic font-serif text-text-secondary leading-relaxed">"{activeOutput.souvenir}"</span>
                     </div>
                     <button
                         onClick={handleCopySouvenir}
@@ -516,7 +603,38 @@ const GauntletOutputView: React.FC<GauntletOutputViewProps> = ({
                 </div>
             )}
 
-            {/* CONTROLS */}
+            {gauntletTabs.length > 0 && (
+                <div className="relative z-10 flex gap-2 overflow-x-auto pb-4 px-2 mb-2 no-scrollbar border-b border-border-subtle/50">
+                    {gauntletTabs.map((tab) => {
+                        const isActive = tab.id === activeTabId;
+                        const isStreaming = tab.response.status === 'streaming' || tab.response.status === 'pending';
+                        const isError = tab.response.status === 'error';
+
+                        return (
+                            <button
+                                key={tab.id}
+                                onClick={() => setActiveTabId(tab.id)}
+                                className={clsx(
+                                    "relative px-4 py-2 rounded-full text-sm font-medium transition-all whitespace-nowrap border",
+                                    isActive
+                                        ? "bg-surface-raised border-brand-400 text-text-primary shadow-sm"
+                                        : "bg-transparent border-transparent text-text-muted hover:bg-surface-highlight hover:text-text-secondary"
+                                )}
+                            >
+                                <span className="flex items-center gap-2">
+                                    {tab.label}
+                                    {isStreaming && <span className="w-1.5 h-1.5 rounded-full bg-intent-warning animate-pulse" />}
+                                    {isError && <span className="w-1.5 h-1.5 rounded-full bg-intent-danger" />}
+                                </span>
+                                {isActive && (
+                                    <span className="absolute bottom-0 left-1/2 -translate-x-1/2 w-4 h-[2px] bg-brand-500 rounded-t-full" />
+                                )}
+                            </button>
+                        );
+                    })}
+                </div>
+            )}
+
             <div className="flex items-center gap-3 bg-surface-raised border border-border-subtle rounded-xl px-3 py-2 mt-4">
                 <div className="text-xs text-text-secondary">Model</div>
                 <select
@@ -526,10 +644,7 @@ const GauntletOutputView: React.FC<GauntletOutputViewProps> = ({
                     className="flex-1 bg-[#1a1b26] border border-border-subtle rounded px-2 py-1 text-sm text-gray-200 focus:outline-none focus:border-brand-500 disabled:opacity-50 appearance-none"
                 >
                     {availableProviders.map((p) => {
-                        // Estimate limits - this is a rough client-side check
-                        // Length = prompt overhead + artifact length
-                        // Gauntlet output can be large, use conservative estimate
-                        const estimatedLength = (output.the_answer.statement?.length || 0) + (output.the_void?.length || 0) + 3000;
+                        const estimatedLength = (activeOutput.the_answer.statement?.length || 0) + (activeOutput.the_void?.length || 0) + 3000;
                         const { isAllowed } = useProviderLimits(p.id, estimatedLength);
                         return (
                             <option key={p.id} value={p.id} disabled={!isAllowed}>
@@ -539,7 +654,7 @@ const GauntletOutputView: React.FC<GauntletOutputViewProps> = ({
                     })}
                 </select>
                 <button
-                    onClick={() => onRecompute?.({ providerId: nextProviderId, isRecompute: true, sourceTurnId: aiTurn.id })}
+                    onClick={handleRecomputeClick}
                     disabled={isLoading}
                     className="px-3 py-1.5 text-xs rounded-md border border-border-subtle bg-surface-base text-text-secondary hover:text-text-primary hover:bg-surface-highlight/50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
@@ -581,6 +696,44 @@ const GauntletOutputView: React.FC<GauntletOutputViewProps> = ({
                 </CopyButton>
             </div>
         </div>
+
+        {showConfirm && (
+            <div
+                className="fixed inset-0 bg-overlay-backdrop/70 flex items-center justify-center z-[1000]"
+                onClick={(e) => {
+                    if (e.target === e.currentTarget) {
+                        setShowConfirm(false);
+                    }
+                }}
+            >
+                <div className="bg-surface-modal border border-border-subtle rounded-2xl p-6 min-w-[360px] max-w-[480px] shadow-overlay">
+                    <h3 className="m-0 mb-3 text-lg font-semibold text-text-primary">
+                        Re-run Decide on this model?
+                    </h3>
+                    <p className="text-sm text-text-secondary mb-6">
+                        This model already has a Decide result for this turn. Running again will create an additional tab.
+                    </p>
+                    <div className="flex gap-3 justify-end">
+                        <button
+                            onClick={() => setShowConfirm(false)}
+                            className="px-4 py-2 bg-transparent border border-border-subtle rounded-lg text-text-muted text-sm font-medium cursor-pointer hover:bg-surface-highlight/40 transition-all"
+                        >
+                            Cancel
+                        </button>
+                        <button
+                            onClick={() => {
+                                setShowConfirm(false);
+                                onRecompute?.({ providerId: nextProviderId, isRecompute: true, sourceTurnId: aiTurn.id });
+                            }}
+                            className="px-4 py-2 border rounded-lg text-sm font-medium bg-intent-warning text-white border-intent-warning cursor-pointer hover:bg-intent-warning/90 transition-all"
+                        >
+                            Yes, run again
+                        </button>
+                    </div>
+                </div>
+            </div>
+        )}
+        </>
     );
 };
 

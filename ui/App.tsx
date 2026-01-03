@@ -108,9 +108,13 @@ export default function App() {
         <SettingsPanel />
       </Suspense>
 
-      {/* Reconnect Overlay - Shows when connection is lost */}
+      {/* Reconnect Overlay - Shows when connection was healthy and is now lost */}
       <ReconnectOverlay
-        visible={isInitialized && !connectionStatus?.isConnected && !connectionStatus?.isReconnecting}
+        visible={
+          isInitialized &&
+          !connectionStatus?.isConnected &&
+          connectionStatus?.hasEverConnected
+        }
         onReconnect={handleReconnect}
       />
 

@@ -1,20 +1,24 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Claim, Edge, ExploreAnalysis, MapperArtifact } from '../../../shared/contract';
+import { Claim, Edge, ExploreAnalysis, MapperArtifact, ProblemStructure } from '../../../shared/contract';
+import { StructuralInsight } from "../StructuralInsight";
 
 interface MetricsRibbonProps {
     analysis?: ExploreAnalysis;
     artifact?: MapperArtifact;
     claimsCount: number;
     ghostCount: number;
+    problemStructure?: ProblemStructure;
 }
 
 export const MetricsRibbon: React.FC<MetricsRibbonProps> = ({
     analysis,
     artifact,
     claimsCount,
-    ghostCount
+    ghostCount,
+    problemStructure
 }) => {
     const [isAdvancedOpen, setIsAdvancedOpen] = useState(false);
+    const [showGuidance, setShowGuidance] = useState(false);
     const containerRef = useRef<HTMLDivElement | null>(null);
 
     type StructuralAnalysis = {
@@ -57,6 +61,12 @@ export const MetricsRibbon: React.FC<MetricsRibbonProps> = ({
             positionWeight: number;
         };
         isLeverageInversion: boolean;
+        keystoneScore: number;
+        evidenceGapScore: number;
+        supportSkew: number;
+        isKeystone: boolean;
+        isEvidenceGap: boolean;
+        isOutlier: boolean;
     };
 
     type LeverageInversion = {
@@ -135,9 +145,9 @@ export const MetricsRibbon: React.FC<MetricsRibbonProps> = ({
         };
 
         const computeClaimLeverage = (claim: Claim, allEdges: Edge[], modelCountRaw: number): ClaimWithLeverage => {
-            const safeModelCount = Math.max(modelCountRaw || 0, 1);
+            const modelCount = Math.max(modelCountRaw || 0, 1);
             const supporters = Array.isArray(claim.supporters) ? claim.supporters : [];
-            const supportWeight = (supporters.length / safeModelCount) * 2;
+            const supportWeight = (supporters.length / modelCount) * 2;
 
             const roleWeights: Record<string, number> = {
                 challenger: 4,
@@ -165,6 +175,21 @@ export const MetricsRibbon: React.FC<MetricsRibbonProps> = ({
             const leverage = supportWeight + roleWeight + connectivityWeight + positionWeight;
             const isLeverageInversion = supporters.length < 2 && leverage > 4;
 
+            const keystoneScore = outgoing.length * supporters.length;
+
+            const supporterCounts = supporters.reduce((acc, s) => {
+                const key = typeof s === "number" ? String(s) : String(s);
+                acc[key] = (acc[key] || 0) + 1;
+                return acc;
+            }, {} as Record<string, number>);
+
+            const maxFromSingleModel =
+                Object.values(supporterCounts).length > 0 ? Math.max(...Object.values(supporterCounts)) : 0;
+            const supportSkew = supporters.length > 0 ? maxFromSingleModel / supporters.length : 0;
+            const isOutlier = supportSkew > 0.6 && supporters.length >= 2;
+
+            const isKeystone = keystoneScore >= modelCount * 2;
+
             return {
                 id: claim.id,
                 label: claim.label,
@@ -179,6 +204,12 @@ export const MetricsRibbon: React.FC<MetricsRibbonProps> = ({
                     positionWeight,
                 },
                 isLeverageInversion,
+                keystoneScore,
+                evidenceGapScore: 0,
+                supportSkew,
+                isKeystone,
+                isEvidenceGap: false,
+                isOutlier,
             };
         };
 
@@ -409,26 +440,11 @@ export const MetricsRibbon: React.FC<MetricsRibbonProps> = ({
         };
     }, [isAdvancedOpen]);
 
-    const convergence = analysis?.convergenceRatio !== undefined
-        ? Math.round(analysis.convergenceRatio * 100)
-        : structural?.landscape?.convergenceRatio !== undefined
-            ? Math.round(structural.landscape.convergenceRatio * 100)
-            : null;
-
-    const conflictCount = analysis?.conflictCount ?? structural?.patterns?.conflicts?.length ?? 0;
-
-    // Determine color for convergence based on health
-    const convergenceColor = (convergence ?? 0) >= 60
-        ? "text-emerald-400"
-        : (convergence ?? 0) >= 30
-            ? "text-amber-400"
-            : "text-text-secondary";
-
-    const leverageInversionCount = structural?.patterns?.leverageInversions?.length ?? 0;
-    const cascadeRiskCount = structural?.patterns?.cascadeRisks?.length ?? 0;
-    const tradeoffCount = structural?.patterns?.tradeoffs?.length ?? 0;
-    const convergencePointCount = structural?.patterns?.convergencePoints?.length ?? 0;
-    const isolatedCount = structural?.patterns?.isolatedClaims?.length ?? 0;
+    const leverageInversionCount = structural ? structural.patterns.leverageInversions.length : 0;
+    const cascadeRiskCount = structural ? structural.patterns.cascadeRisks.length : 0;
+    const tradeoffCount = structural ? structural.patterns.tradeoffs.length : 0;
+    const convergencePointCount = structural ? structural.patterns.convergencePoints.length : 0;
+    const isolatedCount = structural ? structural.patterns.isolatedClaims.length : 0;
     const modelCount = structural?.landscape?.modelCount ?? (artifact as any)?.model_count ?? null;
 
     const formatLeverageReason = (reason: LeverageInversion["reason"]) => {
@@ -438,70 +454,93 @@ export const MetricsRibbon: React.FC<MetricsRibbonProps> = ({
     };
 
     return (
-        <div ref={containerRef} className="relative flex items-center gap-4 px-4 py-2 bg-surface-raised border border-border-subtle rounded-lg mb-4 text-xs">
-            {/* Claims */}
-            <div className="flex items-center gap-1.5" title="Total claims in the map">
-                <span className="text-text-muted">Claims:</span>
-                <span className="font-medium text-text-primary">{claimsCount}</span>
-            </div>
-
-            <div className="w-px h-3 bg-border-subtle" />
-
-            {/* Convergence */}
-            {convergence !== null && (
-                <div className="flex items-center gap-1.5" title="Agreement ratio across models">
-                    <span className="text-text-muted">Convergence:</span>
-                    <span className={`font-medium ${convergenceColor}`}>{convergence}%</span>
+        <div ref={containerRef} className="relative flex flex-wrap items-center gap-3 sm:gap-4 px-4 py-2 bg-surface-raised border border-border-subtle rounded-lg mb-4 text-xs">
+            {problemStructure && (
+                <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-surface-highlight/20 border border-brand-500/30">
+                    <span className="text-[10px] uppercase tracking-wide text-text-muted">
+                        Structure
+                    </span>
+                    <span className="font-semibold text-brand-400 capitalize">
+                        {problemStructure.primaryPattern}
+                    </span>
+                    {problemStructure.confidence < 0.7 && (
+                        <span className="text-amber-400 text-xs" title="Low confidence">
+                            ?
+                        </span>
+                    )}
                 </div>
             )}
 
-            {/* Conflicts - Only show if > 0 */}
-            {conflictCount > 0 && (
-                <>
-                    <div className="w-px h-3 bg-border-subtle" />
-                    <div className="flex items-center gap-1.5" title="Conflicting viewpoints identified">
-                        <span className="text-text-muted">Conflicts:</span>
-                        <span className="font-medium text-intent-warning">{conflictCount}</span>
-                    </div>
-                </>
+            {(problemStructure && structural) && (
+                <div className="w-px h-4 bg-border-subtle" />
             )}
 
-            {/* Ghosts - Only show if > 0 */}
-            {ghostCount > 0 && (
-                <>
-                    <div className="w-px h-3 bg-border-subtle" />
-                    <div className="flex items-center gap-1.5" title="Uncharted territories (Ghosts)">
-                        <span className="text-text-muted">Ghosts:</span>
-                        <span className="font-medium text-purple-400">{ghostCount}</span>
-                    </div>
-                </>
+            {structural?.patterns.conflicts.some((c) => c.isBothConsensus) && (
+                <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-red-500/10 border border-red-500/30">
+                    <span className="text-xs">⚠️</span>
+                    <span className="text-xs font-medium text-red-400">Consensus Conflict</span>
+                </div>
+            )}
+
+            {leverageInversionCount > 0 && (
+                <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-purple-500/10 border border-purple-500/30">
+                    <span className="text-xs">💎</span>
+                    <span className="text-xs font-medium text-purple-400">
+                        {leverageInversionCount} High-Leverage
+                    </span>
+                </div>
+            )}
+
+            {cascadeRiskCount > 0 && structural?.patterns.cascadeRisks.some((r) => r.depth >= 3) && (
+                <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-amber-500/10 border border-amber-500/30">
+                    <span className="text-xs">⛓️</span>
+                    <span className="text-xs font-medium text-amber-400">
+                        Deep Cascade ({Math.max(...(structural?.patterns.cascadeRisks.map((r) => r.depth) || []))})
+                    </span>
+                </div>
+            )}
+
+            {structural?.ghostAnalysis.mayExtendChallenger && (
+                <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-indigo-500/10 border border-indigo-500/30">
+                    <span className="text-xs">👻</span>
+                    <span className="text-xs font-medium text-indigo-400">Unmapped Territory</span>
+                </div>
             )}
 
             <div className="flex-1" />
 
-            {/* Model Count */}
+            {problemStructure && (
+                <button
+                    type="button"
+                    onClick={() => setShowGuidance((v) => !v)}
+                    className="flex items-center gap-1.5 px-2 py-1 rounded-md border border-border-subtle hover:bg-surface-highlight/10 transition-colors"
+                >
+                    <span className="text-xs text-text-muted">What this means</span>
+                    <span className="text-[10px] opacity-70">{showGuidance ? "▴" : "▾"}</span>
+                </button>
+            )}
+
             {typeof modelCount === "number" && modelCount > 0 && (
-                <div className="flex items-center gap-1.5 opacity-60">
+                <div className="flex items-center gap-1.5 opacity-60 ml-2">
                     <span className="text-text-muted">Models:</span>
                     <span>{modelCount}</span>
                 </div>
             )}
 
             {structural && (
-                <div className="relative">
+                <div className="relative ml-1">
                     <button
                         type="button"
                         onClick={() => setIsAdvancedOpen((v) => !v)}
-                        className="flex items-center gap-1.5 px-2 py-1 rounded-md border border-border-subtle bg-surface-highlight/10 hover:bg-surface-highlight/20 text-text-secondary transition-colors"
+                        className="p-1.5 rounded-md hover:bg-surface-highlight/10 text-text-muted hover:text-text-primary transition-colors"
                         aria-expanded={isAdvancedOpen}
+                        title="Full structural analysis"
                     >
-                        <span>Details</span>
-                        {(leverageInversionCount + cascadeRiskCount + tradeoffCount + convergencePointCount + isolatedCount) > 0 && (
-                            <span className="ml-1 text-[10px] px-1.5 py-0.5 rounded-full bg-brand-500/20 text-brand-300">
-                                {leverageInversionCount + cascadeRiskCount + tradeoffCount + convergencePointCount + isolatedCount}
-                            </span>
-                        )}
-                        <span className="text-[10px] opacity-70">{isAdvancedOpen ? "▴" : "▾"}</span>
+                        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 16 16">
+                            <circle cx="2" cy="8" r="1.5" />
+                            <circle cx="8" cy="8" r="1.5" />
+                            <circle cx="14" cy="8" r="1.5" />
+                        </svg>
                     </button>
 
                     {isAdvancedOpen && (
@@ -545,44 +584,56 @@ export const MetricsRibbon: React.FC<MetricsRibbonProps> = ({
                             <div className="px-4 pb-4 max-h-[420px] overflow-y-auto custom-scrollbar space-y-3">
                                 <div className="border border-border-subtle rounded-lg overflow-hidden">
                                     <div className="px-3 py-2 bg-surface-highlight/10 text-[11px] text-text-secondary flex items-center justify-between">
-                                        <span>Leverage inversions</span>
-                                        <span className="opacity-70">{leverageInversionCount}</span>
+                                        <span>Structural insights</span>
+                                        <span className="opacity-70">{leverageInversionCount + cascadeRiskCount}</span>
                                     </div>
-                                    {leverageInversionCount > 0 ? (
-                                        <div className="px-3 py-2 space-y-1">
-                                            {structural.patterns.leverageInversions.slice(0, 6).map((inv) => (
-                                                <div key={`${inv.claimId}:${inv.reason}`} className="text-text-primary">
-                                                    <span className="font-medium">{inv.claimLabel}</span>
-                                                    <span className="text-text-muted"> ({inv.supporterCount})</span>
-                                                    <span className="text-text-muted"> — {formatLeverageReason(inv.reason)}</span>
-                                                    {inv.affectedClaims.length > 0 && (
-                                                        <span className="text-text-muted"> → affects {inv.affectedClaims.length}</span>
-                                                    )}
-                                                </div>
-                                            ))}
-                                        </div>
-                                    ) : (
-                                        <div className="px-3 py-2 text-text-muted">None detected.</div>
-                                    )}
-                                </div>
+                                    {leverageInversionCount + cascadeRiskCount > 0 ? (
+                                        <div className="px-3 py-2 space-y-2">
+                                            {structural.patterns.leverageInversions.map((inv) => {
+                                                const cascade = structural.patterns.cascadeRisks.find(
+                                                    (r) => r.sourceId === inv.claimId
+                                                );
+                                                const claimData = structural.claimsWithLeverage.find(
+                                                    (c) => c.id === inv.claimId
+                                                );
 
-                                <div className="border border-border-subtle rounded-lg overflow-hidden">
-                                    <div className="px-3 py-2 bg-surface-highlight/10 text-[11px] text-text-secondary flex items-center justify-between">
-                                        <span>Cascade risks</span>
-                                        <span className="opacity-70">{cascadeRiskCount}</span>
-                                    </div>
-                                    {cascadeRiskCount > 0 ? (
-                                        <div className="px-3 py-2 space-y-1">
+                                                return (
+                                                    <StructuralInsight
+                                                        key={inv.claimId}
+                                                        type={
+                                                            inv.reason === "singular_foundation"
+                                                                ? "fragile_foundation"
+                                                                : "high_leverage_singular"
+                                                        }
+                                                        claim={{
+                                                            label: inv.claimLabel,
+                                                            supporters: Array(inv.supporterCount).fill(0),
+                                                        }}
+                                                        metadata={{
+                                                            dependentCount: inv.affectedClaims.length,
+                                                            dependentLabels: cascade?.dependentLabels || [],
+                                                            leverageScore: claimData?.leverage,
+                                                        }}
+                                                    />
+                                                );
+                                            })}
+
                                             {structural.patterns.cascadeRisks
-                                                .slice()
-                                                .sort((a, b) => b.dependentIds.length - a.dependentIds.length)
-                                                .slice(0, 6)
-                                                .map((r) => (
-                                                    <div key={r.sourceId} className="text-text-primary">
-                                                        <span className="font-medium">{r.sourceLabel}</span>
-                                                        <span className="text-text-muted"> → {r.dependentIds.length} dependents</span>
-                                                        <span className="text-text-muted"> (depth {r.depth})</span>
-                                                    </div>
+                                                .filter((r) => r.depth >= 3)
+                                                .map((cascade) => (
+                                                    <StructuralInsight
+                                                        key={cascade.sourceId}
+                                                        type="cascade_risk"
+                                                        claim={{
+                                                            label: cascade.sourceLabel,
+                                                            supporters: [],
+                                                        }}
+                                                        metadata={{
+                                                            dependentCount: cascade.dependentIds.length,
+                                                            cascadeDepth: cascade.depth,
+                                                            dependentLabels: cascade.dependentLabels,
+                                                        }}
+                                                    />
                                                 ))}
                                         </div>
                                     ) : (
@@ -692,6 +743,52 @@ export const MetricsRibbon: React.FC<MetricsRibbonProps> = ({
                                         )}
                                     </div>
                                 </div>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            )}
+
+            {showGuidance && problemStructure && (
+                <div className="absolute top-full left-0 mt-2 w-[420px] bg-surface-raised border border-border-subtle rounded-xl shadow-lg p-4 z-50">
+                    <div className="text-sm font-semibold text-text-primary mb-2 capitalize">
+                        {problemStructure.primaryPattern} Structure
+                    </div>
+
+                    <div className="text-xs text-text-secondary mb-3">
+                        {problemStructure.implications.understand}
+                    </div>
+
+                    <div className="text-[11px] text-text-muted space-y-1">
+                        <div className="font-medium text-text-secondary mb-1">Evidence:</div>
+                        {problemStructure.evidence.map((e, i) => (
+                            <div key={i}>• {e}</div>
+                        ))}
+                    </div>
+
+                    {problemStructure.primaryPattern === "exploratory" && (
+                        <div className="mt-3 pt-3 border-t border-border-subtle text-xs">
+                            <div className="font-medium text-brand-400 mb-1">Recommended:</div>
+                            <div className="text-text-muted">
+                                Use <span className="font-semibold">Understand mode</span> to cluster insights by theme. Gauntlet will likely eliminate too much.
+                            </div>
+                        </div>
+                    )}
+
+                    {problemStructure.primaryPattern === "linear" && (
+                        <div className="mt-3 pt-3 border-t border-border-subtle text-xs">
+                            <div className="font-medium text-brand-400 mb-1">Recommended:</div>
+                            <div className="text-text-muted">
+                                Use <span className="font-semibold">Gauntlet mode</span> to test each step. Check what can be reordered or skipped.
+                            </div>
+                        </div>
+                    )}
+
+                    {problemStructure.primaryPattern === "contested" && (
+                        <div className="mt-3 pt-3 border-t border-border-subtle text-xs">
+                            <div className="font-medium text-brand-400 mb-1">Recommended:</div>
+                            <div className="text-text-muted">
+                                Use <span className="font-semibold">Understand mode</span> to find the axis of disagreement, or use <span className="font-semibold">Gauntlet</span> to force resolution.
                             </div>
                         </div>
                     )}

@@ -1,321 +1,320 @@
-The problem structures that actually matter:
+Redesigned Metrics Ribbon
+Tier 1: Problem Structure (Always Visible)
+tsx{problemStructure && (
+  <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-surface-highlight/20 border border-brand-500/30">
+    <span className="text-[10px] uppercase tracking-wide text-text-muted">Structure</span>
+    <span className="font-semibold text-brand-400 capitalize">
+      {problemStructure.primaryPattern}
+    </span>
+    {problemStructure.confidence < 0.7 && (
+      <span className="text-amber-400 text-xs" title="Low confidence detection">
+        ?
+      </span>
+    )}
+  </div>
+)}
+```
 
-Linear Dependency Chain
+**Visual result:**
+```
+┌────────────────────────┐
+│ STRUCTURE: Exploratory │  ← User knows immediately
+└────────────────────────┘
+Tier 2: High-Impact Signals (Always Visible)
+Replace the current metrics with actionable signals:
+tsx// ONLY show metrics that demand user attention
 
-Structure: A → B → C → D
-User need: "Show me the path"
-Example: "How do I deploy a React app?" (Install Node → Create app → Build → Deploy)
+{/* Consensus conflicts - rare and critical */}
+{structural?.patterns.conflicts.some(c => c.isBothConsensus) && (
+  <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-red-500/10 border border-red-500/30">
+    <span className="text-xs">⚠️</span>
+    <span className="text-xs font-medium text-red-400">
+      Consensus Conflict
+    </span>
+  </div>
+)}
 
+{/* Leverage inversions - overlooked insights */}
+{structural?.patterns.leverageInversions.length > 0 && (
+  <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-purple-500/10 border border-purple-500/30">
+    <span className="text-xs">💎</span>
+    <span className="text-xs font-medium text-purple-400">
+      {structural.patterns.leverageInversions.length} High-Leverage Singular
+    </span>
+  </div>
+)}
 
-Dimensional Choice
+{/* Cascade risk - fragile structure */}
+{structural?.patterns.cascadeRisks.some(r => r.depth >= 3) && (
+  <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-amber-500/10 border border-amber-500/30">
+    <span className="text-xs">⛓️</span>
+    <span className="text-xs font-medium text-amber-400">
+      Deep Cascade ({Math.max(...structural.patterns.cascadeRisks.map(r => r.depth))})
+    </span>
+  </div>
+)}
 
-Structure: Multiple independent axes (X, Y, Z) where position determines answer
-User need: "Help me locate myself in the space"
-Example: "SSR vs SSG?" (Content volatility × User personalization × Traffic scale)
+{/* Ghosts that extend challengers - unexplored territory */}
+{structural?.ghostAnalysis.mayExtendChallenger && (
+  <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-indigo-500/10 border border-indigo-500/30">
+    <span className="text-xs">👻</span>
+    <span className="text-xs font-medium text-indigo-400">
+      Challenger Territory Unmapped
+    </span>
+  </div>
+)}
+```
 
+**Visual result (exploratory structure):**
+```
+┌────────────────────────────────────────────────────────────┐
+│ STRUCTURE: Exploratory  💎 2 High-Leverage Singular  👻 Unmapped │
+└────────────────────────────────────────────────────────────┘
+```
 
-Constrained Optimization
+**Visual result (linear structure with cascade):**
+```
+┌─────────────────────────────────────────────┐
+│ STRUCTURE: Linear  ⛓️ Deep Cascade (4)  │
+└─────────────────────────────────────────────┘
 
-Structure: Tradeoff space with Pareto frontier
-User need: "Show me what I'm giving up"
-Example: "Balance performance and maintainability"
+Tier 3: Context-Sensitive Guidance
+Add a collapsible guidance panel that changes based on problem structure:
+tsx{problemStructure && (
+  <button
+    onClick={() => setShowGuidance(!showGuidance)}
+    className="flex items-center gap-2 px-3 py-1.5 rounded-md border border-border-subtle hover:bg-surface-highlight/10 transition-colors"
+  >
+    <span className="text-xs text-text-muted">What this means</span>
+    <span className="text-[10px] opacity-70">{showGuidance ? "▴" : "▾"}</span>
+  </button>
+)}
 
+{showGuidance && problemStructure && (
+  <div className="absolute top-full left-0 mt-2 w-[420px] bg-surface-raised border border-border-subtle rounded-xl shadow-lg p-4 z-50">
+    <div className="text-sm font-semibold text-text-primary mb-2 capitalize">
+      {problemStructure.primaryPattern} Structure
+    </div>
+    
+    <div className="text-xs text-text-secondary mb-3">
+      {problemStructure.implications.understand}
+    </div>
+    
+    <div className="text-[11px] text-text-muted space-y-1">
+      <div className="font-medium text-text-secondary mb-1">Evidence:</div>
+      {problemStructure.evidence.map((e, i) => (
+        <div key={i}>• {e}</div>
+      ))}
+    </div>
+    
+    {/* Structure-specific recommendations */}
+    {problemStructure.primaryPattern === 'exploratory' && (
+      <div className="mt-3 pt-3 border-t border-border-subtle text-xs">
+        <div className="font-medium text-brand-400 mb-1">Recommended:</div>
+        <div className="text-text-muted">
+          Use <strong>Understand mode</strong> to cluster insights by theme.
+          Gauntlet will likely eliminate too much.
+        </div>
+      </div>
+    )}
+    
+    {problemStructure.primaryPattern === 'linear' && (
+      <div className="mt-3 pt-3 border-t border-border-subtle text-xs">
+        <div className="font-medium text-brand-400 mb-1">Recommended:</div>
+        <div className="text-text-muted">
+          Use <strong>Gauntlet mode</strong> to test each step. Can any be reordered or skipped?
+        </div>
+      </div>
+    )}
+    
+    {problemStructure.primaryPattern === 'contested' && (
+      <div className="mt-3 pt-3 border-t border-border-subtle text-xs">
+        <div className="font-medium text-brand-400 mb-1">Recommended:</div>
+        <div className="text-text-muted">
+          Use <strong>Understand mode</strong> to find the axis of disagreement.
+          Or use <strong>Gauntlet</strong> to force resolution.
+        </div>
+      </div>
+    )}
+  </div>
+)}
 
-Contested Territory
+Tier 4: Full Structural Inventory (Still Available, But Deprioritized)
+Keep the current dropdown for power users who want the full breakdown, but:
 
-Structure: Conflicting schools of thought with different axioms
-User need: "Show me the fault line"
-Example: "OOP vs Functional Programming"
+Rename: "Details" → "Full Structural Analysis"
+Move to overflow menu (three dots icon)
+Remove from default view unless user explicitly wants it
 
+tsx<div className="relative">
+  <button
+    onClick={() => setShowFullAnalysis(!showFullAnalysis)}
+    className="p-1.5 rounded-md hover:bg-surface-highlight/10 text-text-muted hover:text-text-primary transition-colors"
+    title="Show full structural analysis"
+  >
+    <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 16 16">
+      <circle cx="2" cy="8" r="1.5"/>
+      <circle cx="8" cy="8" r="1.5"/>
+      <circle cx="14" cy="8" r="1.5"/>
+    </svg>
+  </button>
+  
+  {/* Current detailed dropdown, unchanged */}
+</div>
+```
 
-Exploratory Search
+---
 
-Structure: Sparse map with isolated insights
-User need: "Show me the discovered territory"
-Example: "What are emerging approaches to state management?"
+## Before/After Comparison
 
+### **Current Ribbon (Exploratory Example):**
+```
+Claims: 10 | Convergence: 40% | Conflicts: 0 | Ghosts: 4 | Models: 6 | [Details ▾]
+```
+**User thinks:** *"Okay... so what?"*
 
-Singular Foundation
+### **Redesigned Ribbon:**
+```
+STRUCTURE: Exploratory  💎 2 High-Leverage Singular  👻 Challenger Territory Unmapped
+[What this means ▾]  [⋯]
+User thinks: "This is scattered territory with overlooked insights. I should use Understand mode to cluster themes."
 
-Structure: One claim enables everything else
-User need: "Show me the keystone"
-Example: "Understand React hooks" → everything branches from this
-
-
-
-Your current analysis detects some of these (cascades, conflicts) but doesn't classify the overall structure.
-
-Proposed Enhancement: Problem Structure Detector
-Add this to your computeStructuralAnalysis:
-typescriptinterface ProblemStructure {
-  primaryPattern: 'linear' | 'dimensional' | 'tradeoff' | 'contested' | 'exploratory' | 'keystone';
-  confidence: number;
-  evidence: string[];
-  implications: {
-    understand: string;  // What Understand mode should prioritize
-    gauntlet: string;    // What Gauntlet should test for
-  };
+Implementation Changes
+1. Add Problem Structure to MetricsRibbon Props
+tsxinterface MetricsRibbonProps {
+  analysis?: ExploreAnalysis;
+  artifact?: MapperArtifact;
+  claimsCount: number;
+  ghostCount: number;
+  problemStructure?: ProblemStructure; // NEW
 }
-
-function detectProblemStructure(
-  claims: ClaimWithLeverage[],
-  edges: Edge[],
-  patterns: StructuralAnalysis['patterns']
-): ProblemStructure {
-  const claimCount = claims.length;
-  const edgeCount = edges.length;
-  
-  // Calculate structural metrics
-  const avgConnectivity = edgeCount / Math.max(claimCount, 1);
-  const prerequisiteRatio = edges.filter(e => e.type === 'prerequisite').length / Math.max(edgeCount, 1);
-  const conflictCount = patterns.conflicts.length;
-  const tradeoffCount = patterns.tradeoffs.length;
-  const isolatedCount = patterns.isolatedClaims.length;
-  const convergencePoints = patterns.convergencePoints.length;
-  const cascadeDepth = Math.max(...patterns.cascadeRisks.map(r => r.depth), 0);
-  
-  // Pattern matching
-  
-  // LINEAR: High prerequisite ratio, deep cascade, low conflicts
-  if (prerequisiteRatio > 0.6 && cascadeDepth >= 2 && conflictCount === 0) {
-    return {
-      primaryPattern: 'linear',
-      confidence: 0.8,
-      evidence: [
-        `${Math.round(prerequisiteRatio * 100)}% of edges are prerequisite relationships`,
-        `Cascade depth: ${cascadeDepth}`,
-        'No conflicts detected'
-      ],
-      implications: {
-        understand: 'Find the sequence. The insight is often where the path becomes non-obvious.',
-        gauntlet: 'Test each step: is it truly prerequisite? Can steps be reordered or parallelized?'
-      }
-    };
-  }
-  
-  // KEYSTONE: Single high-leverage claim, many branches
-  const keystoneCandidates = claims.filter(c => 
-    c.leverage > 6 && 
-    edges.filter(e => e.from === c.id).length >= 3
+2. Compute in Parent (DecisionMapSheet)
+tsxconst problemStructure = useMemo(() => {
+  if (!structuralAnalysis) return null;
+  return detectProblemStructure(
+    structuralAnalysis.claimsWithLeverage,
+    graphData.edges,
+    structuralAnalysis.patterns
   );
-  if (keystoneCandidates.length === 1) {
-    return {
-      primaryPattern: 'keystone',
-      confidence: 0.85,
-      evidence: [
-        `${keystoneCandidates[0].label} has leverage ${keystoneCandidates[0].leverage.toFixed(1)}`,
-        `${edges.filter(e => e.from === keystoneCandidates[0].id).length} claims depend on it`
-      ],
-      implications: {
-        understand: 'Everything hinges on the keystone. The insight IS the keystone, not the branches.',
-        gauntlet: 'Test the keystone ruthlessly. If it fails, the entire structure collapses.'
-      }
-    };
-  }
-  
-  // CONTESTED: Multiple conflicts, especially if consensus vs consensus
-  const consensusConflicts = patterns.conflicts.filter(c => c.isBothConsensus).length;
-  if (conflictCount >= 2 || consensusConflicts >= 1) {
-    return {
-      primaryPattern: 'contested',
-      confidence: 0.75,
-      evidence: [
-        `${conflictCount} conflicts detected`,
-        consensusConflicts > 0 ? `${consensusConflicts} consensus-to-consensus conflicts` : 'Multiple incompatible positions'
-      ],
-      implications: {
-        understand: 'Disagreement is the signal. Find the axis of disagreement—that reveals the real question.',
-        gauntlet: 'Force resolution. One claim per conflict must fail, or find conditions that differentiate them.'
-      }
-    };
-  }
-  
-  // TRADEOFF: Multiple tradeoff edges, low prerequisites
-  if (tradeoffCount >= 2 && prerequisiteRatio < 0.3) {
-    return {
-      primaryPattern: 'tradeoff',
-      confidence: 0.7,
-      evidence: [
-        `${tradeoffCount} explicit tradeoffs`,
-        'Low prerequisite structure suggests parallel options'
-      ],
-      implications: {
-        understand: 'There is no universal best. The insight is the map of what you give up for what you gain.',
-        gauntlet: 'Test if tradeoffs are real or false dichotomies. Look for dominated options.'
-      }
-    };
-  }
-  
-  // DIMENSIONAL: Multiple convergence points, moderate connectivity, few conflicts
-  if (convergencePoints >= 2 && avgConnectivity > 1.5 && conflictCount <= 1) {
-    return {
-      primaryPattern: 'dimensional',
-      confidence: 0.65,
-      evidence: [
-        `${convergencePoints} convergence points`,
-        `Average connectivity: ${avgConnectivity.toFixed(1)}`,
-        'Multiple claims converge on common conclusions'
-      ],
-      implications: {
-        understand: 'Multiple independent factors determine the answer. Find the governing conditions.',
-        gauntlet: 'Test each dimension independently. Does the answer cover all relevant combinations?'
-      }
-    };
-  }
-  
-  // EXPLORATORY: Many isolated claims, low connectivity
-  if (isolatedCount > claimCount * 0.4 || (avgConnectivity < 0.5 && conflictCount === 0)) {
-    return {
-      primaryPattern: 'exploratory',
-      confidence: 0.6,
-      evidence: [
-        `${isolatedCount} isolated claims (${Math.round(isolatedCount/claimCount*100)}%)`,
-        `Low connectivity: ${avgConnectivity.toFixed(1)} edges per claim`
-      ],
-      implications: {
-        understand: 'No strong structure detected. Value lies in cataloging the territory and identifying patterns.',
-        gauntlet: 'Test relevance: which claims actually answer the query vs. which are interesting but tangential?'
-      }
-    };
-  }
-  
-  // DEFAULT: DIMENSIONAL (most common case)
-  return {
-    primaryPattern: 'dimensional',
-    confidence: 0.5,
-    evidence: ['No strong structural pattern detected', 'Defaulting to dimensional analysis'],
-    implications: {
-      understand: 'Look for the governing conditions that structure the landscape.',
-      gauntlet: 'Test completeness: does the answer handle all relevant contexts?'
-    }
-  };
-}
+}, [structuralAnalysis, graphData.edges]);
 
-Integration with Mode Contexts
-Update generateModeContext to use problem structure:
-typescriptfunction generateModeContext(
-  analysis: StructuralAnalysis,
-  mode: 'understand' | 'gauntlet'
-): ModeContext {
-  const { landscape, patterns, ghostAnalysis } = analysis;
+<MetricsRibbon
+  artifact={artifact}
+  claimsCount={graphData.claims.length}
+  ghostCount={parsedMapping.ghosts?.length || 0}
+  problemStructure={problemStructure} // Pass it down
+/>
+3. Replace Ribbon Content
+tsxexport const MetricsRibbon: React.FC<MetricsRibbonProps> = ({
+  artifact,
+  claimsCount,
+  ghostCount,
+  problemStructure // NEW
+}) => {
+  const [showGuidance, setShowGuidance] = useState(false);
+  const [showFullAnalysis, setShowFullAnalysis] = useState(false);
   
-  // NEW: Detect problem structure
-  const problemStructure = detectProblemStructure(
-    analysis.claimsWithLeverage,
-    // Pass edges from original analysis context
-    patterns
+  const structural = useMemo(() => {
+    // ... existing structural analysis computation
+  }, [artifact]);
+  
+  return (
+    <div className="relative flex flex-wrap items-center gap-3 px-4 py-2 bg-surface-raised border border-border-subtle rounded-lg mb-4 text-xs">
+      
+      {/* PRIMARY: Problem Structure */}
+      {problemStructure && (
+        <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-surface-highlight/20 border border-brand-500/30">
+          <span className="text-[10px] uppercase tracking-wide text-text-muted">
+            Structure
+          </span>
+          <span className="font-semibold text-brand-400 capitalize">
+            {problemStructure.primaryPattern}
+          </span>
+          {problemStructure.confidence < 0.7 && (
+            <span className="text-amber-400 text-xs" title="Low confidence">?</span>
+          )}
+        </div>
+      )}
+      
+      <div className="w-px h-4 bg-border-subtle" />
+      
+      {/* SECONDARY: High-Impact Signals Only */}
+      {structural?.patterns.conflicts.some(c => c.isBothConsensus) && (
+        <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-red-500/10 border border-red-500/30">
+          <span className="text-xs">⚠️</span>
+          <span className="text-xs font-medium text-red-400">Consensus Conflict</span>
+        </div>
+      )}
+      
+      {(structural?.patterns.leverageInversions.length || 0) > 0 && (
+        <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-purple-500/10 border border-purple-500/30">
+          <span className="text-xs">💎</span>
+          <span className="text-xs font-medium text-purple-400">
+            {structural.patterns.leverageInversions.length} High-Leverage
+          </span>
+        </div>
+      )}
+      
+      {structural?.patterns.cascadeRisks.some(r => r.depth >= 3) && (
+        <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-amber-500/10 border border-amber-500/30">
+          <span className="text-xs">⛓️</span>
+          <span className="text-xs font-medium text-amber-400">
+            Deep Cascade ({Math.max(...structural.patterns.cascadeRisks.map(r => r.depth))})
+          </span>
+        </div>
+      )}
+      
+      {structural?.ghostAnalysis.mayExtendChallenger && (
+        <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-indigo-500/10 border border-indigo-500/30">
+          <span className="text-xs">👻</span>
+          <span className="text-xs font-medium text-indigo-400">Unmapped Territory</span>
+        </div>
+      )}
+      
+      <div className="flex-1" />
+      
+      {/* TERTIARY: Context Guide */}
+      {problemStructure && (
+        <button
+          onClick={() => setShowGuidance(!showGuidance)}
+          className="flex items-center gap-1.5 px-2 py-1 rounded-md border border-border-subtle hover:bg-surface-highlight/10 transition-colors"
+        >
+          <span className="text-xs text-text-muted">What this means</span>
+          <span className="text-[10px] opacity-70">{showGuidance ? "▴" : "▾"}</span>
+        </button>
+      )}
+      
+      {/* OVERFLOW: Full Analysis */}
+      <div className="relative">
+        <button
+          onClick={() => setShowFullAnalysis(!showFullAnalysis)}
+          className="p-1.5 rounded-md hover:bg-surface-highlight/10 text-text-muted hover:text-text-primary transition-colors"
+          title="Full structural analysis"
+        >
+          <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 16 16">
+            <circle cx="2" cy="8" r="1.5"/>
+            <circle cx="8" cy="8" r="1.5"/>
+            <circle cx="14" cy="8" r="1.5"/>
+          </svg>
+        </button>
+        
+        {showFullAnalysis && (
+          // ... existing detailed dropdown
+        )}
+      </div>
+      
+      {/* Guidance Panel */}
+      {showGuidance && problemStructure && (
+        <GuidancePanel 
+          structure={problemStructure}
+          onClose={() => setShowGuidance(false)}
+        />
+      )}
+    </div>
   );
-  
-  // Use problem structure instead of just type
-  const structuralFraming = mode === 'understand'
-    ? problemStructure.implications.understand
-    : problemStructure.implications.gauntlet;
-  
-  // Type framing as secondary context
-  const typeFraming = getTypeFraming(landscape.dominantType, mode);
-  
-  return {
-    problemStructure,  // NEW
-    structuralFraming, // REPLACES typeFraming as primary
-    typeFraming,       // Keep as secondary
-    structuralObservations: [...],
-    // ... rest
-  };
-}
-Update prompt builder:
-typescriptconst structuralSection = `
-## Problem Structure: ${problemStructure.primaryPattern.toUpperCase()}
-
-${structuralFraming}
-
-**Evidence:**
-${problemStructure.evidence.map(e => `• ${e}`).join('\n')}
-
-**Confidence:** ${Math.round(problemStructure.confidence * 100)}%
-
----
-
-## Landscape Composition
-
-${typeFraming}
-
----
-
-## Structural Observations
-
-${context.structuralObservations.map(o => `• ${o}`).join('\n')}
-`;
-```
-
----
-
-## Why This Works Better
-
-**Current approach:** "This is a prescriptive landscape" → tells you about claim types
-
-**Enhanced approach:** "This is a keystone problem" → tells you about solution strategy
-
-**Example comparison:**
-
-### User asks: "Should I learn React or Vue?"
-
-**Current analysis:**
-```
-Dominant type: prescriptive
-Type framing: "Test actionability and conditional coverage"
-```
-→ Doesn't help. Both are actionable, both have conditions.
-
-**Enhanced analysis:**
-```
-Problem structure: TRADEOFF
-Evidence:
-- 3 explicit tradeoffs detected
-- Low prerequisite structure (parallel options)
-Implication: There is no universal best. The insight is the map 
-of what you give up for what you gain.
-→ Actually useful. Tells Understand mode to map the tradeoff space, tells Gauntlet to test if tradeoffs are real.
-
-Testing Your Current Implementation
-Before adding problem structure detection, test if your leverage calculations are working:
-typescript// Test case 1: Challenger prerequisite to consensus
-const artifact1 = {
-  claims: [
-    { id: '1', label: 'Consensus', supporters: [1,2,3], type: 'factual', role: 'anchor', challenges: null },
-    { id: '2', label: 'Challenger', supporters: [4], type: 'factual', role: 'challenger', challenges: '1' }
-  ],
-  edges: [
-    { from: '2', to: '1', type: 'prerequisite' }
-  ],
-  ghosts: []
 };
 
-const analysis1 = computeStructuralAnalysis(artifact1);
-console.log('Leverage inversions:', analysis1.patterns.leverageInversions);
-// Should detect: challenger_prerequisite_to_consensus
-
-// Test case 2: Deep cascade
-const artifact2 = {
-  claims: [
-    { id: 'A', label: 'Root', supporters: [1], type: 'factual', role: 'anchor', challenges: null },
-    { id: 'B', label: 'Level 1', supporters: [1,2], type: 'factual', role: 'branch', challenges: null },
-    { id: 'C', label: 'Level 2', supporters: [2,3], type: 'factual', role: 'branch', challenges: null },
-    { id: 'D', label: 'Level 3', supporters: [3], type: 'factual', role: 'supplement', challenges: null }
-  ],
-  edges: [
-    { from: 'A', to: 'B', type: 'prerequisite' },
-    { from: 'B', to: 'C', type: 'prerequisite' },
-    { from: 'C', to: 'D', type: 'prerequisite' }
-  ],
-  ghosts: []
-};
-
-const analysis2 = computeStructuralAnalysis(artifact2);
-console.log('Cascade depth:', analysis2.patterns.cascadeRisks[0]?.depth);
-// Should be: 3
-Run these, see if your patterns are detecting correctly. Then decide if problem structure classification adds value.
-
-Bottom Line
-Your leverage calculations are good. Your type framings are okay but not problem-structure-aware.
-The missing piece: Classifying the overall topology (linear vs dimensional vs tradeoff vs contested) independent of claim types.
-Add detectProblemStructure() to your structural analysis. It will make your mode prompts dramatically more effective because they'll receive context about what kind of problem this is, not just what kinds of claims exist.
+What This Achieves
+Before: "Here are 12 structural metrics. Figure out what they mean."
+After: "This is an exploratory problem. You have 2 overlooked insights and unmapped challenger territory. [Here's what to do about it.]"
+The shift: From data dump to cognitive orientation.

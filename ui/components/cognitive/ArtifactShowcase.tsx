@@ -1,17 +1,14 @@
 import React, { useEffect, useMemo, useCallback, useState } from "react";
-import { MapperArtifact, AiTurn, ExploreAnalysis, ProviderResponse } from "../../../shared/contract";
-import { applyEdits } from "../../utils/apply-artifact-edits";
+import { MapperArtifact, AiTurn, ExploreAnalysis, ProviderResponse, ProblemStructure, Claim } from "../../../shared/contract";
 import { artifactEditsAtom } from "../../state/artifact-edits";
 import { RawResponseCard } from "./cards/RawResponseCard";
 import { extractGraphTopologyAndStrip, parseMappingResponse } from "../../../shared/parsing-utils";
-import DecisionMapGraph from "../DecisionMapGraph";
+import StructureGlyph from "../StructureGlyph";
 import { adaptGraphTopology } from "../../utils/graphAdapter";
-
 import { selectedArtifactsAtom, selectedModelsAtom, workflowProgressForTurnFamily } from "../../state/atoms";
 import { SelectionBar } from "./SelectionBar";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { SouvenirCard } from "./cards/SouvenirCard";
-import { GapsCard } from "./cards/GapsCard";
 import { CouncilOrbs } from "../CouncilOrbs";
 import RefinerDot from '../refinerui/RefinerDot';
 import { activeSplitPanelAtom, includePromptInCopyAtom, isDecisionMapOpenAtom } from "../../state/atoms";
@@ -27,6 +24,8 @@ import type { CognitiveTransitionOptions, SelectedArtifact } from "../../hooks/c
 import { MetricsRibbon } from "./MetricsRibbon";
 import { useProviderLimits } from "../../hooks/useProviderLimits";
 import { getProviderName } from "../../utils/provider-helpers";
+import { computeProblemStructureFromArtifact } from "../../../src/core/PromptService";
+import { applyEdits } from "../../utils/apply-artifact-edits";
 
 const MapIcon = ({ className }: { className?: string }) => (
     <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><rect width="18" height="18" x="3" y="3" rx="2" ry="2" /><line x1="3" x2="21" y1="9" y2="9" /><line x1="9" x2="9" y1="21" y2="9" /></svg>
@@ -90,6 +89,18 @@ interface ArtifactShowcaseProps {
     isLoading?: boolean;
 }
 
+function getStructureGuidance(pattern: string): string {
+    const guidance: Record<string, string> = {
+        linear: "Follow the steps in order; one step unlocks the next.",
+        keystone: "Everything hangs on one key idea.",
+        contested: "Two incompatible worldviews collide here.",
+        tradeoff: "You must give up X to gain Y.",
+        dimensional: "The answer depends on conditions.",
+        exploratory: "This is open terrain with scattered findings.",
+    };
+    return guidance[pattern] || guidance.exploratory;
+}
+
 export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
     mapperArtifact,
     analysis,
@@ -113,7 +124,10 @@ export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
     // Get modified artifact
     const currentTurnId = turn?.id || mapperArtifact?.turn?.toString() || "";
     const edits = allEdits.get(currentTurnId);
-    const modifiedArtifact = useMemo(() => mapperArtifact ? applyEdits(mapperArtifact, edits) : null, [mapperArtifact, edits]);
+    const modifiedArtifact = useMemo(
+        () => (mapperArtifact ? applyEdits(mapperArtifact, edits) : null),
+        [mapperArtifact, edits]
+    );
     const userNotes = edits?.userNotes;
     const artifactForDisplay = modifiedArtifact || mapperArtifact || null;
 
@@ -153,7 +167,16 @@ export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
         return matches ? matches.length : 0;
     }, [mapperNarrative]);
 
-
+    const problemStructure = useMemo<ProblemStructure | undefined>(() => {
+        if (!artifactForDisplay) return undefined;
+        const fromArtifact = (artifactForDisplay as any).problemStructure as ProblemStructure | undefined;
+        if (fromArtifact && typeof fromArtifact.primaryPattern === "string") return fromArtifact;
+        try {
+            return computeProblemStructureFromArtifact(artifactForDisplay as MapperArtifact);
+        } catch {
+            return undefined;
+        }
+    }, [artifactForDisplay]);
 
     const graphData = useMemo(() => {
         const claims = Array.isArray(artifactForDisplay?.claims) ? artifactForDisplay!.claims : [];
@@ -161,29 +184,6 @@ export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
         if (claims.length > 0 || edges.length > 0) return { claims, edges };
         return adaptGraphTopology(graphTopology);
     }, [artifactForDisplay, graphTopology]);
-
-    const graphContainerRef = React.useRef<HTMLDivElement>(null);
-    const [graphDims, setGraphDims] = useState<{ w: number; h: number }>({ w: 0, h: 320 });
-
-    useEffect(() => {
-        const update = () => {
-            const el = graphContainerRef.current;
-            if (!el) return;
-            const w = el.clientWidth;
-            const h = Math.max(260, Math.min(420, Math.floor(w * 0.6)));
-            setGraphDims({ w, h });
-        };
-
-        update();
-        const raf = requestAnimationFrame(update);
-        window.addEventListener('resize', update);
-        return () => {
-            window.removeEventListener('resize', update);
-            cancelAnimationFrame(raf);
-        };
-    }, []);
-
-
 
     const workflowProgress = useAtomValue(workflowProgressForTurnFamily(currentTurnId));
 
@@ -215,7 +215,9 @@ export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
         // Direct lookup from artifact claims only
         if (artifactForDisplay && artifactForDisplay.claims) {
             for (const id of ids) {
-                const claim = artifactForDisplay.claims.find(c => c.id === id || String(c.id) === id);
+                const claim = artifactForDisplay.claims.find(
+                    (c: Claim) => c.id === id || String(c.id) === id
+                );
                 if (claim) {
                     out.push({
                         id,
@@ -309,6 +311,7 @@ export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
                         artifact={mapperArtifact}
                         claimsCount={claimsCount}
                         ghostCount={ghostCount}
+                        problemStructure={problemStructure}
                     />
 
                     <div className="flex items-center justify-between gap-2">
@@ -362,41 +365,59 @@ export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
                     {mapperArtifact.souvenir && <SouvenirCard content={mapperArtifact.souvenir} />}
                     {/* GapsCard removed as per cleanup requirements */}
 
-                    {mapperNarrative && (
-                        <div className="bg-surface-raised border border-border-subtle rounded-xl overflow-hidden mb-4">
-                            <div className="px-4 py-3 border-b border-border-subtle bg-surface-highlight/10 flex items-center justify-between">
-                                <div className="text-xs font-semibold text-text-secondary uppercase tracking-wide">
-                                    📖 The Landscape
-                                </div>
-                                <div className="text-[10px] text-text-muted">
-                                    {mapperNarrativeAnchorCount} clickable claims
-                                </div>
-                            </div>
-                            {graphData.claims.length > 0 && (
-                                <div className="px-4 py-4 border-b border-border-subtle bg-surface">
-                                    <div ref={graphContainerRef} className="w-full">
-                                        {graphDims.w > 0 && (
-                                            <DecisionMapGraph
-                                                claims={graphData.claims}
-                                                edges={graphData.edges}
-                                                width={graphDims.w}
-                                                height={graphDims.h}
-                                                onNodeClick={(node) => toggleSelection(node.id)}
-                                                selectedClaimIds={Array.from(selectedIds)}
-                                            />
-                                        )}
+                            {mapperNarrative && (
+                                <div className="bg-surface-raised border border-border-subtle rounded-xl overflow-hidden mb-4">
+                                    <div className="px-4 py-3 border-b border-border-subtle bg-surface-highlight/10 flex items-center justify-between">
+                                        <div className="text-xs font-semibold text-text-secondary uppercase tracking-wide">
+                                            📖 The Landscape
+                                        </div>
+                                        <div className="text-[10px] text-text-muted">
+                                            {mapperNarrativeAnchorCount} clickable claims
+                                        </div>
+                                    </div>
+                                    <div className="px-4 py-4 border-b border-border-subtle bg-surface">
+                                        <div className="space-y-3">
+                                            {problemStructure && (
+                                                <div className="space-y-3">
+                                                    <div className="flex items-center gap-3">
+                                                        <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-surface-highlight/20 border border-brand-500/30">
+                                                            <span className="text-[10px] uppercase tracking-wide text-text-muted">
+                                                                Structure
+                                                            </span>
+                                                            <span className="font-semibold text-brand-400 capitalize">
+                                                                {problemStructure.primaryPattern}
+                                                            </span>
+                                                            {problemStructure.confidence < 0.7 && (
+                                                                <span className="text-amber-400 text-xs">?</span>
+                                                            )}
+                                                        </div>
+                                                        <span className="text-xs text-text-muted">
+                                                            {Math.round((problemStructure.confidence ?? 0) * 100)}% confidence
+                                                        </span>
+                                                    </div>
+                                                    <div className="text-sm text-text-secondary px-4 py-2 bg-surface-highlight/10 rounded-lg border border-border-subtle/50">
+                                                        {getStructureGuidance(problemStructure.primaryPattern)}
+                                                    </div>
+                                                    <StructureGlyph
+                                                        pattern={problemStructure.primaryPattern}
+                                                        claimCount={graphData.claims.length}
+                                                        width={280}
+                                                        height={120}
+                                                        onClick={() => setIsDecisionMapOpen({ turnId: currentTurnId })}
+                                                    />
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                    <div className="px-5 py-5 text-sm text-text-muted leading-relaxed whitespace-pre-wrap font-serif">
+                                        <FormattedNarrative
+                                            text={mapperNarrative}
+                                            onToggle={toggleSelection}
+                                            selectedIds={selectedIds}
+                                        />
                                     </div>
                                 </div>
                             )}
-                            <div className="px-5 py-5 text-sm text-text-muted leading-relaxed whitespace-pre-wrap font-serif">
-                                <FormattedNarrative
-                                    text={mapperNarrative}
-                                    onToggle={toggleSelection}
-                                    selectedIds={selectedIds}
-                                />
-                            </div>
-                        </div>
-                    )}
 
                     {/* V3: No Container Previews. The Narrative is the structure. */
                     /* However, we still show Challengers, Bundles, etc. if they exist in the graph */}
@@ -428,7 +449,7 @@ export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
                                                 </div>
                                             </div>
                                             <div className="space-y-2">
-                                                {artifactForDisplay.ghosts.map((ghost, idx) => (
+                                                {artifactForDisplay.ghosts.map((ghost: string, idx: number) => (
                                                     <div key={idx} className="text-sm text-text-muted italic leading-relaxed">
                                                         {ghost}
                                                     </div>
@@ -436,7 +457,7 @@ export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
                                             </div>
                                         </div>
                                     )}
-                                    {artifactForDisplay.claims.map((claim) => (
+                                    {artifactForDisplay.claims.map((claim: Claim) => (
                                         <SelectableCard
                                             key={claim.id}
                                             item={{

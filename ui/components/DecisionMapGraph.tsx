@@ -1,6 +1,11 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as d3 from 'd3-force';
-import { Claim, Edge } from '../../shared/contract';
+import { Claim, Edge, ProblemStructure } from '../../shared/contract';
+
+const DEBUG_DECISION_MAP_GRAPH = false;
+const decisionMapGraphDbg = (...args: any[]) => {
+    if (DEBUG_DECISION_MAP_GRAPH) console.debug('[DecisionMapGraph]', ...args);
+};
 
 // Internal node type for d3 simulation, extending V3 Claim
 export interface GraphNode extends d3.SimulationNodeDatum {
@@ -30,6 +35,7 @@ export interface GraphEdge extends d3.SimulationLinkDatum<GraphNode> {
 interface Props {
     claims: Claim[];
     edges: Edge[];
+    problemStructure?: ProblemStructure;
     citationSourceOrder?: Record<number, string>;
     onNodeClick?: (node: GraphNode) => void;
     selectedClaimIds?: string[];
@@ -59,9 +65,58 @@ function getNodeRadius(supportCount: number): number {
     return base + Math.max(1, supportCount) * scale;
 }
 
+function computePrereqDepths(nodeIds: string[], edges: Edge[]): Map<string, number> {
+    const incoming = new Map<string, string[]>();
+    for (const id of nodeIds) incoming.set(id, []);
+    for (const e of edges) {
+        if (e.type !== 'prerequisite') continue;
+        if (!incoming.has(e.to)) incoming.set(e.to, []);
+        incoming.get(e.to)!.push(e.from);
+        if (!incoming.has(e.from)) incoming.set(e.from, []);
+    }
+
+    const visiting = new Set<string>();
+    const memo = new Map<string, number>();
+    const dfs = (id: string): number => {
+        if (memo.has(id)) return memo.get(id)!;
+        if (visiting.has(id)) return 0;
+        visiting.add(id);
+        const prereqs = incoming.get(id) || [];
+        let depth = 0;
+        for (const p of prereqs) {
+            depth = Math.max(depth, dfs(p) + 1);
+        }
+        visiting.delete(id);
+        memo.set(id, depth);
+        return depth;
+    };
+
+    for (const id of nodeIds) dfs(id);
+    return memo;
+}
+
+function pickKeystoneId(nodes: GraphNode[], edges: Edge[]): string | null {
+    const out = new Map<string, number>();
+    for (const e of edges) {
+        if (e.type !== 'supports' && e.type !== 'prerequisite') continue;
+        out.set(e.from, (out.get(e.from) || 0) + 1);
+    }
+    let best: string | null = null;
+    let bestCount = -1;
+    for (const n of nodes) {
+        const c = out.get(n.id) || 0;
+        if (c > bestCount) {
+            bestCount = c;
+            best = n.id;
+        }
+    }
+    return bestCount > 0 ? best : null;
+}
+
 const DecisionMapGraph: React.FC<Props> = ({
     claims: inputClaims,
     edges: inputEdges,
+    problemStructure,
     citationSourceOrder: _citationSourceOrder,
     onNodeClick,
     selectedClaimIds,
@@ -93,11 +148,68 @@ const DecisionMapGraph: React.FC<Props> = ({
             nodes.map(n => [n.id, { x: n.x, y: n.y }])
         );
 
+        const nodeIds = inputClaims.map((c) => c.id);
+        const hasPrereqs = inputEdges.some((e) => e.type === 'prerequisite');
+        const targets = new Map<string, { x: number; y: number }>();
+
+        const padding = 60;
+        const usableW = Math.max(1, width - padding * 2);
+        const usableH = Math.max(1, height - padding * 2);
+
+        if (problemStructure?.primaryPattern === 'linear' && hasPrereqs) {
+            const depths = computePrereqDepths(nodeIds, inputEdges);
+            const maxDepth = Math.max(0, ...Array.from(depths.values()));
+            const levels: Record<number, string[]> = {};
+            nodeIds.forEach((id) => {
+                const d = depths.get(id) || 0;
+                if (!levels[d]) levels[d] = [];
+                levels[d].push(id);
+            });
+
+            for (let d = 0; d <= maxDepth; d++) {
+                const levelIds = levels[d] || [];
+                const y = padding + (maxDepth === 0 ? usableH / 2 : (d / maxDepth) * usableH);
+                const count = levelIds.length;
+                levelIds.forEach((id, idx) => {
+                    const x = padding + (count === 1 ? usableW / 2 : (idx / (count - 1)) * usableW);
+                    targets.set(id, { x, y });
+                });
+            }
+        } else if (problemStructure?.primaryPattern === 'keystone') {
+            const provisionalNodes: GraphNode[] = inputClaims.map((c) => ({
+                id: c.id,
+                label: c.label,
+                text: c.text,
+                supporters: c.supporters,
+                support_count: c.support_count || c.supporters.length || 1,
+                type: c.type,
+                role: c.role,
+            }));
+            const keystoneId = pickKeystoneId(provisionalNodes, inputEdges);
+            if (keystoneId) {
+                targets.set(keystoneId, { x: width / 2, y: height / 2 });
+                const neighbors = inputEdges
+                    .filter((e) => e.from === keystoneId || e.to === keystoneId)
+                    .map((e) => (e.from === keystoneId ? e.to : e.from))
+                    .filter((id) => id !== keystoneId);
+                const uniq = Array.from(new Set(neighbors));
+                const radius = Math.min(usableW, usableH) * 0.28;
+                uniq.forEach((id, idx) => {
+                    const a = (idx / Math.max(uniq.length, 1)) * Math.PI * 2;
+                    targets.set(id, {
+                        x: width / 2 + Math.cos(a) * radius,
+                        y: height / 2 + Math.sin(a) * radius,
+                    });
+                });
+            }
+        }
+
         // Map V3 Claims to GraphNodes
         const simNodes: GraphNode[] = inputClaims.map(c => {
             const existing = existingPositions.get(c.id);
             const supporters = Array.isArray(c.supporters) ? c.supporters : [];
             const supportCount = (typeof c.support_count === 'number' && c.support_count > 0) ? c.support_count : (supporters.length || 1);
+            const target = targets.get(c.id);
             return {
                 id: c.id,
                 label: c.label,
@@ -106,8 +218,8 @@ const DecisionMapGraph: React.FC<Props> = ({
                 support_count: supportCount,
                 type: c.type,
                 role: c.role,
-                x: existing?.x ?? width / 2 + (Math.random() - 0.5) * 100,
-                y: existing?.y ?? height / 2 + (Math.random() - 0.5) * 100,
+                x: existing?.x ?? target?.x ?? width / 2 + (Math.random() - 0.5) * 100,
+                y: existing?.y ?? target?.y ?? height / 2 + (Math.random() - 0.5) * 100,
             };
         });
 
@@ -119,6 +231,14 @@ const DecisionMapGraph: React.FC<Props> = ({
             reason: e.type // Use type as reason for now or logic from meta
         }));
 
+        decisionMapGraphDbg("init", {
+            claims: inputClaims.length,
+            edges: inputEdges.length,
+            pattern: problemStructure?.primaryPattern || null,
+            confidence: problemStructure?.confidence ?? null,
+            targets: targets.size,
+        });
+
         // Stop existing simulation
         if (simulationRef.current) {
             simulationRef.current.stop();
@@ -129,8 +249,11 @@ const DecisionMapGraph: React.FC<Props> = ({
         const isWideLayout = aspectRatio > 1.5;
         const nodePadding = 80; // Keep nodes away from edges (increased for larger spread)
 
+        const isLinear = problemStructure?.primaryPattern === 'linear' && targets.size > 0;
+        const isKeystone = problemStructure?.primaryPattern === 'keystone' && targets.size > 0;
+
         const simulation = d3.forceSimulation<GraphNode>(simNodes)
-            .force('charge', d3.forceManyBody().strength(-1000)) // Stronger repulsion to spread out
+            .force('charge', d3.forceManyBody().strength(isLinear ? -700 : -1000))
             .force('link', d3.forceLink<GraphNode, GraphEdge>(simEdges)
                 .id(d => d.id)
                 .distance(link => {
@@ -188,6 +311,14 @@ const DecisionMapGraph: React.FC<Props> = ({
                 });
             })
             .alphaDecay(0.02);
+
+        if (isLinear || isKeystone) {
+            simulation.force('xTarget', d3.forceX<GraphNode>(d => (targets.get(d.id)?.x ?? width / 2)).strength(isLinear ? 0.18 : 0.12));
+            simulation.force('yTarget', d3.forceY<GraphNode>(d => (targets.get(d.id)?.y ?? height / 2)).strength(isLinear ? 0.22 : 0.12));
+        } else {
+            simulation.force('xTarget', null);
+            simulation.force('yTarget', null);
+        }
 
         simulation.on('tick', () => {
             setNodes([...simNodes]);

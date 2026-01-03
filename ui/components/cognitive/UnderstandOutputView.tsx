@@ -16,6 +16,7 @@ import RefinerDot from '../refinerui/RefinerDot';
 import CognitiveAnchors from './CognitiveAnchors';
 import { getProviderName } from '../../utils/provider-helpers';
 import { useProviderLimits } from '../../hooks/useProviderLimits';
+import clsx from 'clsx';
 
 // Icons
 const ChevronDown = ({ className }: { className?: string }) => (
@@ -57,6 +58,8 @@ const UnderstandOutputView: React.FC<UnderstandOutputViewProps> = ({
 }) => {
     const [longAnswerOpen, setLongAnswerOpen] = useState(true);
     const [copied, setCopied] = useState(false);
+    const [activeTabId, setActiveTabId] = useState<string | null>(null);
+    const [showConfirm, setShowConfirm] = useState(false);
     const selectedModels = useAtomValue(selectedModelsAtom);
     const setActiveSplitPanel = useSetAtom(activeSplitPanelAtom);
     const setIsDecisionMapOpen = useSetAtom(isDecisionMapOpenAtom);
@@ -67,14 +70,63 @@ const UnderstandOutputView: React.FC<UnderstandOutputViewProps> = ({
         return enabled.length > 0 ? enabled : LLM_PROVIDERS_CONFIG;
     }, [selectedModels]);
 
-    // Determine actual provider who performed this step
-    const actualProviderId = useMemo(() => {
-        if (!aiTurn?.understandResponses) return null;
-        const keys = Object.keys(aiTurn.understandResponses);
-        return keys.length > 0 ? keys[0] : null;
-    }, [aiTurn]);
+    const understandTabs = useMemo(() => {
+        if (!aiTurn.understandResponses) return [];
 
-    const actualProviderName = actualProviderId ? getProviderName(actualProviderId) : "";
+        interface UnderstandTab {
+            id: string;
+            providerId: string;
+            index: number;
+            label: string;
+            response: ProviderResponse;
+            isLatest: boolean;
+            structuredOutput?: UnderstandOutput;
+        }
+
+        const tabs: UnderstandTab[] = [];
+        const providerOrder = new Map(
+            LLM_PROVIDERS_CONFIG.map((p, idx) => [String(p.id), idx] as const)
+        );
+        const providersWithResponses = Object.entries(aiTurn.understandResponses)
+            .filter(([_, resps]) => Array.isArray(resps) && resps.length > 0);
+
+        const sortedProviders = providersWithResponses.sort((a, b) => {
+            const idxA = providerOrder.get(a[0]) ?? Number.POSITIVE_INFINITY;
+            const idxB = providerOrder.get(b[0]) ?? Number.POSITIVE_INFINITY;
+            if (idxA !== idxB) return idxA - idxB;
+            return String(a[0]).localeCompare(String(b[0]));
+        });
+
+        sortedProviders.forEach(([pid, resps]) => {
+            const name = getProviderName(pid);
+            const respsArray = Array.isArray(resps) ? resps : [resps];
+            const validResps = respsArray.filter((r) => {
+                if (!r) return false;
+                const hasText = typeof r.text === 'string' && r.text.trim().length > 0;
+                const hasStatus = r.status === 'streaming' || r.status === 'pending' || r.status === 'error';
+                const hasStructured = !!(r.meta as any)?.understandOutput;
+                return hasText || hasStatus || hasStructured;
+            });
+
+            validResps.forEach((resp, idx) => {
+                const count = validResps.length;
+                const label = count > 1 ? `${name} ${idx + 1}` : name;
+                const structuredOutput = (resp.meta as any)?.understandOutput as UnderstandOutput | undefined;
+
+                tabs.push({
+                    id: `${pid}-${idx}`,
+                    providerId: pid,
+                    index: idx,
+                    label,
+                    response: resp,
+                    isLatest: idx === validResps.length - 1,
+                    structuredOutput,
+                });
+            });
+        });
+
+        return tabs;
+    }, [aiTurn.understandResponses]);
 
     const [nextProviderId, setNextProviderId] = useState<string>(() => availableProviders[0]?.id || "gemini");
 
@@ -84,16 +136,47 @@ const UnderstandOutputView: React.FC<UnderstandOutputViewProps> = ({
         }
     }, [availableProviders, nextProviderId]);
 
-    // Copy Handlers
+    useEffect(() => {
+        if (understandTabs.length === 0) return;
+        if (activeTabId && understandTabs.some((t) => t.id === activeTabId)) return;
+        const latestWithOutput = [...understandTabs].reverse().find((t) => t.structuredOutput);
+        const target = latestWithOutput || understandTabs[understandTabs.length - 1];
+        setActiveTabId(target.id);
+    }, [understandTabs, activeTabId]);
+
+    const activeTab = useMemo(() => {
+        if (understandTabs.length === 0) return null;
+        return understandTabs.find((t) => t.id === activeTabId) || understandTabs[understandTabs.length - 1];
+    }, [understandTabs, activeTabId]);
+
+    useEffect(() => {
+        if (activeTab) {
+            setNextProviderId(activeTab.providerId);
+        }
+    }, [activeTab]);
+
+    const activeOutput: UnderstandOutput = useMemo(() => {
+        const fromTab = activeTab?.structuredOutput;
+        if (fromTab) return fromTab;
+        return output;
+    }, [activeTab, output]);
+
+    const actualProviderId = useMemo(() => {
+        if (activeTab) return activeTab.providerId;
+        if (!aiTurn?.understandResponses) return null;
+        const keys = Object.keys(aiTurn.understandResponses);
+        return keys.length > 0 ? keys[0] : null;
+    }, [activeTab, aiTurn]);
+
+    const actualProviderName = actualProviderId ? getProviderName(actualProviderId) : "";
+
     const handleCopyUnderstand = useCallback(() => {
-        // Use actual provider name for attribution, fallback to next if not found (though unlikely for completed step)
         const providerName = actualProviderName || getProviderName(nextProviderId);
-        const md = formatAnalysisContextForMd(output, providerName);
+        const md = formatAnalysisContextForMd(activeOutput, providerName);
         navigator.clipboard.writeText(md);
-    }, [output, nextProviderId, actualProviderName]);
+    }, [activeOutput, nextProviderId, actualProviderName]);
 
     const handleCopyTurn = useCallback(() => {
-        // Gather Batch Responses (latest for each provider)
         const batchResponses: Record<string, ProviderResponse> = {};
         Object.entries(aiTurn.batchResponses || {}).forEach(([pid, resps]) => {
             const latest = getLatestResponse(resps);
@@ -114,7 +197,7 @@ const UnderstandOutputView: React.FC<UnderstandOutputViewProps> = ({
         const md = formatTurnForMd(
             aiTurn.id,
             userPrompt,
-            output, // Analysis (Understand/Gauntlet)
+            activeOutput,
             nextProviderId, // Analysis Provider ID
             decisionMap,
             batchResponses,
@@ -125,23 +208,33 @@ const UnderstandOutputView: React.FC<UnderstandOutputViewProps> = ({
             antagonistState.providerId
         );
         navigator.clipboard.writeText(md);
-    }, [aiTurn, output, nextProviderId, includePromptInCopy, refinerState, antagonistState]);
+    }, [aiTurn, activeOutput, nextProviderId, includePromptInCopy, refinerState, antagonistState]);
 
     const handleCopySouvenir = () => {
-        if (output.souvenir) {
-            navigator.clipboard.writeText(output.souvenir);
+        if (activeOutput.souvenir) {
+            navigator.clipboard.writeText(activeOutput.souvenir);
             setCopied(true);
             setTimeout(() => setCopied(false), 2000);
         }
     };
 
-    if (!output.short_answer && !output.souvenir) {
+    const handleRecomputeClick = () => {
+        const hasExisting = !!aiTurn.understandResponses?.[nextProviderId]?.length;
+        if (hasExisting) {
+            setShowConfirm(true);
+            return;
+        }
+        onRecompute?.({ providerId: nextProviderId, isRecompute: true, sourceTurnId: aiTurn.id });
+    };
+
+    if (!activeOutput.short_answer && !activeOutput.souvenir) {
         return <div className="p-4 text-text-secondary italic">Understanding output is empty.</div>;
     }
 
     const refinerOutput = refinerState.output;
 
     return (
+        <>
         <div className="flex flex-col gap-6 p-1 max-w-full overflow-hidden text-sm">
             <motion.div
                 initial={{ opacity: 0, y: 10 }}
@@ -180,21 +273,16 @@ const UnderstandOutputView: React.FC<UnderstandOutputViewProps> = ({
                     </div>
                 </div>
 
-                {/* COUNCIL ORBS (Historic View) */}
-
-
                 <div className="prose prose-sm max-w-none text-text-primary">
-                    <p className="font-medium text-base leading-relaxed">{output.short_answer}</p>
+                    <p className="font-medium text-base leading-relaxed">{activeOutput.short_answer}</p>
                 </div>
             </motion.div>
 
-            {/* COGNITIVE ANCHORS - Collapsed cards for The One & Echo */}
             <CognitiveAnchors
-                one={output.the_one}
-                echo={output.the_echo}
+                one={activeOutput.the_one}
+                echo={activeOutput.the_echo}
             />
 
-            {/* ANTAGONIST INLINE */}
             {antagonistState.output && (
                 <div className="animate-in fade-in slide-in-from-bottom-2 duration-500">
                     <AntagonistCard
@@ -205,8 +293,7 @@ const UnderstandOutputView: React.FC<UnderstandOutputViewProps> = ({
                 </div>
             )}
 
-            {/* THE LONG ANSWER (Collapsible) */}
-            {output.long_answer && (
+            {activeOutput.long_answer && (
                 <div className="border border-border-subtle rounded-lg bg-surface-base/50 overflow-hidden">
                     <button
                         onClick={() => setLongAnswerOpen(!longAnswerOpen)}
@@ -229,7 +316,7 @@ const UnderstandOutputView: React.FC<UnderstandOutputViewProps> = ({
                             >
                                 <div className="p-4 pt-0">
                                     <div className="prose prose-sm max-w-none text-text-primary leading-relaxed whitespace-pre-wrap opacity-90">
-                                        {output.long_answer}
+                                        {activeOutput.long_answer}
                                     </div>
                                 </div>
                             </motion.div>
@@ -238,12 +325,11 @@ const UnderstandOutputView: React.FC<UnderstandOutputViewProps> = ({
                 </div>
             )}
 
-            {/* SOUVENIR */}
-            {output.souvenir && (
+            {activeOutput.souvenir && (
                 <div className="flex items-center justify-between bg-surface-highlight/30 rounded-lg py-2.5 px-3 border border-border-subtle/50">
                     <div className="flex items-start gap-2">
                         <span className="text-lg flex-shrink-0 mt-0.5">💎</span>
-                        <span className="text-xs italic font-serif text-text-secondary leading-relaxed">"{output.souvenir}"</span>
+                        <span className="text-xs italic font-serif text-text-secondary leading-relaxed">"{activeOutput.souvenir}"</span>
                     </div>
                     <button
                         onClick={handleCopySouvenir}
@@ -255,7 +341,38 @@ const UnderstandOutputView: React.FC<UnderstandOutputViewProps> = ({
                 </div>
             )}
 
-            {/* CONTROLS */}
+            {understandTabs.length > 0 && (
+                <div className="relative z-10 flex gap-2 overflow-x-auto pb-4 px-2 mb-2 no-scrollbar border-b border-border-subtle/50">
+                    {understandTabs.map((tab) => {
+                        const isActive = tab.id === activeTabId;
+                        const isStreaming = tab.response.status === 'streaming' || tab.response.status === 'pending';
+                        const isError = tab.response.status === 'error';
+
+                        return (
+                            <button
+                                key={tab.id}
+                                onClick={() => setActiveTabId(tab.id)}
+                                className={clsx(
+                                    "relative px-4 py-2 rounded-full text-sm font-medium transition-all whitespace-nowrap border",
+                                    isActive
+                                        ? "bg-surface-raised border-brand-400 text-text-primary shadow-sm"
+                                        : "bg-transparent border-transparent text-text-muted hover:bg-surface-highlight hover:text-text-secondary"
+                                )}
+                            >
+                                <span className="flex items-center gap-2">
+                                    {tab.label}
+                                    {isStreaming && <span className="w-1.5 h-1.5 rounded-full bg-intent-warning animate-pulse" />}
+                                    {isError && <span className="w-1.5 h-1.5 rounded-full bg-intent-danger" />}
+                                </span>
+                                {isActive && (
+                                    <span className="absolute bottom-0 left-1/2 -translate-x-1/2 w-4 h-[2px] bg-brand-500 rounded-t-full" />
+                                )}
+                            </button>
+                        );
+                    })}
+                </div>
+            )}
+
             <div className="flex items-center gap-3 bg-surface-raised border border-border-subtle rounded-xl px-3 py-2 mt-4">
                 <div className="text-xs text-text-secondary">Model</div>
                 <select
@@ -265,9 +382,7 @@ const UnderstandOutputView: React.FC<UnderstandOutputViewProps> = ({
                     className="flex-1 bg-[#1a1b26] border border-border-subtle rounded px-2 py-1 text-sm text-gray-200 focus:outline-none focus:border-brand-500 disabled:opacity-50 appearance-none"
                 >
                     {availableProviders.map((p) => {
-                        // Estimate context length: 
-                        // Previous output (short + long) + buffer
-                        const estimatedLength = (output.short_answer?.length || 0) + (output.long_answer?.length || 0) + 2000;
+                        const estimatedLength = (activeOutput.short_answer?.length || 0) + (activeOutput.long_answer?.length || 0) + 2000;
                         const { isAllowed } = useProviderLimits(p.id, estimatedLength);
                         return (
                             <option key={p.id} value={p.id} disabled={!isAllowed}>
@@ -277,7 +392,7 @@ const UnderstandOutputView: React.FC<UnderstandOutputViewProps> = ({
                     })}
                 </select>
                 <button
-                    onClick={() => onRecompute?.({ providerId: nextProviderId, isRecompute: true, sourceTurnId: aiTurn.id })}
+                    onClick={handleRecomputeClick}
                     disabled={isLoading}
                     className="px-3 py-1.5 text-xs rounded-md border border-border-subtle bg-surface-base text-text-secondary hover:text-text-primary hover:bg-surface-highlight/50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
@@ -319,6 +434,44 @@ const UnderstandOutputView: React.FC<UnderstandOutputViewProps> = ({
                 </CopyButton>
             </div>
         </div>
+
+        {showConfirm && (
+            <div
+                className="fixed inset-0 bg-overlay-backdrop/70 flex items-center justify-center z-[1000]"
+                onClick={(e) => {
+                    if (e.target === e.currentTarget) {
+                        setShowConfirm(false);
+                    }
+                }}
+            >
+                <div className="bg-surface-modal border border-border-subtle rounded-2xl p-6 min-w-[360px] max-w-[480px] shadow-overlay">
+                    <h3 className="m-0 mb-3 text-lg font-semibold text-text-primary">
+                        Re-run Understand on this model?
+                    </h3>
+                    <p className="text-sm text-text-secondary mb-6">
+                        This model already has an Understand result for this turn. Running again will create an additional tab.
+                    </p>
+                    <div className="flex gap-3 justify-end">
+                        <button
+                            onClick={() => setShowConfirm(false)}
+                            className="px-4 py-2 bg-transparent border border-border-subtle rounded-lg text-text-muted text-sm font-medium cursor-pointer hover:bg-surface-highlight/40 transition-all"
+                        >
+                            Cancel
+                        </button>
+                        <button
+                            onClick={() => {
+                                setShowConfirm(false);
+                                onRecompute?.({ providerId: nextProviderId, isRecompute: true, sourceTurnId: aiTurn.id });
+                            }}
+                            className="px-4 py-2 border rounded-lg text-sm font-medium bg-intent-warning text-white border-intent-warning cursor-pointer hover:bg-intent-warning/90 transition-all"
+                        >
+                            Yes, run again
+                        </button>
+                    </div>
+                </div>
+            </div>
+        )}
+        </>
     );
 };
 

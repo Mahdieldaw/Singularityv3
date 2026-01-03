@@ -1,4 +1,14 @@
-import { MapperArtifact, Claim, Edge } from "../../shared/contract";
+import { MapperArtifact, Claim, Edge, ProblemStructure } from "../../shared/contract";
+
+const DEBUG_PROMPT_SERVICE = false;
+const promptDbg = (...args: any[]) => {
+  if (DEBUG_PROMPT_SERVICE) console.debug("[PromptService]", ...args);
+};
+
+const DEBUG_STRUCTURAL_ANALYSIS = false;
+const structuralDbg = (...args: any[]) => {
+  if (DEBUG_STRUCTURAL_ANALYSIS) console.debug("[PromptService:structural]", ...args);
+};
 
 type StructuralAnalysis = {
   edges: Edge[];
@@ -41,6 +51,12 @@ type ClaimWithLeverage = {
     positionWeight: number;
   };
   isLeverageInversion: boolean;
+  keystoneScore?: number;
+  evidenceGapScore?: number;
+  supportSkew?: number;
+  isKeystone?: boolean;
+  isEvidenceGap?: boolean;
+  isOutlier?: boolean;
 };
 
 type LeverageInversion = {
@@ -77,16 +93,6 @@ type ConvergencePoint = {
   sourceIds: string[];
   sourceLabels: string[];
   edgeType: "prerequisite" | "supports";
-};
-
-type ProblemStructure = {
-  primaryPattern: "linear" | "dimensional" | "tradeoff" | "contested" | "exploratory" | "keystone";
-  confidence: number;
-  evidence: string[];
-  implications: {
-    understand: string;
-    gauntlet: string;
-  };
 };
 
 type ModeContext = {
@@ -141,13 +147,15 @@ const computeLandscapeMetrics = (artifact: MapperArtifact): StructuralAnalysis["
 const detectProblemStructure = (
   claims: ClaimWithLeverage[],
   edges: Edge[],
-  patterns: StructuralAnalysis["patterns"]
+  patterns: StructuralAnalysis["patterns"],
+  modelCount: number
 ): ProblemStructure => {
   const clamp01 = (n: number) => Math.max(0, Math.min(1, n));
   const pct = (n: number) => `${Math.round(n * 100)}%`;
 
   const claimCount = claims.length;
   const edgeCount = edges.length;
+  const safeModelCount = Math.max(1, Number.isFinite(modelCount) ? modelCount : 1);
 
   const prereqCount = edges.filter((e) => e.type === "prerequisite").length;
   const conflictEdgeCount = edges.filter((e) => e.type === "conflicts").length;
@@ -161,6 +169,11 @@ const detectProblemStructure = (
   const isolatedRatio = isolatedCount / Math.max(claimCount, 1);
   const convergencePoints = patterns.convergencePoints.length;
   const cascadeDepth = patterns.cascadeRisks.reduce((max, r) => Math.max(max, r.depth), 0);
+  const longestCascade = patterns.cascadeRisks.reduce<CascadeRisk | null>((best, r) => {
+    if (!best) return r;
+    return r.depth > best.depth ? r : best;
+  }, null);
+  const longestChainLabel = longestCascade?.sourceLabel || "n/a";
 
   const consensusConflicts = patterns.conflicts.filter((c) => c.isBothConsensus).length;
 
@@ -177,19 +190,48 @@ const detectProblemStructure = (
 
   const linearScore = clamp01(prerequisiteRatio * 0.8 + clamp01(cascadeDepth / 3) * 0.5 - clamp01(conflictCount / 2) * 0.5);
   const contestedScore = clamp01(clamp01(conflictCount / 3) * 0.8 + (consensusConflicts > 0 ? 0.35 : 0));
-  const tradeoffScore = clamp01(clamp01(tradeoffCount / 3) * 0.75 + clamp01(1 - prerequisiteRatio) * 0.35 - clamp01(conflictCount / 3) * 0.2);
+  const tradeoffScore = clamp01(
+    clamp01(tradeoffCount / 3) * 0.75 +
+    clamp01(1 - prerequisiteRatio) * 0.35
+  );
   const dimensionalScore = clamp01(
     clamp01(convergencePoints / 3) * 0.6 +
       clamp01(avgConnectivity / 2) * 0.45 +
       clamp01(1 - isolatedRatio) * 0.25 -
       clamp01(conflictCount / 3) * 0.25
   );
-  const exploratoryScore = clamp01(clamp01(isolatedRatio / 0.5) * 0.75 + clamp01((0.8 - avgConnectivity) / 0.8) * 0.35);
+  const exploratoryScore = clamp01(
+    clamp01(isolatedRatio / 0.5) * 0.85 +
+    (convergencePoints === 0 ? 0.15 : 0)
+  );
 
-  const keystoneEligible = Boolean(topClaim && topOut >= 3 && topClaim.leverage >= 6);
-  const keystoneScore = keystoneEligible
-    ? clamp01((clamp01(topOut / 6) * 0.55 + clamp01(topClaim!.leverage / 10) * 0.55) * (0.6 + 0.4 * dominance))
-    : 0;
+  let keystoneScore = 0;
+  const keystoneCandidates = claims
+    .filter((c) => c.isKeystone)
+    .map((c) => {
+      const cascade = patterns.cascadeRisks.find((r) => r.sourceId === c.id) || null;
+      const dependentCount = cascade ? cascade.dependentIds.length : edges.filter((e) => e.from === c.id).length;
+      const cascadeDepth = cascade ? cascade.depth : 0;
+      const supportRatio = (c.supporters.length || 0) / safeModelCount;
+      const gapPenalty = c.isEvidenceGap ? 0.25 : 0;
+      const skewPenalty = (c.supportSkew || 0) > 0.8 ? 0.15 : 0;
+
+      const rawScore =
+        (c.keystoneScore || 0) *
+        (1 + supportRatio) *
+        (1 + dependentCount / 5) *
+        (1 - gapPenalty - skewPenalty);
+
+      return { claim: c, rawScore, dependentCount, cascadeDepth };
+    })
+    .sort((a, b) => b.rawScore - a.rawScore);
+
+  const bestKeystone = keystoneCandidates[0] || null;
+
+  if (bestKeystone && bestKeystone.rawScore >= safeModelCount * 2) {
+    const dominanceBoost = dominance > 0 ? 0.2 + dominance * 0.4 : 0;
+    keystoneScore = clamp01((bestKeystone.rawScore / (bestKeystone.rawScore + 6)) + dominanceBoost);
+  }
 
   const scores: Array<{ pattern: ProblemStructure["primaryPattern"]; score: number }> = [
     { pattern: "keystone", score: keystoneScore },
@@ -202,9 +244,6 @@ const detectProblemStructure = (
   scores.sort((a, b) => b.score - a.score);
 
   const best = scores[0];
-  const second = scores[1] || { pattern: "dimensional" as const, score: 0 };
-  const confidence = clamp01(0.45 + (best.score - second.score) * 0.6 + best.score * 0.15);
-
   const implications: Record<ProblemStructure["primaryPattern"], ProblemStructure["implications"]> = {
     linear: {
       understand: "Find the sequence. The insight is often where the path becomes non-obvious.",
@@ -234,17 +273,39 @@ const detectProblemStructure = (
 
   const evidenceByPattern: Record<ProblemStructure["primaryPattern"], string[]> = {
     linear: [
-      `${pct(prerequisiteRatio)} of edges are prerequisite relationships`,
-      `Max cascade depth: ${cascadeDepth}`,
-      `Conflicts: ${conflictCount}`,
+      `${prereqCount}/${edgeCount} edges are prerequisites (${pct(prerequisiteRatio)})`,
+      `Max cascade depth: ${cascadeDepth} (longest: ${longestChainLabel})`,
+      conflictCount > 0 ? `${conflictCount} conflicts present` : "No conflicts",
     ],
-    keystone: topClaim
-      ? [
+    keystone: (() => {
+      if (bestKeystone) {
+        const c = bestKeystone.claim;
+        const dependentCount = bestKeystone.dependentCount;
+        const cascadeDepthForBest = bestKeystone.cascadeDepth;
+        const skewPct = pct(c.supportSkew || 0);
+        const gapNote = c.isEvidenceGap
+          ? "Load-bearing assumption with thin evidence"
+          : "Evidence spread is adequate for its impact";
+        return [
+          `${c.label} has keystone score ${(c.keystoneScore || 0).toFixed(1)}`,
+          `${dependentCount} outgoing dependencies (cascade depth: ${cascadeDepthForBest})`,
+          `Support skew: ${skewPct}`,
+          gapNote,
+        ];
+      }
+      if (topClaim) {
+        return [
           `${topClaim.label} has leverage ${topClaim.leverage.toFixed(1)}`,
           `${topOut} outgoing dependencies (supports/prerequisites)`,
           `Dominance: ${pct(dominance)}`,
-        ]
-      : ["No keystone candidate detected", `Average connectivity: ${avgConnectivity.toFixed(1)} edges/claim`, `Isolated claims: ${isolatedCount}`],
+        ];
+      }
+      return [
+        "No keystone candidate detected",
+        `Average connectivity: ${avgConnectivity.toFixed(1)} edges/claim`,
+        `Isolated claims: ${isolatedCount}`,
+      ];
+    })(),
     contested: [
       `${conflictCount} conflict pair(s) detected (${conflictEdgeCount} conflict edge(s))`,
       consensusConflicts > 0 ? `${consensusConflicts} consensus-to-consensus conflict(s)` : "Conflicts include at least one low-support position",
@@ -266,6 +327,23 @@ const detectProblemStructure = (
       `Convergence points: ${convergencePoints}`,
     ],
   };
+
+  const maxScore = Math.max(...scores.map((s) => s.score));
+  if (maxScore < 0.3) {
+    return {
+      primaryPattern: "exploratory",
+      confidence: clamp01(maxScore * 0.8),
+      evidence: [
+        "No dominant structural pattern detected",
+        `Highest pattern score: ${maxScore.toFixed(2)}`,
+        "Landscape may be exploratory or data insufficient",
+      ],
+      implications: implications.exploratory,
+    };
+  }
+
+  const second = scores[1] || { pattern: "dimensional" as const, score: 0 };
+  const confidence = clamp01(0.45 + (best.score - second.score) * 0.6 + best.score * 0.15);
 
   return {
     primaryPattern: best.pattern,
@@ -311,6 +389,20 @@ const computeClaimLeverage = (
   const leverage = supportWeight + roleWeight + connectivityWeight + positionWeight;
   const isLeverageInversion = supporters.length < 2 && leverage > 4;
 
+  const keystoneScore = outgoing.length * supporters.length;
+
+  const supporterCounts = supporters.reduce((acc, s) => {
+    const key = typeof s === "number" ? String(s) : String(s);
+    acc[key] = (acc[key] || 0) + 1;
+    return acc;
+  }, {} as Record<string, number>);
+
+  const maxFromSingleModel = Object.values(supporterCounts).length > 0 ? Math.max(...Object.values(supporterCounts)) : 0;
+  const supportSkew = supporters.length > 0 ? maxFromSingleModel / supporters.length : 0;
+  const isOutlier = supportSkew > 0.6 && supporters.length >= 2;
+
+  const isKeystone = keystoneScore >= modelCount * 2;
+
   return {
     id: claim.id,
     label: claim.label,
@@ -325,6 +417,12 @@ const computeClaimLeverage = (
       positionWeight,
     },
     isLeverageInversion,
+    keystoneScore,
+    evidenceGapScore: 0,
+    supportSkew,
+    isKeystone,
+    isEvidenceGap: false,
+    isOutlier,
   };
 };
 
@@ -553,9 +651,49 @@ const computeStructuralAnalysis = (artifact: MapperArtifact): StructuralAnalysis
     isolatedClaims: detectIsolatedClaims(claimsWithLeverage, edges),
   };
 
+  const cascadeBySource = new Map<string, CascadeRisk>();
+  for (const risk of patterns.cascadeRisks) {
+    cascadeBySource.set(risk.sourceId, risk);
+  }
+
+  for (const claim of claimsWithLeverage) {
+    const cascade = cascadeBySource.get(claim.id);
+    let evidenceGapScore = 0;
+    let isEvidenceGap = false;
+    if (cascade && claim.supporters.length > 0) {
+      evidenceGapScore = cascade.dependentIds.length / claim.supporters.length;
+      isEvidenceGap = evidenceGapScore > 3;
+    }
+    claim.evidenceGapScore = evidenceGapScore;
+    claim.isEvidenceGap = isEvidenceGap;
+  }
+
   const ghostAnalysis = analyzeGhosts(ghosts, claimsWithLeverage);
 
-  return { edges, landscape, claimsWithLeverage, patterns, ghostAnalysis };
+  const analysis = { edges, landscape, claimsWithLeverage, patterns, ghostAnalysis };
+  structuralDbg("analysis", {
+    claimCount: landscape.claimCount,
+    edgeCount: edges.length,
+    modelCount: landscape.modelCount,
+    convergenceRatio: landscape.convergenceRatio,
+    conflictPairs: patterns.conflicts.length,
+    tradeoffPairs: patterns.tradeoffs.length,
+    cascadeRisks: patterns.cascadeRisks.length,
+    isolatedClaims: patterns.isolatedClaims.length,
+  });
+  return analysis;
+};
+
+export const computeProblemStructureFromArtifact = (artifact: MapperArtifact): ProblemStructure => {
+  const analysis = computeStructuralAnalysis(artifact);
+  const structure = detectProblemStructure(
+    analysis.claimsWithLeverage,
+    analysis.edges,
+    analysis.patterns,
+    analysis.landscape.modelCount
+  );
+  structuralDbg("problemStructure", structure);
+  return structure;
 };
 
 const TYPE_FRAMINGS: Record<string, { understand: string; gauntlet: string }> = {
@@ -588,7 +726,12 @@ const getTypeFraming = (dominantType: string, mode: "understand" | "gauntlet"): 
 
 const generateModeContext = (analysis: StructuralAnalysis, mode: "understand" | "gauntlet"): ModeContext => {
   const { landscape, patterns, ghostAnalysis } = analysis;
-  const problemStructure = detectProblemStructure(analysis.claimsWithLeverage, analysis.edges, analysis.patterns);
+  const problemStructure = detectProblemStructure(
+    analysis.claimsWithLeverage,
+    analysis.edges,
+    analysis.patterns,
+    landscape.modelCount
+  );
   const structuralFraming = mode === "understand" ? problemStructure.implications.understand : problemStructure.implications.gauntlet;
   const typeFraming = getTypeFraming(landscape.dominantType, mode);
   const structuralObservations: string[] = [];
@@ -849,6 +992,11 @@ export class PromptService {
     sourceResults: Array<{ providerId: string; text: string }>,
     citationOrder: string[] = []
   ): string {
+    promptDbg("buildMappingPrompt", {
+      sources: Array.isArray(sourceResults) ? sourceResults.length : 0,
+      citationOrder: Array.isArray(citationOrder) ? citationOrder.length : 0,
+      userPromptLen: String(userPrompt || "").length,
+    });
     const providerToNumber = new Map();
     if (Array.isArray(citationOrder) && citationOrder.length > 0) {
       citationOrder.forEach((pid, idx) => providerToNumber.set(pid, idx + 1));
@@ -912,6 +1060,7 @@ export class PromptService {
     const outlierClaims = claims.filter((c) => (c.supporters?.length || 0) < 2);
     const challengers = claims.filter((c) => c.role === 'challenger');
     const convergenceRatio = claims.length > 0 ? Math.round((consensusClaims.length / claims.length) * 100) : 0;
+    promptDbg("buildUnderstandPrompt", { claims: claims.length, edges: edges.length, ghosts: ghosts.length });
 
     const narrativeBlock = narrativeSummary
       ? `## Landscape Overview\n${narrativeSummary}\n`
@@ -1464,6 +1613,7 @@ Return the JSON now.`;
 
     const conflictCount = edges.filter((e) => e.type === "conflicts").length;
     const convergenceRatio = claims.length > 0 ? Math.round((consensusClaims.length / claims.length) * 100) : 0;
+    promptDbg("buildGauntletPrompt", { claims: claims.length, edges: edges.length, ghosts: ghosts.length });
 
     const narrativeBlock = narrativeSummary
       ? `## Landscape Overview\n${narrativeSummary}\n`

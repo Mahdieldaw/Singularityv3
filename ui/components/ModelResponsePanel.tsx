@@ -57,12 +57,11 @@ export const ModelResponsePanel: React.FC<ModelResponsePanelProps> = React.memo(
     }, [turnId, providerId, shownTurnId, shownProviderId]);
 
     // State subscriptions
-    const effectiveState = useAtomValue(
-        useMemo(
-            () => providerEffectiveStateFamily({ turnId: shownTurnId, providerId: shownProviderId }),
-            [shownTurnId, shownProviderId]
-        )
+    const effectiveStateAtom = useMemo(
+        () => providerEffectiveStateFamily({ turnId: shownTurnId, providerId: shownProviderId }),
+        [shownTurnId, shownProviderId]
     );
+    const effectiveState = useAtomValue(effectiveStateAtom);
     const streamingState = useAtomValue(turnStreamingStateFamily(shownTurnId));
     const activeRecompute = useAtomValue(activeRecomputeStateAtom);
     const turnIds = useAtomValue(turnIdsAtom);

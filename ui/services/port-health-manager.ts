@@ -63,7 +63,7 @@ export class PortHealthManager {
   }
 
   private sendKeepalivePing() {
-    if (!this.port || !this.isConnected) return;
+    if (!this.port) return;
 
     try {
       this.port.postMessage({ type: "KEEPALIVE_PING", timestamp: Date.now() });
@@ -140,6 +140,7 @@ export class PortHealthManager {
     if (message.type === "HANDLER_READY") {
       console.log("[PortHealthManager] Service worker handler ready");
       this.isConnected = true;
+      this.options.onHealthy?.();
       if (this.readyResolve) {
         this.readyResolve();
         this.readyResolve = null;

@@ -85,6 +85,16 @@ export interface GraphTopology {
   edges: GraphEdge[];
 }
 
+export interface ProblemStructure {
+  primaryPattern: "linear" | "dimensional" | "tradeoff" | "contested" | "exploratory" | "keystone";
+  confidence: number;
+  evidence: string[];
+  implications: {
+    understand: string;
+    gauntlet: string;
+  };
+}
+
 export interface MapperOutput {
   claims: Claim[];
   edges: Edge[];
@@ -107,6 +117,7 @@ export interface MapperArtifact extends MapperOutput {
   timestamp?: string;
   model_count?: number;
   souvenir?: string;
+  problemStructure?: ProblemStructure;
 }
 
 export interface ExploreAnalysis {

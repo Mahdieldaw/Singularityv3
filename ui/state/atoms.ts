@@ -351,7 +351,8 @@ export const isHistoryLoadingAtom = atom<boolean>(false);
 export const connectionStatusAtom = atom<{
   isConnected: boolean;
   isReconnecting: boolean;
-}>({ isConnected: false, isReconnecting: true });
+  hasEverConnected: boolean;
+}>({ isConnected: false, isReconnecting: false, hasEverConnected: false });
 export const providerAuthStatusAtom = atom<Record<string, boolean>>({});
 export const alertTextAtom = atom<string | null>(null);
 export const chatInputHeightAtom = atom<number>(80);
