@@ -1572,3 +1572,45 @@
         /* overflow: hidden;  <-- DO NOT USE THIS, it clips the scrollbar */
     }
 }
+
+/* Scroll-Synced Response Panel Styles */
+.message-row.active-turn {
+    background-color: rgba(99, 102, 241, 0.05);
+    border-right: 2px solid rgba(99, 102, 241, 0.4);
+    transition: background-color 0.3s ease, border-color 0.3s ease;
+}
+
+.gutter-orb-indicator {
+    z-index: 50;
+    filter: drop-shadow(0 0 8px rgba(0, 0, 0, 0.3));
+}
+
+.gutter-orb-indicator .orb-collapsed {
+    box-shadow: 0 0 10px rgba(99, 102, 241, 0.3);
+}
+
+.gutter-orb-indicator:hover .orb-collapsed {
+    box-shadow: 0 0 15px rgba(99, 102, 241, 0.5);
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+    background: rgba(148, 163, 184, 0.2);
+    border-radius: 3px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: rgba(148, 163, 184, 0.4);
+}
+
+.message-row {
+    padding-right: 24px !important;
+}

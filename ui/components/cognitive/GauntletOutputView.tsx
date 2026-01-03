@@ -7,6 +7,7 @@ import { formatTurnForMd, formatAnalysisContextForMd } from '../../utils/copy-fo
 import { getLatestResponse } from '../../utils/turn-helpers';
 import { CopyButton } from '../CopyButton';
 import { getProviderName } from '../../utils/provider-helpers';
+import { useProviderLimits } from '../../hooks/useProviderLimits';
 import { LLM_PROVIDERS_CONFIG } from '../../constants';
 import type { CognitiveTransitionOptions } from '../../hooks/cognitive/useCognitiveMode';
 import { AntagonistOutputState } from '../../hooks/useAntagonistOutput';
@@ -72,6 +73,15 @@ const GauntletOutputView: React.FC<GauntletOutputViewProps> = ({
         return enabled.length > 0 ? enabled : LLM_PROVIDERS_CONFIG;
     }, [selectedModels]);
 
+    // Determine actual provider who performed this step
+    const actualProviderId = useMemo(() => {
+        if (!aiTurn?.gauntletResponses) return null;
+        const keys = Object.keys(aiTurn.gauntletResponses);
+        return keys.length > 0 ? keys[0] : null;
+    }, [aiTurn]);
+
+    const actualProviderName = actualProviderId ? getProviderName(actualProviderId) : "";
+
     const [nextProviderId, setNextProviderId] = useState<string>(() => availableProviders[0]?.id || "gemini");
 
     useEffect(() => {
@@ -84,10 +94,11 @@ const GauntletOutputView: React.FC<GauntletOutputViewProps> = ({
 
     // Copy Handlers
     const handleCopyGauntlet = useCallback(() => {
-        const providerName = getProviderName(nextProviderId);
+        // Use actual provider name for attribution, fallback to next if not found
+        const providerName = actualProviderName || getProviderName(nextProviderId);
         const md = formatAnalysisContextForMd(output, providerName);
         navigator.clipboard.writeText(md);
-    }, [output, nextProviderId]);
+    }, [output, nextProviderId, actualProviderName]);
 
     const handleCopyTurn = useCallback(() => {
         // Gather Batch Responses (latest for each provider)
@@ -159,6 +170,9 @@ const GauntletOutputView: React.FC<GauntletOutputViewProps> = ({
                     <div className="flex flex-col gap-1">
                         <div className="flex items-center gap-2">
                             <h2 className="text-lg font-semibold text-text-primary tracking-tight m-0">The Verdict</h2>
+                            {actualProviderName && (
+                                <span className="text-[11px] text-text-tertiary">by {actualProviderName}</span>
+                            )}
                             {output.optimal_end && (
                                 <div className="hidden sm:flex items-center gap-2 px-2 py-0.5 rounded-full bg-surface-highlight/50 border border-border-subtle/50">
                                     <span className="text-[10px] uppercase font-bold text-text-tertiary">Goal</span>
@@ -511,11 +525,18 @@ const GauntletOutputView: React.FC<GauntletOutputViewProps> = ({
                     disabled={isLoading}
                     className="flex-1 bg-[#1a1b26] border border-border-subtle rounded px-2 py-1 text-sm text-gray-200 focus:outline-none focus:border-brand-500 disabled:opacity-50 appearance-none"
                 >
-                    {availableProviders.map((p) => (
-                        <option key={p.id} value={p.id}>
-                            {p.name}
-                        </option>
-                    ))}
+                    {availableProviders.map((p) => {
+                        // Estimate limits - this is a rough client-side check
+                        // Length = prompt overhead + artifact length
+                        // Gauntlet output can be large, use conservative estimate
+                        const estimatedLength = (output.the_answer.statement?.length || 0) + (output.the_void?.length || 0) + 3000;
+                        const { isAllowed } = useProviderLimits(p.id, estimatedLength);
+                        return (
+                            <option key={p.id} value={p.id} disabled={!isAllowed}>
+                                {p.name} {!isAllowed && "(Limit Exceeded)"}
+                            </option>
+                        );
+                    })}
                 </select>
                 <button
                     onClick={() => onRecompute?.({ providerId: nextProviderId, isRecompute: true, sourceTurnId: aiTurn.id })}

@@ -99,8 +99,10 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                 ×
               </button>
             </div>
-            <div className="flex-1 overflow-y-auto p-5 bg-surface">
-              <MarkdownDisplay content={selectedArtifact.content} />
+            <div className="flex-1 overflow-y-auto overflow-x-auto custom-scrollbar p-5 bg-surface">
+              <div className="w-fit min-w-full">
+                <MarkdownDisplay content={selectedArtifact.content} />
+              </div>
             </div>
             <div className="flex gap-3 p-4 border-t border-border-subtle justify-end">
               <button

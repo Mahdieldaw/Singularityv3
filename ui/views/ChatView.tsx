@@ -21,6 +21,7 @@ import { useChat } from "../hooks/chat/useChat";
 import { SplitPaneRightPanel } from "../components/SplitPaneRightPanel";
 import { CouncilOrbsVertical } from "../components/CouncilOrbsVertical";
 import { useSmartProviderDefaults } from "../hooks/providers/useSmartProviderDefaults";
+import { useScrollSyncedTurn } from "../hooks/chat/useScrollSyncedTurn";
 
 
 import { safeLazy } from "../utils/safeLazy";
@@ -48,6 +49,8 @@ export default function ChatView() {
 
   // Smart Defaults
   useSmartProviderDefaults();
+
+  useScrollSyncedTurn({ enabled: !!isSplitOpen });
 
 
 
@@ -96,6 +99,7 @@ export default function ChatView() {
       React.forwardRef<HTMLDivElement, ScrollerProps>((props, ref) => (
         <div
           {...props}
+          data-chat-scroller="true"
           ref={(node) => {
             if (typeof ref === "function") ref(node as HTMLDivElement | null);
             else if (ref && "current" in (ref as any))

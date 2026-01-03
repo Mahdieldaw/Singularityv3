@@ -43,7 +43,6 @@ function languageToExt(lang: string): string {
 // Only Triple-Backtick code blocks get wrapped in <pre>.
 // This ensures inline code NEVER gets the buttons or box style.
 const PreBlock = ({ children }: any) => {
-  // Extract the code text and language from the inner <code> element
   const codeElement = React.Children.toArray(children).find(
     (child: any) => child.props && child.props.className
   ) as React.ReactElement | undefined;
@@ -76,45 +75,44 @@ const PreBlock = ({ children }: any) => {
     } catch { }
   }, [codeText, language]);
 
-
-
   return (
-    <div
-      className="relative bg-surface-code border border-border-subtle rounded-lg my-3 overflow-hidden"
-      style={{ contain: 'inline-size', maxWidth: '100%' }}
-    >
-      {/* Header / Language Label */}
-      {language && (
-        <div className="absolute top-0 left-0 px-2 py-0.5 text-xs uppercase text-text-muted bg-surface-modal/50 rounded-br pointer-events-none z-[1]">
-          {language}
-        </div>
-      )}
+    <div className="relative group/code my-3 overflow-x-auto custom-scrollbar border border-border-subtle rounded-lg">
+      {/* 
+          Background and content wrapper: 
+          'w-fit min-w-full' ensures the background extends to 
+          cover full content width when scrolling horizontally.
+      */}
+      <div className="w-fit min-w-full bg-surface-code pt-7 px-3 pb-3 relative">
+        {/* Header / Language Label */}
+        {language && (
+          <div className="absolute top-0 left-0 px-2 py-0.5 text-xs uppercase text-text-muted bg-surface-modal/50 rounded-br pointer-events-none z-[1]">
+            {language}
+          </div>
+        )}
 
-      {/* CODE CONTENT - Horizontal scroll within contained bounds */}
-      <div className="pt-7 px-3 pb-3 overflow-x-auto custom-scrollbar">
         <pre className="m-0 font-[inherit] bg-transparent whitespace-pre">
           {children}
         </pre>
-      </div>
 
-      {/* Action Buttons */}
-      <div className="absolute top-1.5 right-1.5 flex gap-1.5 z-[2]">
-        <button
-          onClick={handleCopy}
-          title="Copy"
-          className={`inline-flex items-center gap-1 px-1.5 mx-0.5 bg-chip-active border border-border-brand rounded-pill text-text-primary text-sm font-bold leading-snug cursor-pointer no-underline transition-all
-                      ${copied ? 'text-intent-success' : 'text-text-muted'}`}
-        >
-          {copied ? "✓" : "📋"}
-        </button>
-        <button
-          onClick={handleDownload}
-          title="Download"
-          className="bg-border-subtle border border-border-subtle rounded-md px-2 py-1
-                     text-text-muted text-xs cursor-pointer"
-        >
-          ⬇️
-        </button>
+        {/* Action Buttons */}
+        <div className="absolute top-1.5 right-1.5 flex gap-1.5 z-[2]">
+          <button
+            onClick={handleCopy}
+            title="Copy"
+            className={`inline-flex items-center gap-1 px-1.5 mx-0.5 bg-chip-active border border-border-brand rounded-pill text-text-primary text-sm font-bold leading-snug cursor-pointer no-underline transition-all
+                        ${copied ? 'text-intent-success' : 'text-text-muted'}`}
+          >
+            {copied ? "✓" : "📋"}
+          </button>
+          <button
+            onClick={handleDownload}
+            title="Download"
+            className="bg-border-subtle border border-border-subtle rounded-md px-2 py-1
+                       text-text-muted text-xs cursor-pointer"
+          >
+            ⬇️
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -198,7 +196,7 @@ const MarkdownDisplay: React.FC<MarkdownDisplayProps> = React.memo(
     }, [content, isMathLoaded]);
 
     return (
-      <div className={`markdown-body text-base leading-relaxed ${className || 'text-text-primary'} min-w-0 max-w-full`}>
+      <div className={`markdown-body text-base leading-relaxed ${className || 'text-text-primary'}`}>
         <ReactMarkdown
           remarkPlugins={[remarkGfm, ...mathPlugins.remarkPlugins]}
           rehypePlugins={[...mathPlugins.rehypePlugins]}

@@ -16,11 +16,13 @@ import {
  */
 export function computeExplore(query: string, artifact: MapperArtifact): ExploreAnalysis {
     const claims = artifact.claims || [];
+    const edges = artifact.edges || [];
 
     const consensusCount = claims.filter((c) => (c.supporters?.length || 0) >= 2).length;
     const outlierCount = claims.filter((c) => (c.supporters?.length || 0) < 2).length;
     const challengerCount = claims.filter((c) => c.role === 'challenger').length;
     const claimCount = claims.length;
+    const conflictCount = edges.filter((e) => e.type === 'conflicts').length;
 
     const convergenceRatio = claimCount > 0 ? consensusCount / claimCount : 0;
 
@@ -30,6 +32,7 @@ export function computeExplore(query: string, artifact: MapperArtifact): Explore
         outlierCount,
         challengerCount,
         convergenceRatio,
+        conflictCount,
         hasChallengers: challengerCount > 0,
     };
 }

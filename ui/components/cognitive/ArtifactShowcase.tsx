@@ -3,7 +3,7 @@ import { MapperArtifact, AiTurn, ExploreAnalysis, ProviderResponse } from "../..
 import { applyEdits } from "../../utils/apply-artifact-edits";
 import { artifactEditsAtom } from "../../state/artifact-edits";
 import { RawResponseCard } from "./cards/RawResponseCard";
-import { cleanOptionsText, extractGraphTopologyAndStrip, parseMappingResponse } from "../../../shared/parsing-utils";
+import { extractGraphTopologyAndStrip, parseMappingResponse } from "../../../shared/parsing-utils";
 import DecisionMapGraph from "../DecisionMapGraph";
 import { adaptGraphTopology } from "../../utils/graphAdapter";
 
@@ -21,16 +21,12 @@ import { useRefinerOutput } from "../../hooks/useRefinerOutput";
 import { useAntagonistOutput } from "../../hooks/useAntagonistOutput";
 import { PipelineErrorBanner } from "../PipelineErrorBanner";
 import { CopyButton } from "../CopyButton";
-import {
-    reconcileOptions,
-    unifiedOptionsToShowcaseItems,
-    processShowcaseItems,
-    type ProcessedShowcase,
-    type SelectableShowcaseItem
-} from "./content-builders";
-import { SelectableCard, GhostDivider } from "./LegacyArtifactViews";
+import { SelectableCard } from "./LegacyArtifactViews";
 import { LLM_PROVIDERS_CONFIG } from "../../constants";
 import type { CognitiveTransitionOptions, SelectedArtifact } from "../../hooks/cognitive/useCognitiveMode";
+import { MetricsRibbon } from "./MetricsRibbon";
+import { useProviderLimits } from "../../hooks/useProviderLimits";
+import { getProviderName } from "../../utils/provider-helpers";
 
 const MapIcon = ({ className }: { className?: string }) => (
     <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><rect width="18" height="18" x="3" y="3" rx="2" ry="2" /><line x1="3" x2="21" y1="9" y2="9" /><line x1="9" x2="9" y1="21" y2="9" /></svg>
@@ -53,19 +49,19 @@ const FormattedNarrative: React.FC<{
                 const match = part.match(/^\*\*\[(.*?)\|(.*?)\]\*\*$/);
                 if (match) {
                     const label = match[1];
-                    const id = match[2];
-                    const isSelected = selectedIds.has(id);
+                    const normalizedId = match[2].replace(/^claim_/, '');
+                    const isSelected = selectedIds.has(normalizedId);
                     return (
                         <span
                             key={i}
-                            onClick={(e) => { e.stopPropagation(); onToggle(id); }}
+                            onClick={(e) => { e.stopPropagation(); onToggle(normalizedId); }}
                             className={`
                                 inline-flex items-center gap-1 mx-1 px-1.5 py-0.5 rounded-md cursor-pointer transition-all border
                                 ${isSelected
                                     ? "bg-primary-500/20 border-primary-500/40 text-primary-200"
                                     : "bg-surface-highlight border-border-strong text-text-secondary hover:bg-surface-highlight/80 hover:border-brand-400/50"}
                             `}
-                            title={`Toggle claim ${id}`}
+                            title={`Toggle claim ${normalizedId}`}
                         >
                             <span className="font-medium text-[13px]">{label}</span>
                             {isSelected && <span className="text-[10px] opacity-70">✓</span>}
@@ -80,130 +76,7 @@ const FormattedNarrative: React.FC<{
     );
 };
 
-const normalizeTitleKey = (title: string): string =>
-    String(title || "")
-        .toLowerCase()
-        .replace(/[`"'’“”]/g, "")
-        .replace(/[^a-z0-9\s]/g, " ")
-        .replace(/\s+/g, " ")
-        .trim();
 
-const normalizeMaybeEscapedText = (text: string): string => {
-    const raw = String(text || "");
-    if (!raw.includes("\n") && raw.includes("\\n")) {
-        return raw
-            .replace(/\\n/g, "\n")
-            .replace(/\\t/g, "\t")
-            .replace(/\\"/g, '"');
-    }
-    return raw;
-};
-
-const buildOptionDetailMap = (optionsText: string | null | undefined): Map<string, string> => {
-    const map = new Map<string, string>();
-    if (!optionsText) return map;
-
-    const normalizedText = normalizeMaybeEscapedText(String(optionsText));
-    const lines = normalizedText.split("\n");
-
-    const isThemeHeader = (line: string) => {
-        const t = line.trim();
-        if (!t) return false;
-        if (/^Theme:\s*/i.test(t)) return true;
-        if (/^#+\s+/.test(t)) return true;
-        if (/^[\u{1F300}-\u{1FAD6}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/u.test(t)) return true;
-        return false;
-    };
-
-    const titleLineMatch = (line: string): { title: string; desc: string } | null => {
-        const t = line.trim();
-        if (!t) return null;
-        const boldMatch = t.match(/^\s*[-*•]?\s*\*\*([^*]+)\*\*\s*:\s*(.+)$/);
-        if (boldMatch) return { title: boldMatch[1].trim(), desc: boldMatch[2].trim() };
-        const plainMatch = t.match(/^\s*[-*•]?\s*\*{0,2}([^:]{3,}?)\*{0,2}\s*:\s*(.+)$/);
-        if (plainMatch) return { title: plainMatch[1].trim(), desc: plainMatch[2].trim() };
-        return null;
-    };
-
-    let currentTitle: string | null = null;
-    let buffer: string[] = [];
-
-    const flush = () => {
-        if (!currentTitle) return;
-        const key = normalizeTitleKey(currentTitle);
-        const body = buffer.join(" ").replace(/\s+/g, " ").trim();
-        if (key && body && !map.has(key)) map.set(key, body);
-        currentTitle = null;
-        buffer = [];
-    };
-
-    for (const rawLine of lines) {
-        const trimmed = String(rawLine || "").trim();
-        if (!trimmed) continue;
-        if (isThemeHeader(trimmed)) {
-            flush();
-            continue;
-        }
-        const match = titleLineMatch(trimmed);
-        if (match) {
-            flush();
-            currentTitle = match.title;
-            if (match.desc) buffer.push(match.desc);
-            continue;
-        }
-        if (currentTitle) buffer.push(trimmed.replace(/^\s*[-*•]\s+/, ""));
-    }
-
-    flush();
-    return map;
-};
-
-const findBestOptionDetail = (optionDetailMap: Map<string, string>, itemText: string): string | null => {
-    if (optionDetailMap.size === 0) return null;
-    const key = normalizeTitleKey(itemText);
-    if (!key) return null;
-    const direct = optionDetailMap.get(key);
-    if (direct) return direct;
-
-    const keyTokens = new Set(key.split(" ").filter(Boolean));
-    let best: { detail: string; score: number } | null = null;
-
-    for (const [optKey, detail] of optionDetailMap.entries()) {
-        if (!optKey) continue;
-        if (optKey.includes(key) || key.includes(optKey)) {
-            return detail;
-        }
-
-        const optTokens = optKey.split(" ").filter(Boolean);
-        if (optTokens.length === 0) continue;
-        let intersect = 0;
-        for (const t of optTokens) if (keyTokens.has(t)) intersect += 1;
-        const union = new Set([...keyTokens, ...optTokens]).size || 1;
-        const score = intersect / union;
-        if (!best || score > best.score) best = { detail, score };
-    }
-
-    if (best && best.score >= 0.55) return best.detail;
-    return null;
-};
-
-const buildArtifactDetailMap = (artifact: MapperArtifact | null): Map<string, string> => {
-    const map = new Map<string, string>();
-    if (!artifact) return map;
-
-    // V3: Iterate claims
-    for (const c of artifact.claims || []) {
-        const titleKey = normalizeTitleKey(c.label);
-        const parts: string[] = [];
-        if (c.quote) parts.push(`"${c.quote}"`);
-        if (typeof c.support_count === "number" && c.support_count > 0) parts.push(`Supported by ${c.support_count} models`);
-        if (c.type) parts.push(`Type: ${c.type}`);
-        const summary = parts.join(" · ").trim();
-        if (titleKey && summary && !map.has(titleKey)) map.set(titleKey, summary);
-    }
-
-    return map;
-};
 
 
 
@@ -247,8 +120,12 @@ export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
     const activeMapperPid = useMemo(() => {
         if (turn.meta?.mapper) return turn.meta.mapper;
         const keys = Object.keys(turn.mappingResponses || {});
-        return keys.length > 0 ? keys[0] : undefined;
+        return keys.length > 0 ? keys[0] : null;
     }, [turn.meta?.mapper, turn.mappingResponses]);
+
+    const mapperProviderName = useMemo(() => {
+        return activeMapperPid ? getProviderName(activeMapperPid) : "";
+    }, [activeMapperPid]);
 
     const latestMapping = useMemo(() => {
         if (!activeMapperPid) return null;
@@ -276,17 +153,7 @@ export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
         return matches ? matches.length : 0;
     }, [mapperNarrative]);
 
-    const mapperOptionsText = useMemo(() => {
-        const fromMeta =
-            (latestMapping?.meta as any)?.allAvailableOptions ||
-            (latestMapping?.meta as any)?.all_available_options ||
-            (latestMapping?.meta as any)?.options ||
-            null;
-        if (fromMeta) {
-            return cleanOptionsText(normalizeMaybeEscapedText(String(fromMeta)));
-        }
-        return parsedMapping.options ? cleanOptionsText(normalizeMaybeEscapedText(parsedMapping.options)) : null;
-    }, [latestMapping, parsedMapping.options]);
+
 
     const graphData = useMemo(() => {
         const claims = Array.isArray(artifactForDisplay?.claims) ? artifactForDisplay!.claims : [];
@@ -316,19 +183,7 @@ export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
         };
     }, []);
 
-    const artifactDetailMap = useMemo(() => buildArtifactDetailMap(artifactForDisplay), [artifactForDisplay]);
-    const optionDetailMap = useMemo(() => buildOptionDetailMap(mapperOptionsText), [mapperOptionsText]);
 
-    const reconciliation = useMemo(
-        () => reconcileOptions(mapperOptionsText, artifactForDisplay),
-        [mapperOptionsText, artifactForDisplay]
-    );
-
-    const optionById = useMemo(() => {
-        const map = new Map<string, (typeof reconciliation.options)[number]>();
-        for (const opt of reconciliation.options) map.set(opt.id, opt);
-        return map;
-    }, [reconciliation]);
 
     const workflowProgress = useAtomValue(workflowProgressForTurnFamily(currentTurnId));
 
@@ -357,51 +212,10 @@ export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
         const ids = Array.from(selectedIds);
         ids.sort();
 
-        for (const id of ids) {
-            // Check unified items first (reconciled)
-            const unified = optionById.get(id);
-            if (unified) {
-                const ad = unified.artifactData;
-
-                let kind = "inventory_option";
-                let text = unified.label;
-                let dimension = ad?.dimension;
-
-                const meta: any = {
-                    summary: unified.summary,
-                    citations: unified.citations,
-                    source: unified.source,
-                    inventoryIndex: unified.inventoryIndex,
-                    matchConfidence: unified.matchConfidence,
-                    artifact: ad || null,
-                };
-
-                // If linked to a V3 claim (via ID matching)
-                if (ad && ad.originalId && artifactForDisplay && artifactForDisplay.claims) {
-                    const claim = artifactForDisplay.claims.find(c => c.id === ad.originalId);
-                    if (claim) {
-                        kind = "consensus_claim"; // Reuse "consensus_claim" kind for compatibility
-                        text = claim.label || claim.text;
-                        meta.supporters = claim.supporters;
-                        meta.support_count = claim.support_count;
-                        meta.quote = claim.quote;
-                        meta.type = claim.type;
-                    }
-                }
-
-                out.push({
-                    id,
-                    kind,
-                    text,
-                    dimension,
-                    meta
-                });
-                continue;
-            }
-
-            // Fallback: Check Artifact directly if not in reconciled list (e.g. from graph only)
-            if (artifactForDisplay && artifactForDisplay.claims) {
-                const claim = artifactForDisplay.claims.find(c => c.id === id);
+        // Direct lookup from artifact claims only
+        if (artifactForDisplay && artifactForDisplay.claims) {
+            for (const id of ids) {
+                const claim = artifactForDisplay.claims.find(c => c.id === id || String(c.id) === id);
                 if (claim) {
                     out.push({
                         id,
@@ -418,7 +232,7 @@ export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
             }
         }
         return out;
-    }, [artifactForDisplay, selectedIds, optionById]);
+    }, [artifactForDisplay, selectedIds]);
 
     const toggleSelection = (id: string) => {
         setSelectedIds((draft) => {
@@ -481,41 +295,7 @@ export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
         navigator.clipboard.writeText(md);
     }, [turn, refinerOutput, refinerPid, antagonistOutput, antagonistPid, includePromptInCopy]);
 
-    const processed: ProcessedShowcase | null = useMemo(() => {
-        if (!artifactForDisplay) return null;
-        const reconciledItems = unifiedOptionsToShowcaseItems(reconciliation);
-        return processShowcaseItems(reconciledItems, graphTopology, artifactForDisplay?.ghosts?.[0] ?? null);
-    }, [artifactForDisplay, graphTopology, reconciliation]);
 
-    const processedWithDetails: ProcessedShowcase | null = useMemo(() => {
-        if (!processed) return null;
-        if (artifactDetailMap.size === 0 && optionDetailMap.size === 0) return processed;
-
-        const attach = (it: SelectableShowcaseItem): SelectableShowcaseItem => {
-            if (it.detail) return it;
-            if (!it.text) return it;
-            const fromArtifact = findBestOptionDetail(artifactDetailMap, it.text);
-            const found = fromArtifact || findBestOptionDetail(optionDetailMap, it.text);
-            if (!found) return it;
-            const clipped = found.length > 260 ? `${found.slice(0, 257)}…` : found;
-            return { ...it, detail: clipped };
-        };
-
-        return {
-            ...processed,
-            frameChallengers: processed.frameChallengers.map(attach),
-            bifurcations: processed.bifurcations.map((b) => ({
-                ...b,
-                left: attach(b.left),
-                right: attach(b.right),
-            })),
-            bundles: processed.bundles.map((bundle) => ({
-                ...bundle,
-                items: bundle.items.map(attach),
-            })),
-            independentAnchors: processed.independentAnchors.map(attach),
-        };
-    }, [processed, artifactDetailMap, optionDetailMap]);
 
     const claimsCount = mapperArtifact?.claims?.length || 0;
     const ghostCount = mapperArtifact?.ghosts?.length || 0;
@@ -523,22 +303,23 @@ export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
     return (
         <div className="w-full max-w-3xl mx-auto space-y-4 pb-12 animate-in fade-in duration-500">
             {mapperArtifact && (
-                <div className="flex flex-wrap gap-2 items-center">
-                    <div className="flex flex-wrap gap-2 items-center flex-1">
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-surface-highlight/30 border border-border-subtle text-xs text-text-secondary">
-                            Claims: {claimsCount}
-                        </span>
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-surface-highlight/30 border border-border-subtle text-xs text-text-secondary">
-                            Models: {mapperArtifact.model_count}
-                        </span>
-                        {ghostCount > 0 && (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-surface-highlight/30 border border-border-subtle text-xs text-text-secondary">
-                                👻 {ghostCount} {ghostCount === 1 ? 'Ghost' : 'Ghosts'}
-                            </span>
-                        )}
-                    </div>
+                <div className="flex flex-col gap-2">
+                    <MetricsRibbon
+                        analysis={analysis}
+                        artifact={mapperArtifact}
+                        claimsCount={claimsCount}
+                        ghostCount={ghostCount}
+                    />
 
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                            <div className="text-xs font-semibold text-text-secondary uppercase tracking-wide">
+                                Decision Map
+                            </div>
+                            {mapperProviderName && (
+                                <span className="text-[11px] text-text-tertiary">by {mapperProviderName}</span>
+                            )}
+                        </div>
                         <button
                             onClick={() => setIsDecisionMapOpen({ turnId: turn.id })}
                             className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-surface-raised hover:bg-surface-highlight border border-border-subtle text-xs text-text-secondary transition-colors"
@@ -564,8 +345,7 @@ export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
                     </div>
                 </div>
             )}
-
-            {/* Source Layer: Council Orbs */}
+ {/* Source Layer: Council Orbs */}
             <div className="mb-2">
                 <CouncilOrbs
                     providers={LLM_PROVIDERS_CONFIG}
@@ -577,12 +357,10 @@ export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
                     onOrbClick={(pid) => setActiveSplitPanel({ turnId: currentTurnId, providerId: pid })}
                 />
             </div>
-
             {mapperArtifact ? (
                 <>
                     {mapperArtifact.souvenir && <SouvenirCard content={mapperArtifact.souvenir} />}
-
-                    <GapsCard artifact={mapperArtifact!} />
+                    {/* GapsCard removed as per cleanup requirements */}
 
                     {mapperNarrative && (
                         <div className="bg-surface-raised border border-border-subtle rounded-xl overflow-hidden mb-4">
@@ -623,30 +401,71 @@ export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
                     {/* V3: No Container Previews. The Narrative is the structure. */
                     /* However, we still show Challengers, Bundles, etc. if they exist in the graph */}
 
-                    {processedWithDetails && (
-                        <div className="space-y-4 mt-2">
-
-
-                            {processedWithDetails.independentAnchors.length > 0 && (
-                                <div className="space-y-2">
-                                    {processedWithDetails.independentAnchors.map((item) => (
+                    {/* All Claims Section (Expandable) */}
+                    {artifactForDisplay?.claims && artifactForDisplay.claims.length > 0 && (
+                        <div className="mt-4">
+                            <details className="group rounded-xl border border-border-subtle bg-surface-raised overflow-hidden">
+                                <summary className="flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-surface-highlight/50 transition-colors select-none">
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-xs font-semibold text-text-secondary uppercase tracking-wide">
+                                            All Claims
+                                        </span>
+                                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-surface-highlight border border-border-subtle text-text-muted">
+                                            {artifactForDisplay.claims.length}
+                                        </span>
+                                    </div>
+                                    <div className="text-text-muted group-open:rotate-180 transition-transform">
+                                        ▼
+                                    </div>
+                                </summary>
+                                <div className="p-4 space-y-3 border-t border-border-subtle/50 bg-surface">
+                                    {artifactForDisplay.ghosts && artifactForDisplay.ghosts.length > 0 && (
+                                        <div className="p-4 rounded-xl border border-dashed border-border-subtle bg-surface-highlight/10">
+                                            <div className="flex items-center justify-between gap-3 mb-2">
+                                                <div className="text-xs font-semibold text-text-secondary">👻 Ghosts</div>
+                                                <div className="text-[10px] text-text-muted">
+                                                    {artifactForDisplay.ghosts.length}
+                                                </div>
+                                            </div>
+                                            <div className="space-y-2">
+                                                {artifactForDisplay.ghosts.map((ghost, idx) => (
+                                                    <div key={idx} className="text-sm text-text-muted italic leading-relaxed">
+                                                        {ghost}
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+                                    {artifactForDisplay.claims.map((claim) => (
                                         <SelectableCard
-                                            key={item.id}
-                                            item={item}
-                                            isSelected={selectedIds.has(item.id)}
-                                            onToggle={() => toggleSelection(item.id)}
-                                            modelCount={mapperArtifact.model_count}
-                                            subtitle={
-                                                item.detail ? (
-                                                    <div className="text-xs text-text-muted leading-relaxed">{item.detail}</div>
-                                                ) : null
-                                            }
+                                            key={claim.id}
+                                            item={{
+                                                id: String(claim.id),
+                                                text: claim.label || "Untitled Claim",
+                                                type: (claim.supporters?.length || 0) >= 2 ? "consensus" : "supplemental",
+                                                graphSupportCount: claim.support_count
+                                            }}
+                                            isSelected={selectedIds.has(String(claim.id))}
+                                            onToggle={() => toggleSelection(String(claim.id))}
+                                            className="bg-surface-base hover:bg-surface-highlight"
+                                            subtitle={(claim.text || claim.quote) ? (
+                                                <div className="space-y-1">
+                                                    {claim.text && claim.text !== claim.label && (
+                                                        <div className="text-xs text-text-muted leading-relaxed">
+                                                            {claim.text}
+                                                        </div>
+                                                    )}
+                                                    {claim.quote ? (
+                                                        <div className="text-xs text-text-muted italic border-l-2 border-border-subtle pl-2">
+                                                            "{claim.quote}"
+                                                        </div>
+                                                    ) : null}
+                                                </div>
+                                            ) : null}
                                         />
                                     ))}
                                 </div>
-                            )}
-
-                            {processedWithDetails.ghost && <GhostDivider ghost={processedWithDetails.ghost} />}
+                            </details>
                         </div>
                     )}
                 </>
@@ -676,11 +495,17 @@ export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
                     disabled={isLoading}
                     className="flex-1 bg-[#1a1b26] border border-border-subtle rounded px-2 py-1 text-sm text-gray-200 focus:outline-none focus:border-brand-500 disabled:opacity-50 appearance-none"
                 >
-                    {availableProviders.map((p) => (
-                        <option key={p.id} value={p.id}>
-                            {p.name}
-                        </option>
-                    ))}
+                    {availableProviders.map((p) => {
+                        // Estimate limits - this is a rough client-side check
+                        // Length = prompt overhead + artifact length
+                        const estimatedLength = (mapperNarrative?.length || 0) + (selectedIds.size * 500) + 2000;
+                        const { isAllowed } = useProviderLimits(p.id, estimatedLength);
+                        return (
+                            <option key={p.id} value={p.id} disabled={!isAllowed}>
+                                {p.name} {!isAllowed && "(Limit Exceeded)"}
+                            </option>
+                        );
+                    })}
                 </select>
                 <div className="text-xs text-text-muted tabular-nums">
                     {selectedArtifacts.length > 0 ? `${selectedArtifacts.length} selected` : "None selected"}

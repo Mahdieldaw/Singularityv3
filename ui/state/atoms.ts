@@ -459,8 +459,6 @@ export type WorkflowStage =
   | 'thinking'
   | 'streaming'
   | 'complete'
-  | 'error'
-  | 'complete'
   | 'error';
 
 export interface ProviderWorkflowState {

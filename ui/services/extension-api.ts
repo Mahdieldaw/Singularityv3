@@ -135,6 +135,12 @@ class ExtensionAPI {
     this.portMessageHandler = handler;
   }
 
+  async reconnect(): Promise<void> {
+    console.log("[ExtensionAPI] Manual reconnect triggered");
+    this.disconnectAll();
+    await this.ensurePort({ force: true });
+  }
+
   async executeWorkflow(request: PrimitiveWorkflowRequest): Promise<void> {
     try {
       const port = await this.ensurePort();

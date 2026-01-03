@@ -6,7 +6,7 @@ export class PortHealthManager {
   private onDisconnectCallback: (() => void) | undefined = undefined;
 
   // Relaxed health check and reconnect strategy to reduce churn
-  private readonly HEALTH_CHECK_INTERVAL = 30000; // 30s
+  private readonly HEALTH_CHECK_INTERVAL = 10000; // 10s (reduced from 30s)
   private readonly RECONNECT_DELAY = 2000; // base delay
   private readonly RECONNECT_JITTER_MS = 500; // random jitter
 
@@ -45,6 +45,7 @@ export class PortHealthManager {
     this.port.onMessage.addListener(this.handleMessage.bind(this));
     this.port.onDisconnect.addListener(this.handleDisconnect.bind(this));
 
+    this.lastPongTimestamp = Date.now();
     this.startHealthCheck();
 
     console.log("[PortHealthManager] Connected to service worker");
@@ -78,13 +79,15 @@ export class PortHealthManager {
     this.healthCheckInterval = window.setInterval(() => {
       this.sendKeepalivePing();
 
-      const timeSinceLastPong = Date.now() - this.lastPongTimestamp;
-      // Be more tolerant before declaring unhealthy
-      if (timeSinceLastPong > this.HEALTH_CHECK_INTERVAL * 3) {
-        console.warn(
-          "[PortHealthManager] No pong received, port may be unhealthy",
-        );
-        this.handleUnhealthyPort();
+      if (this.isConnected) {
+        const timeSinceLastPong = Date.now() - this.lastPongTimestamp;
+        // Be more tolerant before declaring unhealthy
+        if (timeSinceLastPong > this.HEALTH_CHECK_INTERVAL * 3) {
+          console.warn(
+            "[PortHealthManager] No pong received, port may be unhealthy",
+          );
+          this.handleUnhealthyPort();
+        }
       }
     }, this.HEALTH_CHECK_INTERVAL);
   }

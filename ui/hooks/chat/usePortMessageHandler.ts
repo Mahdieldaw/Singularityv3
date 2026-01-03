@@ -483,6 +483,9 @@ export function usePortMessageHandler() {
             } catch { }
           }
 
+          // CRITICAL: Ensure watchdog knows we are still alive
+          setLastActivityAt(Date.now());
+
           // Do not gate by session; process updates irrespective of UI session state
 
           if (status === "completed" && result) {

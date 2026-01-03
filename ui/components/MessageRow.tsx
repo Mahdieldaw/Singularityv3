@@ -1,9 +1,11 @@
 import React, { useMemo } from "react";
 import { useAtomValue } from "jotai";
 import { selectAtom } from "jotai/utils";
-import { turnsMapAtom } from "../state/atoms";
+import { activeSplitPanelAtom, isSplitOpenAtom, turnsMapAtom } from "../state/atoms";
 import UserTurnBlock from "./UserTurnBlock";
 import AiTurnBlock from "./AiTurnBlock";
+import GutterOrbIndicator from "./GutterOrbIndicator";
+import clsx from "clsx";
 
 function MessageRow({ turnId }: { turnId: string }) {
   const turnAtom = useMemo(
@@ -11,6 +13,13 @@ function MessageRow({ turnId }: { turnId: string }) {
     [turnId],
   );
   const message = useAtomValue(turnAtom);
+  const isSplitOpen = useAtomValue(isSplitOpenAtom);
+  const isActiveTurn = useAtomValue(
+    useMemo(
+      () => selectAtom(activeSplitPanelAtom, (p) => p?.turnId === turnId),
+      [turnId],
+    ),
+  );
 
   if (!message) {
     return (
@@ -29,8 +38,19 @@ function MessageRow({ turnId }: { turnId: string }) {
 
   // Wrap each row with an anchor for scroll/highlight targeting
   return (
-    <div className="message-row" data-turn-id={turnId} id={`turn-${turnId}`}>
+    <div
+      className={clsx(
+        "message-row relative",
+        isActiveTurn && (message as any).type === "ai" && "active-turn",
+      )}
+      data-turn-id={turnId}
+      data-turn-type={(message as any).type}
+      id={`turn-${turnId}`}
+    >
       {content}
+      {(message as any).type === "ai" && !isSplitOpen && (
+        <GutterOrbIndicator turnId={turnId} />
+      )}
     </div>
   );
 }

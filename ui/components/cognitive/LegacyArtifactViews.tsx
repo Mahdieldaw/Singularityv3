@@ -31,11 +31,7 @@ export const UnifiedMetaBadges: React.FC<{ item: SelectableShowcaseItem }> = ({ 
                 </span>
             );
         }
-        return (
-            <span className="text-[10px] px-1.5 py-0.5 rounded bg-violet-500/10 border border-violet-500/20 text-violet-200 uppercase tracking-wide">
-                artifact only
-            </span>
-        );
+        return null;
     })();
 
     const confidenceBadge =
@@ -45,26 +41,18 @@ export const UnifiedMetaBadges: React.FC<{ item: SelectableShowcaseItem }> = ({ 
             </span>
         ) : null;
 
-    const inventoryBadge =
-        typeof item.inventoryIndex === "number" && item.inventoryIndex > 0 ? (
-            <span className="text-[10px] px-1.5 py-0.5 rounded bg-surface-highlight/30 border border-border-subtle text-text-muted tabular-nums">
-                opt #{item.inventoryIndex}
-            </span>
-        ) : null;
-
     const artifactIdBadge = item.artifactOriginalId ? (
         <span className="text-[10px] text-text-muted font-mono px-1.5 py-0.5 rounded bg-surface-highlight/30 border border-border-subtle">
             {item.artifactOriginalId}
         </span>
     ) : null;
 
-    if (!sourceBadge && !confidenceBadge && !inventoryBadge && !artifactIdBadge) return null;
+    if (!sourceBadge && !confidenceBadge && !artifactIdBadge) return null;
 
     return (
         <>
             {sourceBadge}
             {confidenceBadge}
-            {inventoryBadge}
             {artifactIdBadge}
         </>
     );
@@ -75,7 +63,7 @@ export const SupportMeta: React.FC<{ supportCount?: number; modelCount?: number 
     const denom = typeof modelCount === "number" && modelCount > 0 ? modelCount : null;
     return (
         <span className="text-[10px] px-1.5 py-0.5 rounded bg-surface-highlight/30 border border-border-subtle text-text-muted tabular-nums">
-            {denom ? `${supportCount}/${denom}` : supportCount}
+            {supportCount}
         </span>
     );
 };

@@ -1,6 +1,7 @@
 import { MapperArtifact, Claim, Edge } from "../../shared/contract";
 
 type StructuralAnalysis = {
+  edges: Edge[];
   landscape: {
     dominantType: Claim["type"];
     typeDistribution: Record<string, number>;
@@ -78,7 +79,19 @@ type ConvergencePoint = {
   edgeType: "prerequisite" | "supports";
 };
 
+type ProblemStructure = {
+  primaryPattern: "linear" | "dimensional" | "tradeoff" | "contested" | "exploratory" | "keystone";
+  confidence: number;
+  evidence: string[];
+  implications: {
+    understand: string;
+    gauntlet: string;
+  };
+};
+
 type ModeContext = {
+  problemStructure: ProblemStructure;
+  structuralFraming: string;
   typeFraming: string;
   structuralObservations: string[];
   leverageNotes: string | null;
@@ -122,6 +135,143 @@ const computeLandscapeMetrics = (artifact: MapperArtifact): StructuralAnalysis["
     claimCount: claims.length,
     modelCount,
     convergenceRatio: claims.length > 0 ? consensusClaims.length / claims.length : 0,
+  };
+};
+
+const detectProblemStructure = (
+  claims: ClaimWithLeverage[],
+  edges: Edge[],
+  patterns: StructuralAnalysis["patterns"]
+): ProblemStructure => {
+  const clamp01 = (n: number) => Math.max(0, Math.min(1, n));
+  const pct = (n: number) => `${Math.round(n * 100)}%`;
+
+  const claimCount = claims.length;
+  const edgeCount = edges.length;
+
+  const prereqCount = edges.filter((e) => e.type === "prerequisite").length;
+  const conflictEdgeCount = edges.filter((e) => e.type === "conflicts").length;
+  const tradeoffEdgeCount = edges.filter((e) => e.type === "tradeoff").length;
+  const avgConnectivity = edgeCount / Math.max(claimCount, 1);
+  const prerequisiteRatio = prereqCount / Math.max(edgeCount, 1);
+
+  const conflictCount = patterns.conflicts.length;
+  const tradeoffCount = patterns.tradeoffs.length;
+  const isolatedCount = patterns.isolatedClaims.length;
+  const isolatedRatio = isolatedCount / Math.max(claimCount, 1);
+  const convergencePoints = patterns.convergencePoints.length;
+  const cascadeDepth = patterns.cascadeRisks.reduce((max, r) => Math.max(max, r.depth), 0);
+
+  const consensusConflicts = patterns.conflicts.filter((c) => c.isBothConsensus).length;
+
+  const outDegree = new Map<string, number>();
+  for (const e of edges) {
+    if (e.type !== "prerequisite" && e.type !== "supports") continue;
+    outDegree.set(e.from, (outDegree.get(e.from) || 0) + 1);
+  }
+  const byOutDegree = [...outDegree.entries()].sort((a, b) => b[1] - a[1]);
+  const [topId, topOut] = byOutDegree[0] || [null, 0];
+  const secondOut = byOutDegree[1]?.[1] ?? 0;
+  const topClaim = topId ? claims.find((c) => c.id === topId) : null;
+  const dominance = topOut <= 0 ? 0 : secondOut <= 0 ? 1 : clamp01((topOut - secondOut) / topOut);
+
+  const linearScore = clamp01(prerequisiteRatio * 0.8 + clamp01(cascadeDepth / 3) * 0.5 - clamp01(conflictCount / 2) * 0.5);
+  const contestedScore = clamp01(clamp01(conflictCount / 3) * 0.8 + (consensusConflicts > 0 ? 0.35 : 0));
+  const tradeoffScore = clamp01(clamp01(tradeoffCount / 3) * 0.75 + clamp01(1 - prerequisiteRatio) * 0.35 - clamp01(conflictCount / 3) * 0.2);
+  const dimensionalScore = clamp01(
+    clamp01(convergencePoints / 3) * 0.6 +
+      clamp01(avgConnectivity / 2) * 0.45 +
+      clamp01(1 - isolatedRatio) * 0.25 -
+      clamp01(conflictCount / 3) * 0.25
+  );
+  const exploratoryScore = clamp01(clamp01(isolatedRatio / 0.5) * 0.75 + clamp01((0.8 - avgConnectivity) / 0.8) * 0.35);
+
+  const keystoneEligible = Boolean(topClaim && topOut >= 3 && topClaim.leverage >= 6);
+  const keystoneScore = keystoneEligible
+    ? clamp01((clamp01(topOut / 6) * 0.55 + clamp01(topClaim!.leverage / 10) * 0.55) * (0.6 + 0.4 * dominance))
+    : 0;
+
+  const scores: Array<{ pattern: ProblemStructure["primaryPattern"]; score: number }> = [
+    { pattern: "keystone", score: keystoneScore },
+    { pattern: "linear", score: linearScore },
+    { pattern: "contested", score: contestedScore },
+    { pattern: "tradeoff", score: tradeoffScore },
+    { pattern: "dimensional", score: dimensionalScore },
+    { pattern: "exploratory", score: exploratoryScore },
+  ];
+  scores.sort((a, b) => b.score - a.score);
+
+  const best = scores[0];
+  const second = scores[1] || { pattern: "dimensional" as const, score: 0 };
+  const confidence = clamp01(0.45 + (best.score - second.score) * 0.6 + best.score * 0.15);
+
+  const implications: Record<ProblemStructure["primaryPattern"], ProblemStructure["implications"]> = {
+    linear: {
+      understand: "Find the sequence. The insight is often where the path becomes non-obvious.",
+      gauntlet: "Test each step: is it truly prerequisite? Can steps be reordered or parallelized?",
+    },
+    keystone: {
+      understand: "Everything hinges on a keystone. The insight is the keystone, not the branches.",
+      gauntlet: "Test the keystone ruthlessly. If it fails, the entire structure collapses.",
+    },
+    contested: {
+      understand: "Disagreement is the signal. Find the axis of disagreement—that reveals the real question.",
+      gauntlet: "Force resolution. One claim per conflict must fail, or find conditions that differentiate them.",
+    },
+    tradeoff: {
+      understand: "There is no universal best. The insight is the map of what you give up for what you gain.",
+      gauntlet: "Test if tradeoffs are real or false dichotomies. Look for dominated options.",
+    },
+    dimensional: {
+      understand: "Multiple independent factors determine the answer. Find the governing conditions.",
+      gauntlet: "Test each dimension independently. Does the answer cover all relevant combinations?",
+    },
+    exploratory: {
+      understand: "No strong structure detected. Value lies in cataloging the territory and identifying patterns.",
+      gauntlet: "Test relevance: which claims answer the query vs. which are interesting but tangential?",
+    },
+  };
+
+  const evidenceByPattern: Record<ProblemStructure["primaryPattern"], string[]> = {
+    linear: [
+      `${pct(prerequisiteRatio)} of edges are prerequisite relationships`,
+      `Max cascade depth: ${cascadeDepth}`,
+      `Conflicts: ${conflictCount}`,
+    ],
+    keystone: topClaim
+      ? [
+          `${topClaim.label} has leverage ${topClaim.leverage.toFixed(1)}`,
+          `${topOut} outgoing dependencies (supports/prerequisites)`,
+          `Dominance: ${pct(dominance)}`,
+        ]
+      : ["No keystone candidate detected", `Average connectivity: ${avgConnectivity.toFixed(1)} edges/claim`, `Isolated claims: ${isolatedCount}`],
+    contested: [
+      `${conflictCount} conflict pair(s) detected (${conflictEdgeCount} conflict edge(s))`,
+      consensusConflicts > 0 ? `${consensusConflicts} consensus-to-consensus conflict(s)` : "Conflicts include at least one low-support position",
+      `Tradeoffs: ${tradeoffCount}`,
+    ],
+    tradeoff: [
+      `${tradeoffCount} tradeoff pair(s) detected (${tradeoffEdgeCount} tradeoff edge(s))`,
+      `Prerequisite ratio: ${pct(prerequisiteRatio)}`,
+      `Conflicts: ${conflictCount}`,
+    ],
+    dimensional: [
+      `${convergencePoints} convergence point(s)`,
+      `Average connectivity: ${avgConnectivity.toFixed(1)} edges/claim`,
+      `Isolated claims: ${isolatedCount}`,
+    ],
+    exploratory: [
+      `${isolatedCount}/${Math.max(claimCount, 1)} isolated claims (${pct(isolatedRatio)})`,
+      `Average connectivity: ${avgConnectivity.toFixed(1)} edges/claim`,
+      `Convergence points: ${convergencePoints}`,
+    ],
+  };
+
+  return {
+    primaryPattern: best.pattern,
+    confidence,
+    evidence: evidenceByPattern[best.pattern],
+    implications: implications[best.pattern],
   };
 };
 
@@ -405,7 +555,7 @@ const computeStructuralAnalysis = (artifact: MapperArtifact): StructuralAnalysis
 
   const ghostAnalysis = analyzeGhosts(ghosts, claimsWithLeverage);
 
-  return { landscape, claimsWithLeverage, patterns, ghostAnalysis };
+  return { edges, landscape, claimsWithLeverage, patterns, ghostAnalysis };
 };
 
 const TYPE_FRAMINGS: Record<string, { understand: string; gauntlet: string }> = {
@@ -438,6 +588,8 @@ const getTypeFraming = (dominantType: string, mode: "understand" | "gauntlet"): 
 
 const generateModeContext = (analysis: StructuralAnalysis, mode: "understand" | "gauntlet"): ModeContext => {
   const { landscape, patterns, ghostAnalysis } = analysis;
+  const problemStructure = detectProblemStructure(analysis.claimsWithLeverage, analysis.edges, analysis.patterns);
+  const structuralFraming = mode === "understand" ? problemStructure.implications.understand : problemStructure.implications.gauntlet;
   const typeFraming = getTypeFraming(landscape.dominantType, mode);
   const structuralObservations: string[] = [];
 
@@ -514,6 +666,8 @@ const generateModeContext = (analysis: StructuralAnalysis, mode: "understand" | 
   }
 
   return {
+    problemStructure,
+    structuralFraming,
     typeFraming,
     structuralObservations,
     leverageNotes,
@@ -526,6 +680,11 @@ const generateModeContext = (analysis: StructuralAnalysis, mode: "understand" | 
 
 const buildStructuralSection = (context: ModeContext, mode: "understand" | "gauntlet"): string => {
   const sections: string[] = [];
+  sections.push(
+    `## Problem Structure: ${context.problemStructure.primaryPattern.toUpperCase()}\n\n${context.structuralFraming}\n\n**Evidence:**\n${context.problemStructure.evidence
+      .map((e) => `• ${e}`)
+      .join("\n")}\n\n**Confidence:** ${Math.round(context.problemStructure.confidence * 100)}%`
+  );
   sections.push(`## Landscape Type\n\n${context.typeFraming}`);
   if (context.structuralObservations.length > 0) {
     sections.push(`## Structural Observations\n\n${context.structuralObservations.map((o) => `• ${o}`).join("\n")}`);

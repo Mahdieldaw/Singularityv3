@@ -115,6 +115,7 @@ export interface ExploreAnalysis {
   outlierCount: number;
   challengerCount: number;
   convergenceRatio: number;
+  conflictCount: number;
   hasChallengers: boolean;
 }
 

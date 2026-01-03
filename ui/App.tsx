@@ -1,5 +1,5 @@
-import { useRef, Suspense } from "react";
-import { useAtom } from "jotai";
+import { useRef, Suspense, useCallback } from "react";
+import { useAtom, useAtomValue } from "jotai";
 import { usePortMessageHandler } from "./hooks/chat/usePortMessageHandler";
 import { useConnectionMonitoring } from "./hooks/useConnectionMonitoring";
 import { useHistoryLoader } from "./hooks/useHistoryLoader";
@@ -9,10 +9,12 @@ import Header from "./components/Header";
 import { safeLazy } from "./utils/safeLazy";
 const HistoryPanel = safeLazy(() => import("./components/HistoryPanel"));
 import Banner from "./components/Banner";
+import { ReconnectOverlay } from "./components/ReconnectOverlay"; // Import Overlay
+import api from "./services/extension-api"; // Import API
 
 const SettingsPanel = safeLazy(() => import("./components/SettingsPanel"));
 import { Toast } from "./components/Toast";
-import { isHistoryPanelOpenAtom } from "./state/atoms";
+import { isHistoryPanelOpenAtom, connectionStatusAtom } from "./state/atoms"; // Import connection atom
 
 import { useInitialization } from "./hooks/useInitialization"; // Import the new hook
 import LaunchpadTab from "./components/LaunchpadTab"; // Import LaunchpadTab
@@ -34,10 +36,15 @@ export default function App() {
   useResponsiveLoadingGuard({ idleWarnMs: 15000, idleCriticalMs: 45000 });
 
   const [isHistoryOpen, setIsHistoryOpen] = useAtom(isHistoryPanelOpenAtom);
+  const connectionStatus = useAtomValue(connectionStatusAtom);
 
   const historyPanelRef = useRef<HTMLDivElement>(null);
 
   const closePanel = () => setIsHistoryOpen(false);
+
+  const handleReconnect = useCallback(() => {
+    api.reconnect();
+  }, []);
 
   useOnClickOutside(historyPanelRef, closePanel);
   useKey("Escape", closePanel);
@@ -100,6 +107,12 @@ export default function App() {
       <Suspense fallback={null}>
         <SettingsPanel />
       </Suspense>
+
+      {/* Reconnect Overlay - Shows when connection is lost */}
+      <ReconnectOverlay
+        visible={isInitialized && !connectionStatus?.isConnected && !connectionStatus?.isReconnecting}
+        onReconnect={handleReconnect}
+      />
 
       {/* Global Toast Notifications */}
       <Toast />

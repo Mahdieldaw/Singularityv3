@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useEffect, useRef, useState, useMemo } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
 import { activeSplitPanelAtom, providerEffectiveStateFamily, turnsMapAtom } from "../state/atoms";
 import { LLM_PROVIDERS_CONFIG } from "../constants";
@@ -17,12 +17,24 @@ export const CouncilOrbsVertical: React.FC<CouncilOrbsVerticalProps> = React.mem
     const setActiveSplitPanel = useSetAtom(activeSplitPanelAtom);
     const [hoveredOrb, setHoveredOrb] = useState<string | null>(null);
     const turnsMap = useAtomValue(turnsMapAtom);
+    const prevTurnIdRef = useRef<string | null>(null);
+    const [isTransitioning, setIsTransitioning] = useState(false);
 
     if (!activePanel) return null;
 
     const { turnId, providerId: activeProviderId } = activePanel;
     const turn = turnsMap.get(turnId);
     const { output: refinerOutput } = useRefinerOutput(turnId);
+
+    useEffect(() => {
+        if (prevTurnIdRef.current && prevTurnIdRef.current !== turnId) {
+            setIsTransitioning(true);
+            const t = window.setTimeout(() => setIsTransitioning(false), 160);
+            prevTurnIdRef.current = turnId;
+            return () => window.clearTimeout(t);
+        }
+        prevTurnIdRef.current = turnId;
+    }, [turnId]);
 
     // Filter out system provider
     const allProviders = LLM_PROVIDERS_CONFIG.filter(p => p.id !== 'system');
@@ -47,7 +59,7 @@ export const CouncilOrbsVertical: React.FC<CouncilOrbsVerticalProps> = React.mem
     const middleIndex = Math.max(0, Math.floor(displayProviders.length / 2));
 
     return (
-        <div className="flex flex-col items-center gap-3 py-4 w-full">
+        <div className={clsx("flex flex-col items-center gap-3 py-4 w-full transition-opacity duration-150", isTransitioning && "opacity-60")}>
             {displayProviders.map((p, idx) => {
                 const pid = String(p.id);
                 const isActive = pid === activeProviderId;

@@ -15,6 +15,7 @@ import AntagonistCard from '../antagonist/AntagonistCard';
 import RefinerDot from '../refinerui/RefinerDot';
 import CognitiveAnchors from './CognitiveAnchors';
 import { getProviderName } from '../../utils/provider-helpers';
+import { useProviderLimits } from '../../hooks/useProviderLimits';
 
 // Icons
 const ChevronDown = ({ className }: { className?: string }) => (
@@ -66,6 +67,15 @@ const UnderstandOutputView: React.FC<UnderstandOutputViewProps> = ({
         return enabled.length > 0 ? enabled : LLM_PROVIDERS_CONFIG;
     }, [selectedModels]);
 
+    // Determine actual provider who performed this step
+    const actualProviderId = useMemo(() => {
+        if (!aiTurn?.understandResponses) return null;
+        const keys = Object.keys(aiTurn.understandResponses);
+        return keys.length > 0 ? keys[0] : null;
+    }, [aiTurn]);
+
+    const actualProviderName = actualProviderId ? getProviderName(actualProviderId) : "";
+
     const [nextProviderId, setNextProviderId] = useState<string>(() => availableProviders[0]?.id || "gemini");
 
     useEffect(() => {
@@ -76,10 +86,11 @@ const UnderstandOutputView: React.FC<UnderstandOutputViewProps> = ({
 
     // Copy Handlers
     const handleCopyUnderstand = useCallback(() => {
-        const providerName = getProviderName(nextProviderId);
+        // Use actual provider name for attribution, fallback to next if not found (though unlikely for completed step)
+        const providerName = actualProviderName || getProviderName(nextProviderId);
         const md = formatAnalysisContextForMd(output, providerName);
         navigator.clipboard.writeText(md);
-    }, [output, nextProviderId]);
+    }, [output, nextProviderId, actualProviderName]);
 
     const handleCopyTurn = useCallback(() => {
         // Gather Batch Responses (latest for each provider)
@@ -140,7 +151,12 @@ const UnderstandOutputView: React.FC<UnderstandOutputViewProps> = ({
                 <div className="absolute top-0 right-0 w-32 h-32 bg-accent-primary/5 rounded-full blur-3xl -translate-y-1/2 translate-x-1/3 pointer-events-none" />
 
                 <div className="flex items-start justify-between mb-4">
-                    <h2 className="text-lg font-semibold text-text-primary tracking-tight m-0">The Understanding</h2>
+                    <div className="flex flex-col">
+                        <h2 className="text-lg font-semibold text-text-primary tracking-tight m-0">The Understanding</h2>
+                        {actualProviderName && (
+                            <span className="text-[11px] text-text-tertiary">by {actualProviderName}</span>
+                        )}
+                    </div>
                     <div className="flex items-center gap-2">
                         <button
                             onClick={() => setIsDecisionMapOpen({ turnId: aiTurn.id })}
@@ -248,11 +264,17 @@ const UnderstandOutputView: React.FC<UnderstandOutputViewProps> = ({
                     disabled={isLoading}
                     className="flex-1 bg-[#1a1b26] border border-border-subtle rounded px-2 py-1 text-sm text-gray-200 focus:outline-none focus:border-brand-500 disabled:opacity-50 appearance-none"
                 >
-                    {availableProviders.map((p) => (
-                        <option key={p.id} value={p.id}>
-                            {p.name}
-                        </option>
-                    ))}
+                    {availableProviders.map((p) => {
+                        // Estimate context length: 
+                        // Previous output (short + long) + buffer
+                        const estimatedLength = (output.short_answer?.length || 0) + (output.long_answer?.length || 0) + 2000;
+                        const { isAllowed } = useProviderLimits(p.id, estimatedLength);
+                        return (
+                            <option key={p.id} value={p.id} disabled={!isAllowed}>
+                                {p.name} {!isAllowed && "(Limit Exceeded)"}
+                            </option>
+                        );
+                    })}
                 </select>
                 <button
                     onClick={() => onRecompute?.({ providerId: nextProviderId, isRecompute: true, sourceTurnId: aiTurn.id })}
