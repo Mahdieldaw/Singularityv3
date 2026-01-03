@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from "react";
-import { MapperArtifact } from "../../../../../shared/contract";
+import { MapperArtifact, Claim } from "../../../../../shared/contract";
 
 interface EditableClaimItemProps {
-    claim: MapperArtifact["consensus"]["claims"][0];
+    claim: Claim;
     isEditing: boolean;
     hasBeenEdited: boolean;
     onStartEdit: () => void;

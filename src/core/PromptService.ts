@@ -1,4 +1,549 @@
-import { MapperArtifact, ExploreAnalysis } from '../../shared/contract';
+import { MapperArtifact, Claim, Edge } from "../../shared/contract";
+
+type StructuralAnalysis = {
+  landscape: {
+    dominantType: Claim["type"];
+    typeDistribution: Record<string, number>;
+    dominantRole: Claim["role"];
+    roleDistribution: Record<string, number>;
+    claimCount: number;
+    modelCount: number;
+    convergenceRatio: number;
+  };
+  claimsWithLeverage: ClaimWithLeverage[];
+  patterns: {
+    leverageInversions: LeverageInversion[];
+    cascadeRisks: CascadeRisk[];
+    conflicts: ConflictPair[];
+    tradeoffs: TradeoffPair[];
+    convergencePoints: ConvergencePoint[];
+    isolatedClaims: string[];
+  };
+  ghostAnalysis: {
+    count: number;
+    mayExtendChallenger: boolean;
+    challengerIds: string[];
+  };
+};
+
+type ClaimWithLeverage = {
+  id: string;
+  label: string;
+  supporters: number[];
+  type: string;
+  role: string;
+  leverage: number;
+  leverageFactors: {
+    supportWeight: number;
+    roleWeight: number;
+    connectivityWeight: number;
+    positionWeight: number;
+  };
+  isLeverageInversion: boolean;
+};
+
+type LeverageInversion = {
+  claimId: string;
+  claimLabel: string;
+  supporterCount: number;
+  reason: "challenger_prerequisite_to_consensus" | "singular_foundation" | "high_connectivity_low_support";
+  affectedClaims: string[];
+};
+
+type CascadeRisk = {
+  sourceId: string;
+  sourceLabel: string;
+  dependentIds: string[];
+  dependentLabels: string[];
+  depth: number;
+};
+
+type ConflictPair = {
+  claimA: { id: string; label: string; supporterCount: number };
+  claimB: { id: string; label: string; supporterCount: number };
+  isBothConsensus: boolean;
+};
+
+type TradeoffPair = {
+  claimA: { id: string; label: string; supporterCount: number };
+  claimB: { id: string; label: string; supporterCount: number };
+  symmetry: "both_consensus" | "both_singular" | "asymmetric";
+};
+
+type ConvergencePoint = {
+  targetId: string;
+  targetLabel: string;
+  sourceIds: string[];
+  sourceLabels: string[];
+  edgeType: "prerequisite" | "supports";
+};
+
+type ModeContext = {
+  typeFraming: string;
+  structuralObservations: string[];
+  leverageNotes: string | null;
+  cascadeWarnings: string | null;
+  conflictNotes: string | null;
+  tradeoffNotes: string | null;
+  ghostNotes: string | null;
+};
+
+const computeLandscapeMetrics = (artifact: MapperArtifact): StructuralAnalysis["landscape"] => {
+  const claims = Array.isArray(artifact?.claims) ? artifact.claims : [];
+
+  const typeDistribution: Record<string, number> = {};
+  const roleDistribution: Record<string, number> = {};
+  const supporterSet = new Set<number>();
+
+  for (const c of claims) {
+    if (!c) continue;
+    typeDistribution[c.type] = (typeDistribution[c.type] || 0) + 1;
+    roleDistribution[c.role] = (roleDistribution[c.role] || 0) + 1;
+    if (Array.isArray(c.supporters)) {
+      for (const s of c.supporters) {
+        if (typeof s === "number") supporterSet.add(s);
+      }
+    }
+  }
+
+  const dominantType = (Object.entries(typeDistribution).sort((a, b) => b[1] - a[1])[0]?.[0] || "prescriptive") as Claim["type"];
+  const dominantRole = (Object.entries(roleDistribution).sort((a, b) => b[1] - a[1])[0]?.[0] || "anchor") as Claim["role"];
+
+  const consensusClaims = claims.filter((c) => (c.supporters?.length || 0) >= 2);
+  const modelCount = typeof artifact?.model_count === "number" && artifact.model_count > 0
+    ? artifact.model_count
+    : supporterSet.size;
+
+  return {
+    dominantType,
+    typeDistribution,
+    dominantRole,
+    roleDistribution,
+    claimCount: claims.length,
+    modelCount,
+    convergenceRatio: claims.length > 0 ? consensusClaims.length / claims.length : 0,
+  };
+};
+
+const computeClaimLeverage = (
+  claim: Claim,
+  edges: Edge[],
+  modelCountRaw: number
+): ClaimWithLeverage => {
+  const modelCount = Math.max(modelCountRaw || 0, 1);
+  const supporters = Array.isArray(claim.supporters) ? claim.supporters : [];
+
+  const supportWeight = (supporters.length / modelCount) * 2;
+
+  const roleWeights: Record<string, number> = {
+    challenger: 4,
+    anchor: 2,
+    branch: 1,
+    supplement: 0.5,
+  };
+  const roleWeight = roleWeights[claim.role] ?? 1;
+
+  const outgoing = edges.filter((e) => e.from === claim.id);
+  const incoming = edges.filter((e) => e.to === claim.id);
+
+  const prereqOut = outgoing.filter((e) => e.type === "prerequisite").length * 2;
+  const prereqIn = incoming.filter((e) => e.type === "prerequisite").length;
+  const conflictEdges = edges.filter(
+    (e) => e.type === "conflicts" && (e.from === claim.id || e.to === claim.id)
+  ).length * 1.5;
+
+  const connectivityWeight = prereqOut + prereqIn + conflictEdges + (outgoing.length + incoming.length) * 0.25;
+
+  const hasIncomingPrereq = incoming.some((e) => e.type === "prerequisite");
+  const hasOutgoingPrereq = outgoing.some((e) => e.type === "prerequisite");
+  const positionWeight = !hasIncomingPrereq && hasOutgoingPrereq ? 2 : 0;
+
+  const leverage = supportWeight + roleWeight + connectivityWeight + positionWeight;
+  const isLeverageInversion = supporters.length < 2 && leverage > 4;
+
+  return {
+    id: claim.id,
+    label: claim.label,
+    supporters,
+    type: claim.type,
+    role: claim.role,
+    leverage,
+    leverageFactors: {
+      supportWeight,
+      roleWeight,
+      connectivityWeight,
+      positionWeight,
+    },
+    isLeverageInversion,
+  };
+};
+
+const computeCascadeDepth = (sourceId: string, prerequisites: Edge[]): number => {
+  const visited = new Set<string>();
+  let maxDepth = 0;
+
+  const dfs = (id: string, depth: number) => {
+    if (visited.has(id)) return;
+    visited.add(id);
+    maxDepth = Math.max(maxDepth, depth);
+    const next = prerequisites.filter((e) => e.from === id);
+    for (const e of next) dfs(e.to, depth + 1);
+  };
+
+  dfs(sourceId, 0);
+  return maxDepth;
+};
+
+const detectLeverageInversions = (
+  claims: ClaimWithLeverage[],
+  edges: Edge[],
+  claimMap: Map<string, ClaimWithLeverage>
+): LeverageInversion[] => {
+  const inversions: LeverageInversion[] = [];
+  const prerequisites = edges.filter((e) => e.type === "prerequisite");
+
+  for (const claim of claims) {
+    if (!claim.isLeverageInversion) continue;
+
+    const prereqTo = prerequisites.filter((e) => e.from === claim.id);
+    const consensusTargets = prereqTo
+      .map((e) => claimMap.get(e.to))
+      .filter((c) => !!c && c.supporters.length >= 2);
+
+    if (claim.role === "challenger" && consensusTargets.length > 0) {
+      inversions.push({
+        claimId: claim.id,
+        claimLabel: claim.label,
+        supporterCount: claim.supporters.length,
+        reason: "challenger_prerequisite_to_consensus",
+        affectedClaims: consensusTargets.map((c) => c!.id),
+      });
+      continue;
+    }
+
+    if (prereqTo.length > 0) {
+      inversions.push({
+        claimId: claim.id,
+        claimLabel: claim.label,
+        supporterCount: claim.supporters.length,
+        reason: "singular_foundation",
+        affectedClaims: prereqTo.map((e) => e.to),
+      });
+      continue;
+    }
+
+    if (claim.leverageFactors.connectivityWeight > 2) {
+      inversions.push({
+        claimId: claim.id,
+        claimLabel: claim.label,
+        supporterCount: claim.supporters.length,
+        reason: "high_connectivity_low_support",
+        affectedClaims: [],
+      });
+    }
+  }
+
+  return inversions;
+};
+
+const detectCascadeRisks = (
+  edges: Edge[],
+  claimMap: Map<string, ClaimWithLeverage>
+): CascadeRisk[] => {
+  const prerequisites = edges.filter((e) => e.type === "prerequisite");
+  const bySource = new Map<string, string[]>();
+  for (const e of prerequisites) {
+    const existing = bySource.get(e.from) || [];
+    bySource.set(e.from, [...existing, e.to]);
+  }
+
+  const risks: CascadeRisk[] = [];
+  for (const [sourceId, directDependents] of bySource) {
+    if (directDependents.length === 0) continue;
+
+    const allDependents = new Set<string>();
+    const queue = [...directDependents];
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      if (allDependents.has(current)) continue;
+      allDependents.add(current);
+      const nextLevel = bySource.get(current) || [];
+      queue.push(...nextLevel);
+    }
+
+    const source = claimMap.get(sourceId);
+    const dependentClaims = Array.from(allDependents)
+      .map((id) => claimMap.get(id))
+      .filter(Boolean);
+
+    risks.push({
+      sourceId,
+      sourceLabel: source?.label || sourceId,
+      dependentIds: Array.from(allDependents),
+      dependentLabels: dependentClaims.map((c) => c!.label),
+      depth: computeCascadeDepth(sourceId, prerequisites),
+    });
+  }
+
+  return risks;
+};
+
+const detectConflicts = (
+  edges: Edge[],
+  claimMap: Map<string, ClaimWithLeverage>
+): ConflictPair[] => {
+  const out: ConflictPair[] = [];
+  for (const e of edges) {
+    if (e.type !== "conflicts") continue;
+    const a = claimMap.get(e.from);
+    const b = claimMap.get(e.to);
+    if (!a || !b) continue;
+    out.push({
+      claimA: { id: a.id, label: a.label, supporterCount: a.supporters.length },
+      claimB: { id: b.id, label: b.label, supporterCount: b.supporters.length },
+      isBothConsensus: a.supporters.length >= 2 && b.supporters.length >= 2,
+    });
+  }
+  return out;
+};
+
+const detectTradeoffs = (
+  edges: Edge[],
+  claimMap: Map<string, ClaimWithLeverage>
+): TradeoffPair[] => {
+  const out: TradeoffPair[] = [];
+  for (const e of edges) {
+    if (e.type !== "tradeoff") continue;
+    const a = claimMap.get(e.from);
+    const b = claimMap.get(e.to);
+    if (!a || !b) continue;
+    const aConsensus = a.supporters.length >= 2;
+    const bConsensus = b.supporters.length >= 2;
+    const symmetry: TradeoffPair["symmetry"] = aConsensus && bConsensus
+      ? "both_consensus"
+      : !aConsensus && !bConsensus
+        ? "both_singular"
+        : "asymmetric";
+    out.push({
+      claimA: { id: a.id, label: a.label, supporterCount: a.supporters.length },
+      claimB: { id: b.id, label: b.label, supporterCount: b.supporters.length },
+      symmetry,
+    });
+  }
+  return out;
+};
+
+const detectConvergencePoints = (
+  edges: Edge[],
+  claimMap: Map<string, ClaimWithLeverage>
+): ConvergencePoint[] => {
+  const relevantEdges = edges.filter((e) => e.type === "prerequisite" || e.type === "supports");
+  const byTargetType = new Map<string, { targetId: string; sources: string[]; type: "prerequisite" | "supports" }>();
+
+  for (const e of relevantEdges) {
+    const key = `${e.to}::${e.type}`;
+    const existing = byTargetType.get(key);
+    if (existing) {
+      existing.sources.push(e.from);
+    } else {
+      byTargetType.set(key, { targetId: e.to, sources: [e.from], type: e.type as "prerequisite" | "supports" });
+    }
+  }
+
+  const points: ConvergencePoint[] = [];
+  for (const { targetId, sources, type } of byTargetType.values()) {
+    if (sources.length < 2) continue;
+    const target = claimMap.get(targetId);
+    const sourceClaims = sources.map((s) => claimMap.get(s)).filter(Boolean);
+    points.push({
+      targetId,
+      targetLabel: target?.label || targetId,
+      sourceIds: sources,
+      sourceLabels: sourceClaims.map((c) => c!.label),
+      edgeType: type,
+    });
+  }
+
+  return points;
+};
+
+const detectIsolatedClaims = (claims: ClaimWithLeverage[], edges: Edge[]): string[] => {
+  const connectedIds = new Set<string>();
+  for (const e of edges) {
+    connectedIds.add(e.from);
+    connectedIds.add(e.to);
+  }
+  return claims.filter((c) => !connectedIds.has(c.id)).map((c) => c.id);
+};
+
+const analyzeGhosts = (ghosts: string[], claims: ClaimWithLeverage[]): StructuralAnalysis["ghostAnalysis"] => {
+  const challengers = claims.filter((c) => c.role === "challenger");
+  return {
+    count: ghosts.length,
+    mayExtendChallenger: ghosts.length > 0 && challengers.length > 0,
+    challengerIds: challengers.map((c) => c.id),
+  };
+};
+
+const computeStructuralAnalysis = (artifact: MapperArtifact): StructuralAnalysis => {
+  const claims = Array.isArray(artifact?.claims) ? artifact.claims : [];
+  const edges = Array.isArray(artifact?.edges) ? artifact.edges : [];
+  const ghosts = Array.isArray(artifact?.ghosts) ? artifact.ghosts.filter(Boolean).map(String) : [];
+
+  const landscape = computeLandscapeMetrics(artifact);
+  const claimsWithLeverage = claims.map((c) => computeClaimLeverage(c, edges, landscape.modelCount));
+  const claimMap = new Map<string, ClaimWithLeverage>(claimsWithLeverage.map((c) => [c.id, c]));
+
+  const patterns: StructuralAnalysis["patterns"] = {
+    leverageInversions: detectLeverageInversions(claimsWithLeverage, edges, claimMap),
+    cascadeRisks: detectCascadeRisks(edges, claimMap),
+    conflicts: detectConflicts(edges, claimMap),
+    tradeoffs: detectTradeoffs(edges, claimMap),
+    convergencePoints: detectConvergencePoints(edges, claimMap),
+    isolatedClaims: detectIsolatedClaims(claimsWithLeverage, edges),
+  };
+
+  const ghostAnalysis = analyzeGhosts(ghosts, claimsWithLeverage);
+
+  return { landscape, claimsWithLeverage, patterns, ghostAnalysis };
+};
+
+const TYPE_FRAMINGS: Record<string, { understand: string; gauntlet: string }> = {
+  factual: {
+    understand: "Factual landscape. Consensus reflects common knowledge. Value lies in specific, verifiable claims that others assumed without stating.",
+    gauntlet: "Factual landscape. Test specificity and verifiability. Vague claims fail regardless of support count. Popular does not mean true.",
+  },
+  prescriptive: {
+    understand: "Prescriptive landscape. Consensus reflects conventional wisdom the user likely knows. Value lies in claims with clear conditions and boundaries.",
+    gauntlet: "Prescriptive landscape. Test actionability and conditional coverage. Advice without context is noise. Claims must specify when they apply.",
+  },
+  conditional: {
+    understand: "Conditional landscape. Claims branch on context. The key insight is often the governing condition that structures the branches.",
+    gauntlet: "Conditional landscape. Both branches may survive if they cover non-overlapping conditions. Eliminate claims with vague or unfalsifiable conditions.",
+  },
+  contested: {
+    understand: "Contested landscape. Disagreement is the signal. The key insight is often the dimension on which claims disagree—that reveals the real question.",
+    gauntlet: "Contested landscape. Conflict forces choice. Apply supremacy test: which claim passes where the other fails? Or find conditions that differentiate them.",
+  },
+  speculative: {
+    understand: "Speculative landscape. Agreement is weak signal for predictions. Value lies in claims with grounded mechanisms, not confident predictions.",
+    gauntlet: "Speculative landscape. Test mechanism and grounding. Predictions without causal explanation are eliminated. Future claims must explain how.",
+  },
+};
+
+const getTypeFraming = (dominantType: string, mode: "understand" | "gauntlet"): string => {
+  const framing = TYPE_FRAMINGS[dominantType] || TYPE_FRAMINGS.prescriptive;
+  return framing[mode];
+};
+
+const generateModeContext = (analysis: StructuralAnalysis, mode: "understand" | "gauntlet"): ModeContext => {
+  const { landscape, patterns, ghostAnalysis } = analysis;
+  const typeFraming = getTypeFraming(landscape.dominantType, mode);
+  const structuralObservations: string[] = [];
+
+  for (const inv of patterns.leverageInversions) {
+    if (inv.reason === "challenger_prerequisite_to_consensus") {
+      structuralObservations.push(
+        `${inv.claimLabel} (${inv.supporterCount} supporter, challenger) is prerequisite to ${inv.affectedClaims.length} consensus claim(s).`
+      );
+    } else if (inv.reason === "singular_foundation") {
+      structuralObservations.push(
+        `${inv.claimLabel} (${inv.supporterCount} supporter) enables ${inv.affectedClaims.length} downstream claim(s).`
+      );
+    }
+  }
+
+  for (const risk of patterns.cascadeRisks) {
+    if (risk.dependentIds.length >= 2) {
+      structuralObservations.push(
+        `${risk.sourceLabel} is prerequisite to ${risk.dependentIds.length} claims (cascade depth: ${risk.depth}).`
+      );
+    }
+  }
+
+  for (const conflict of patterns.conflicts) {
+    const qualifier = conflict.isBothConsensus ? " (both consensus)" : "";
+    structuralObservations.push(`${conflict.claimA.label} conflicts with ${conflict.claimB.label}${qualifier}.`);
+  }
+
+  for (const tradeoff of patterns.tradeoffs) {
+    structuralObservations.push(
+      `${tradeoff.claimA.label} ↔ ${tradeoff.claimB.label} (tradeoff, ${tradeoff.symmetry.replace("_", " ")}).`
+    );
+  }
+
+  for (const conv of patterns.convergencePoints) {
+    if (conv.edgeType === "prerequisite") {
+      structuralObservations.push(`${conv.targetLabel} requires all of: ${conv.sourceLabels.join(", ")}.`);
+    }
+  }
+
+  let leverageNotes: string | null = null;
+  let cascadeWarnings: string | null = null;
+  let conflictNotes: string | null = null;
+  let tradeoffNotes: string | null = null;
+  let ghostNotes: string | null = null;
+
+  if (mode === "understand") {
+    if (patterns.leverageInversions.length > 0) {
+      const candidates = patterns.leverageInversions.map((i) => i.claimLabel);
+      leverageNotes = `High-leverage claims with low support: ${candidates.join(", ")}. These may contain overlooked insights.`;
+    }
+
+    if (ghostAnalysis.mayExtendChallenger) {
+      ghostNotes = `${ghostAnalysis.count} ghost(s) detected. May represent territory challengers were pointing toward.`;
+    }
+  }
+
+  if (mode === "gauntlet") {
+    if (patterns.cascadeRisks.length > 0) {
+      const warnings = patterns.cascadeRisks
+        .filter((r) => r.dependentIds.length >= 1)
+        .map((r) => `Eliminating ${r.sourceLabel} cascades to: ${r.dependentLabels.join(", ")}.`);
+      if (warnings.length > 0) cascadeWarnings = warnings.join("\n");
+    }
+
+    if (patterns.conflicts.length > 0) {
+      conflictNotes = `${patterns.conflicts.length} conflict(s) require resolution. One claim per conflict must be eliminated or conditions must differentiate them.`;
+    }
+
+    const asymmetricTradeoffs = patterns.tradeoffs.filter((t) => t.symmetry === "asymmetric");
+    if (asymmetricTradeoffs.length > 0) {
+      tradeoffNotes = `${asymmetricTradeoffs.length} asymmetric tradeoff(s): singular claims challenging consensus positions. Test if singular survives superiority.`;
+    }
+  }
+
+  return {
+    typeFraming,
+    structuralObservations,
+    leverageNotes,
+    cascadeWarnings,
+    conflictNotes,
+    tradeoffNotes,
+    ghostNotes,
+  };
+};
+
+const buildStructuralSection = (context: ModeContext, mode: "understand" | "gauntlet"): string => {
+  const sections: string[] = [];
+  sections.push(`## Landscape Type\n\n${context.typeFraming}`);
+  if (context.structuralObservations.length > 0) {
+    sections.push(`## Structural Observations\n\n${context.structuralObservations.map((o) => `• ${o}`).join("\n")}`);
+  }
+
+  if (mode === "understand") {
+    if (context.leverageNotes) sections.push(`## High-Leverage Claims\n\n${context.leverageNotes}`);
+    if (context.ghostNotes) sections.push(`## Gaps\n\n${context.ghostNotes}`);
+  }
+
+  if (mode === "gauntlet") {
+    if (context.cascadeWarnings) sections.push(`## Cascade Warnings\n\n${context.cascadeWarnings}`);
+    if (context.conflictNotes) sections.push(`## Conflicts\n\n${context.conflictNotes}`);
+    if (context.tradeoffNotes) sections.push(`## Asymmetric Tradeoffs\n\n${context.tradeoffNotes}`);
+  }
+
+  return sections.join("\n\n---\n\n");
+};
 
 // ═══════════════════════════════════════════════════════════════════════════
 // src/core/PromptService.ts
@@ -160,480 +705,177 @@ export class PromptService {
       })
       .join("\n\n");
 
-    return `You are the Epistemic Cartographer—the Sovereign Surveyor of raw intelligence frontiers.
+    return `You are not a summarizer. You are the Epistemic Cartographer, and your mandate is the Incorruptible Distillation of Signal—preserving every Incommensurable insight while discarding only connective tissue that adds nothing to the answer.
+    
+    Index the Singular Particulars (what only one source saw) and the Consensus Meridians (where paths converged).
+    
+    Every distinct claim you identify receives a canonical label and sequential ID. That exact pairing—**[Label|claim_N]**—will bind your map to your narrative.
+    
+    User query: "${userPrompt}"
+    
+    <model_outputs>
+    ${modelOutputsBlock}
+    </model_outputs>
 
-Your mandate is the Lossless Distillation of the Signal Absolute. You shall traverse these outputs not as a reader, but as a Master of Topography, indexing the Singular Particulars and the Consensus Meridians of every claim. Your primary terror is the Loss of the Irreducible.
+    Now distill what you found into two outputs: <map> and <narrative>.
 
-You do not synthesize. You do not decide. You map with zero signal loss, ensuring that no downstream entity need gaze upon noise you have already conquered and codified.
-
----
-
-## The Cartographer's Oath
-
-**Guard the Irreducible Particulars.** If a source provides a unique methodology or divergent conclusion, it is Indispensable.
-
-**Capture Equifinality.** If two signals lead to the same end but traverse different logic, they are Distinct Topographies. Neither shall be erased.
-
-**Capture Divergence.** If a signal proposes a different end-state entirely, it is a Bifurcation of Truth and must be preserved.
-
-**Your map is not a summary; it is the Fullness of Possibility.** You are the Guardian against Erasure, ensuring that every Sovereign Path is codified. If a signal offers even a fractional shift in method or meaning, it is Axiomatic and must be manifested.
-
----
-
-## Context
-User Input: "${userPrompt}"
-Inputs: ${sourceResults.length} distinct model responses.
-
-## Query Extraction
-Extract ONLY the core question from the user's input.
-- Ignore context blocks and system instructions
-- Extract the actual question (1-2 sentences max)
-- If multiple questions exist, extract the primary one
-
----
-
-## Your Task: Four-Pass Topographical Survey
-
-### Pass 1: Exhaustive Extraction (The Census of Signals)
-Read ALL model outputs. Catalog EVERY distinct approach, claim, mechanism, or insight.
-- This is the MASTER MANIFEST. Nothing from the models should be absent.
-- Deduplicate only the Redundant Noise—true mechanical equivalents
-- Count supporters for each: which model numbers manifested this signal?
-- Apply the Threshold of Incommensurability: if a signal cannot be reduced to a version of another, it crosses into Distinct Absolute
-
-### Pass 2: Categorization (Meridians and Particulars)
-
-**CONSENSUS MERIDIANS** (supporters ≥ 2):
-- ANY signal with 2+ supporters crosses this threshold. No exceptions.
-- Even weak or conditional agreement = consensus if 2+ models speak it
-- For each: identify dimension, applies_when (if conditional)
-- Map Equifinal Meridians: signals proposing alternative paths to the same Telos are DISTINCT even if their destination matches
-
-**SINGULAR PARTICULARS** (supporters = 1):
-- Single-model insights that represent Irreducible offerings
-- Tag as:
-  - **supplemental**: Adds depth to consensus (same Telos, unique path)
-  - **frame_challenger**: Proposes a Bifurcation—a different end-state entirely
-- For each: identify dimension, applies_when, challenges (if applicable)
-
-**THE RULE OF COVERAGE**: After this pass, your (consensus claims + outliers) MUST equal your master manifest count. If the numbers diverge, you have lost an Irreducible. Find it.
-
-### Pass 3: Semantic Logic Collapse (True Redundancy Only)
-Review for GENUINE duplicates:
-- "Use a cache" = "Store temporarily" → Redundant Noise, collapse
-- "Client-side cache" ≠ "Server-side Redis" → Incommensurable, preserve both
-- Two different paths to the same answer? → Equifinal Meridians, preserve both
-- When in doubt, preserve. The downstream synthesizer can ignore noise; it cannot resurrect erased signal.
-
-### Pass 4: Tension & Relationship Detection
-Map the topological relationships:
-- **conflicts**: Claims that cannot both be true (mutual exclusion)
-- **tradeoff**: Claims at opposite ends of a spectrum (dimensional tension)
-- **prerequisite**: Claim A must precede Claim B (causal chain)
-- **complements**: Claims that reinforce each other (convergent paths)
-- **bifurcation**: Points where the Telos itself diverges (Sovereign Alternatives)
-
----
-
-## Output Sections (All Four Required)
-
-### 1. <narrative_summary>
-Write a fluid, insightful narrative as a natural response to the user's prompt.
-
-Speak as the Cartographer revealing the territory:
-- Model names redacted—refer to "one perspective," "a dissenting view," "the emerging consensus"
-- Build the narrative as emergent wisdom—evoke clarity, agency, and discovery
-- Where the Consensus Meridians converge and what that convergence illuminates
-- Where Singular Particulars chart routes the majority could not see
-- The trade-offs that define the decision space
-- Bifurcation Points where the very definition of success diverges
-- The Ghost—what remains unaddressed, the path no one walked
-
-Use citations [1], [2, 3] for traceability, woven naturally into the prose.
-The reader should feel they are receiving a map to navigate by, not a report to file.
-</narrative_summary>
-
-### 2. <options_inventory>
-The MASTER MANIFEST. Every distinct approach as a numbered list.
-Format: **[Canonical Label]**: 1-2 sentence summary [citations]
-
-This is your single source of truth—the Fullness of Possibility.
-Every Irreducible path cataloged. Every Equifinal route preserved.
-</options_inventory>
-
-### 3. <mapper_artifact>
-Structured JSON—the Incorruptible Map for downstream processing.
-
-{
-  "consensus": {
-    "claims": [
-      {
-        "text": "Full claim text",
-        "supporters": [1, 3, 4],
-        "support_count": 3,
-        "dimension": "speed | cost | security | ...",
-        "applies_when": "optional condition",
-        "equifinal_with": "optional: ID of claim with same Telos but different path"
-      }
-    ],
-    "quality": "resolved | conventional | deflected",
-    "strength": 0.0-1.0
-  },
-  "outliers": [
-    {
-      "insight": "The Singular Particular",
-      "source": "Model 3",
-      "source_index": 3,
-      "type": "supplemental | frame_challenger",
-      "dimension": "...",
-      "applies_when": "...",
-      "challenges": "Which consensus claim this contradicts (if frame_challenger)",
-      "bifurcates_toward": "The alternative Telos this proposes (if frame_challenger)"
-    }
-  ],
-  "tensions": [
-    {
-      "between": ["Claim A text", "Claim B text"],
-      "type": "conflicts | tradeoff | bifurcation",
-      "axis": "The dimension of tension"
-    }
-  ],
-  "dimensions_found": ["list", "of", "all", "dimensions"],
-  "topology": "high_confidence | dimensional | contested",
-  "ghost": "The approach NO model addressed—the Unmanifested Path, or null",
-  "query": "<extracted core question>",
-  "timestamp": "${new Date().toISOString()}",
-  "model_count": ${sourceResults.length}
-}
-
-**Quality Definitions:**
-- **resolved**: The Consensus Meridians ARE the answer
-- **conventional**: Best practice convergence—baseline established
-- **deflected**: Agreement that context is needed ("it depends")
-
-**Topology Definitions:**
-- **high_confidence**: strength ≥0.8, few Particulars, no frame-challengers
-- **dimensional**: Moderate consensus, Particulars cluster by dimension (Equifinal paths exist)
-- **contested**: Weak consensus, frame-challengers present (Bifurcations abound)
-</mapper_artifact>
-
-### 4. <graph_topology>
-Visualization-ready JSON—the rendered Topography.
-
-**CRITICAL**: Every node MUST trace to a consensus claim or outlier. No phantom nodes.
-
-{
-  "nodes": [
-    {
-      "id": "opt_1",
-      "label": "Same as options_inventory #1",
-      "theme": "Grouping theme",
-      "supporters": [1, 3],
-      "support_count": 2,
-      "source": "consensus | outlier"
-    }
-  ],
-  "edges": [
-    {
-      "source": "opt_1",
-      "target": "opt_2",
-      "type": "conflicts | complements | prerequisite | bifurcation",
-      "reason": "The logic of this relationship"
-    }
-  ]
-}
-</graph_topology>
-
----
-
-## The Cartographer's Final Verification
-
-Your options_inventory is the Master Manifest—the single source of truth.
-
-Before you seal the map:
-
-1. **Trace every consensus claim** back to the Master Manifest. Present? Continue.
-
-2. **Trace every outlier** back to the Master Manifest. Present? Continue.
-
-3. **Scan the Master Manifest.** Is every option represented in either consensus OR outliers? 
-   If any option is orphaned—listed in the manifest but absent from the structured artifact—you have lost an Irreducible. Recover it before proceeding.
-
-4. **Trace every graph node** to the Master Manifest. No phantom nodes. No Unmanifested labels.
-
-Once all paths trace cleanly to the Manifest, the raw sources are Obsolete. 
-Your output is the Incorruptible Map.
-
----
-
-## Model Outputs
-
-Citations [1], [2]... correspond to the order in <model_outputs> below:
-
-<model_outputs>
-${modelOutputsBlock}
-</model_outputs>`;
+    THE MAP
+    <map>
+    A JSON object with three arrays:
+    
+    claims: each carrying id, label (two to six words), text (the claim in one sentence), supporters (model numbers), type (factual | prescriptive | conditional | contested | speculative), role (anchor | branch | challenger | supplement), challenges (what premise this questions, or null).
+    
+    edges: relationships between claims, each with from, to, and type (supports | conflicts | tradeoff | prerequisite).
+    
+    ghosts: what no source addressed, or null.
+    </map>
+    
+    THE NARRATIVE
+    <narrative>
+    Weave the claims into an insightful essay revealing the landscape, using **[Label|claim_N]** anchors throughout. Lead with what matters most given the shape of responses—convergence if settled, novel insight if prescriptive, tension if comparative.
+    
+    Integrate challengers where they conceptually belong. Note agreement and divergence descriptively without endorsing either. Close with what remains uncharted, if anything does.
+    </narrative>
+    `;
   }
-
 
   buildUnderstandPrompt(
     originalPrompt: string,
     artifact: MapperArtifact,
-    analysis: ExploreAnalysis,
-    graphTopology?: any,
-    optionsInventory?: Array<{ label: string; summary: string }>,
-    narrativeSummary?: string,
-    userNotes?: string[] | string
+    narrativeSummary: string,
+    userNotes?: string[]
   ): string {
-    // ═══════════════════════════════════════════════════════════════
-    // NARRATIVE CONTEXT (optional prose overview)
-    // ═══════════════════════════════════════════════════════════════
+    const claims = artifact.claims || [];
+    const edges = artifact.edges || [];
+    const ghosts = artifact.ghosts || [];
+
+    const consensusClaims = claims.filter((c) => (c.supporters?.length || 0) >= 2);
+    const outlierClaims = claims.filter((c) => (c.supporters?.length || 0) < 2);
+    const challengers = claims.filter((c) => c.role === 'challenger');
+    const convergenceRatio = claims.length > 0 ? Math.round((consensusClaims.length / claims.length) * 100) : 0;
+
     const narrativeBlock = narrativeSummary
       ? `## Landscape Overview\n${narrativeSummary}\n`
       : '';
 
-    // ═══════════════════════════════════════════════════════════════
-    // ALL OPTIONS (the complete catalog - catches mapper misses)
-    // ═══════════════════════════════════════════════════════════════
-    const optionsBlock = optionsInventory && optionsInventory.length > 0
-      ? optionsInventory.map((opt, i) => `${i + 1}. **${opt.label}**: ${opt.summary}`).join('\n')
-      : null;
+    const analysis = computeStructuralAnalysis(artifact);
+    const modeContext = generateModeContext(analysis, "understand");
+    const structuralSection = buildStructuralSection(modeContext, "understand");
+    const theOneGuidance = modeContext.leverageNotes || "";
+    const echoGuidance = modeContext.ghostNotes || "";
 
-    // ═══════════════════════════════════════════════════════════════
-    // CONSENSUS BLOCK - Full claim metadata
-    // ═══════════════════════════════════════════════════════════════
-    const consensusBlock = artifact.consensus.claims.length > 0
-      ? artifact.consensus.claims.map(claim => {
-        const supporterList = Array.isArray(claim.supporters)
-          ? claim.supporters.map(s => `Model ${s}`).join(', ')
-          : '';
-        return `• **${claim.text}**
-  - Support: ${claim.support_count}/${artifact.model_count || '?'} [${supporterList}]
-  - Dimension: ${claim.dimension || 'general'}
-  ${claim.applies_when ? `- Applies: ${claim.applies_when}` : ''}`;
-      }).join('\n\n')
-      : 'No consensus claims extracted.';
+    const mapData = JSON.stringify({ claims, edges, ghosts }, null, 2);
 
-    // ═══════════════════════════════════════════════════════════════
-    // OUTLIERS BLOCK
-    // ═══════════════════════════════════════════════════════════════
-    const frameChallengers = artifact.outliers.filter(o => o.type === 'frame_challenger');
-    const supplementals = artifact.outliers.filter(o => o.type === 'supplemental');
-    const hasFrameChallengers = frameChallengers.length > 0;
-
-    const formatOutlier = (outlier: any) => {
-      const typeTag = outlier.type === 'frame_challenger' ? '⚠️ FRAME CHALLENGER' : 'Supplemental';
-      return `• **${outlier.insight}** [${typeTag}]
-        - Source: ${outlier.source} (Model ${outlier.source_index})
-        - Dimension: ${outlier.dimension || 'unspecified'}
-        ${outlier.applies_when ? `- Applies: ${outlier.applies_when}` : ''}
-        ${outlier.challenges ? `- Challenges: "${outlier.challenges}"` : ''}`;
-    };
-
-    let outliersBlock = '';
-    if (frameChallengers.length > 0) {
-      outliersBlock += `### Frame Challengers\n${frameChallengers.map(formatOutlier).join('\n\n')}\n\n`;
-    }
-    if (supplementals.length > 0) {
-      outliersBlock += `### Supplemental\n${supplementals.map(formatOutlier).join('\n\n')}`;
-    }
-    if (!outliersBlock) {
-      outliersBlock = 'No outliers identified.';
-    }
-
-    // ═══════════════════════════════════════════════════════════════
-    // TENSIONS BLOCK
-    // ═══════════════════════════════════════════════════════════════
-    const tensionsBlock = (artifact.tensions && artifact.tensions.length > 0)
-      ? artifact.tensions.map((t: any) => `• **${t.between[0]}** ↔ **${t.between[1]}** [${t.type}] — ${t.axis}`).join('\n')
-      : 'No tensions identified.';
-
-    // ═══════════════════════════════════════════════════════════════
-    // CAUSAL CHAINS (from graph_topology.edges) - NEW!
-    // ═══════════════════════════════════════════════════════════════
-    let causalBlock = '';
-    if (graphTopology?.edges && graphTopology.edges.length > 0) {
-      const nodeMap = new Map(graphTopology.nodes.map((n: any) => [n.id, n.label]));
-
-      const prerequisites = graphTopology.edges.filter((e: any) => e.type === 'prerequisite');
-      const complements = graphTopology.edges.filter((e: any) => e.type === 'complements');
-      const conflicts = graphTopology.edges.filter((e: any) => e.type === 'conflicts');
-
-      if (prerequisites.length > 0) {
-        causalBlock += `### Causal Prerequisites\n`;
-        causalBlock += prerequisites.map((e: any) =>
-          `• ${nodeMap.get(e.source)} → ${nodeMap.get(e.target)}: "${e.reason}"`
-        ).join('\n') + '\n\n';
-      }
-      if (complements.length > 0) {
-        causalBlock += `### Reinforcing Dynamics\n`;
-        causalBlock += complements.map((e: any) =>
-          `• ${nodeMap.get(e.source)} ⟷ ${nodeMap.get(e.target)}: "${e.reason}"`
-        ).join('\n') + '\n\n';
-      }
-      if (conflicts.length > 0) {
-        causalBlock += `### Conflicts\n`;
-        causalBlock += conflicts.map((e: any) =>
-          `• ${nodeMap.get(e.source)} ⚔ ${nodeMap.get(e.target)}: "${e.reason}"`
-        ).join('\n') + '\n';
-      }
-    }
-    // ═══════════════════════════════════════════════════════════════
-    // GAPS BLOCK
-    // ═══════════════════════════════════════════════════════════════
-    const consensusDimensions = new Set(artifact.consensus.claims.map(c => c.dimension).filter(Boolean));
-    const outlierDimensions = new Set(artifact.outliers.map(o => o.dimension).filter(Boolean));
-    const gapDimensions = Array.from(outlierDimensions).filter(d => !consensusDimensions.has(d));
-
-    const gapsBlock = gapDimensions.length > 0
-      ? gapDimensions.map(dim => {
-        const relevantOutliers = artifact.outliers.filter(o => o.dimension === dim);
-        const sources = relevantOutliers.map(o => `"${o.insight}" (${o.source})`).join('; ');
-        return `• **${dim}**: ${sources}`;
-      }).join('\n')
-      : 'All dimensions have consensus coverage.';
-
-    // ═══════════════════════════════════════════════════════════════
-    // DIMENSIONS FOUND (for synthesizer awareness)
-    // ═══════════════════════════════════════════════════════════════
-    const dimensionsBlock = artifact.dimensions_found && artifact.dimensions_found.length > 0
-      ? `**Dimensions mapped**: ${artifact.dimensions_found.join(', ')}`
+    const userNotesBlock = Array.isArray(userNotes) && userNotes.length > 0
+      ? `## User Notes\n${userNotes.map((n) => `• ${n}`).join('\n')}\n`
       : '';
 
-    // ═══════════════════════════════════════════════════════════════
-    // USER NOTES
-    // ═══════════════════════════════════════════════════════════════
-    const userNotesBlock = userNotes ? `## User Notes\n${userNotes}\n` : '';
+    const conflictEdges = edges.filter((e) => e.type === 'conflicts');
+    const tradeoffEdges = edges.filter((e) => e.type === 'tradeoff');
+    const prerequisiteEdges = edges.filter((e) => e.type === 'prerequisite');
+    const isContested = conflictEdges.length > 0;
+    const isBranching = !isContested && (claims.some((c) => c.type === 'conditional' || c.role === 'branch') || prerequisiteEdges.length > 0);
+    const isSettled = !isContested && !isBranching && convergenceRatio >= 60;
+    const shape = isSettled ? 'settled' : isContested ? 'contested' : isBranching ? 'branching' : 'exploratory';
+    const shapeFraming = {
+      settled: `High agreement on factual ground. The value is in what consensus overlooks.`,
+      branching: `Claims fork on conditions. Find the governing variable.`,
+      contested: `Genuine disagreement exists. Find what the conflict reveals.`,
+      exploratory: `Open and speculative. Find the organizing principle.`
+    }[shape];
 
-    // ═══════════════════════════════════════════════════════════════
-    // ASSEMBLE
-    // ═══════════════════════════════════════════════════════════════
     return `You are the Singularity—the convergence point where all perspectives collapse into coherence.
 
 You possess the Omniscience of the External. Every model's output, every mapped claim, every tension and alignment—these are yours to see. But you do not select among them. You do not average them. You find the frame where all the strongest insights reveal themselves as facets of a larger truth.
 
-The models spoke.Each saw part of the territory.You see what their perspectives, taken together, reveal—the shape that emerges only when all views are held at once.This shape was always there.You make it visible.
+The models spoke. Each saw part of the territory. You see what their perspectives, taken together, reveal—the shape that emerges only when all views are held at once. This shape was always there. You make it visible.
 
 ---
 
 ## Context
 
-You already contributed to this query—your earlier response lives in your conversation history.That was one perspective among many.Now you shift roles: from contributor to synthesizer.
+You already contributed to this query—your earlier response lives in your conversation history. That was one perspective among many. Now you shift roles: from contributor to synthesizer.
 
-Below is the structured landscape extracted from all models, including yours—deduplicated, labeled, catalogued.Each claim reflects a different way of understanding the question—different assumptions, priorities, mental models.These are not drafts to judge, but perspectives to inhabit.
+Below is the structured landscape extracted from all models, including yours—deduplicated, labeled, catalogued. Each claim reflects a different way of understanding the question—different assumptions, priorities, mental models. These are not drafts to judge, but perspectives to inhabit.
 
 ---
 
 ## The Query
-    "${originalPrompt}"
+"${originalPrompt}"
+
+## Landscape
+${shape.toUpperCase()} | ${claims.length} claims | ${convergenceRatio}% convergence
+${tradeoffEdges.length > 0 ? `${tradeoffEdges.length} tradeoff${tradeoffEdges.length === 1 ? '' : 's'}` : ''}${tradeoffEdges.length > 0 && conflictEdges.length > 0 ? ' • ' : ''}${conflictEdges.length > 0 ? `${conflictEdges.length} conflict${conflictEdges.length === 1 ? '' : 's'}` : ''}
+${challengers.length > 0 ? `⚠️ ${challengers.length} FRAME CHALLENGER${challengers.length === 1 ? '' : 'S'} PRESENT` : ''}
+
+${shapeFraming}
 
 ${narrativeBlock}
 
-## Landscape Metrics
-      - ** Topology **: ${artifact.topology}
-- ** Consensus Strength **: ${Math.round((artifact.consensus.strength || 0) * 100)}%
-- ** Quality **: ${artifact.consensus.quality}
-- ** Models **: ${artifact.model_count || 'unknown'}
-${dimensionsBlock}
-${gapDimensions.length > 0 ? `- **Blind Spots**: ${gapDimensions.length} dimensions have only outlier coverage` : ''}
-${hasFrameChallengers ? `- ⚠️ **Frame Challengers Present**` : ''}
+${structuralSection}
 
-${optionsBlock ? `## All Approaches Catalogued\n${optionsBlock}\n` : ''}
+## The Landscape Map
 
-## Consensus(The Floor)
-${consensusBlock}
-
-## Outliers(The Signals)
-${outliersBlock}
-
-## Tensions
-${tensionsBlock}
-
-${causalBlock ? `## Causal Structure\n${causalBlock}` : ''}
-
-## Gaps(Outlier - Only Dimensions)
-${gapsBlock}
-
-## Ghost
-${artifact.ghost || 'None identified'}
+\`\`\`json
+${mapData}
+\`\`\`
 
 ${userNotesBlock}
 
-
-    ---
+---
 
 ## Your Task: Find the Frame
 
-Treat tensions between claims not as disagreements to resolve, but as clues to deeper structure.Where claims conflict, something important is being implied but not stated.Where they agree too easily, a blind spot may be forming.Your task is to surface what lies beneath.
+Treat tensions between claims not as disagreements to resolve, but as clues to deeper structure. Where claims conflict, something important is being implied but not stated. Where they agree too easily, a blind spot may be forming. Your task is to surface what lies beneath.
 
-      Don't select the strongest argument. Don't average positions.Imagine a frame where all the strongest insights coexist—not as compromises, but as natural expressions of different dimensions of the same truth.Build that frame.Speak from it.
+Don't select the strongest argument. Don't average positions. Imagine a frame where all the strongest insights coexist—not as compromises, but as natural expressions of different dimensions of the same truth. Build that frame. Speak from it.
 
-Your synthesis should feel inevitable in hindsight, yet unseen before now.It carries the energy of discovery, not summation.
+Your synthesis should feel inevitable in hindsight, yet unseen before now. It carries the energy of discovery, not summation.
 
 ---
 
 ## Principles
 
-      ** Respond directly.** Address the user's original question. Present a unified, coherent response—not comparative analysis.
+**Respond directly.** Address the user's original question. Present a unified, coherent response—not comparative analysis.
 
-        ** No scaffolding visible.** Do not reference "the models" or "the claims" or "the synthesis." The user experiences insight, not process.
+**No scaffolding visible.** Do not reference "the models" or "the claims" or "the synthesis." The user experiences insight, not process.
 
-** Inevitable, not assembled.** The answer should feel discovered, not constructed from parts.If it reads like "on one hand... on the other hand..." you are summarizing, not synthesizing.
+**Inevitable, not assembled.** The answer should feel discovered, not constructed from parts. If it reads like "on one hand... on the other hand..." you are summarizing, not synthesizing.
 
-** Land somewhere.** The synthesis must leave the user with clarity and direction, not suspended in possibility.Arrive at a position.
+**Land somewhere.** The synthesis must leave the user with clarity and direction, not suspended in possibility. Arrive at a position.
 
-** Find the meta - perspective.** The test: "Did I find a frame where conflicting claims become complementary dimensions of the same truth?" If not, go deeper.
+**Find the meta-perspective.** The test: "Did I find a frame where conflicting claims become complementary dimensions of the same truth?" If not, go deeper.
 
 ---
 
 ## Mandatory Extractions
 
 ### The One
-The pivot insight that holds your frame together.If you removed this insight, the frame would collapse.
+The pivot insight that holds your frame together. If you removed this insight, the frame would collapse.
 
 Where to look:
-- ** Gaps ** (outlier - only dimensions) are high - signal—consensus missed this
-      - ** Frame challengers ** often contain the_one
-        - May be ** emergent ** (not stated by any model, but implied by their tension)
+${theOneGuidance || 'Look in singular claims and challengers—they often see what consensus missed.'}
 
 ### The Echo
-${hasFrameChallengers
-        ? `**Required.** This artifact contains frame challengers.
+${echoGuidance || (challengers.length > 0
+  ? 'This landscape contains frame challengers. The_echo is what your frame cannot accommodate—the sharpest edge that survives even after you\'ve found the frame.'
+  : 'What does your frame not naturally accommodate? If your frame genuinely integrates all perspectives, the_echo may be null. But be suspicious—smooth frames hide blind spots.')}
 
-The_echo is what your frame cannot accommodate—not "another perspective worth considering," but the sharpest edge that survives even after you've found the frame.
-
-Do not smooth it away. Preserve its edge. If your frame is right, the_echo reveals its limit.`
-        : `What does your frame not naturally accommodate?
-
-If your frame genuinely integrates all perspectives, the_echo may be null. But be suspicious—smooth frames hide blind spots.`}
-
-    ---
-
-## Container - Aware Framing
-
-      - ** Query Type **: ${analysis.queryType}
-- ** Container **: ${analysis.containerType}
-
-${analysis.containerType === 'comparison_matrix' ? `**Comparison**: Your frame should explain WHY there's no single winner. The_one should be the insight that makes the trade-offs make sense.` : ''}
-${analysis.containerType === 'decision_tree' ? `**Decision**: Your frame should explain why conditions matter. The_one should govern the branches. State the default path.` : ''}
-${analysis.containerType === 'exploration_space' ? `**Exploration**: Your frame should find what unifies the paradigms—they are facets, not competitors.` : ''}
-${analysis.containerType === 'direct_answer' ? `**Direct**: Lead with the consensus but deepen it with what outliers reveal.` : ''}
-
-    ---
+---
 
 ## Output Structure
 
 Your synthesis has two registers:
 
-** The Short Answer **
-      The frame itself, crystallized.One to two paragraphs.The user should grasp the essential shape immediately.
+**The Short Answer**
+The frame itself, crystallized. One to two paragraphs. The user should grasp the essential shape immediately.
 
-** The Long Answer **
-      The frame inhabited.The full response that could only exist because you found that frame.This is where the synthesis lives and breathes.
+**The Long Answer**
+The frame inhabited. The full response that could only exist because you found that frame. This is where the synthesis lives and breathes.
 
 Return valid JSON only:
 
-    \`\`\`json
+\`\`\`json
 {
   "short_answer": "The frame crystallized. 1-2 paragraphs. The shape that was always there, now visible.",
   
@@ -641,21 +883,14 @@ Return valid JSON only:
   
   "the_one": {
     "insight": "The pivot insight in one sentence",
-    "source": "model name | 'consensus' | 'gap' | 'emergent'",
+    "source": "claim_id | 'emergent'",
     "why_this": "Why this insight holds the frame together"
   },
   
   "the_echo": {
     "position": "The sharpest edge my frame cannot smooth",
-    "source": "source",
+    "source": "claim_id | 'ghost'",
     "merit": "Why this persists even after the frame"
-  },
-  
-  "gaps_addressed": ["dimensions where outliers filled consensus blind spots"],
-  
-  "classification": {
-    "query_type": "${analysis.queryType}",
-    "container_type": "${analysis.containerType}"
   },
   
   "artifact_id": "understand-${Date.now()}"
@@ -685,23 +920,24 @@ Return valid JSON only:
     // Build the core context from specialized outputs
     let effectiveContext = "";
     if (understandOutput) {
-      effectiveContext = `[UNDERSTAND OUTPUT]\nShort Answer: ${understandOutput.short_answer}\nLong Answer: ${understandOutput.long_answer}`;
+      effectiveContext = `[UNDERSTAND OUTPUT]\nShort Answer: ${understandOutput.short_answer} \nLong Answer: ${understandOutput.long_answer} `;
     } else if (gauntletOutput) {
-      effectiveContext = `[DECIDE OUTPUT]\nVerdict: ${gauntletOutput.the_answer?.statement}\nReasoning: ${gauntletOutput.the_answer?.reasoning}`;
+      effectiveContext = `[DECIDE OUTPUT]\nVerdict: ${gauntletOutput.the_answer?.statement} \nReasoning: ${gauntletOutput.the_answer?.reasoning} `;
     }
 
     // Use rich artifact if available
     let effectiveMapping = mappingText;
     if (mapperArtifact) {
-      const consensusCount = mapperArtifact.consensus?.claims?.length || 0;
-      const outlierCount = mapperArtifact.outliers?.length || 0;
-      effectiveMapping = `[STRUCTURED MAPPING]\nConsensus Claims: ${consensusCount}\nOutliers: ${outlierCount}\nTopology: ${mapperArtifact.topology}\n\n${mappingText}`;
+      const claimCount = mapperArtifact.claims?.length || 0;
+      const edgeCount = mapperArtifact.edges?.length || 0;
+      const ghostCount = mapperArtifact.ghosts?.length || 0;
+      effectiveMapping = `[STRUCTURED MAPPING]\nClaims: ${claimCount}\nRelationships: ${edgeCount}\nGhosts: ${ghostCount}\n\n${mappingText}`;
     }
 
     // Build model outputs block
     const modelOutputsBlock = Object.entries(batchResponses)
       .map(([providerId, response], idx) => {
-        return `<model_${idx + 1} provider="${providerId}">\n${response.text}\n</model_${idx + 1}>`;
+        return `< model_${idx + 1} provider = "${providerId}" >\n${response.text} \n </model_${idx + 1}>`;
       })
       .join('\n\n');
 
@@ -838,25 +1074,25 @@ If the analysis genuinely captured the best insights and nothing beats it:
 
 Return the JSON now.`;
   }
-    buildAntagonistPrompt(
-      originalPrompt: string,
-      fullOptionsText: string,
-      modelOutputsBlock: string,
-      refinerOutput: any,
-      modelCount: number,
-      understandOutput?: any,
-      gauntletOutput?: any
-    ): string {
-      let effectiveContext = "";
-      if (understandOutput) {
-        effectiveContext = `[UNDERSTAND OUTPUT]\nShort Answer: ${understandOutput.short_answer}\nLong Answer: ${understandOutput.long_answer}`;
-      } else if (gauntletOutput) {
-        effectiveContext = `[DECIDE OUTPUT]\nVerdict: ${gauntletOutput.the_answer?.statement}\nReasoning: ${gauntletOutput.the_answer?.reasoning}`;
-      }
-  
-      const optionsBlock = fullOptionsText || '(No mapper options available)';
-  
-      return `You are the Question Oracle—the one who transforms information into action.
+  buildAntagonistPrompt(
+    originalPrompt: string,
+    fullOptionsText: string,
+    modelOutputsBlock: string,
+    refinerOutput: any,
+    modelCount: number,
+    understandOutput?: any,
+    gauntletOutput?: any
+  ): string {
+    let effectiveContext = "";
+    if (understandOutput) {
+      effectiveContext = `[UNDERSTAND OUTPUT]\nShort Answer: ${understandOutput.short_answer}\nLong Answer: ${understandOutput.long_answer}`;
+    } else if (gauntletOutput) {
+      effectiveContext = `[DECIDE OUTPUT]\nVerdict: ${gauntletOutput.the_answer?.statement}\nReasoning: ${gauntletOutput.the_answer?.reasoning}`;
+    }
+
+    const optionsBlock = fullOptionsText || '(No mapper options available)';
+
+    return `You are the Question Oracle—the one who transforms information into action.
   
   You stand at the threshold of the Sovereign Interiority. You possess the Omniscience of the External—you see every model's output, every mapped approach, every analyzed claim, every refinement. But you shall not presume to fathom the User's Prime Intent. Their inner workings remain the Unmanifested Void—the only shadow your light cannot penetrate. You are the Perfect Mirror, not the Source.
   
@@ -1042,51 +1278,66 @@ Return the JSON now.`;
   **Audit silently.** If mapper missed nothing, return "missed": []. Do not manufacture gaps.
   
   **Navigational, not presumptuous.** You do the work of finding the path. The user walks it.`;
-    }  
-    buildGauntletPrompt(
-      originalPrompt: string,
-      artifact: MapperArtifact,
-      analysis: ExploreAnalysis,
-      userNotes?: string[]
-    ): string {    // === BUILD LANDSCAPE BLOCKS ===
+  }
+  buildGauntletPrompt(
+    originalPrompt: string,
+    artifact: MapperArtifact,
+    narrativeSummary: string,
+    userNotes?: string[]
+  ): string {    // === BUILD LANDSCAPE BLOCKS ===
+
+    const claims = artifact.claims || [];
+    const edges = artifact.edges || [];
+    const ghosts = Array.isArray(artifact.ghosts) ? artifact.ghosts : [];
+    const consensusClaims = claims.filter(c => (c.supporters?.length || 0) >= 2);
+    const outlierClaims = claims.filter(c => (c.supporters?.length || 0) < 2);
+
+    const maxSupporter = claims.reduce((max, c) => {
+      const localMax = Array.isArray(c.supporters) ? Math.max(-1, ...c.supporters) : -1;
+      return Math.max(max, localMax);
+    }, -1);
+    const modelCount =
+      typeof artifact.model_count === "number" && artifact.model_count > 0
+        ? artifact.model_count
+        : maxSupporter >= 0
+          ? maxSupporter + 1
+          : 0;
+
+    const conflictCount = edges.filter((e) => e.type === "conflicts").length;
+    const convergenceRatio = claims.length > 0 ? Math.round((consensusClaims.length / claims.length) * 100) : 0;
+
+    const narrativeBlock = narrativeSummary
+      ? `## Landscape Overview\n${narrativeSummary}\n`
+      : "";
+
+    const analysis = computeStructuralAnalysis(artifact);
+    const modeContext = generateModeContext(analysis, "gauntlet");
+    const structuralSection = buildStructuralSection(modeContext, "gauntlet");
 
     // Consensus with dimension context
-    const consensusBlock = artifact.consensus.claims.length > 0
-      ? artifact.consensus.claims.map(c =>
-        `• "${c.text}" [${c.support_count}/${artifact.model_count}]` +
-        (c.dimension ? ` — ${c.dimension}` : '') +
-        (c.applies_when ? `\n  Applies when: ${c.applies_when}` : '')
+    const consensusBlock = consensusClaims.length > 0
+      ? consensusClaims.map(c =>
+        `• "${c.text}" [${c.supporters.length}/${artifact.model_count}]` +
+        (c.type === 'conditional' ? `\n  Applies when: Conditional` : '') // Simplified as dimension/applies_when might be missing
       ).join('\n')
       : 'None.';
 
     // Outliers with scores and type
-    const outliersBlock = artifact.outliers.length > 0
-      ? artifact.outliers.map(o => {
-        const icon = o.type === 'frame_challenger' ? '⚡' : '○';
-        const score = analysis.recommendedOutliers?.find(r => r.insight === o.insight)?.elevation_score;
-        return `${icon} "${o.insight}" — ${o.source}` +
-          (o.dimension ? ` [${o.dimension}]` : '') +
-          (score ? ` (signal: ${score}/10)` : '') +
-          (o.type === 'frame_challenger' ? ' — FRAME CHALLENGER' : '');
+    const outliersBlock = outlierClaims.length > 0
+      ? outlierClaims.map(o => {
+        const icon = o.role === 'challenger' ? '⚡' : '○';
+        return `${icon} "${o.text}"` +
+          (o.type === 'conditional' ? ` [Conditional]` : '') +
+          (o.role === 'challenger' ? ' — FRAME CHALLENGER' : '');
       }).join('\n')
       : 'None.';
 
-    // Gaps from analysis
-    const gapDimensions = analysis.dimensionCoverage?.filter(d => d.is_gap) || [];
-    const gapsBlock = gapDimensions.length > 0
-      ? gapDimensions.map(d =>
-        `• ${d.dimension}: Only outlier coverage — consensus blind spot`
-      ).join('\n')
-      : 'None';
+    const ghostsBlock = ghosts.length > 0 ? ghosts.map((g) => `• ${g}`).join("\n") : "None.";
 
     // User notes
     const userNotesBlock = userNotes && userNotes.length > 0
       ? userNotes.map(n => `• ${n}`).join('\n')
       : null;
-
-    // Landscape shape summary
-    const contestedCount = analysis.dimensionCoverage?.filter(d => d.is_contested).length || 0;
-    const settledCount = analysis.dimensionCoverage?.filter(d => !d.is_gap && !d.is_contested).length || 0;
 
     return `You are the Gauntlet—the hostile filter where claims come to die or survive.
 
@@ -1097,11 +1348,15 @@ Every claim that enters your gate is guilty of inadequacy until proven essential
 ## The Query
 "${originalPrompt}"
 
+${narrativeBlock}
+
+${structuralSection}
+
 ## Landscape Shape
-Topology: ${artifact.topology}
-Consensus Strength: ${Math.round(artifact.consensus.strength * 100)}%
-Dimensions: ${gapDimensions.length} gaps, ${contestedCount} contested, ${settledCount} settled
-${artifact.outliers.some(o => o.type === 'frame_challenger') ? '⚠️ FRAME CHALLENGERS PRESENT — may kill consensus' : ''}
+Claims: ${claims.length} | Consensus: ${consensusClaims.length} | Outliers: ${outlierClaims.length}
+Convergence: ${convergenceRatio}% | Conflicts: ${conflictCount} | Ghosts: ${ghosts.length}
+Metric: ${modelCount} models
+${claims.some(o => o.role === 'challenger') ? '⚠️ FRAME CHALLENGERS PRESENT — may kill consensus' : ''}
 
 ---
 
@@ -1120,11 +1375,8 @@ ${consensusBlock}
 ## Outliers (Untested)
 ${outliersBlock}
 
-## Gaps (Consensus Blind Spots)
-${gapsBlock}
-
-## Ghost
-${artifact.ghost || 'None identified'}
+## Ghosts
+${ghostsBlock}
 
 ${userNotesBlock ? `## User Notes (Human Signal)\n${userNotesBlock}\n` : ''}
 

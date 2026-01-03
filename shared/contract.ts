@@ -43,162 +43,79 @@ export interface GauntletOutput {
   artifact_id: string;
 }
 
-export interface MapperArtifact {
-  consensus: {
-    claims: Array<{
-      text: string;
-      supporters: number[];
-      support_count: number;
-      // Enhanced fields for computeExplore
-      dimension?: string;       // "speed" | "cost" | "hiring" | "simplicity" | etc.
-      applies_when?: string;    // Condition when this is especially true
-    }>;
-    quality: "resolved" | "conventional" | "deflected";
-    strength: number; // 0-1
-  };
-  outliers: Array<{
-    insight: string;
-    source: string; // model name
-    source_index: number;
-    type: "supplemental" | "frame_challenger";
-    raw_context: string; // 10-20 words surrounding context
-    // Enhanced fields for computeExplore
-    dimension?: string;         // What axis does this address
-    applies_when?: string;      // When is this the right path
-    challenges?: string;        // Which consensus claim does this challenge
-  }>;
-  // Pre-identified relationships (for computeExplore)
-  tensions?: Array<{
-    between: [string, string];  // Two claim texts or labels
-    type: "conflicts" | "tradeoff";
-    axis: string;               // What they're trading off on
-  }>;
-  // Dimension summary (Mapper counts these as it tags)
-  dimensions_found?: string[];  // ["speed", "cost", "hiring", "simplicity"]
+export interface Claim {
+  id: string;
+  label: string;
+  text: string;
+  dimension?: string | null; // Optional legacy metadata
+  supporters: number[];
+  type: 'factual' | 'prescriptive' | 'conditional' | 'contested' | 'speculative';
+  role: 'anchor' | 'branch' | 'challenger' | 'supplement';
+  challenges: string | null;
+  quote?: string;
+  support_count?: number;
+  originalId?: string; // Tracking for edits across turns
+}
 
-  topology: "high_confidence" | "dimensional" | "contested";
-  ghost: string | null;
-  query: string;
-  turn: number;
-  timestamp: string;
-  model_count: number;
+export interface Edge {
+  from: string;
+  to: string;
+  type: 'supports' | 'conflicts' | 'tradeoff' | 'prerequisite';
+}
+
+export interface GraphEdge {
+  source: string;
+  target: string;
+  type?: string;
+  reason?: string;
+}
+
+export interface GraphNode {
+  id: string;
+  label: string;
+  type?: string;
+  group?: string;
+  theme?: string;
+  support_count?: number;
+  supporters?: number[];
+}
+
+export interface GraphTopology {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+}
+
+export interface MapperOutput {
+  claims: Claim[];
+  edges: Edge[];
+  ghosts: string[] | null;
+}
+
+export interface ParsedMapperOutput extends MapperOutput {
+  narrative: string;
+  anchors: Array<{ label: string; id: string; position: number }>;
+  // Compatibility / Parsing fields
+  map?: MapperOutput | null;
+  topology?: GraphTopology | null;
+  options?: string | null;
+  artifact?: MapperArtifact | null;
+}
+
+export interface MapperArtifact extends MapperOutput {
+  query?: string;
+  turn?: number;
+  timestamp?: string;
+  model_count?: number;
   souvenir?: string;
 }
 
-// ============================================================================
-// EXPLORE ANALYSIS (Computed, not LLM-generated)
-// ============================================================================
-
-export type QueryType = "informational" | "procedural" | "advisory" | "comparative" | "creative" | "predictive" | "interpretive" | "general";
-
-export type ContainerType = "direct_answer" | "decision_tree" | "comparison_matrix" | "exploration_space";
-
-// Specificity levels for claims/outliers
-export type Specificity = "vague" | "moderate" | "specific" | "actionable";
-
-// Enriched outlier with computed scores (extends MapperArtifact.outliers)
-export interface EnrichedOutlier {
-  // Original fields from MapperArtifact.outliers
-  insight: string;
-  source: string;
-  source_index: number;
-  type: "supplemental" | "frame_challenger";
-  raw_context: string;
-  dimension?: string;
-  applies_when?: string;
-  challenges?: string;
-
-  // Computed scores
-  id: string;                       // Stable ID for selection (outlier-N)
-  elevation_score: number;          // 0-10 composite
-  covers_consensus_gap: boolean;    // Dimension not in consensus
-  specificity: Specificity;
-  is_recommended: boolean;          // Top 3 by elevation_score
-}
-
-// Coverage analysis per dimension
-export interface DimensionCoverage {
-  dimension: string;
-  consensus_claims: number;         // Count of consensus claims
-  outlier_claims: number;           // Count of outliers
-  is_gap: boolean;                  // Outliers only, no consensus
-  is_contested: boolean;            // Has frame_challenger or both present
-  status: "gap" | "contested" | "settled";
-  leader: string | null;            // Top claim text
-  leader_source: string | null;     // Who said it
-  support_bar: number | null;       // e.g., 6/6 = 6
-}
-
-// Universal summary bar data
-export interface SummaryBarData {
-  lead: {
-    text: string;
-    support: number | null;
-    type: "consensus" | "contested" | "exploration";
-  };
-  coverage: {
-    gaps: number;
-    contested: number;
-    settled: number;
-    total: number;
-  };
-  signals: {
-    challengers: number;
-    conditions: number;
-    tensions: number;
-    ghost: string | null;
-  };
-  meta: {
-    modelCount: number;
-    strength: number; // 0-100
-    queryType: QueryType;
-    escapeVelocity: boolean;
-    topology: "high_confidence" | "dimensional" | "contested";
-  };
-}
-
-export interface ExploreDimension {
-  name: string;
-  winner: string;
-  support: number;
-  alternatives: string[];
-}
-
-export interface ExploreCondition {
-  if: string;
-  then: string;
-  source: string;
-  challenges?: string;
-}
-
-export interface ExploreParadigm {
-  name: string;
-  source: string;
-  core_idea: string;
-  challenges?: string;
-}
-
-export interface ExploreConflict {
-  between: [string, string];
-  type: "conflicts" | "challenges" | "tradeoff";
-  axis: string;
-}
-
 export interface ExploreAnalysis {
-  queryType: QueryType;
-  /** @deprecated - Legacy container routing. Kept for debugging. */
-  containerType: ContainerType;
-  dimensions: ExploreDimension[];
-  conditions: ExploreCondition[];
-  paradigms: ExploreParadigm[];
-  conflicts: ExploreConflict[];
-  escapeVelocity: boolean;
-
-  // NEW: Dimension-first analysis
-  dimensionCoverage: DimensionCoverage[];
-  recommendedOutliers: EnrichedOutlier[];
-  allOutliers: EnrichedOutlier[];
-  summaryBar: SummaryBarData;
+  claimCount: number;
+  consensusCount: number;
+  outlierCount: number;
+  challengerCount: number;
+  convergenceRatio: number;
+  hasChallengers: boolean;
 }
 
 export interface UnderstandOutput {
@@ -206,9 +123,10 @@ export interface UnderstandOutput {
   long_answer: string;
   the_one: { insight: string; source: string | null; why_this: string } | null;
   the_echo: { position: string; source: string; merit: string } | null;
-  souvenir: string;
+  souvenir?: string;
   artifact_id: string;
 }
+
 
 // ============================================================================
 // SECTION 1: WORKFLOW PRIMITIVES (UI -> BACKEND)
@@ -566,29 +484,6 @@ export interface WorkflowPartialCompleteMessage {
 // These are the core data entities representing the application's state.
 // ============================================================================
 
-// ============================================================================
-// GRAPH TOPOLOGY TYPES
-// ============================================================================
-
-export interface GraphNode {
-  id: string;
-  label: string;
-  theme: string;
-  supporters: (number | string)[];
-  support_count: number;
-}
-
-export interface GraphEdge {
-  source: string;
-  target: string;
-  type: 'conflicts' | 'complements' | 'prerequisite' | string;
-  reason: string;
-}
-
-export interface GraphTopology {
-  nodes: GraphNode[];
-  edges: GraphEdge[];
-}
 
 export interface ProviderResponse {
   providerId: string;
@@ -609,7 +504,6 @@ export interface ProviderResponse {
     tokenCount?: number;
     thinkingUsed?: boolean;
     _rawError?: string;
-    graphTopology?: GraphTopology;
     allAvailableOptions?: string;
     citationSourceOrder?: Record<string | number, string>;
     synthesizer?: string;
@@ -683,38 +577,4 @@ export function isUserTurn(turn: any): turn is { type: "user" } {
 }
 export function isAiTurn(turn: any): turn is { type: "ai" } {
   return !!turn && typeof turn === "object" && turn.type === "ai";
-}
-
-// ============================================================================
-// EXPLORE MODE TYPES
-// ============================================================================
-
-export interface DirectAnswerContent {
-  answer: string;
-  additional_context: Array<{ text: string; source: string }>;
-}
-
-export interface DecisionTreeContent {
-  default_path: string;
-  conditions: Array<{ condition: string; path: string; source: string; reasoning: string }>;
-  frame_challenger?: { position: string; source: string; consider_if: string };
-}
-
-export interface ComparisonContent {
-  dimensions: Array<{ name: string; winner: string; sources: string[]; tradeoff: string }>;
-  matrix: { approaches: string[]; dimensions: string[]; scores: number[][] };
-}
-
-export interface ExplorationContent {
-  paradigms: Array<{ name: string; source: string; core_idea: string; best_for: string }>;
-  common_thread?: string;
-  ghost?: string;
-}
-
-export interface ExploreOutput {
-  container: "direct_answer" | "decision_tree" | "comparison_matrix" | "exploration_space";
-  content: DirectAnswerContent | DecisionTreeContent | ComparisonContent | ExplorationContent;
-  souvenir: string;
-  alternatives: Array<{ container: string; label: string }>;
-  artifact_id: string;
 }

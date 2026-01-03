@@ -1,14 +1,17 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as d3 from 'd3-force';
-import { getProviderColor } from '../utils/provider-helpers';
+import { Claim, Edge } from '../../shared/contract';
 
-export interface ClaimNode extends d3.SimulationNodeDatum {
-    id: string;
+// Internal node type for d3 simulation, extending V3 Claim
+export interface GraphNode extends d3.SimulationNodeDatum {
+    id: string; // V3 claim id
     label: string;
-    supporters: (string | number)[];
+    text: string;
+    supporters: (string | number)[]; // V3 numbers or legacy strings
     support_count: number;
-    consensusStrength: number; // 0-1, maps to node size
-    theme?: string;
+    type: Claim['type'];
+    role: Claim['role'];
+    // D3 state
     x?: number;
     y?: number;
     fx?: number | null;
@@ -17,131 +20,104 @@ export interface ClaimNode extends d3.SimulationNodeDatum {
     vy?: number;
 }
 
-export interface ClaimEdge extends d3.SimulationLinkDatum<ClaimNode> {
-    source: string | ClaimNode;
-    target: string | ClaimNode;
-    type: 'conflicts' | 'complements' | 'prerequisite';
+export interface GraphEdge extends d3.SimulationLinkDatum<GraphNode> {
+    source: string | GraphNode;
+    target: string | GraphNode;
+    type: string; // V3 edge type
     reason?: string;
 }
 
 interface Props {
-    nodes: ClaimNode[];
-    edges: ClaimEdge[];
-    citationSourceOrder?: Record<number, string>; // Maps citation number -> provider ID
-    onNodeClick?: (node: ClaimNode) => void;
+    claims: Claim[];
+    edges: Edge[];
+    citationSourceOrder?: Record<number, string>;
+    onNodeClick?: (node: GraphNode) => void;
+    selectedClaimIds?: string[];
     width?: number;
     height?: number;
 }
 
-// Map supporter to provider ID using citationSourceOrder when available
-function getProviderIdFromSupporter(s: string | number, citationSourceOrder?: Record<number, string>): string {
-    // Handle 'S' as synthesizer identifier
-    if (s === 'S' || s === 's') {
-        return (citationSourceOrder as any)?.['S'] || 'synthesizer';
+function getRoleColor(role: Claim['role']): string {
+    switch (role) {
+        case 'anchor':
+            return '#3b82f6';
+        case 'branch':
+            return '#10b981';
+        case 'challenger':
+            return '#f59e0b';
+        case 'supplement':
+            return '#6b7280';
+        default:
+            return '#8b5cf6';
     }
-    if ((typeof s === 'number' || !isNaN(Number(s))) && citationSourceOrder) {
-        const num = Number(s);
-        const providerId = citationSourceOrder[num];
-        if (providerId) {
-            return providerId;
-        }
-    }
-    // If it's a string (direct provider ID), return as-is
-    if (typeof s === 'string' && isNaN(Number(s))) {
-        return s;
-    }
-    return 'default';
-}
-
-// Get blended color from multiple supporters
-function getNodeColor(supporters: (string | number)[], citationSourceOrder?: Record<number, string>): string {
-    if (!supporters || supporters.length === 0) {
-        return '#8b5cf6'; // default violet
-    }
-
-    const colors = supporters.map(s => {
-        const pid = getProviderIdFromSupporter(s, citationSourceOrder);
-        return getProviderColor(pid);
-    });
-
-    if (colors.length === 1) {
-        return colors[0];
-    }
-
-    // Average the colors for multiple supporters
-    let r = 0, g = 0, b = 0;
-    for (const hex of colors) {
-        const parsed = hexToRgb(hex);
-        r += parsed.r;
-        g += parsed.g;
-        b += parsed.b;
-    }
-    r = Math.round(r / colors.length);
-    g = Math.round(g / colors.length);
-    b = Math.round(b / colors.length);
-
-    return `rgb(${r}, ${g}, ${b})`;
-}
-
-function hexToRgb(hex: string): { r: number; g: number; b: number } {
-    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
-    return result ? {
-        r: parseInt(result[1], 16),
-        g: parseInt(result[2], 16),
-        b: parseInt(result[3], 16)
-    } : { r: 139, g: 92, b: 246 }; // fallback to violet
 }
 
 // Node sizing by support_count: 1=48px diameter (24 radius), 2=64px (32 radius), 3+=80px (40 radius)
 function getNodeRadius(supportCount: number): number {
-    if (supportCount >= 3) return 40;
-    if (supportCount === 2) return 32;
-    return 24;
+    const base = 20;
+    const scale = 8;
+    return base + Math.max(1, supportCount) * scale;
 }
 
 const DecisionMapGraph: React.FC<Props> = ({
-    nodes: inputNodes,
+    claims: inputClaims,
     edges: inputEdges,
-    citationSourceOrder,
+    citationSourceOrder: _citationSourceOrder,
     onNodeClick,
+    selectedClaimIds,
     width = 400,
     height = 250,
 }) => {
     const svgRef = useRef<SVGSVGElement>(null);
-    const simulationRef = useRef<d3.Simulation<ClaimNode, ClaimEdge> | null>(null);
-    const [nodes, setNodes] = useState<ClaimNode[]>([]);
-    const [edges, setEdges] = useState<ClaimEdge[]>([]);
+    const simulationRef = useRef<d3.Simulation<GraphNode, GraphEdge> | null>(null);
+    const [nodes, setNodes] = useState<GraphNode[]>([]);
+    const [edges, setEdges] = useState<GraphEdge[]>([]);
     const [hoveredNode, setHoveredNode] = useState<string | null>(null);
-    const [hoveredEdge, setHoveredEdge] = useState<{ edge: ClaimEdge; x: number; y: number } | null>(null);
+    const [hoveredEdge, setHoveredEdge] = useState<{ edge: GraphEdge; x: number; y: number } | null>(null);
 
     // Zoom/pan state
     const [transform, setTransform] = useState({ x: 0, y: 0, scale: 1 });
     const isPanningRef = useRef(false);
     const panStartRef = useRef({ x: 0, y: 0 });
 
-    // Initialize and update simulation when input changes
+    // ...
+
     useEffect(() => {
-        if (!inputNodes.length) {
+        if (!inputClaims.length) {
             setNodes([]);
             setEdges([]);
             return;
         }
 
-        // Preserve existing positions for nodes that already exist
         const existingPositions = new Map(
             nodes.map(n => [n.id, { x: n.x, y: n.y }])
         );
 
-        const simNodes: ClaimNode[] = inputNodes.map(n => {
-            const existing = existingPositions.get(n.id);
+        // Map V3 Claims to GraphNodes
+        const simNodes: GraphNode[] = inputClaims.map(c => {
+            const existing = existingPositions.get(c.id);
+            const supporters = Array.isArray(c.supporters) ? c.supporters : [];
+            const supportCount = (typeof c.support_count === 'number' && c.support_count > 0) ? c.support_count : (supporters.length || 1);
             return {
-                ...n,
+                id: c.id,
+                label: c.label,
+                text: c.text,
+                supporters,
+                support_count: supportCount,
+                type: c.type,
+                role: c.role,
                 x: existing?.x ?? width / 2 + (Math.random() - 0.5) * 100,
                 y: existing?.y ?? height / 2 + (Math.random() - 0.5) * 100,
             };
         });
 
-        const simEdges: ClaimEdge[] = inputEdges.map(e => ({ ...e }));
+        // Map V3 Edges to GraphEdges
+        const simEdges: GraphEdge[] = inputEdges.map(e => ({
+            source: e.from,
+            target: e.to,
+            type: e.type,
+            reason: e.type // Use type as reason for now or logic from meta
+        }));
 
         // Stop existing simulation
         if (simulationRef.current) {
@@ -153,24 +129,26 @@ const DecisionMapGraph: React.FC<Props> = ({
         const isWideLayout = aspectRatio > 1.5;
         const nodePadding = 80; // Keep nodes away from edges (increased for larger spread)
 
-        const simulation = d3.forceSimulation<ClaimNode>(simNodes)
+        const simulation = d3.forceSimulation<GraphNode>(simNodes)
             .force('charge', d3.forceManyBody().strength(-1000)) // Stronger repulsion to spread out
-            .force('link', d3.forceLink<ClaimNode, ClaimEdge>(simEdges)
+            .force('link', d3.forceLink<GraphNode, GraphEdge>(simEdges)
                 .id(d => d.id)
                 .distance(link => {
-                    const baseDist = link.type === 'complements' ? 100 :
+                    const baseDist = link.type === 'supports' ? 120 :
                         link.type === 'conflicts' ? 220 :
-                            link.type === 'prerequisite' ? 150 : 120;
+                            link.type === 'tradeoff' ? 180 :
+                                link.type === 'prerequisite' ? 150 : 120;
                     return isWideLayout ? baseDist * 1.6 : baseDist; // Increased distance
                 })
                 .strength(link => {
-                    if (link.type === 'complements') return 0.5;
+                    if (link.type === 'supports') return 0.45;
                     if (link.type === 'conflicts') return 0.15;
+                    if (link.type === 'tradeoff') return 0.22;
                     if (link.type === 'prerequisite') return 0.3;
-                    return 0.3;
+                    return 0.28;
                 }))
             .force('center', d3.forceCenter(width / 2, height / 2).strength(0.01)) // Extremely weak centering
-            .force('collision', d3.forceCollide<ClaimNode>().radius(d => getNodeRadius(d.support_count) + 45)) // Large collision radius for labels
+            .force('collision', d3.forceCollide<GraphNode>().radius(d => getNodeRadius(d.support_count) + 45)) // Large collision radius for labels
             // No x-centering force - let nodes spread horizontally
             .force('y', d3.forceY(height / 2).strength(0.02)) // Very weak vertical centering
             // Soft boundary force to keep nodes inside canvas
@@ -221,15 +199,15 @@ const DecisionMapGraph: React.FC<Props> = ({
         return () => {
             simulation.stop();
         };
-    }, [inputNodes, inputEdges, width, height]);
+    }, [inputClaims, inputEdges, width, height]);
 
     // Get edge coordinates
-    const getEdgeCoords = useCallback((edge: ClaimEdge) => {
+    const getEdgeCoords = useCallback((edge: GraphEdge) => {
         const source = typeof edge.source === 'object'
-            ? edge.source as ClaimNode
+            ? edge.source as GraphNode
             : nodes.find(n => n.id === edge.source);
         const target = typeof edge.target === 'object'
-            ? edge.target as ClaimNode
+            ? edge.target as GraphNode
             : nodes.find(n => n.id === edge.target);
 
         if (!source?.x || !target?.x) return null;
@@ -431,17 +409,27 @@ const DecisionMapGraph: React.FC<Props> = ({
                     </feMerge>
                 </filter>
 
-                {/* Arrow marker for prerequisites */}
-                <marker
-                    id="arrowBlue"
-                    viewBox="0 0 10 10"
-                    refX="9"
-                    refY="5"
-                    markerWidth="6"
-                    markerHeight="6"
-                    orient="auto-start-reverse"
-                >
-                    <path d="M 0 0 L 10 5 L 0 10 z" fill="#3b82f6" />
+                <filter id="edgeGlowOrange" x="-150%" y="-150%" width="400%" height="400%">
+                    <feGaussianBlur stdDeviation="5" result="blur" />
+                    <feFlood floodColor="#f97316" floodOpacity="0.75" />
+                    <feComposite in2="blur" operator="in" result="glow" />
+                    <feMerge>
+                        <feMergeNode in="glow" />
+                        <feMergeNode in="SourceGraphic" />
+                    </feMerge>
+                </filter>
+
+                <marker id="arrowGray" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                    <path d="M 0 0 L 10 5 L 0 10 z" fill="#9ca3af" />
+                </marker>
+                <marker id="arrowRed" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                    <path d="M 0 0 L 10 5 L 0 10 z" fill="#ef4444" />
+                </marker>
+                <marker id="arrowOrange" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                    <path d="M 0 0 L 10 5 L 0 10 z" fill="#f97316" />
+                </marker>
+                <marker id="arrowBlack" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                    <path d="M 0 0 L 10 5 L 0 10 z" fill="#111827" />
                 </marker>
 
                 <filter id="nodeGlow" x="-200%" y="-200%" width="500%" height="500%">
@@ -470,10 +458,25 @@ const DecisionMapGraph: React.FC<Props> = ({
                         if (!coords) return null;
 
                         const baseColor =
-                            edge.type === 'complements' ? '#10b981' :
+                            edge.type === 'supports' ? '#9ca3af' :
                                 edge.type === 'conflicts' ? '#ef4444' :
-                                    '#3b82f6';
-                        const isDashed = edge.type === 'conflicts';
+                                    edge.type === 'tradeoff' ? '#f97316' :
+                                        edge.type === 'prerequisite' ? '#111827' :
+                                            '#9ca3af';
+                        const dash =
+                            edge.type === 'conflicts' ? '6,4' :
+                                edge.type === 'tradeoff' ? '2,2' :
+                                    undefined;
+                        const markerEnd =
+                            edge.type === 'supports' ? 'url(#arrowGray)' :
+                                edge.type === 'conflicts' ? 'url(#arrowRed)' :
+                                    edge.type === 'tradeoff' ? 'url(#arrowOrange)' :
+                                        edge.type === 'prerequisite' ? 'url(#arrowBlack)' :
+                                            undefined;
+                        const markerStart =
+                            edge.type === 'conflicts' ? 'url(#arrowRed)' :
+                                edge.type === 'tradeoff' ? 'url(#arrowOrange)' :
+                                    undefined;
                         const midX = (coords.x1 + coords.x2) / 2;
                         const midY = (coords.y1 + coords.y2) / 2;
 
@@ -497,12 +500,14 @@ const DecisionMapGraph: React.FC<Props> = ({
                                     y2={coords.y2}
                                     stroke={baseColor}
                                     strokeWidth={2.5}
-                                    strokeDasharray={isDashed ? '8,5' : undefined}
-                                    markerEnd={edge.type === 'prerequisite' ? 'url(#arrowBlue)' : undefined}
+                                    strokeDasharray={dash}
+                                    markerStart={markerStart}
+                                    markerEnd={markerEnd}
                                     filter={
-                                        edge.type === 'complements' ? 'url(#edgeGlowGreen)' :
-                                            edge.type === 'conflicts' ? 'url(#edgeGlowRed)' :
-                                                'url(#edgeGlowBlue)'
+                                        edge.type === 'conflicts' ? 'url(#edgeGlowRed)' :
+                                            edge.type === 'tradeoff' ? 'url(#edgeGlowOrange)' :
+                                                edge.type === 'prerequisite' ? 'url(#edgeGlowBlue)' :
+                                                    undefined
                                     }
                                     style={{
                                         animation: edge.type === 'conflicts' ? 'conflictPulse 2s ease-in-out infinite' : undefined
@@ -541,7 +546,8 @@ const DecisionMapGraph: React.FC<Props> = ({
                         const y = node.y || 0;
                         const radius = getNodeRadius(node.support_count);
                         const isHovered = hoveredNode === node.id;
-                        const color = getNodeColor(node.supporters, citationSourceOrder);
+                        const color = getRoleColor(node.role);
+                        const isSelected = Array.isArray(selectedClaimIds) && selectedClaimIds.includes(node.id);
 
                         return (
                             <g
@@ -563,14 +569,28 @@ const DecisionMapGraph: React.FC<Props> = ({
                                     </circle>
                                 )}
 
+                                {isSelected && (
+                                    <circle r={radius + 10} fill="none" stroke={color} strokeWidth={3} strokeOpacity={0.9} />
+                                )}
+
                                 {/* Outer ring */}
-                                <circle
-                                    r={radius + 3}
-                                    fill="none"
-                                    stroke={color}
-                                    strokeWidth={isHovered ? 2.5 : 1.5}
-                                    strokeOpacity={0.5}
-                                />
+                                {node.role !== 'challenger' ? (
+                                    <circle
+                                        r={radius + 3}
+                                        fill="none"
+                                        stroke={color}
+                                        strokeWidth={isHovered ? 2.5 : 1.5}
+                                        strokeOpacity={0.5}
+                                    />
+                                ) : (
+                                    <polygon
+                                        points={`${0},${-(radius + 3)} ${radius + 3},0 0,${radius + 3} ${-(radius + 3)},0`}
+                                        fill="none"
+                                        stroke={color}
+                                        strokeWidth={isHovered ? 2.5 : 1.5}
+                                        strokeOpacity={0.5}
+                                    />
+                                )}
 
                                 {/* Radial gradient definition */}
                                 <defs>
@@ -581,14 +601,24 @@ const DecisionMapGraph: React.FC<Props> = ({
                                     </radialGradient>
                                 </defs>
 
-                                {/* Main node sphere */}
-                                <circle
-                                    r={radius}
-                                    fill={`url(#nodeGrad-${node.id})`}
-                                    stroke={color}
-                                    strokeWidth={isHovered ? 3 : 2}
-                                    filter="url(#nodeGlow)"
-                                />
+                                {/* Main node */}
+                                {node.role !== 'challenger' ? (
+                                    <circle
+                                        r={radius}
+                                        fill={`url(#nodeGrad-${node.id})`}
+                                        stroke={color}
+                                        strokeWidth={isHovered ? 3 : 2}
+                                        filter="url(#nodeGlow)"
+                                    />
+                                ) : (
+                                    <polygon
+                                        points={`${0},${-radius} ${radius},0 0,${radius} ${-radius},0`}
+                                        fill={`url(#nodeGrad-${node.id})`}
+                                        stroke={color}
+                                        strokeWidth={isHovered ? 3 : 2}
+                                        filter="url(#nodeGlow)"
+                                    />
+                                )}
 
                                 {/* Highlight sparkle */}
                                 <circle
@@ -692,7 +722,7 @@ const DecisionMapGraph: React.FC<Props> = ({
                                 <div
                                     style={{
                                         background: 'rgba(0,0,0,0.95)',
-                                        border: `1px solid ${hoveredEdge.edge.type === 'complements' ? '#10b981' : hoveredEdge.edge.type === 'conflicts' ? '#ef4444' : '#3b82f6'}`,
+                                        border: `1px solid ${hoveredEdge.edge.type === 'supports' ? '#9ca3af' : hoveredEdge.edge.type === 'conflicts' ? '#ef4444' : hoveredEdge.edge.type === 'tradeoff' ? '#f97316' : '#111827'}`,
                                         borderRadius: 6,
                                         padding: '6px 10px',
                                         fontSize: 11,
@@ -713,17 +743,20 @@ const DecisionMapGraph: React.FC<Props> = ({
 
             {/* Legend - fixed position outside transform */}
             <g transform={`translate(${width - 140}, 20)`}>
-                <rect x={-10} y={-10} width={135} height={80} fill="rgba(0,0,0,0.85)" rx={8} stroke="rgba(139,92,246,0.3)" strokeWidth={1} />
+                <rect x={-10} y={-10} width={135} height={98} fill="rgba(0,0,0,0.85)" rx={8} stroke="rgba(139,92,246,0.3)" strokeWidth={1} />
                 <text x={0} y={8} fill="rgba(255,255,255,0.8)" fontSize={10} fontWeight={600}>Legend</text>
 
-                <line x1={0} y1={24} x2={30} y2={24} stroke="#10b981" strokeWidth={2.5} />
-                <text x={38} y={28} fill="rgba(255,255,255,0.7)" fontSize={9}>Complements</text>
+                <line x1={0} y1={24} x2={30} y2={24} stroke="#9ca3af" strokeWidth={2.5} markerEnd="url(#arrowGray)" />
+                <text x={38} y={28} fill="rgba(255,255,255,0.7)" fontSize={9}>Supports</text>
 
-                <line x1={0} y1={42} x2={30} y2={42} stroke="#ef4444" strokeWidth={2.5} strokeDasharray="6,4" />
-                <text x={38} y={46} fill="rgba(255,255,255,0.7)" fontSize={9}>Conflicts</text>
+                <line x1={0} y1={42} x2={30} y2={42} stroke="#f97316" strokeWidth={2.5} strokeDasharray="2,2" markerStart="url(#arrowOrange)" markerEnd="url(#arrowOrange)" />
+                <text x={38} y={46} fill="rgba(255,255,255,0.7)" fontSize={9}>Tradeoff</text>
 
-                <line x1={0} y1={60} x2={30} y2={60} stroke="#3b82f6" strokeWidth={2.5} markerEnd="url(#arrowBlue)" />
-                <text x={38} y={64} fill="rgba(255,255,255,0.7)" fontSize={9}>Prerequisite</text>
+                <line x1={0} y1={60} x2={30} y2={60} stroke="#ef4444" strokeWidth={2.5} strokeDasharray="6,4" markerStart="url(#arrowRed)" markerEnd="url(#arrowRed)" />
+                <text x={38} y={64} fill="rgba(255,255,255,0.7)" fontSize={9}>Conflicts</text>
+
+                <line x1={0} y1={78} x2={30} y2={78} stroke="#111827" strokeWidth={2.5} markerEnd="url(#arrowBlack)" />
+                <text x={38} y={82} fill="rgba(255,255,255,0.7)" fontSize={9}>Prerequisite</text>
             </g>
         </svg>
     );

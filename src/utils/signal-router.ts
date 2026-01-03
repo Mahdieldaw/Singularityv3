@@ -22,10 +22,7 @@ export function classifyClaimsWithSignals(
   const classified: ClassifiedClaim[] = [];
 
   if (!edits) {
-    const allClaims = [
-      ...originalArtifact.consensus.claims,
-      ...originalArtifact.outliers,
-    ];
+    const allClaims = originalArtifact.claims || [];
     return allClaims.map((claim: any) => ({ claim, signalType: "unticked" }));
   }
 
@@ -47,10 +44,7 @@ export function classifyClaimsWithSignals(
     });
   }
 
-  const allOriginalClaims = [
-    ...originalArtifact.consensus.claims,
-    ...originalArtifact.outliers,
-  ];
+  const allOriginalClaims = originalArtifact.claims || [];
   for (const claim of allOriginalClaims as any[]) {
     const claimId = claim.id || claim.text || claim.insight;
     if (removedIds.has(claimId)) {

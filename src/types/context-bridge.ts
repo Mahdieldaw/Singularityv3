@@ -1,18 +1,4 @@
-export interface MinimalMapperArtifact {
-  claims: Array<{
-    text: string;
-    dimension?: string;
-    applies_when?: string;
-    isFrameChallenger?: boolean;
-  }>;
-  dimensions: string[];
-  tensions: Array<{
-    pair: [string, string];
-    axis: string;
-  }>;
-  ghost: string | null;
-  claimCount: number;
-}
+// MinimalMapperArtifact removed in favor of full MapperArtifact from contract
 
 export interface EstablishedFacts {
   positive: Array<{
@@ -46,12 +32,14 @@ export interface CascadeEffects {
   }>;
 }
 
+import { MapperArtifact } from "../../shared/contract";
+
 export interface ContextBridge {
   query: string;
   established: EstablishedFacts;
   openEdges: string[];
   nextStep: string | null;
-  landscape: MinimalMapperArtifact;
+  landscape: MapperArtifact;
   cascadeEffects?: CascadeEffects;
   turnId: string;
 }

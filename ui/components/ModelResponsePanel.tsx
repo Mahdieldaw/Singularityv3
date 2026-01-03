@@ -132,11 +132,34 @@ export const ModelResponsePanel: React.FC<ModelResponsePanelProps> = React.memo(
         );
     }
 
+    const displayContent = useMemo(() => {
+        const raw = derivedState.text || derivedState.errorMsg || (derivedState.isError ? "Error occurred" : "Empty response");
+        const trimmed = String(raw || "").trim();
+        if (!trimmed) return "";
+
+        if (trimmed.includes("```")) return raw;
+        if (!(trimmed.startsWith("{") || trimmed.startsWith("["))) return raw;
+
+        try {
+            const parsed = JSON.parse(trimmed);
+            if (parsed && typeof parsed === "object") {
+                return `\n\n\`\`\`json\n${trimmed}\n\`\`\`\n`;
+            }
+        } catch {
+            return `\n\n\`\`\`json\n${trimmed}\n\`\`\`\n`;
+        }
+
+        return `\n\n\`\`\`json\n${trimmed}\n\`\`\`\n`;
+    }, [derivedState.text, derivedState.errorMsg, derivedState.isError]);
+
     return (
-        <div className={clsx(
-            "h-full w-full min-w-0 flex flex-col bg-surface-raised border border-border-subtle rounded-2xl shadow-lg overflow-hidden animate-in slide-in-from-right duration-300",
-            isBranching && "ring-2 ring-brand-500/50"
-        )}>
+        <div
+            className={clsx(
+                "h-full w-full min-w-0 max-w-full flex flex-col bg-surface-raised border border-border-subtle rounded-2xl shadow-lg overflow-hidden animate-in slide-in-from-right duration-300",
+                isBranching && "ring-2 ring-brand-500/50"
+            )}
+            style={{ contain: 'inline-size' }} // CRITICAL: Prevents content from affecting layout width
+        >
             {/* Header */}
             <div className="flex items-center justify-between px-4 py-3 border-b border-border-subtle bg-surface-raised flex-shrink-0">
                 <div className="flex items-center gap-2">
@@ -229,11 +252,17 @@ export const ModelResponsePanel: React.FC<ModelResponsePanelProps> = React.memo(
                 </div>
             </div>
 
-            {/* Content */}
-            <div className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden p-4 custom-scrollbar relative z-10" style={{ paddingBottom: (chatInputHeight || 80) + 24 }}>
+            {/* Content - STRICT WIDTH CONTAINMENT */}
+            <div
+                className="flex-1 min-w-0 max-w-full overflow-y-auto overflow-x-hidden p-4 custom-scrollbar relative z-10"
+                style={{ paddingBottom: (chatInputHeight || 80) + 24, contain: 'inline-size' }}
+            >
                 {/* Main response */}
-                <div className="prose prose-sm max-w-none dark:prose-invert break-words" style={{ overflowWrap: 'anywhere' }}>
-                    <MarkdownDisplay content={derivedState.text || ((derivedState as any).errorMsg || (derivedState.isError ? "Error occurred" : "Empty response"))} />
+                <div
+                    className="prose prose-sm max-w-none dark:prose-invert break-words min-w-0 max-w-full overflow-hidden"
+                    style={{ overflowWrap: 'anywhere', wordBreak: 'break-word' }}
+                >
+                    <MarkdownDisplay content={displayContent} />
                     {derivedState.isStreaming && <span className="streaming-dots" />}
                 </div>
 

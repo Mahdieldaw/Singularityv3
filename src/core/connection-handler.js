@@ -194,6 +194,8 @@ export class ConnectionHandler {
             understandResponses: buckets.understandResponses,
             gauntletResponses: buckets.gauntletResponses,
             meta: aiTurn.meta || {},
+            mapperArtifact: aiTurn.mapperArtifact,
+            exploreAnalysis: aiTurn.exploreAnalysis,
           },
         },
       });

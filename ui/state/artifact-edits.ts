@@ -2,33 +2,25 @@ import { atomWithImmer } from 'jotai-immer';
 import { MapperArtifact } from '../../shared/contract';
 
 export interface ClaimEdit {
-    index: number;
-    original: MapperArtifact['consensus']['claims'][0];
-    edited: Partial<MapperArtifact['consensus']['claims'][0]>;
+    originalId: string; // V3 uses originalId for tracking
+    edited: Partial<MapperArtifact['claims'][0]>;
     userNote?: string;
 }
 
-export interface OutlierEdit {
-    index: number;
-    original: MapperArtifact['outliers'][0];
-    edited: Partial<MapperArtifact['outliers'][0]>;
-    userNote?: string;
-}
+// OutlierEdit removed - unified into ClaimEdit
 
 export interface ArtifactEdits {
     turnId: string;
     timestamp: number;
 
     // Edits
-    consensusEdits: ClaimEdit[];
-    outlierEdits: OutlierEdit[];
-    tensionEdits: Array<{ index: number; edited: Partial<NonNullable<MapperArtifact['tensions']>[0]> }>;
+    claimEdits: ClaimEdit[];
+    tensionEdits: Array<{ index: number; edited: Partial<NonNullable<MapperArtifact['edges']>[0]> }>;
     ghostEdit: string | null;
 
     // Deletions 
-    deletedClaimIndices: number[];
-    deletedOutlierIndices: number[];
-    deletedTensionIndices: number[];
+    deletedClaimIds: string[]; // Changed from indices to IDs for V3
+    deletedTensionIndices: number[]; // Edges might need IDs too but keeping indices for now if edges lack IDs
 
     // Additions
     userNotes: string[];  // General notes for modes to see

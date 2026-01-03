@@ -1,41 +1,15 @@
 import { MapperArtifact } from "../../shared/contract";
 import type {
-  MinimalMapperArtifact,
   EstablishedFacts,
   ContextBridge,
 } from "../types/context-bridge";
 import { computeCascadeEffects } from "./cascade-effects";
 
+// Deprecated: No longer "minimal", just returns the full artifact as the bridge expects MapperArtifact now
 export function buildMinimalMapperArtifact(
   fullArtifact: MapperArtifact,
-): MinimalMapperArtifact {
-  const claims = [
-    ...fullArtifact.consensus.claims.map((c) => ({
-      text: c.text,
-      dimension: c.dimension || undefined,
-      applies_when: c.applies_when || undefined,
-      isFrameChallenger: false,
-    })),
-    ...fullArtifact.outliers.map((o) => ({
-      text: o.insight,
-      dimension: o.dimension || undefined,
-      applies_when: o.applies_when || undefined,
-      isFrameChallenger: o.type === "frame_challenger",
-    })),
-  ];
-
-  const tensions = (fullArtifact.tensions || []).map((t) => ({
-    pair: [t.between[0], t.between[1]] as [string, string],
-    axis: t.axis,
-  }));
-
-  return {
-    claims,
-    dimensions: fullArtifact.dimensions_found || [],
-    tensions,
-    ghost: fullArtifact.ghost || null,
-    claimCount: claims.length,
-  };
+): MapperArtifact {
+  return fullArtifact;
 }
 
 export function extractEstablishedFacts(turnState: any): EstablishedFacts {
@@ -57,8 +31,7 @@ export function extractEstablishedFacts(turnState: any): EstablishedFacts {
     for (const removal of turnState.artifactEdits.edits.removed) {
       const claim = findClaimById(removal.claimId, turnState.mapper.artifact);
       if (claim) {
-        const text = (claim as any).text || (claim as any).insight || String(claim);
-        established.negative.push({ text, source: "removal" });
+        established.negative.push({ text: claim.text, source: "removal" });
       }
     }
   }
@@ -68,15 +41,11 @@ export function extractEstablishedFacts(turnState: any): EstablishedFacts {
 function findClaimById(
   claimId: string,
   artifact: MapperArtifact,
-): { text?: string; insight?: string } | null {
-  const consensusClaim = artifact.consensus?.claims?.find(
-    (c: any) => c.id === claimId || c.text === claimId,
+): { text: string } | null {
+  const claim = artifact.claims?.find(
+    (c) => c.id === claimId || c.text === claimId
   );
-  if (consensusClaim) return consensusClaim as any;
-  const outlier = artifact.outliers?.find(
-    (o: any) => o.id === claimId || o.insight === claimId,
-  );
-  if (outlier) return outlier as any;
+  if (claim) return claim;
   return null;
 }
 
@@ -86,7 +55,7 @@ export function buildContextBridge(turnState: any): ContextBridge {
     established: extractEstablishedFacts(turnState),
     openEdges: [],
     nextStep: null,
-    landscape: buildMinimalMapperArtifact(turnState.mapper.artifact),
+    landscape: turnState?.mapper?.artifact || null,
     turnId: String(turnState.turnId),
   };
   if (turnState?.artifactEdits?.edits?.removed?.length > 0) {

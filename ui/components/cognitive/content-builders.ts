@@ -1,10 +1,6 @@
 import {
     MapperArtifact,
     ExploreAnalysis,
-    ComparisonContent,
-    ExplorationContent,
-    DecisionTreeContent,
-    DirectAnswerContent,
     GraphTopology,
     GraphEdge
 } from "../../../shared/contract";
@@ -287,13 +283,9 @@ export function matchInventoryToArtifact(
     if (!Array.isArray(inventory) || inventory.length === 0) return matches;
 
     const candidates: Array<{ kind: "consensus" | "outlier"; index: number; title: string; full: string }> = [];
-    (artifact.consensus?.claims || []).forEach((c, i) => {
-        const parsed = splitTitleDesc(c.text);
-        candidates.push({ kind: "consensus", index: i, title: parsed.title, full: c.text });
-    });
-    (artifact.outliers || []).forEach((o, i) => {
-        const parsed = splitTitleDesc(o.insight);
-        candidates.push({ kind: "outlier", index: i, title: parsed.title, full: o.insight });
+    (artifact.claims || []).forEach((c, i) => {
+        const kind = (c.supporters?.length || 0) >= 2 ? "consensus" : "outlier";
+        candidates.push({ kind, index: i, title: c.label, full: c.text });
     });
 
     const pairs: Array<{ invIndex: number; candKey: string; match: InventoryMatch }> = [];
@@ -348,38 +340,34 @@ export function reconcileOptions(
 
     for (const item of parsedInventory) {
         const match = matches.get(item.index);
-        if (match && artifact) {
-            const artifactId = `${match.kind === "consensus" ? "consensus" : "outlier"}-${match.index}`;
+        if (match && artifact && artifact.claims[match.index]) {
+            const claim = artifact.claims[match.index];
+            const artifactId = claim.id;
             matchedArtifactIds.add(artifactId);
 
             let artifactData: UnifiedOption["artifactData"];
             if (match.kind === "consensus") {
-                const claim = artifact.consensus?.claims?.[match.index];
                 artifactData = {
                     type: "consensus",
                     originalId: artifactId,
-                    dimension: claim?.dimension,
-                    applies_when: claim?.applies_when,
-                    support_count: claim?.support_count,
-                    supporters: claim?.supporters,
+                    dimension: undefined,
+                    applies_when: claim.type === 'conditional' ? "conditional" : undefined,
+                    support_count: claim.supporters?.length,
+                    supporters: claim.supporters,
                 };
             } else {
-                const outlier = artifact.outliers?.[match.index];
                 artifactData = {
-                    type: outlier?.type === "frame_challenger" ? "frame_challenger" : "supplemental",
+                    type: claim.role === "challenger" ? "frame_challenger" : "supplemental",
                     originalId: artifactId,
-                    dimension: outlier?.dimension,
-                    applies_when: outlier?.applies_when,
-                    source: outlier?.source,
-                    challenges: outlier?.challenges,
+                    dimension: undefined,
+                    applies_when: claim.type === 'conditional' ? "conditional" : undefined,
+                    source: undefined,
+                    challenges: claim.challenges || undefined,
                 };
             }
 
             const supportersFallback = artifactData?.supporters || [];
-            const outlierIndexFallback =
-                match.kind === "outlier" && typeof artifact.outliers?.[match.index]?.source_index === "number"
-                    ? [artifact.outliers[match.index].source_index]
-                    : [];
+            const outlierIndexFallback: number[] = [];
 
             options.push({
                 id: `unified-${item.index}`,
@@ -405,45 +393,27 @@ export function reconcileOptions(
     }
 
     if (artifact) {
-        (artifact.consensus?.claims || []).forEach((claim, i) => {
-            const id = `consensus-${i}`;
+        (artifact.claims || []).forEach((claim) => {
+            const id = claim.id;
             if (matchedArtifactIds.has(id)) return;
-            const parsed = splitTitleDesc(claim.text);
+
+            const isConsensus = (claim.supporters?.length || 0) >= 2;
+            const type = isConsensus ? "consensus" : (claim.role === "challenger" ? "frame_challenger" : "supplemental");
+
             options.push({
-                id: `unified-artifact-consensus-${i}`,
-                label: parsed.title,
-                summary: parsed.desc || "",
+                id: `unified-artifact-${id}`,
+                label: claim.label,
+                summary: claim.text,
                 citations: claim.supporters || [],
                 source: "artifact_only",
                 artifactData: {
-                    type: "consensus",
+                    type: type as any,
                     originalId: id,
-                    dimension: claim.dimension,
-                    applies_when: claim.applies_when,
-                    support_count: claim.support_count,
+                    dimension: undefined,
+                    applies_when: claim.type === 'conditional' ? "conditional" : undefined,
+                    support_count: claim.supporters?.length,
                     supporters: claim.supporters,
-                },
-                matchConfidence: "none",
-            });
-        });
-
-        (artifact.outliers || []).forEach((outlier, i) => {
-            const id = `outlier-${i}`;
-            if (matchedArtifactIds.has(id)) return;
-            const parsed = splitTitleDesc(outlier.insight);
-            options.push({
-                id: `unified-artifact-outlier-${i}`,
-                label: parsed.title,
-                summary: parsed.desc || outlier.raw_context || "",
-                citations: typeof outlier.source_index === "number" ? [outlier.source_index] : [],
-                source: "artifact_only",
-                artifactData: {
-                    type: outlier.type === "frame_challenger" ? "frame_challenger" : "supplemental",
-                    originalId: id,
-                    dimension: outlier.dimension,
-                    applies_when: outlier.applies_when,
-                    source: outlier.source,
-                    challenges: outlier.challenges,
+                    challenges: claim.challenges || undefined
                 },
                 matchConfidence: "none",
             });
@@ -505,12 +475,12 @@ export function unifiedOptionsToShowcaseItems(reconciliation: ReconciliationResu
 }
 
 const isConflictEdge = (e: GraphEdge): boolean => {
-    const t = normalizeEdgeType(e.type);
+    const t = normalizeEdgeType(e.type || "");
     return t === "conflicts" || t === "bifurcation" || t.includes("conflict") || t.includes("bifurc");
 };
 
 const isPositiveEdge = (e: GraphEdge): boolean => {
-    const t = normalizeEdgeType(e.type);
+    const t = normalizeEdgeType(e.type || "");
     return t === "complements" || t === "prerequisite" || t.includes("complement") || t.includes("prereq");
 };
 
@@ -520,7 +490,7 @@ const sortByPrerequisites = (
 ): SelectableShowcaseItem[] => {
     const nodes = items.map((i) => i.graphNodeId).filter(Boolean) as string[];
     const nodeSet = new Set(nodes);
-    const prereqEdges = edges.filter((e) => normalizeEdgeType(e.type) === "prerequisite");
+    const prereqEdges = edges.filter((e) => normalizeEdgeType(e.type || "") === "prerequisite");
 
     const indegree = new Map<string, number>();
     const outgoing = new Map<string, Set<string>>();
@@ -578,35 +548,22 @@ export function processArtifactForShowcase(
 ): ProcessedShowcase {
     const items: SelectableShowcaseItem[] = [];
 
-    (artifact?.consensus?.claims || []).forEach((claim, i) => {
-        const parsed = splitTitleDesc(claim.text);
+    (artifact?.claims || []).forEach((claim) => {
+        const isConsensus = (claim.supporters?.length || 0) >= 2;
         items.push({
-            id: `consensus-${i}`,
-            text: parsed.title,
-            detail: parsed.desc,
-            type: "consensus",
-            dimension: claim.dimension,
-            applies_when: claim.applies_when,
-            graphSupportCount: claim.support_count,
+            id: claim.id,
+            text: claim.label,
+            detail: claim.text,
+            type: isConsensus ? "consensus" : (claim.role === "challenger" ? "frame_challenger" : "supplemental"),
+            dimension: undefined,
+            applies_when: claim.type === 'conditional' ? "conditional" : undefined,
+            graphSupportCount: claim.supporters?.length,
             graphSupporters: claim.supporters,
+            challenges: claim.challenges || undefined,
         });
     });
 
-    (artifact?.outliers || []).forEach((o, i) => {
-        const parsed = splitTitleDesc(o.insight);
-        items.push({
-            id: `outlier-${i}`,
-            text: parsed.title,
-            detail: parsed.desc,
-            type: o.type === "frame_challenger" ? "frame_challenger" : "supplemental",
-            dimension: o.dimension,
-            applies_when: o.applies_when,
-            source: o.source,
-            challenges: o.challenges,
-        });
-    });
-
-    return processShowcaseItems(items, graphTopology, artifact?.ghost ?? null);
+    return processShowcaseItems(items, graphTopology, artifact?.ghosts?.[0] ?? null);
 }
 
 export function processShowcaseItems(
@@ -734,155 +691,3 @@ export function processShowcaseItems(
     };
 }
 
-export function buildComparisonContent(
-    artifact: MapperArtifact,
-    _analysis: ExploreAnalysis
-): ComparisonContent {
-    const dimensions = (artifact.dimensions_found || []).map((dimName) => {
-        const dimClaims = artifact.consensus.claims.filter((c) => c.dimension === dimName);
-        const dimOutliers = artifact.outliers.filter((o) => o.dimension === dimName);
-
-        const winner =
-            dimClaims.length > 0
-                ? dimClaims.reduce((best, c) => (c.support_count > best.support_count ? c : best))
-                : null;
-
-        const sources = winner
-            ? getModelNames(winner.supporters)
-            : dimOutliers.length > 0
-                ? [dimOutliers[0].source]
-                : [];
-
-        const tension = artifact.tensions?.find(
-            (t) =>
-                t.axis.toLowerCase().includes(dimName.toLowerCase()) ||
-                t.between.some((b) => b.toLowerCase().includes(dimName.toLowerCase()))
-        );
-
-        const tradeoff = tension ? `${tension.between[0]} vs ${tension.between[1]}` : winner?.applies_when || "";
-
-        return {
-            name: dimName.replace(/_/g, " "),
-            winner: winner?.text || dimOutliers[0]?.insight || "No clear winner",
-            sources,
-            tradeoff
-        };
-    });
-
-    const approaches = [...new Set(dimensions.map((d) => d.winner))].slice(0, 4);
-    const dimNames = dimensions.map((d) => d.name);
-
-    const scores = dimNames.map((dimName) => {
-        const dim = dimensions.find((d) => d.name === dimName);
-        return approaches.map((approach) => (approach === dim?.winner ? 8 : 5));
-    });
-
-    return {
-        dimensions,
-        matrix: {
-            approaches,
-            dimensions: dimNames,
-            scores
-        }
-    };
-}
-
-export function buildExplorationContent(
-    artifact: MapperArtifact,
-    _analysis: ExploreAnalysis
-): ExplorationContent {
-    const paradigms = artifact.outliers
-        .filter((o) => o.type === "frame_challenger")
-        .map((o) => ({
-            name: o.insight.slice(0, 50) + (o.insight.length > 50 ? "..." : ""),
-            source: o.source,
-            core_idea: o.insight,
-            best_for: o.applies_when || "Consider when standard approach doesn't fit"
-        }));
-
-    if (paradigms.length < 2 && artifact.consensus.claims.length > 0) {
-        const topClaim = artifact.consensus.claims[0];
-        paradigms.unshift({
-            name: "Consensus View",
-            source: `${topClaim.support_count} models`,
-            core_idea: topClaim.text,
-            best_for: topClaim.applies_when || "General recommendation"
-        });
-    }
-
-    const common_thread =
-        artifact.consensus.claims
-            .filter((c) => c.support_count >= 4)
-            .map((c) => c.text)
-            .slice(0, 2)
-            .join("; ") || undefined;
-
-    return {
-        paradigms,
-        common_thread,
-        ghost: artifact.ghost || undefined
-    };
-}
-
-export function buildDecisionTreeContent(
-    artifact: MapperArtifact,
-    _analysis: ExploreAnalysis
-): DecisionTreeContent {
-    const defaultClaim = artifact.consensus.claims[0];
-    const default_path = defaultClaim?.text || "No clear default recommendation";
-
-    const conditions = artifact.outliers
-        .filter((o) => o.applies_when)
-        .map((o) => ({
-            condition: o.applies_when!,
-            path: o.insight,
-            reasoning: o.challenges || `Alternative to ${o.dimension || "default"} approach`,
-            source: o.source
-        }));
-
-    artifact.consensus.claims
-        .filter((c) => c.applies_when && c !== defaultClaim)
-        .forEach((c) => {
-            conditions.push({
-                condition: c.applies_when!,
-                path: c.text,
-                reasoning: `Supported by ${c.support_count} models`,
-                source: `${c.support_count} models`
-            });
-        });
-
-    const challenger = artifact.outliers.find((o) => o.type === "frame_challenger");
-    const frame_challenger = challenger
-        ? {
-            position: challenger.insight,
-            source: challenger.source,
-            consider_if:
-                challenger.applies_when || challenger.challenges || "Standard approach doesn't fit your situation"
-        }
-        : undefined;
-
-    return {
-        default_path,
-        conditions,
-        frame_challenger
-    };
-}
-
-export function buildDirectAnswerContent(
-    artifact: MapperArtifact,
-    _analysis: ExploreAnalysis
-): DirectAnswerContent {
-    const answer = artifact.consensus.claims[0]?.text || "No clear consensus reached";
-
-    const additional_context = artifact.outliers
-        .filter((o) => o.type === "supplemental")
-        .map((o) => ({
-            text: o.insight,
-            source: o.source
-        }));
-
-    return {
-        answer,
-        additional_context
-    };
-}

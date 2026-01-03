@@ -306,6 +306,9 @@ export class TurnEmitter {
           },
           ...(context?.workflowControl ? { workflowControl: context.workflowControl } : {}),
         },
+        // ✅ CRITICAL: Pass cognitive artifacts to UI
+        mapperArtifact: context?.mapperArtifact || undefined,
+        exploreAnalysis: context?.exploreAnalysis || undefined,
       };
 
       console.log("[TurnEmitter] Emitting TURN_FINALIZED", {

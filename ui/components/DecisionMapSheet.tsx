@@ -20,8 +20,7 @@ import { formatDecisionMapForMd, formatGraphForMd } from "../utils/copy-format-u
 // ============================================================================
 
 import {
-  parseMappingResponse,
-  extractGraphTopologyAndStrip,
+  parseUnifiedMapperOutput,
   cleanOptionsText,
 } from "../../shared/parsing-utils";
 import { normalizeProviderId } from "../utils/provider-id-mapper";
@@ -889,7 +888,7 @@ export const DecisionMapSheet = React.memo(() => {
 
   const parsedMapping = useMemo(() => {
     const rawText = latestMapping?.text || '';
-    return parseMappingResponse(String(rawText));
+    return parseUnifiedMapperOutput(String(rawText));
   }, [latestMapping]);
 
   const graphTopology = useMemo(() => {
@@ -900,13 +899,24 @@ export const DecisionMapSheet = React.memo(() => {
       normalizeGraphTopologyCandidate(meta?.topology) ||
       null;
     if (fromMeta) return fromMeta;
-    const fromParsed = normalizeGraphTopologyCandidate(parsedMapping.graphTopology) || null;
+    const fromParsed = normalizeGraphTopologyCandidate(parsedMapping.topology) || null;
     if (fromParsed) return fromParsed;
-    const rawText = latestMapping?.text || null;
-    return extractGraphTopologyAndStrip(rawText || '').topology;
-  }, [latestMapping, parsedMapping.graphTopology]);
+    return null;
+  }, [latestMapping, parsedMapping.topology]);
 
-  const adapted = useMemo(() => adaptGraphTopology(graphTopology), [graphTopology]);
+  const graphData = useMemo(() => {
+    const claimsFromMap = Array.isArray(parsedMapping.map?.claims) ? parsedMapping.map!.claims : null;
+    const edgesFromMap = Array.isArray(parsedMapping.map?.edges) ? parsedMapping.map!.edges : null;
+
+    const claims = claimsFromMap || (Array.isArray(parsedMapping.claims) ? parsedMapping.claims : []);
+    const edges = edgesFromMap || (Array.isArray(parsedMapping.edges) ? parsedMapping.edges : []);
+
+    if (claims.length > 0 || edges.length > 0) {
+      return { claims, edges };
+    }
+
+    return adaptGraphTopology(graphTopology);
+  }, [parsedMapping, graphTopology]);
 
   const mappingText = useMemo(() => {
     return parsedMapping.narrative || '';
@@ -919,7 +929,7 @@ export const DecisionMapSheet = React.memo(() => {
       // Use shared cleanup function to strip any trailing GRAPH_TOPOLOGY
       return cleanOptionsText(fromMeta);
     }
-    return parsedMapping.options;
+    return parsedMapping.options ?? null;
   }, [latestMapping, parsedMapping.options]);
 
   const parsedThemes = useMemo(() => {
@@ -1000,7 +1010,7 @@ export const DecisionMapSheet = React.memo(() => {
       id: node.id,
       label: node.label,
       supporters: node.supporters || [],
-      theme: node.theme
+      theme: node.type || node.theme
     });
   }, []);
 
@@ -1188,8 +1198,8 @@ export const DecisionMapSheet = React.memo(() => {
                     )}
                     <Suspense fallback={<div className="w-full h-full flex items-center justify-center opacity-50"><div className="w-8 h-8 rounded-full border-2 border-brand-500 border-t-transparent animate-spin" /></div>}>
                       <DecisionMapGraph
-                        nodes={adapted.nodes}
-                        edges={adapted.edges}
+                        claims={graphData.claims}
+                        edges={graphData.edges}
                         citationSourceOrder={citationSourceOrder}
                         width={dims.w}
                         height={dims.h}

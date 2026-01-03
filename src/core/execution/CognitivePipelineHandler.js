@@ -34,9 +34,16 @@ export class CognitivePipelineHandler {
             const result = take?.status === "completed" ? take.result : null;
             if (!result?.text) continue;
             const text = String(result.text || "");
-            const isLegacyV1 =
-              text.includes("<mapping_output>") || text.includes("<decision_map>");
-            if (!isLegacyV1) continue;
+
+            // Allow V3 <map> or legacy tags
+            const hasStructuralTags =
+              text.includes("<map>") ||
+              text.includes("<mapper_artifact>") ||
+              text.includes("<mapping_output>") ||
+              text.includes("<decision_map>");
+
+            if (!hasStructuralTags) continue;
+
             mapperArtifact = parseV1MapperToArtifact(text, {
               graphTopology: result?.meta?.graphTopology,
               query: userMessageForExplore,
@@ -47,21 +54,7 @@ export class CognitivePipelineHandler {
       }
 
       if (!mapperArtifact) {
-        console.error("[CognitiveHandler] Cognitive pipeline missing mapperArtifact");
-        try {
-            await this.persistenceCoordinator.persistStepResult(resolvedContext, context, steps, stepResults, userMessageForExplore);
-        } catch (_) { }
-
-        // We emit finalizer elsewhere, just notify engine to stop?
-        // Actually, halt logic usually emits turn finalization too.
-        
-        this.port.postMessage({
-          type: "WORKFLOW_COMPLETE",
-          sessionId: context.sessionId,
-          workflowId: request.workflowId,
-          finalResults: Object.fromEntries(stepResults),
-          haltReason: "mapping_artifact_missing",
-        });
+        console.warn("[CognitiveHandler] Cognitive pipeline missing mapperArtifact - forcing halt");
         return true;
       }
 
@@ -69,6 +62,10 @@ export class CognitivePipelineHandler {
         userMessageForExplore,
         mapperArtifact,
       );
+
+      // ✅ CRITICAL: Populate context so WorkflowEngine/TurnEmitter can see them
+      context.mapperArtifact = mapperArtifact;
+      context.exploreAnalysis = exploreAnalysis;
 
       this.port.postMessage({
         type: "MAPPER_ARTIFACT_READY",
@@ -78,43 +75,6 @@ export class CognitivePipelineHandler {
         analysis: exploreAnalysis,
       });
 
-      try {
-        if (resolvedContext?.type !== "recompute") {
-          const persistResult = this.persistenceCoordinator.buildPersistenceResultFromStepResults(
-            steps,
-            stepResults,
-          );
-          const persistRequest = {
-            type: resolvedContext?.type || "initialize",
-            sessionId: context.sessionId,
-            userMessage: userMessageForExplore,
-            canonicalUserTurnId: context?.canonicalUserTurnId,
-            canonicalAiTurnId: context?.canonicalAiTurnId,
-            mapperArtifact,
-            exploreAnalysis,
-          };
-
-          await this.persistenceCoordinator.persistWorkflowResult(
-            persistRequest,
-            resolvedContext,
-            persistResult,
-          );
-        }
-      } catch (err) {
-        console.error(
-          "[CognitiveHandler] Failed to persist cognitive halt state:",
-          err,
-        );
-      }
-
-      // We need to trigger the engine to finalize the turn
-      this.port.postMessage({
-        type: "WORKFLOW_COMPLETE",
-        sessionId: context.sessionId,
-        workflowId: request.workflowId,
-        finalResults: Object.fromEntries(stepResults),
-        haltReason: "cognitive_exploration_ready",
-      });
       return true;
     } catch (e) {
       console.error("[CognitiveHandler] computeExplore failed:", e);
@@ -148,7 +108,7 @@ export class CognitivePipelineHandler {
       }
 
       const priorResponses = await adapter.getResponsesByTurnId(aiTurnId);
-      
+
       const mappingResponses = (priorResponses || [])
         .filter((r) => r && r.responseType === "mapping" && r.providerId)
         .sort((a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0))
@@ -189,10 +149,10 @@ export class CognitivePipelineHandler {
       };
 
       const executorOptions = {
-          streamingManager, 
-          persistenceCoordinator: this.persistenceCoordinator, 
-          contextManager, 
-          sessionManager: this.sessionManager
+        streamingManager,
+        persistenceCoordinator: this.persistenceCoordinator,
+        contextManager,
+        sessionManager: this.sessionManager
       };
 
       let step;
@@ -201,186 +161,186 @@ export class CognitivePipelineHandler {
 
       if (mode === "understand" || mode === "gauntlet") {
         step = {
-            stepId,
-            type: mode,
+          stepId,
+          type: mode,
+          payload: {
+            [`${mode}Provider`]: preferredProvider,
+            mapperArtifact,
+            exploreAnalysis,
+            originalPrompt,
+            mappingText: latestMappingText,
+            mappingMeta: latestMappingMeta,
+            selectedArtifacts: Array.isArray(selectedArtifacts) ? selectedArtifacts : [],
+            useThinking: false,
+          },
+        };
+      } else if (mode === "refine") {
+        const hasUnderstand =
+          !!aiTurn.understandOutput ||
+          (priorResponses || []).some(
+            (r) =>
+              r &&
+              r.responseType === "understand" &&
+              ((r.meta && r.meta.understandOutput) ||
+                (typeof r.text === "string" && r.text.trim().length > 0)),
+          );
+        const hasGauntlet =
+          !!aiTurn.gauntletOutput ||
+          (priorResponses || []).some(
+            (r) =>
+              r &&
+              r.responseType === "gauntlet" &&
+              ((r.meta && r.meta.gauntletOutput) ||
+                (typeof r.text === "string" && r.text.trim().length > 0)),
+          );
+
+        if (!hasUnderstand && !hasGauntlet) {
+          const pivotMode = "understand";
+          const pivotProvider = mappingProviders[0] || aiTurn.meta?.mapper || preferredProvider;
+          const pivotStepId = `${pivotMode}-${pivotProvider}-${Date.now()}`;
+          const pivotStep = {
+            stepId: pivotStepId,
+            type: pivotMode,
             payload: {
-              [`${mode}Provider`]: preferredProvider,
+              [`${pivotMode}Provider`]: pivotProvider,
               mapperArtifact,
               exploreAnalysis,
               originalPrompt,
               mappingText: latestMappingText,
               mappingMeta: latestMappingMeta,
-              selectedArtifacts: Array.isArray(selectedArtifacts) ? selectedArtifacts : [],
+              selectedArtifacts: [],
               useThinking: false,
             },
           };
-      } else if (mode === "refine") {
-          const hasUnderstand =
-            !!aiTurn.understandOutput ||
-            (priorResponses || []).some(
-              (r) =>
-                r &&
-                r.responseType === "understand" &&
-                ((r.meta && r.meta.understandOutput) ||
-                  (typeof r.text === "string" && r.text.trim().length > 0)),
-            );
-          const hasGauntlet =
-            !!aiTurn.gauntletOutput ||
-            (priorResponses || []).some(
-              (r) =>
-                r &&
-                r.responseType === "gauntlet" &&
-                ((r.meta && r.meta.gauntletOutput) ||
-                  (typeof r.text === "string" && r.text.trim().length > 0)),
-            );
 
-          if (!hasUnderstand && !hasGauntlet) {
-              const pivotMode = "understand";
-              const pivotProvider = mappingProviders[0] || aiTurn.meta?.mapper || preferredProvider;
-              const pivotStepId = `${pivotMode}-${pivotProvider}-${Date.now()}`;
-              const pivotStep = {
-                  stepId: pivotStepId,
-                  type: pivotMode,
-                  payload: {
-                      [`${pivotMode}Provider`]: pivotProvider,
-                      mapperArtifact,
-                      exploreAnalysis,
-                      originalPrompt,
-                      mappingText: latestMappingText,
-                      mappingMeta: latestMappingMeta,
-                      selectedArtifacts: [],
-                      useThinking: false,
-                  },
-              };
+          const pivotResult = await stepExecutor.executeUnderstandStep(
+            pivotStep,
+            context,
+            new Map(),
+            executorOptions,
+          );
 
-              const pivotResult = await stepExecutor.executeUnderstandStep(
-                  pivotStep,
-                  context,
-                  new Map(),
-                  executorOptions,
-              );
+          try {
+            this.port.postMessage({
+              type: "WORKFLOW_STEP_UPDATE",
+              sessionId: effectiveSessionId,
+              stepId: pivotStepId,
+              status: "completed",
+              result: pivotResult,
+              ...(isRecompute ? { isRecompute: true, sourceTurnId: sourceTurnId || aiTurnId } : {}),
+            });
+          } catch (_) { }
 
-              try {
-                  this.port.postMessage({
-                      type: "WORKFLOW_STEP_UPDATE",
-                      sessionId: effectiveSessionId,
-                      stepId: pivotStepId,
-                      status: "completed",
-                      result: pivotResult,
-                      ...(isRecompute ? { isRecompute: true, sourceTurnId: sourceTurnId || aiTurnId } : {}),
-                  });
-              } catch (_) { }
+          await this.sessionManager.upsertProviderResponse(
+            effectiveSessionId,
+            aiTurnId,
+            pivotProvider,
+            pivotMode,
+            0,
+            { text: pivotResult?.text || "", status: pivotResult?.status || "completed", meta: pivotResult?.meta || {} },
+          );
+        }
 
-              await this.sessionManager.upsertProviderResponse(
-                  effectiveSessionId,
-                  aiTurnId,
-                  pivotProvider,
-                  pivotMode,
-                  0,
-                  { text: pivotResult?.text || "", status: pivotResult?.status || "completed", meta: pivotResult?.meta || {} },
-              );
+        step = {
+          stepId,
+          type: "refiner",
+          payload: {
+            refinerProvider: preferredProvider,
+            originalPrompt,
+            mappingText: latestMappingText,
+            mapperArtifact,
+            sourceHistorical: { turnId: aiTurnId }
           }
-
-          step = {
-              stepId,
-              type: "refiner",
-              payload: {
-                  refinerProvider: preferredProvider,
-                  originalPrompt,
-                  mappingText: latestMappingText,
-                  mapperArtifact,
-                  sourceHistorical: { turnId: aiTurnId } 
-              }
-          };
+        };
       } else if (mode === "antagonist") {
-          const hasUnderstand =
-            !!aiTurn.understandOutput ||
-            (priorResponses || []).some(
-              (r) =>
-                r &&
-                r.responseType === "understand" &&
-                ((r.meta && r.meta.understandOutput) ||
-                  (typeof r.text === "string" && r.text.trim().length > 0)),
-            );
-          const hasGauntlet =
-            !!aiTurn.gauntletOutput ||
-            (priorResponses || []).some(
-              (r) =>
-                r &&
-                r.responseType === "gauntlet" &&
-                ((r.meta && r.meta.gauntletOutput) ||
-                  (typeof r.text === "string" && r.text.trim().length > 0)),
-            );
+        const hasUnderstand =
+          !!aiTurn.understandOutput ||
+          (priorResponses || []).some(
+            (r) =>
+              r &&
+              r.responseType === "understand" &&
+              ((r.meta && r.meta.understandOutput) ||
+                (typeof r.text === "string" && r.text.trim().length > 0)),
+          );
+        const hasGauntlet =
+          !!aiTurn.gauntletOutput ||
+          (priorResponses || []).some(
+            (r) =>
+              r &&
+              r.responseType === "gauntlet" &&
+              ((r.meta && r.meta.gauntletOutput) ||
+                (typeof r.text === "string" && r.text.trim().length > 0)),
+          );
 
-          if (!hasUnderstand && !hasGauntlet) {
-              const pivotMode = "understand";
-              const pivotProvider = mappingProviders[0] || aiTurn.meta?.mapper || preferredProvider;
-              const pivotStepId = `${pivotMode}-${pivotProvider}-${Date.now()}`;
-              const pivotStep = {
-                  stepId: pivotStepId,
-                  type: pivotMode,
-                  payload: {
-                      [`${pivotMode}Provider`]: pivotProvider,
-                      mapperArtifact,
-                      exploreAnalysis,
-                      originalPrompt,
-                      mappingText: latestMappingText,
-                      mappingMeta: latestMappingMeta,
-                      selectedArtifacts: [],
-                      useThinking: false,
-                  },
-              };
-
-              const pivotResult = await stepExecutor.executeUnderstandStep(
-                  pivotStep,
-                  context,
-                  new Map(),
-                  executorOptions,
-              );
-
-              try {
-                  this.port.postMessage({
-                      type: "WORKFLOW_STEP_UPDATE",
-                      sessionId: effectiveSessionId,
-                      stepId: pivotStepId,
-                      status: "completed",
-                      result: pivotResult,
-                      ...(isRecompute ? { isRecompute: true, sourceTurnId: sourceTurnId || aiTurnId } : {}),
-                  });
-              } catch (_) { }
-
-              await this.sessionManager.upsertProviderResponse(
-                  effectiveSessionId,
-                  aiTurnId,
-                  pivotProvider,
-                  pivotMode,
-                  0,
-                  { text: pivotResult?.text || "", status: pivotResult?.status || "completed", meta: pivotResult?.meta || {} },
-              );
-          }
-
-          step = {
-              stepId,
-              type: "antagonist",
-              payload: {
-                  antagonistProvider: preferredProvider,
-                  originalPrompt,
-                  mappingText: latestMappingText,
-                  mapperArtifact,
-                  sourceHistorical: { turnId: aiTurnId }
-              }
+        if (!hasUnderstand && !hasGauntlet) {
+          const pivotMode = "understand";
+          const pivotProvider = mappingProviders[0] || aiTurn.meta?.mapper || preferredProvider;
+          const pivotStepId = `${pivotMode}-${pivotProvider}-${Date.now()}`;
+          const pivotStep = {
+            stepId: pivotStepId,
+            type: pivotMode,
+            payload: {
+              [`${pivotMode}Provider`]: pivotProvider,
+              mapperArtifact,
+              exploreAnalysis,
+              originalPrompt,
+              mappingText: latestMappingText,
+              mappingMeta: latestMappingMeta,
+              selectedArtifacts: [],
+              useThinking: false,
+            },
           };
+
+          const pivotResult = await stepExecutor.executeUnderstandStep(
+            pivotStep,
+            context,
+            new Map(),
+            executorOptions,
+          );
+
+          try {
+            this.port.postMessage({
+              type: "WORKFLOW_STEP_UPDATE",
+              sessionId: effectiveSessionId,
+              stepId: pivotStepId,
+              status: "completed",
+              result: pivotResult,
+              ...(isRecompute ? { isRecompute: true, sourceTurnId: sourceTurnId || aiTurnId } : {}),
+            });
+          } catch (_) { }
+
+          await this.sessionManager.upsertProviderResponse(
+            effectiveSessionId,
+            aiTurnId,
+            pivotProvider,
+            pivotMode,
+            0,
+            { text: pivotResult?.text || "", status: pivotResult?.status || "completed", meta: pivotResult?.meta || {} },
+          );
+        }
+
+        step = {
+          stepId,
+          type: "antagonist",
+          payload: {
+            antagonistProvider: preferredProvider,
+            originalPrompt,
+            mappingText: latestMappingText,
+            mapperArtifact,
+            sourceHistorical: { turnId: aiTurnId }
+          }
+        };
       }
 
       let result;
       if (mode === "understand") {
-          result = await stepExecutor.executeUnderstandStep(step, context, new Map(), executorOptions);
+        result = await stepExecutor.executeUnderstandStep(step, context, new Map(), executorOptions);
       } else if (mode === "gauntlet") {
-          result = await stepExecutor.executeGauntletStep(step, context, new Map(), executorOptions);
+        result = await stepExecutor.executeGauntletStep(step, context, new Map(), executorOptions);
       } else if (mode === "refine") {
-          result = await stepExecutor.executeRefinerStep(step, context, new Map(), executorOptions);
+        result = await stepExecutor.executeRefinerStep(step, context, new Map(), executorOptions);
       } else if (mode === "antagonist") {
-          result = await stepExecutor.executeAntagonistStep(step, context, new Map(), executorOptions);
+        result = await stepExecutor.executeAntagonistStep(step, context, new Map(), executorOptions);
       }
 
       try {

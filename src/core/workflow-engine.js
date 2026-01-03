@@ -138,15 +138,15 @@ export class WorkflowEngine {
     // Executor mapping - FOUNDATION ONLY
     // Cognitive steps (understand, gauntlet, refiner, antagonist) are handled via handleContinueCognitiveRequest
     this._executors = {
-      prompt: (step, ctx, _results, _wfCtx, _resolved, opts) => 
+      prompt: (step, ctx, _results, _wfCtx, _resolved, opts) =>
         this.stepExecutor.executePromptStep(step, ctx, opts),
-      mapping: (step, ctx, results, wfCtx, resolved, opts) => 
+      mapping: (step, ctx, results, wfCtx, resolved, opts) =>
         this.stepExecutor.executeMappingStep(step, ctx, results, wfCtx, resolved, opts),
     };
 
     // Provider key mapping for upsert
     this._providerKeys = {
-      prompt: null, 
+      prompt: null,
       mapping: 'mappingProvider',
     };
   }
@@ -161,7 +161,7 @@ export class WorkflowEngine {
       request?.context?.userMessage ||
       this.currentUserMessage ||
       "";
-    
+
     if (!this.currentUserMessage?.trim()) {
       console.error("[WorkflowEngine] CRITICAL: execute() with empty userMessage!");
       return;
@@ -206,7 +206,7 @@ export class WorkflowEngine {
         const haltReason = await this._checkHaltConditions(
           step, result, request, context, steps, stepResults, resolvedContext, useCognitivePipeline
         );
-        
+
         if (haltReason) {
           await this._haltWorkflow(request, context, steps, stepResults, resolvedContext, haltReason);
           return;
@@ -265,7 +265,7 @@ export class WorkflowEngine {
     } catch (error) {
       stepResults.set(step.stepId, { status: "failed", error: error.message });
       this._emitStepUpdate(step, context, { error: error.message }, resolvedContext, "failed");
-      throw error; 
+      throw error;
     }
   }
 
@@ -287,7 +287,7 @@ export class WorkflowEngine {
 
   async _persistStepResponse(step, context, result, resolvedContext) {
     if (resolvedContext?.type === "recompute") return;
-    if (step.type === 'prompt') return; 
+    if (step.type === 'prompt') return;
 
     const providerKey = this._providerKeys[step.type];
     if (!providerKey) return;
@@ -309,7 +309,7 @@ export class WorkflowEngine {
             meta: result?.meta || {},
           }
         );
-      } catch (_) {}
+      } catch (_) { }
     }
   }
 
@@ -339,17 +339,16 @@ export class WorkflowEngine {
         request, context, steps, stepResults, resolvedContext, this.currentUserMessage
       );
       if (shouldHalt) {
-        this.turnEmitter.emitTurnFinalized(context, steps, stepResults, resolvedContext, this.currentUserMessage);
-        return "cognitive_halt"; 
+        return "cognitive_halt";
       }
     }
 
-    return null; 
+    return null;
   }
 
   _postStepHooks(step, context, stepResults) {
     if (step.type === 'mapping') {
-      const mappingSteps = [step]; 
+      const mappingSteps = [step];
       const consensusGate = computeConsensusGateFromMapping({ stepResults, mappingSteps });
       if (consensusGate) {
         context.workflowControl = consensusGate;
@@ -358,12 +357,9 @@ export class WorkflowEngine {
   }
 
   async _haltWorkflow(request, context, steps, stepResults, resolvedContext, haltReason) {
-    if (haltReason === "cognitive_halt") {
-      return;
-    }
 
     await this._persistAndFinalize(request, context, steps, stepResults, resolvedContext);
-    
+
     this.port.postMessage({
       type: "WORKFLOW_COMPLETE",
       sessionId: context.sessionId,
@@ -377,156 +373,159 @@ export class WorkflowEngine {
 
   _seedContexts(resolvedContext, stepResults, workflowContexts) {
     if (resolvedContext && resolvedContext.type === "recompute") {
-        console.log("[WorkflowEngine] Seeding frozen batch outputs for recompute");
-        try {
-          stepResults.set("batch", {
-            status: "completed",
-            result: { results: resolvedContext.frozenBatchOutputs },
-          });
-        } catch (e) {
-          console.warn("[WorkflowEngine] Failed to seed frozen batch outputs:", e);
-        }
-
-        try {
-          Object.entries(resolvedContext.providerContextsAtSourceTurn || {}).forEach(([pid, ctx]) => {
-            if (ctx && typeof ctx === "object") {
-              workflowContexts[pid] = ctx;
-            }
-          });
-        } catch (e) {
-          console.warn("[WorkflowEngine] Failed to cache historical provider contexts:", e);
-        }
+      console.log("[WorkflowEngine] Seeding frozen batch outputs for recompute");
+      try {
+        stepResults.set("batch", {
+          status: "completed",
+          result: { results: resolvedContext.frozenBatchOutputs },
+        });
+      } catch (e) {
+        console.warn("[WorkflowEngine] Failed to seed frozen batch outputs:", e);
       }
 
-      if (resolvedContext && resolvedContext.type === "extend") {
-        try {
-          const ctxs = resolvedContext.providerContexts || {};
-          const cachedProviders = [];
-          Object.entries(ctxs).forEach(([pid, meta]) => {
-            if (meta && typeof meta === "object" && Object.keys(meta).length > 0) {
-              workflowContexts[pid] = meta;
-              cachedProviders.push(pid);
-            }
-          });
-          if (cachedProviders.length > 0) {
-            console.log(`[WorkflowEngine] Pre-cached contexts from ResolvedContext.extend for providers: ${cachedProviders.join(", ")}`);
+      try {
+        Object.entries(resolvedContext.providerContextsAtSourceTurn || {}).forEach(([pid, ctx]) => {
+          if (ctx && typeof ctx === "object") {
+            workflowContexts[pid] = ctx;
           }
-        } catch (e) {
-          console.warn("[WorkflowEngine] Failed to cache provider contexts from extend:", e);
-        }
+        });
+      } catch (e) {
+        console.warn("[WorkflowEngine] Failed to cache historical provider contexts:", e);
       }
+    }
+
+    if (resolvedContext && resolvedContext.type === "extend") {
+      try {
+        const ctxs = resolvedContext.providerContexts || {};
+        const cachedProviders = [];
+        Object.entries(ctxs).forEach(([pid, meta]) => {
+          if (meta && typeof meta === "object" && Object.keys(meta).length > 0) {
+            workflowContexts[pid] = meta;
+            cachedProviders.push(pid);
+          }
+        });
+        if (cachedProviders.length > 0) {
+          console.log(`[WorkflowEngine] Pre-cached contexts from ResolvedContext.extend for providers: ${cachedProviders.join(", ")}`);
+        }
+      } catch (e) {
+        console.warn("[WorkflowEngine] Failed to cache provider contexts from extend:", e);
+      }
+    }
   }
 
   _hydrateV1Artifacts(context, resolvedContext) {
     if (!context.mapperArtifact && ["understand", "decide"].includes(context.mode)) {
-        try {
-          const previousOutputs = resolvedContext?.providerContexts || {};
-          const v1MappingText = Object.values(previousOutputs)
-            .map(ctx => ctx?.text || "")
-            .find(text => text.includes("<mapping_output>") || text.includes("<decision_map>")); 
-  
-          if (v1MappingText) {
-            console.log("[WorkflowEngine] Hydrating MapperArtifact from V1 output for crossover...");
-            context.mapperArtifact = parseV1MapperToArtifact(v1MappingText, {
-              query: context.userMessage || ""
-            });
-          }
-        } catch (err) {
-          console.warn("[WorkflowEngine] Failed to hydrate V1 artifact:", err);
+      try {
+        const previousOutputs = resolvedContext?.providerContexts || {};
+        const v1MappingText = Object.values(previousOutputs)
+          .map(ctx => ctx?.text || "")
+          .find(text => text.includes("<mapping_output>") || text.includes("<decision_map>"));
+
+        if (v1MappingText) {
+          console.log("[WorkflowEngine] Hydrating MapperArtifact from V1 output for crossover...");
+          context.mapperArtifact = parseV1MapperToArtifact(v1MappingText, {
+            query: context.userMessage || ""
+          });
         }
+      } catch (err) {
+        console.warn("[WorkflowEngine] Failed to hydrate V1 artifact:", err);
+      }
     }
     if (context.mapperArtifact && !context.extractedOptions) {
-        try {
-          console.log("[WorkflowEngine] Flattening V2 MapperArtifact for V1 pipeline...");
-          context.extractedOptions = formatArtifactAsOptions(context.mapperArtifact);
-        } catch (err) {
-          console.warn("[WorkflowEngine] Failed to flatten V2 artifact:", err);
-        }
+      try {
+        console.log("[WorkflowEngine] Flattening V2 MapperArtifact for V1 pipeline...");
+        context.extractedOptions = formatArtifactAsOptions(context.mapperArtifact);
+      } catch (err) {
+        console.warn("[WorkflowEngine] Failed to flatten V2 artifact:", err);
+      }
     }
   }
 
   _emitStepUpdate(step, context, result, resolvedContext, status) {
     this.port.postMessage({
-        type: "WORKFLOW_STEP_UPDATE",
-        sessionId: context.sessionId,
-        stepId: step.stepId,
-        status: status,
-        result: status === 'completed' ? result : undefined,
-        error: status === 'failed' ? result.error : undefined,
-        isRecompute: resolvedContext?.type === "recompute",
-        sourceTurnId: resolvedContext?.sourceTurnId,
-      });
+      type: "WORKFLOW_STEP_UPDATE",
+      sessionId: context.sessionId,
+      stepId: step.stepId,
+      status: status,
+      result: status === 'completed' ? result : undefined,
+      error: status === 'failed' ? result.error : undefined,
+      isRecompute: resolvedContext?.type === "recompute",
+      sourceTurnId: resolvedContext?.sourceTurnId,
+    });
   }
 
   async _persistAndFinalize(request, context, steps, stepResults, resolvedContext) {
-      const result = {
-        batchOutputs: {},
-        mappingOutputs: {},
-        refinerOutputs: {}, // Empty in foundation phase
-        antagonistOutputs: {}, // Empty in foundation phase
-        gauntletOutputs: {}, // Empty in foundation phase
-      };
-      
-      const stepById = new Map((steps || []).map((s) => [s.stepId, s]));
-      stepResults.forEach((stepResult, stepId) => {
-        if (stepResult.status !== "completed") return;
-        const step = stepById.get(stepId);
-        if (!step) return;
-        if (step.type === "prompt") {
-          result.batchOutputs = stepResult.result?.results || {};
-        } else if (step.type === "mapping") {
-          const providerId = step.payload?.mappingProvider;
-          if (providerId) result.mappingOutputs[providerId] = stepResult.result;
-        } 
-      });
+    const result = {
+      batchOutputs: {},
+      mappingOutputs: {},
+      refinerOutputs: {}, // Empty in foundation phase
+      antagonistOutputs: {}, // Empty in foundation phase
+      gauntletOutputs: {}, // Empty in foundation phase
+    };
 
-      const persistRequest = {
-        type: resolvedContext?.type || "unknown",
-        sessionId: context.sessionId,
-        userMessage: this.currentUserMessage,
-      };
-      if (resolvedContext?.type === "recompute") {
-        persistRequest.sourceTurnId = resolvedContext.sourceTurnId;
-        persistRequest.stepType = resolvedContext.stepType;
-        persistRequest.targetProvider = resolvedContext.targetProvider;
+    const stepById = new Map((steps || []).map((s) => [s.stepId, s]));
+    stepResults.forEach((stepResult, stepId) => {
+      if (stepResult.status !== "completed") return;
+      const step = stepById.get(stepId);
+      if (!step) return;
+      if (step.type === "prompt") {
+        result.batchOutputs = stepResult.result?.results || {};
+      } else if (step.type === "mapping") {
+        const providerId = step.payload?.mappingProvider;
+        if (providerId) result.mappingOutputs[providerId] = stepResult.result;
       }
-      if (context?.canonicalUserTurnId)
-        persistRequest.canonicalUserTurnId = context.canonicalUserTurnId;
-      if (context?.canonicalAiTurnId)
-        persistRequest.canonicalAiTurnId = context.canonicalAiTurnId;
+    });
 
-      console.log(
-        `[WorkflowEngine] Persisting (consolidated) ${persistRequest.type} workflow to SessionManager`,
-      );
+    const persistRequest = {
+      type: resolvedContext?.type || "unknown",
+      sessionId: context.sessionId,
+      userMessage: this.currentUserMessage,
+      // ✅ CRITICAL: Ensure cognitive artifacts are persisted
+      mapperArtifact: context?.mapperArtifact,
+      exploreAnalysis: context?.exploreAnalysis,
+    };
+    if (resolvedContext?.type === "recompute") {
+      persistRequest.sourceTurnId = resolvedContext.sourceTurnId;
+      persistRequest.stepType = resolvedContext.stepType;
+      persistRequest.targetProvider = resolvedContext.targetProvider;
+    }
+    if (context?.canonicalUserTurnId)
+      persistRequest.canonicalUserTurnId = context.canonicalUserTurnId;
+    if (context?.canonicalAiTurnId)
+      persistRequest.canonicalAiTurnId = context.canonicalAiTurnId;
 
-      const persistResult = await this.persistenceCoordinator.persistWorkflowResult(
-          persistRequest,
-          resolvedContext,
-          result
-      );
+    console.log(
+      `[WorkflowEngine] Persisting (consolidated) ${persistRequest.type} workflow to SessionManager`,
+    );
 
-      if (persistResult) {
-        if (persistResult.userTurnId)
-          context.canonicalUserTurnId = persistResult.userTurnId;
-        if (persistResult.aiTurnId)
-          context.canonicalAiTurnId = persistResult.aiTurnId;
-        if (resolvedContext?.type === "initialize" && persistResult.sessionId) {
-          context.sessionId = persistResult.sessionId;
-          console.log(
-            `[WorkflowEngine] Initialize complete: session=${persistResult.sessionId}`,
-          );
-        }
+    const persistResult = await this.persistenceCoordinator.persistWorkflowResult(
+      persistRequest,
+      resolvedContext,
+      result
+    );
+
+    if (persistResult) {
+      if (persistResult.userTurnId)
+        context.canonicalUserTurnId = persistResult.userTurnId;
+      if (persistResult.aiTurnId)
+        context.canonicalAiTurnId = persistResult.aiTurnId;
+      if (resolvedContext?.type === "initialize" && persistResult.sessionId) {
+        context.sessionId = persistResult.sessionId;
+        console.log(
+          `[WorkflowEngine] Initialize complete: session=${persistResult.sessionId}`,
+        );
       }
+    }
 
-      this.port.postMessage({
-        type: "WORKFLOW_COMPLETE",
-        sessionId: context.sessionId,
-        workflowId: request.workflowId,
-        finalResults: Object.fromEntries(stepResults),
-        ...(context?.workflowControl?.consensusOnly ? { haltReason: "consensus_only" } : {}),
-      });
+    this.port.postMessage({
+      type: "WORKFLOW_COMPLETE",
+      sessionId: context.sessionId,
+      workflowId: request.workflowId,
+      finalResults: Object.fromEntries(stepResults),
+      ...(context?.workflowControl?.consensusOnly ? { haltReason: "consensus_only" } : {}),
+    });
 
-      this.turnEmitter.emitTurnFinalized(context, steps, stepResults, resolvedContext, this.currentUserMessage);
+    this.turnEmitter.emitTurnFinalized(context, steps, stepResults, resolvedContext, this.currentUserMessage);
   }
 
   async handleRetryRequest(message) {
@@ -556,10 +555,10 @@ export class WorkflowEngine {
 
   async handleContinueCognitiveRequest(payload) {
     return this.cognitiveHandler.handleContinueRequest(
-        payload, 
-        this.stepExecutor, 
-        this.streamingManager, 
-        this.contextManager
+      payload,
+      this.stepExecutor,
+      this.streamingManager,
+      this.contextManager
     );
   }
 }

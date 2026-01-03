@@ -7,42 +7,30 @@ export function applyEdits(
 ): MapperArtifact {
     if (!edits) return original;
 
-    // Apply consensus edits
-    const editedClaims = original.consensus.claims
-        .filter((_, i) => !edits.deletedClaimIndices.includes(i))
-        .map((claim, i) => {
-            const edit = edits.consensusEdits.find(e => e.index === i);
+    // Apply claim edits
+    const editedClaims = (original.claims || [])
+        .filter(c => !edits.deletedClaimIds.includes(c.originalId || c.id))
+        .map(claim => {
+            const id = claim.originalId || claim.id;
+            const edit = edits.claimEdits.find(e => e.originalId === id);
             if (!edit) return claim;
             return { ...claim, ...edit.edited };
         });
 
-    // Apply outlier edits
-    const editedOutliers = original.outliers
-        .filter((_, i) => !edits.deletedOutlierIndices.includes(i))
-        .map((outlier, i) => {
-            const edit = edits.outlierEdits.find(e => e.index === i);
-            if (!edit) return outlier;
-            return { ...outlier, ...edit.edited };
-        });
-
-    // Apply tension edits
-    const editedTensions = (original.tensions || [])
+    // Apply edge edits (tensions/edges)
+    const editedEdges = (original.edges || [])
         .filter((_, i) => !edits.deletedTensionIndices.includes(i))
-        .map((tension, i) => {
+        .map((edge, i) => {
             const edit = edits.tensionEdits.find(e => e.index === i);
-            if (!edit) return tension;
-            return { ...tension, ...edit.edited };
+            if (!edit) return edge;
+            return { ...edge, ...edit.edited };
         });
 
     return {
         ...original,
-        consensus: {
-            ...original.consensus,
-            claims: editedClaims
-        },
-        outliers: editedOutliers,
-        tensions: editedTensions,
-        ghost: edits.ghostEdit !== null ? edits.ghostEdit : original.ghost,
+        claims: editedClaims,
+        edges: editedEdges,
+        ghosts: edits.ghostEdit ? [edits.ghostEdit] : (original.ghosts || []), // Mapping ghost string to V3 ghosts array roughly
         // Add user notes as specific field for prompts to verify
         // The contract might NOT have this field typed yet on the backend contract 
         // but we are passing it in payload payload anyway

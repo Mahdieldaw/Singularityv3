@@ -431,7 +431,18 @@ Answer the user's message directly. Use context only to disambiguate.
 
               graphTopology = unifiedResult.topology;
               allOptions = unifiedResult.options;
-              mapperArtifact = unifiedResult.artifact;
+
+              if (unifiedResult.artifact || unifiedResult.map) {
+                const base = unifiedResult.artifact || unifiedResult.map;
+                mapperArtifact = {
+                  ...base,
+                  query: payload.originalPrompt,
+                  turn: context.turn || 0,
+                  timestamp: new Date().toISOString(),
+                  model_count: citationOrder.length,
+                  souvenir: base.souvenir || ""
+                };
+              }
 
               const processed = artifactProcessor.process(unifiedResult.narrative || finalResult.text);
               finalResult.text = processed.cleanText;
@@ -1018,40 +1029,21 @@ Answer the user's message directly. Use context only to disambiguate.
       payload.exploreAnalysis ||
       (mapperArtifact ? computeExplore(payload.originalPrompt, mapperArtifact) : null);
 
-    if (!mapperArtifact || !exploreAnalysis) {
-      throw new Error("Understand mode requires a MapperArtifact and ExploreAnalysis.");
+    if (!mapperArtifact) {
+      throw new Error("Understand mode requires a MapperArtifact.");
     }
 
-    let graphTopology = payload.mappingMeta?.graphTopology || null;
-    let optionsInventory = [];
     let narrativeSummary = "";
 
     const mappingText = payload.mappingText || "";
     if (mappingText) {
       const parsed = parseUnifiedMapperOutput(mappingText);
-      if (!graphTopology) graphTopology = parsed.topology;
       narrativeSummary = parsed.narrative;
-      const optionsStr = parsed.options || "";
-      if (optionsStr) {
-        const lines = optionsStr.split('\n');
-        for (const line of lines) {
-          const match = line.match(/^\s*(?:\d+\.|\-|\*|•)\s*\*?\*?([^:*]+)\*?\*?:\s*(.*)$/);
-          if (match) {
-            optionsInventory.push({
-              label: match[1].trim().replace(/^\*\*|\*\*$/g, ''),
-              summary: match[2].trim().replace(/\s*\[\d+(?:\s*,\s*\d+)*\]/g, '')
-            });
-          }
-        }
-      }
     }
 
     let understandPrompt = this.promptService.buildUnderstandPrompt(
       payload.originalPrompt,
       mapperArtifact,
-      exploreAnalysis,
-      graphTopology,
-      optionsInventory,
       narrativeSummary,
       payload.userNotes
     );
@@ -1101,18 +1093,21 @@ Answer the user's message directly. Use context only to disambiguate.
         })
         : null);
 
-    const exploreAnalysis =
-      payload.exploreAnalysis ||
-      (mapperArtifact ? computeExplore(payload.originalPrompt, mapperArtifact) : null);
-
     if (!mapperArtifact) {
       throw new Error("Gauntlet requires a MapperArtifact but none was provided.");
+    }
+
+    let narrativeSummary = "";
+    const mappingText = payload.mappingText || "";
+    if (mappingText) {
+      const parsed = parseUnifiedMapperOutput(mappingText);
+      narrativeSummary = parsed.narrative;
     }
 
     let gauntletPrompt = this.promptService.buildGauntletPrompt(
       payload.originalPrompt,
       mapperArtifact,
-      exploreAnalysis,
+      narrativeSummary,
       payload.userNotes
     );
 

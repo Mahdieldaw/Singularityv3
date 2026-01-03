@@ -1,9 +1,11 @@
-import React, { useEffect, useMemo, useState, useCallback } from "react";
+import React, { useEffect, useMemo, useCallback, useState } from "react";
 import { MapperArtifact, AiTurn, ExploreAnalysis, ProviderResponse } from "../../../shared/contract";
 import { applyEdits } from "../../utils/apply-artifact-edits";
 import { artifactEditsAtom } from "../../state/artifact-edits";
 import { RawResponseCard } from "./cards/RawResponseCard";
 import { cleanOptionsText, extractGraphTopologyAndStrip, parseMappingResponse } from "../../../shared/parsing-utils";
+import DecisionMapGraph from "../DecisionMapGraph";
+import { adaptGraphTopology } from "../../utils/graphAdapter";
 
 import { selectedArtifactsAtom, selectedModelsAtom, workflowProgressForTurnFamily } from "../../state/atoms";
 import { SelectionBar } from "./SelectionBar";
@@ -20,17 +22,13 @@ import { useAntagonistOutput } from "../../hooks/useAntagonistOutput";
 import { PipelineErrorBanner } from "../PipelineErrorBanner";
 import { CopyButton } from "../CopyButton";
 import {
-    buildComparisonContent,
-    buildDecisionTreeContent,
-    buildDirectAnswerContent,
-    buildExplorationContent,
     reconcileOptions,
     unifiedOptionsToShowcaseItems,
     processShowcaseItems,
     type ProcessedShowcase,
     type SelectableShowcaseItem
 } from "./content-builders";
-import { DimensionFirstView } from "./DimensionFirstView";
+import { SelectableCard, GhostDivider } from "./LegacyArtifactViews";
 import { LLM_PROVIDERS_CONFIG } from "../../constants";
 import type { CognitiveTransitionOptions, SelectedArtifact } from "../../hooks/cognitive/useCognitiveMode";
 
@@ -38,80 +36,46 @@ const MapIcon = ({ className }: { className?: string }) => (
     <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><rect width="18" height="18" x="3" y="3" rx="2" ry="2" /><line x1="3" x2="21" y1="9" y2="9" /><line x1="9" x2="9" y1="21" y2="9" /></svg>
 );
 
-const DimensionBadge: React.FC<{ dimension?: string }> = ({ dimension }) => {
-    if (!dimension) return null;
-    return (
-        <span className="text-[10px] px-1.5 py-0.5 rounded bg-surface-highlight/40 border border-border-subtle text-text-muted uppercase tracking-wide">
-            {dimension.replace(/_/g, " ")}
-        </span>
-    );
-};
 
-const UnifiedMetaBadges: React.FC<{ item: SelectableShowcaseItem }> = ({ item }) => {
-    const src = item.unifiedSource;
-    const confidence = item.matchConfidence;
 
-    const sourceBadge = (() => {
-        if (!src) return null;
-        if (src === "matched") {
-            return (
-                <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/20 text-emerald-200 uppercase tracking-wide">
-                    matched
-                </span>
-            );
-        }
-        if (src === "inventory_only") {
-            return (
-                <span className="text-[10px] px-1.5 py-0.5 rounded bg-sky-500/10 border border-sky-500/20 text-sky-200 uppercase tracking-wide">
-                    options only
-                </span>
-            );
-        }
-        return (
-            <span className="text-[10px] px-1.5 py-0.5 rounded bg-violet-500/10 border border-violet-500/20 text-violet-200 uppercase tracking-wide">
-                artifact only
-            </span>
-        );
-    })();
-
-    const confidenceBadge =
-        src === "matched" && confidence && confidence !== "none" ? (
-            <span className="text-[10px] px-1.5 py-0.5 rounded bg-surface-highlight/30 border border-border-subtle text-text-muted tabular-nums">
-                match: {confidence}
-            </span>
-        ) : null;
-
-    const inventoryBadge =
-        typeof item.inventoryIndex === "number" && item.inventoryIndex > 0 ? (
-            <span className="text-[10px] px-1.5 py-0.5 rounded bg-surface-highlight/30 border border-border-subtle text-text-muted tabular-nums">
-                opt #{item.inventoryIndex}
-            </span>
-        ) : null;
-
-    const artifactIdBadge = item.artifactOriginalId ? (
-        <span className="text-[10px] text-text-muted font-mono px-1.5 py-0.5 rounded bg-surface-highlight/30 border border-border-subtle">
-            {item.artifactOriginalId}
-        </span>
-    ) : null;
-
-    if (!sourceBadge && !confidenceBadge && !inventoryBadge && !artifactIdBadge) return null;
+const FormattedNarrative: React.FC<{
+    text: string;
+    onToggle: (id: string) => void;
+    selectedIds: Set<string>;
+}> = ({ text, onToggle, selectedIds }) => {
+    // Split by the anchor pattern: **[Label|ID]**
+    // Regex captures: 1=Label, 2=ID
+    const parts = text.split(/(\*\*\[.*?\|.*?\]\*\*)/g);
 
     return (
-        <>
-            {sourceBadge}
-            {confidenceBadge}
-            {inventoryBadge}
-            {artifactIdBadge}
-        </>
-    );
-};
-
-const SupportMeta: React.FC<{ supportCount?: number; modelCount?: number }> = ({ supportCount, modelCount }) => {
-    if (typeof supportCount !== "number" || supportCount <= 0) return null;
-    const denom = typeof modelCount === "number" && modelCount > 0 ? modelCount : null;
-    return (
-        <span className="text-[10px] px-1.5 py-0.5 rounded bg-surface-highlight/30 border border-border-subtle text-text-muted tabular-nums">
-            {denom ? `${supportCount}/${denom}` : supportCount}
+        <span>
+            {parts.map((part, i) => {
+                const match = part.match(/^\*\*\[(.*?)\|(.*?)\]\*\*$/);
+                if (match) {
+                    const label = match[1];
+                    const id = match[2];
+                    const isSelected = selectedIds.has(id);
+                    return (
+                        <span
+                            key={i}
+                            onClick={(e) => { e.stopPropagation(); onToggle(id); }}
+                            className={`
+                                inline-flex items-center gap-1 mx-1 px-1.5 py-0.5 rounded-md cursor-pointer transition-all border
+                                ${isSelected
+                                    ? "bg-primary-500/20 border-primary-500/40 text-primary-200"
+                                    : "bg-surface-highlight border-border-strong text-text-secondary hover:bg-surface-highlight/80 hover:border-brand-400/50"}
+                            `}
+                            title={`Toggle claim ${id}`}
+                        >
+                            <span className="font-medium text-[13px]">{label}</span>
+                            {isSelected && <span className="text-[10px] opacity-70">✓</span>}
+                        </span>
+                    );
+                }
+                // Render Bold text **text** correctly too? 
+                // For now just return text, but maybe handle bolding for emphasis
+                return <span key={i} className="text-text-primary/90">{part.replace(/\*\*/g, '')}</span>;
+            })}
         </span>
     );
 };
@@ -226,34 +190,14 @@ const findBestOptionDetail = (optionDetailMap: Map<string, string>, itemText: st
 const buildArtifactDetailMap = (artifact: MapperArtifact | null): Map<string, string> => {
     const map = new Map<string, string>();
     if (!artifact) return map;
-    const anyArtifact = artifact as any;
 
-    if (Array.isArray(anyArtifact?.options_inventory)) {
-        for (const opt of anyArtifact.options_inventory) {
-            const label = String(opt?.label || "").trim();
-            const summary = String(opt?.summary || "").trim();
-            if (!label || !summary) continue;
-            const key = normalizeTitleKey(label);
-            if (key && !map.has(key)) map.set(key, summary);
-        }
-    }
-
-    for (const c of artifact.consensus?.claims || []) {
-        const titleKey = normalizeTitleKey(c.text);
+    // V3: Iterate claims
+    for (const c of artifact.claims || []) {
+        const titleKey = normalizeTitleKey(c.label);
         const parts: string[] = [];
-        if (c.applies_when) parts.push(`When: ${c.applies_when}`);
+        if (c.quote) parts.push(`"${c.quote}"`);
         if (typeof c.support_count === "number" && c.support_count > 0) parts.push(`Supported by ${c.support_count} models`);
-        if (c.dimension) parts.push(`Dimension: ${c.dimension.replace(/_/g, " ")}`);
-        const summary = parts.join(" · ").trim();
-        if (titleKey && summary && !map.has(titleKey)) map.set(titleKey, summary);
-    }
-
-    for (const o of artifact.outliers || []) {
-        const titleKey = normalizeTitleKey(o.insight);
-        const parts: string[] = [];
-        if (o.applies_when) parts.push(`When: ${o.applies_when}`);
-        if (o.challenges) parts.push(`Challenges: ${o.challenges}`);
-        if (o.raw_context) parts.push(o.raw_context);
+        if (c.type) parts.push(`Type: ${c.type}`);
         const summary = parts.join(" · ").trim();
         if (titleKey && summary && !map.has(titleKey)) map.set(titleKey, summary);
     }
@@ -261,262 +205,7 @@ const buildArtifactDetailMap = (artifact: MapperArtifact | null): Map<string, st
     return map;
 };
 
-const SelectableCard: React.FC<{
-    item: SelectableShowcaseItem;
-    isSelected: boolean;
-    onToggle: () => void;
-    modelCount?: number;
-    className?: string;
-    headerRight?: React.ReactNode;
-    subtitle?: React.ReactNode;
-}> = ({ item, isSelected, onToggle, modelCount, className, headerRight, subtitle }) => {
-    return (
-        <div
-            onClick={onToggle}
-            className={`
-                p-3 rounded-lg border cursor-pointer transition-all duration-200
-                ${isSelected
-                    ? "bg-primary-500/10 border-primary-500/40 shadow-sm"
-                    : "bg-surface-base border-border-subtle hover:border-border-strong hover:bg-surface-highlight"}
-                ${className || ""}
-            `}
-        >
-            <div className="flex items-start justify-between gap-3">
-                <div className="flex items-start gap-2.5">
-                    <div className={`mt-0.5 flex-shrink-0 w-4 h-4 rounded border flex items-center justify-center transition-colors ${isSelected ? "bg-primary-500 border-primary-500" : "border-text-muted"}`}>
-                        {isSelected && <span className="text-white text-[10px] pb-0.5">✓</span>}
-                    </div>
-                    <div className="space-y-1">
-                        <div className="text-sm text-text-primary leading-relaxed font-medium">{item.text}</div>
-                        {subtitle}
-                        <div className="flex items-center gap-2">
-                            <UnifiedMetaBadges item={item} />
-                            <DimensionBadge dimension={item.dimension} />
-                            <SupportMeta supportCount={item.graphSupportCount} modelCount={modelCount} />
-                            {item.source && (
-                                <span className="text-[10px] text-text-muted font-mono px-1.5 py-0.5 rounded bg-surface-highlight/30 border border-border-subtle">
-                                    {item.source}
-                                </span>
-                            )}
-                        </div>
-                    </div>
-                </div>
-                {headerRight}
-            </div>
-        </div>
-    );
-};
 
-const GhostDivider: React.FC<{ ghost: string }> = ({ ghost }) => (
-    <div className="mt-4 p-4 rounded-xl border border-dashed border-border-subtle bg-surface-highlight/10">
-        <div className="text-xs font-semibold text-text-secondary mb-2">👻 The Ghost</div>
-        <div className="text-sm text-text-muted italic leading-relaxed">{ghost}</div>
-    </div>
-);
-
-const ContainerPreview: React.FC<{
-    type: ExploreAnalysis["containerType"];
-    title: string;
-    summary: React.ReactNode;
-}> = ({ type, title, summary }) => {
-    const wrapperClass =
-        type === "direct_answer"
-            ? "bg-emerald-500/5 border border-emerald-500/20"
-            : type === "decision_tree"
-                ? "bg-blue-500/5 border border-blue-500/20"
-                : type === "comparison_matrix"
-                    ? "bg-purple-500/5 border border-purple-500/20"
-                    : "bg-violet-500/5 border border-violet-500/20";
-
-    const headerClass =
-        type === "direct_answer"
-            ? "border-emerald-500/10"
-            : type === "decision_tree"
-                ? "border-blue-500/10"
-                : type === "comparison_matrix"
-                    ? "border-purple-500/10"
-                    : "border-violet-500/10";
-
-    const titleClass =
-        type === "direct_answer"
-            ? "text-emerald-300"
-            : type === "decision_tree"
-                ? "text-blue-300"
-                : type === "comparison_matrix"
-                    ? "text-purple-300"
-                    : "text-violet-300";
-
-    return (
-        <div className={`${wrapperClass} rounded-xl overflow-hidden`}>
-            <div className={`px-4 py-3 flex items-center justify-between border-b ${headerClass}`}>
-                <div className={`text-xs font-semibold uppercase tracking-wide ${titleClass}`}>{title}</div>
-                <div className="text-[11px] text-text-muted">↓ All claims selectable below</div>
-            </div>
-            <div className="p-4">{summary}</div>
-        </div>
-    );
-};
-
-const BifurcationSlot: React.FC<{
-    left: SelectableShowcaseItem;
-    right: SelectableShowcaseItem;
-    axis?: string;
-    selectedIds: Set<string>;
-    onToggle: (id: string) => void;
-    modelCount?: number;
-}> = ({ left, right, axis, selectedIds, onToggle, modelCount }) => {
-    const leftSelected = selectedIds.has(left.id);
-    const rightSelected = selectedIds.has(right.id);
-    const dimLeft = leftSelected && !rightSelected;
-    const dimRight = rightSelected && !leftSelected;
-
-    return (
-        <div className="bg-surface-raised border border-border-subtle rounded-xl overflow-hidden">
-            {axis && (
-                <div className="px-4 py-2 text-[11px] text-text-muted border-b border-border-subtle/40">
-                    <span className="font-medium text-text-secondary">Axis:</span> {axis}
-                </div>
-            )}
-            <div className="grid grid-cols-2 divide-x divide-border-subtle/40">
-                <div className={dimLeft ? "" : dimRight ? "opacity-50" : ""}>
-                    <SelectableCard
-                        item={left}
-                        isSelected={leftSelected}
-                        onToggle={() => onToggle(left.id)}
-                        modelCount={modelCount}
-                        className="rounded-none border-0"
-                        subtitle={
-                            left.detail ? (
-                                <div className="text-xs text-text-muted leading-relaxed">{left.detail}</div>
-                            ) : null
-                        }
-                    />
-                </div>
-                <div className={dimRight ? "" : dimLeft ? "opacity-50" : ""}>
-                    <SelectableCard
-                        item={right}
-                        isSelected={rightSelected}
-                        onToggle={() => onToggle(right.id)}
-                        modelCount={modelCount}
-                        className="rounded-none border-0"
-                        subtitle={
-                            right.detail ? (
-                                <div className="text-xs text-text-muted leading-relaxed">{right.detail}</div>
-                            ) : null
-                        }
-                    />
-                </div>
-            </div>
-        </div>
-    );
-};
-
-const relationshipLabel = (
-    a: SelectableShowcaseItem,
-    b: SelectableShowcaseItem,
-    edges: Array<{ source: string; target: string; type: string }>
-): { text: string; tone: string } | null => {
-    const aid = a.graphNodeId;
-    const bid = b.graphNodeId;
-    if (!aid || !bid) return null;
-    const direct = edges.find((e) => e.source === aid && e.target === bid);
-    const reverse = edges.find((e) => e.source === bid && e.target === aid);
-    const chosen = direct || reverse;
-    if (!chosen) return null;
-    const t = String(chosen.type || "").toLowerCase();
-    if (t === "prerequisite" || t.includes("prereq")) return { text: "↓ enables", tone: "text-emerald-300" };
-    if (t === "complements" || t.includes("complement")) return { text: "↔ complements", tone: "text-emerald-300" };
-    return null;
-};
-
-const RelationshipBundle: React.FC<{
-    items: SelectableShowcaseItem[];
-    edges: Array<{ source: string; target: string; type: string }>;
-    selectedIds: Set<string>;
-    onToggle: (id: string) => void;
-    modelCount?: number;
-}> = ({ items, edges, selectedIds, onToggle, modelCount }) => {
-    const scrollable = items.length >= 5;
-    return (
-        <div className="bg-emerald-500/5 border border-emerald-500/20 rounded-xl overflow-hidden">
-            <div className="px-4 py-2.5 border-b border-emerald-500/10 flex items-center justify-between">
-                <div className="text-xs font-semibold text-emerald-300 uppercase tracking-wide">Relationship Bundle</div>
-                <div className="text-[11px] text-text-muted">{items.length} items</div>
-            </div>
-            <div className={`${scrollable ? "max-h-80 overflow-y-auto" : ""} divide-y divide-emerald-500/10`}>
-                {items.map((item, idx) => {
-                    const rel = idx > 0 ? relationshipLabel(items[idx - 1], item, edges) : null;
-                    return (
-                        <div key={item.id} className="px-4 py-3">
-                            {rel && (
-                                <div className={`text-[11px] mb-2 ${rel.tone}`}>
-                                    {rel.text}
-                                </div>
-                            )}
-                            <SelectableCard
-                                item={item}
-                                isSelected={selectedIds.has(item.id)}
-                                onToggle={() => onToggle(item.id)}
-                                modelCount={modelCount}
-                                className="bg-transparent border-border-subtle/60 hover:bg-surface-highlight/30"
-                                subtitle={
-                                    item.detail ? (
-                                        <div className="text-xs text-text-muted leading-relaxed">{item.detail}</div>
-                                    ) : null
-                                }
-                            />
-                        </div>
-                    );
-                })}
-            </div>
-        </div>
-    );
-};
-
-const FrameChallengerCard: React.FC<{
-    item: SelectableShowcaseItem;
-    isSelected: boolean;
-    onToggle: () => void;
-    modelCount?: number;
-    relatedEdgesCount?: number;
-}> = ({ item, isSelected, onToggle, modelCount, relatedEdgesCount }) => {
-    return (
-        <div className="bg-gradient-to-br from-amber-500/10 to-orange-500/5 border border-amber-500/25 rounded-xl overflow-hidden">
-            <div className="px-4 py-3 flex items-center justify-between border-b border-amber-500/15">
-                <div className="text-xs font-semibold text-amber-300 uppercase tracking-wide">Frame Challenger</div>
-                <div className="flex items-center gap-2">
-                    {typeof relatedEdgesCount === "number" && relatedEdgesCount > 0 && (
-                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/20 text-amber-200 tabular-nums">
-                            {relatedEdgesCount} links
-                        </span>
-                    )}
-                    <SupportMeta supportCount={item.graphSupportCount} modelCount={modelCount} />
-                </div>
-            </div>
-            <div className="p-4 space-y-3">
-                <SelectableCard
-                    item={item}
-                    isSelected={isSelected}
-                    onToggle={onToggle}
-                    modelCount={modelCount}
-                    className="bg-transparent border-amber-500/20 hover:border-amber-400/40"
-                    subtitle={
-                        <div className="mt-2 space-y-2">
-                            {item.detail ? (
-                                <div className="text-xs text-text-muted leading-relaxed">{item.detail}</div>
-                            ) : null}
-                            {item.challenges ? (
-                                <div className="p-2 rounded bg-black/20 border border-amber-500/15 text-xs text-amber-100/90">
-                                    <span className="text-amber-300 font-semibold">Challenges:</span> {item.challenges}
-                                </div>
-                            ) : null}
-                        </div>
-                    }
-                />
-            </div>
-        </div>
-    );
-};
 
 interface ArtifactShowcaseProps {
     mapperArtifact?: MapperArtifact;
@@ -538,7 +227,6 @@ export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
     isLoading = false,
 }) => {
     const [selectedIds, setSelectedIds] = useAtom(selectedArtifactsAtom);
-    const [dimensionViewOpen, setDimensionViewOpen] = useState(false);
     const selectedModels = useAtomValue(selectedModelsAtom);
     const [allEdits] = useAtom(artifactEditsAtom);
     const setActiveSplitPanel = useSetAtom(activeSplitPanelAtom);
@@ -567,18 +255,26 @@ export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
         return getLatestResponse((turn.mappingResponses || {})[activeMapperPid]);
     }, [turn.mappingResponses, activeMapperPid]);
 
+    const parsedMapping = useMemo(() => {
+        const raw = String(latestMapping?.text || "");
+        return parseMappingResponse(raw);
+    }, [latestMapping]);
+
     const graphTopology = useMemo(() => {
         const fromMeta = (latestMapping?.meta as any)?.graphTopology || null;
         if (fromMeta) return fromMeta;
         const raw = String(latestMapping?.text || "");
-        return extractGraphTopologyAndStrip(raw).topology;
-    }, [latestMapping]);
+        return extractGraphTopologyAndStrip(raw).topology || parsedMapping.graphTopology;
+    }, [latestMapping, parsedMapping.graphTopology]);
 
     const mapperNarrative = useMemo(() => {
-        const raw = String(latestMapping?.text || "");
-        const parsed = parseMappingResponse(raw);
-        return parsed.narrative || "";
-    }, [latestMapping]);
+        return parsedMapping.narrative || "";
+    }, [parsedMapping.narrative]);
+
+    const mapperNarrativeAnchorCount = useMemo(() => {
+        const matches = mapperNarrative.match(/\*\*\[[^\]|]+\|[^\]]+\]\*\*/g);
+        return matches ? matches.length : 0;
+    }, [mapperNarrative]);
 
     const mapperOptionsText = useMemo(() => {
         const fromMeta =
@@ -589,10 +285,36 @@ export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
         if (fromMeta) {
             return cleanOptionsText(normalizeMaybeEscapedText(String(fromMeta)));
         }
-        const raw = String(latestMapping?.text || "");
-        const parsed = parseMappingResponse(raw);
-        return parsed.options ? cleanOptionsText(normalizeMaybeEscapedText(parsed.options)) : null;
-    }, [latestMapping]);
+        return parsedMapping.options ? cleanOptionsText(normalizeMaybeEscapedText(parsedMapping.options)) : null;
+    }, [latestMapping, parsedMapping.options]);
+
+    const graphData = useMemo(() => {
+        const claims = Array.isArray(artifactForDisplay?.claims) ? artifactForDisplay!.claims : [];
+        const edges = Array.isArray(artifactForDisplay?.edges) ? artifactForDisplay!.edges : [];
+        if (claims.length > 0 || edges.length > 0) return { claims, edges };
+        return adaptGraphTopology(graphTopology);
+    }, [artifactForDisplay, graphTopology]);
+
+    const graphContainerRef = React.useRef<HTMLDivElement>(null);
+    const [graphDims, setGraphDims] = useState<{ w: number; h: number }>({ w: 0, h: 320 });
+
+    useEffect(() => {
+        const update = () => {
+            const el = graphContainerRef.current;
+            if (!el) return;
+            const w = el.clientWidth;
+            const h = Math.max(260, Math.min(420, Math.floor(w * 0.6)));
+            setGraphDims({ w, h });
+        };
+
+        update();
+        const raf = requestAnimationFrame(update);
+        window.addEventListener('resize', update);
+        return () => {
+            window.removeEventListener('resize', update);
+            cancelAnimationFrame(raf);
+        };
+    }, []);
 
     const artifactDetailMap = useMemo(() => buildArtifactDetailMap(artifactForDisplay), [artifactForDisplay]);
     const optionDetailMap = useMemo(() => buildOptionDetailMap(mapperOptionsText), [mapperOptionsText]);
@@ -634,7 +356,9 @@ export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
         const out: SelectedArtifact[] = [];
         const ids = Array.from(selectedIds);
         ids.sort();
+
         for (const id of ids) {
+            // Check unified items first (reconciled)
             const unified = optionById.get(id);
             if (unified) {
                 const ad = unified.artifactData;
@@ -642,7 +366,6 @@ export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
                 let kind = "inventory_option";
                 let text = unified.label;
                 let dimension = ad?.dimension;
-                let source = ad?.source;
 
                 const meta: any = {
                     summary: unified.summary,
@@ -653,39 +376,17 @@ export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
                     artifact: ad || null,
                 };
 
-                if (ad?.originalId && artifactForDisplay) {
-                    if (ad.originalId.startsWith("consensus-")) {
-                        const idx = Number(ad.originalId.slice("consensus-".length));
-                        const claim = artifactForDisplay?.consensus?.claims?.[idx];
-                        if (claim) {
-                            kind = "consensus_claim";
-                            text = claim.text;
-                            dimension = claim.dimension;
-                            meta.applies_when = claim.applies_when;
-                            meta.support_count = claim.support_count;
-                            meta.supporters = claim.supporters;
-                        }
-                    } else if (ad.originalId.startsWith("outlier-")) {
-                        const idx = Number(ad.originalId.slice("outlier-".length));
-                        const o = artifactForDisplay?.outliers?.[idx];
-                        if (o) {
-                            kind = "outlier";
-                            text = o.insight;
-                            dimension = o.dimension;
-                            source = o.source;
-                            meta.type = o.type;
-                            meta.raw_context = o.raw_context;
-                            meta.applies_when = o.applies_when;
-                            meta.source_index = o.source_index;
-                        }
+                // If linked to a V3 claim (via ID matching)
+                if (ad && ad.originalId && artifactForDisplay && artifactForDisplay.claims) {
+                    const claim = artifactForDisplay.claims.find(c => c.id === ad.originalId);
+                    if (claim) {
+                        kind = "consensus_claim"; // Reuse "consensus_claim" kind for compatibility
+                        text = claim.label || claim.text;
+                        meta.supporters = claim.supporters;
+                        meta.support_count = claim.support_count;
+                        meta.quote = claim.quote;
+                        meta.type = claim.type;
                     }
-                } else if (ad) {
-                    if (ad.type === "consensus") kind = "consensus_claim";
-                    else kind = "outlier";
-                    meta.applies_when = ad.applies_when;
-                    meta.support_count = ad.support_count;
-                    meta.supporters = ad.supporters;
-                    meta.type = ad.type;
                 }
 
                 out.push({
@@ -693,46 +394,27 @@ export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
                     kind,
                     text,
                     dimension,
-                    source,
-                    meta,
+                    meta
                 });
                 continue;
             }
-            if (id.startsWith("consensus-")) {
-                const idx = Number(id.slice("consensus-".length));
-                const claim = artifactForDisplay?.consensus?.claims?.[idx];
-                if (!claim) continue;
-                out.push({
-                    id,
-                    kind: "consensus_claim",
-                    text: claim.text,
-                    dimension: claim.dimension,
-                    meta: {
-                        applies_when: claim.applies_when,
-                        support_count: claim.support_count,
-                        supporters: claim.supporters,
-                    },
-                });
-                continue;
-            }
-            if (id.startsWith("outlier-")) {
-                const idx = Number(id.slice("outlier-".length));
-                const o = artifactForDisplay?.outliers?.[idx];
-                if (!o) continue;
-                out.push({
-                    id,
-                    kind: "outlier",
-                    text: o.insight,
-                    dimension: o.dimension,
-                    source: o.source,
-                    meta: {
-                        type: o.type,
-                        raw_context: o.raw_context,
-                        applies_when: o.applies_when,
-                        source_index: o.source_index,
-                    },
-                });
-                continue;
+
+            // Fallback: Check Artifact directly if not in reconciled list (e.g. from graph only)
+            if (artifactForDisplay && artifactForDisplay.claims) {
+                const claim = artifactForDisplay.claims.find(c => c.id === id);
+                if (claim) {
+                    out.push({
+                        id,
+                        kind: "consensus_claim",
+                        text: claim.label || claim.text,
+                        meta: {
+                            supporters: claim.supporters,
+                            support_count: claim.support_count,
+                            quote: claim.quote,
+                            type: claim.type
+                        }
+                    });
+                }
             }
         }
         return out;
@@ -747,12 +429,6 @@ export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
             }
         });
     };
-
-    const dimensionCoverage = analysis?.dimensionCoverage || [];
-
-    const gaps = useMemo(() => dimensionCoverage.filter((d) => d.is_gap), [dimensionCoverage]);
-
-    const gapsCount = gaps.length;
 
     // Copy Handlers
     const handleCopyMapper = useCallback(() => {
@@ -805,19 +481,10 @@ export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
         navigator.clipboard.writeText(md);
     }, [turn, refinerOutput, refinerPid, antagonistOutput, antagonistPid, includePromptInCopy]);
 
-    const contestedCount = useMemo(
-        () => dimensionCoverage.filter((d) => d.is_contested).length,
-        [dimensionCoverage]
-    );
-    const totalDims = dimensionCoverage.length;
-    const settledCount = Math.max(0, totalDims - gapsCount - contestedCount);
-    const ghostPresent = Boolean(mapperArtifact?.ghost);
-    const dimsFoundCount = mapperArtifact?.dimensions_found?.length ?? totalDims;
-
     const processed: ProcessedShowcase | null = useMemo(() => {
         if (!artifactForDisplay) return null;
         const reconciledItems = unifiedOptionsToShowcaseItems(reconciliation);
-        return processShowcaseItems(reconciledItems, graphTopology, artifactForDisplay?.ghost ?? null);
+        return processShowcaseItems(reconciledItems, graphTopology, artifactForDisplay?.ghosts?.[0] ?? null);
     }, [artifactForDisplay, graphTopology, reconciliation]);
 
     const processedWithDetails: ProcessedShowcase | null = useMemo(() => {
@@ -850,109 +517,8 @@ export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
         };
     }, [processed, artifactDetailMap, optionDetailMap]);
 
-    const renderContainerPreview = () => {
-        if (!artifactForDisplay || !analysis) return null;
-        switch (analysis.containerType) {
-            case "comparison_matrix":
-                {
-                    const content = buildComparisonContent(artifactForDisplay, analysis);
-                    const dims = content?.dimensions || [];
-                    return (
-                        <ContainerPreview
-                            type="comparison_matrix"
-                            title="Comparison Matrix"
-                            summary={
-                                <div className="space-y-2">
-                                    {dims.slice(0, 3).map((d, idx) => (
-                                        <div key={idx} className="flex items-center justify-between gap-3 text-sm">
-                                            <span className="text-text-muted">{d.name}</span>
-                                            <span className="text-text-primary font-medium truncate max-w-[60%]">{d.winner}</span>
-                                        </div>
-                                    ))}
-                                    {dims.length > 3 && (
-                                        <div className="text-xs text-text-muted">+{dims.length - 3} more dimensions</div>
-                                    )}
-                                </div>
-                            }
-                        />
-                    );
-                }
-            case "exploration_space":
-                {
-                    const content = buildExplorationContent(artifactForDisplay, analysis);
-                    const paradigms = content?.paradigms || [];
-                    return (
-                        <ContainerPreview
-                            type="exploration_space"
-                            title="Exploration Space"
-                            summary={
-                                <div className="space-y-3">
-                                    {content?.common_thread && (
-                                        <div className="text-xs text-text-secondary italic">"{content.common_thread}"</div>
-                                    )}
-                                    <div className="flex flex-wrap gap-1.5">
-                                        {paradigms.slice(0, 4).map((p, idx) => (
-                                            <span key={idx} className="text-xs px-2 py-0.5 rounded bg-violet-500/10 text-violet-300">
-                                                {p.name}
-                                            </span>
-                                        ))}
-                                        {paradigms.length > 4 && (
-                                            <span className="text-xs text-text-muted">+{paradigms.length - 4}</span>
-                                        )}
-                                    </div>
-                                </div>
-                            }
-                        />
-                    );
-                }
-            case "decision_tree":
-                {
-                    const content = buildDecisionTreeContent(artifactForDisplay, analysis);
-                    const branches = content?.conditions?.length || 0;
-                    return (
-                        <ContainerPreview
-                            type="decision_tree"
-                            title="Decision Path"
-                            summary={
-                                <div className="space-y-2">
-                                    <div>
-                                        <div className="text-[11px] text-text-muted uppercase tracking-wide">Default</div>
-                                        <div className="text-sm text-text-primary font-medium leading-relaxed">{content.default_path}</div>
-                                    </div>
-                                    {branches > 0 && (
-                                        <div className="text-xs text-text-muted">{branches} conditional branches</div>
-                                    )}
-                                    {content.frame_challenger && (
-                                        <div className="text-xs text-amber-300">Frame challenger present</div>
-                                    )}
-                                </div>
-                            }
-                        />
-                    );
-                }
-            case "direct_answer":
-                {
-                    const content = buildDirectAnswerContent(artifactForDisplay, analysis);
-                    const extraCount = content?.additional_context?.length || 0;
-                    return (
-                        <ContainerPreview
-                            type="direct_answer"
-                            title="Consensus Answer"
-                            summary={
-                                <div className="space-y-2">
-                                    <div className="text-sm text-text-primary font-medium leading-relaxed">{content.answer}</div>
-                                    {extraCount > 0 && (
-                                        <div className="text-xs text-text-muted">+{extraCount} supporting points</div>
-                                    )}
-                                </div>
-                            }
-                        />
-                    );
-                }
-            default:
-                return null;
-        }
-    };
+    const claimsCount = mapperArtifact?.claims?.length || 0;
+    const ghostCount = mapperArtifact?.ghosts?.length || 0;
 
     return (
         <div className="w-full max-w-3xl mx-auto space-y-4 pb-12 animate-in fade-in duration-500">
@@ -960,23 +526,14 @@ export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
                 <div className="flex flex-wrap gap-2 items-center">
                     <div className="flex flex-wrap gap-2 items-center flex-1">
                         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-surface-highlight/30 border border-border-subtle text-xs text-text-secondary">
-                            🔶 Gaps: {gapsCount}
-                        </span>
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-surface-highlight/30 border border-border-subtle text-xs text-text-secondary">
-                            ⚔️ Contested: {contestedCount}
-                        </span>
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-surface-highlight/30 border border-border-subtle text-xs text-text-secondary">
-                            ✅ Settled: {settledCount}
+                            Claims: {claimsCount}
                         </span>
                         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-surface-highlight/30 border border-border-subtle text-xs text-text-secondary">
                             Models: {mapperArtifact.model_count}
                         </span>
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-surface-highlight/30 border border-border-subtle text-xs text-text-secondary">
-                            Dims: {dimsFoundCount}
-                        </span>
-                        {ghostPresent && (
+                        {ghostCount > 0 && (
                             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-surface-highlight/30 border border-border-subtle text-xs text-text-secondary">
-                                👻 Ghost present
+                                👻 {ghostCount} {ghostCount === 1 ? 'Ghost' : 'Ghosts'}
                             </span>
                         )}
                     </div>
@@ -1025,75 +582,50 @@ export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
                 <>
                     {mapperArtifact.souvenir && <SouvenirCard content={mapperArtifact.souvenir} />}
 
-                    <GapsCard artifact={mapperArtifact!} gaps={gaps} />
+                    <GapsCard artifact={mapperArtifact!} />
 
                     {mapperNarrative && (
-                        <details className="bg-surface-raised border border-border-subtle rounded-xl overflow-hidden">
-                            <summary className="cursor-pointer select-none px-4 py-3 text-xs text-text-secondary hover:bg-surface-highlight transition-colors">
-                                📖 The landscape
-                            </summary>
-                            <div className="px-4 pb-4 text-sm text-text-muted leading-relaxed whitespace-pre-wrap">
-                                {mapperNarrative}
+                        <div className="bg-surface-raised border border-border-subtle rounded-xl overflow-hidden mb-4">
+                            <div className="px-4 py-3 border-b border-border-subtle bg-surface-highlight/10 flex items-center justify-between">
+                                <div className="text-xs font-semibold text-text-secondary uppercase tracking-wide">
+                                    📖 The Landscape
+                                </div>
+                                <div className="text-[10px] text-text-muted">
+                                    {mapperNarrativeAnchorCount} clickable claims
+                                </div>
                             </div>
-                        </details>
+                            {graphData.claims.length > 0 && (
+                                <div className="px-4 py-4 border-b border-border-subtle bg-surface">
+                                    <div ref={graphContainerRef} className="w-full">
+                                        {graphDims.w > 0 && (
+                                            <DecisionMapGraph
+                                                claims={graphData.claims}
+                                                edges={graphData.edges}
+                                                width={graphDims.w}
+                                                height={graphDims.h}
+                                                onNodeClick={(node) => toggleSelection(node.id)}
+                                                selectedClaimIds={Array.from(selectedIds)}
+                                            />
+                                        )}
+                                    </div>
+                                </div>
+                            )}
+                            <div className="px-5 py-5 text-sm text-text-muted leading-relaxed whitespace-pre-wrap font-serif">
+                                <FormattedNarrative
+                                    text={mapperNarrative}
+                                    onToggle={toggleSelection}
+                                    selectedIds={selectedIds}
+                                />
+                            </div>
+                        </div>
                     )}
 
-                    {renderContainerPreview()}
+                    {/* V3: No Container Previews. The Narrative is the structure. */
+                    /* However, we still show Challengers, Bundles, etc. if they exist in the graph */}
 
                     {processedWithDetails && (
                         <div className="space-y-4 mt-2">
-                            {processedWithDetails.frameChallengers.length > 0 && (
-                                <div className="space-y-3">
-                                    {processedWithDetails.frameChallengers.map((fc) => {
-                                        const nodeId = fc.graphNodeId;
-                                        const relatedEdgesCount =
-                                            nodeId && graphTopology?.edges
-                                                ? graphTopology.edges.filter((e: any) => e.source === nodeId || e.target === nodeId).length
-                                                : 0;
-                                        return (
-                                            <FrameChallengerCard
-                                                key={fc.id}
-                                                item={fc}
-                                                isSelected={selectedIds.has(fc.id)}
-                                                onToggle={() => toggleSelection(fc.id)}
-                                                modelCount={mapperArtifact.model_count}
-                                                relatedEdgesCount={relatedEdgesCount}
-                                            />
-                                        );
-                                    })}
-                                </div>
-                            )}
 
-                            {processedWithDetails.bifurcations.length > 0 && (
-                                <div className="space-y-3">
-                                    {processedWithDetails.bifurcations.map((b, i) => (
-                                        <BifurcationSlot
-                                            key={`bif-${i}`}
-                                            left={b.left}
-                                            right={b.right}
-                                            axis={b.axis}
-                                            selectedIds={selectedIds}
-                                            onToggle={toggleSelection}
-                                            modelCount={mapperArtifact.model_count}
-                                        />
-                                    ))}
-                                </div>
-                            )}
-
-                            {processedWithDetails.bundles.length > 0 && (
-                                <div className="space-y-3">
-                                    {processedWithDetails.bundles.map((bundle, i) => (
-                                        <RelationshipBundle
-                                            key={`bundle-${i}`}
-                                            items={bundle.items}
-                                            edges={bundle.edges}
-                                            selectedIds={selectedIds}
-                                            onToggle={toggleSelection}
-                                            modelCount={mapperArtifact.model_count}
-                                        />
-                                    ))}
-                                </div>
-                            )}
 
                             {processedWithDetails.independentAnchors.length > 0 && (
                                 <div className="space-y-2">
@@ -1135,25 +667,6 @@ export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
                 </div>
             )}
 
-            {dimensionCoverage.length > 0 && (
-                <div className="bg-surface-raised border border-border-subtle rounded-xl overflow-hidden">
-                    <button
-                        onClick={() => setDimensionViewOpen((v) => !v)}
-                        className="w-full flex items-center justify-between p-3 hover:bg-surface-highlight transition-colors text-left"
-                    >
-                        <span className="text-xs text-text-secondary">
-                            {dimensionViewOpen
-                                ? "▾ Hide dimension breakdown"
-                                : `▸ View by dimension (${dimensionCoverage.length})`}
-                        </span>
-                    </button>
-                    {dimensionViewOpen && (
-                        <div className="px-3 pb-3">
-                            <DimensionFirstView artifact={mapperArtifact!} analysis={analysis!} />
-                        </div>
-                    )}
-                </div>
-            )}
 
             <div className="flex items-center gap-3 bg-surface-raised border border-border-subtle rounded-xl px-3 py-2">
                 <div className="text-xs text-text-secondary">Model</div>
@@ -1207,11 +720,11 @@ export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
                         disabled={isLoading}
                         className={`flex-1 px-4 py-3 text-white rounded-lg font-medium transition-all
                                 disabled:opacity-50 disabled:cursor-not-allowed
-                                ${analysis.escapeVelocity
+                                ${(analysis.convergenceRatio ?? 0) >= 0.6
                                 ? "bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 border border-emerald-400/30"
                                 : "bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500"}`}
                     >
-                        {analysis.escapeVelocity ? "🚀 Ready to Decide" : "⚡ Decide"}
+                        {(analysis.convergenceRatio ?? 0) >= 0.6 ? "🚀 Ready to Decide" : "⚡ Decide"}
                     </button>
                 </div>
             )}

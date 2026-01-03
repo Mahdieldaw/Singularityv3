@@ -1,0 +1,138 @@
+### THE MAP
+
+JSON
+
+```
+{
+  "claims": [
+    {
+      "id": 1,
+      "label": "Epistemic Keystone Identification",
+      "text": "Identify 'Keystone' claims by calculating the product of out-degree leverage and unique model support count to find the logical center of gravity.",
+      "supporters": [3, 4, 5],
+      "type": "factual",
+      "role": "anchor",
+      "challenges": null
+    },
+    {
+      "id": 2,
+      "label": "Structural Sensitivity Simulation",
+      "text": "Simulate the impact radius of a claim's failure by recursively traversing downstream edges to identify systemic single points of failure.",
+      "supporters": [2, 3, 4, 5, 6],
+      "type": "factual",
+      "role": "branch",
+      "challenges": null
+    },
+    {
+      "id": 3,
+      "label": "Thematic Island Delineation",
+      "text": "Apply community detection algorithms to group claims into spatial 'islands' based on edge density, reducing cognitive load in large maps.",
+      "supporters": [2, 3, 4, 5, 6],
+      "type": "prescriptive",
+      "role": "supplement",
+      "challenges": null
+    },
+    {
+      "id": 4,
+      "label": "Adversarial Steel-Manning",
+      "text": "Inject synthetic counterarguments or strengthen existing challenger claims during the 'Refine' mode to ensure conclusions survive the strongest opposition.",
+      "supporters": [2, 4],
+      "type": "prescriptive",
+      "role": "challenger",
+      "challenges": 1
+    },
+    {
+      "id": 5,
+      "label": "Cognitive Load Pathing",
+      "text": "Reorder the narrative UI using a topological sort of prerequisite edges to ensure users digest foundational concepts before derived conclusions.",
+      "supporters": [2, 3, 5],
+      "type": "prescriptive",
+      "role": "anchor",
+      "challenges": null
+    },
+    {
+      "id": 6,
+      "label": "Conflict Resolution Pathfinding",
+      "text": "Identify the 'Last Common Ancestor' of conflicting claims to reveal the exact point where logic diverged between different models.",
+      "supporters": [2, 3, 5, 6],
+      "type": "factual",
+      "role": "branch",
+      "challenges": null
+    },
+    {
+      "id": 7,
+      "label": "Evidence Gap Detection",
+      "text": "Flag 'load-bearing assumptions'—claims with high leverage but low support or speculative types—to prioritize them for the Gauntlet mode.",
+      "supporters": [2, 3, 6],
+      "type": "factual",
+      "role": "challenger",
+      "challenges": 1
+    },
+    {
+      "id": 8,
+      "label": "Uncharted Territory Clustering",
+      "text": "Group 'ghost' strings into thematic clusters to identify systemic voids in the collective knowledge of the fan-out models.",
+      "supporters": [2, 3, 4, 5, 6],
+      "type": "factual",
+      "role": "supplement",
+      "challenges": null
+    },
+    {
+      "id": 9,
+      "label": "Temporal Stability Tracking",
+      "text": "Index claims in IndexedDB to track which logic remains stable across multiple turns and which degrades under iterative scrutiny.",
+      "supporters": [1, 2, 4, 5, 6],
+      "type": "conditional",
+      "role": "supplement",
+      "challenges": null
+    },
+    {
+      "id": 10,
+      "label": "Divergence Heatmaps",
+      "text": "Visualize model-specific outliers to help users distinguish between a genuine consensus and a single-model hallucination or bias.",
+      "supporters": [2, 3, 4],
+      "type": "factual",
+      "role": "supplement",
+      "challenges": null
+    }
+  ],
+  "edges": [
+    { "from": 1, "to": 2, "type": "prerequisite" },
+    { "from": 1, "to": 7, "type": "tradeoff" },
+    { "from": 5, "to": 1, "type": "supports" },
+    { "from": 6, "to": 4, "type": "prerequisite" },
+    { "from": 8, "to": 7, "type": "supports" },
+    { "from": 3, "to": 5, "type": "supports" }
+  ],
+  "ghosts": [
+    "Cross-model latent space visualization techniques",
+    "Real-time token cost/latency trade-offs for parallel fan-out optimization",
+    "Human-in-the-loop edge manual correction impact on structural analysis"
+  ]
+}
+```
+
+### THE NARRATIVE
+
+The landscape of universal improvements for Singularity reveals a powerful convergence toward **topological intelligence**—the idea that the system's power is capped not by the models' knowledge, but by our ability to navigate the relationships between their claims. At the center of this map lies **[Epistemic Keystone Identification|claim_1]**, a high-consensus anchor that proposes mathematically isolating the 'load-bearing' nodes of any argument. By identifying these Keystones, we provide a foundation for **[Structural Sensitivity Simulation|claim_2]**, which allows the system to stress-test the entire logic tree by simulating the collapse of a single foundational premise.
+
+This structural rigor is balanced by a strong prescriptive focus on user experience. Sources suggest **[Cognitive Load Pathing|claim_5]** to solve the 'wall of text' problem by using prerequisite edges to create a linear, logical reading path through a non-linear graph. To manage the resulting complexity of high-claim environments, **[Thematic Island Delineation|claim_3]** is proposed as a method to spatially cluster related logic, preventing cognitive overwhelm.
+
+However, a critical tension exists regarding the fragility of consensus. While Keystones represent strength, **[Evidence Gap Detection|claim_7]** acts as a necessary challenger, flagging claims that perform heavy logical lifting despite having thin epistemic support (low supporter counts or speculative types). This tension is further explored through **[Conflict Resolution Pathfinding|claim_6]**, which moves beyond merely stating that a conflict exists and instead locates the 'Last Common Ancestor'—the exact point where the models' reasoning diverged.
+
+To ensure the system does not become an echo chamber of model agreement, **[Adversarial Steel-Manning|claim_4]** suggests a proactive injection of synthetic counterarguments, particularly during the Refine mode. This ensures that the final synthesis has been 'hardened' against the best possible opposition. For the "known unknowns," **[Uncharted Territory Clustering|claim_8]** transforms the currently passive 'ghosts' into an active map of systemic ignorance, showing the user exactly where the collective intelligence of the parallel models reaches its limit.
+
+Finally, the long-term utility of the system is secured via **[Temporal Stability Tracking|claim_9]**, allowing Singularity to function as a persistent research partner that remembers which claims survived previous turns and which were discarded as noise. What remains uncharted in this distillation is the specific optimization of the parallel fan-out itself—specifically how to dynamically adjust the number of models based on the complexity detected during the initial query.
+
+---
+
+### BEYOND THE SCHEMA: Traceability Anchors
+
+If a schema change were permitted, I would propose the addition of **Epistemic Traceability Traces**.
+
+- **Modification**: `supporters: Array<{ model_id: string, rationale: string, confidence: 0.0-1.0 }>`
+    
+- **Rationale**: Currently, support is a binary 'vote.' By including the _rationale snippet_ and a _confidence score_ from the source model, the Structural Analysis could distinguish between **Reasoning Collusion** (all models being wrong for the same reason) and **Reasoning Convergence** (models arriving at the same truth via different logical paths). This transforms the system from a claim aggregator into a true logic-audit engine, providing a 'Robustness Score' that is mathematically superior to simple agreement counts.
+    
+
+**Would you like me to begin the implementation of Phase 1: Keystone Identification and the Complexity-to-Resolution Ratio?**

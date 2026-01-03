@@ -22,7 +22,7 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
 }) => {
   // --- CONNECTED STATE LOGIC ---
 
-  const { output: refinerOutput, isLoading: isRefinerLoading } = useRefinerOutput(aiTurn.id);
+  const refinerState = useRefinerOutput(aiTurn.id);
   const antagonistState = useAntagonistOutput(aiTurn.id);
 
   // --- PRESENTATION LOGIC ---
@@ -69,7 +69,7 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                 {aiTurn.type === 'ai' ? (
                   <CognitiveOutputRenderer
                     aiTurn={aiTurn}
-                    refinerState={{ output: refinerOutput, isLoading: isRefinerLoading }}
+                    refinerState={refinerState}
                     antagonistState={antagonistState}
                   />
                 ) : null}

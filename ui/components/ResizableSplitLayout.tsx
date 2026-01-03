@@ -1,3 +1,6 @@
+// ResizableSplitLayout.tsx - PRODUCTION-GRADE FIX
+// Fixes: Right pane width expansion bug when content has long unbreakable strings
+
 import React, { useRef, useState, useCallback } from 'react';
 import clsx from 'clsx';
 
@@ -34,8 +37,8 @@ export const ResizableSplitLayout: React.FC<ResizableSplitLayoutProps> = ({
     const ratio = controlledRatio ?? internalRatio;
 
     // Calculate effective ratio - if split is closed, left is 100%
-    // But we keep the 'ratio' prop as the "target" for when it opens
     const leftWidth = isSplitOpen ? ratio : 100;
+    const rightWidth = 100 - ratio; // Store for clarity
 
     const handlePointerDown = useCallback((e: React.PointerEvent) => {
         if (!isSplitOpen) return;
@@ -84,10 +87,18 @@ export const ResizableSplitLayout: React.FC<ResizableSplitLayoutProps> = ({
             className={clsx("flex h-full w-full overflow-hidden", className)}
             style={style}
         >
-            {/* Left Pane */}
+            {/* ============================================
+                LEFT PANE
+                - flex-shrink-0: Prevent collapsing below width
+                - min-w-0: Allow content to scroll/clip
+                - overflow-hidden: Clip overflowing content
+                ============================================ */}
             <div
                 style={{ width: `${leftWidth}%` }}
-                className={clsx("h-full min-w-0 transition-[width] duration-75 ease-out", isDragging && "transition-none")}
+                className={clsx(
+                    "h-full flex-shrink-0 min-w-0 overflow-hidden transition-[width] duration-75 ease-out",
+                    isDragging && "transition-none"
+                )}
             >
                 {leftPane}
             </div>
@@ -95,7 +106,9 @@ export const ResizableSplitLayout: React.FC<ResizableSplitLayoutProps> = ({
             {/* Divider and Right Pane (only if open) */}
             {isSplitOpen && (
                 <>
-                    {/* Divider Handle */}
+                    {/* ============================================
+                        DIVIDER HANDLE
+                        ============================================ */}
                     <div
                         className="w-1.5 h-full bg-border-subtle hover:bg-brand-500/50 transition-colors cursor-col-resize relative z-10 shrink-0 select-none touch-none"
                         onPointerDown={handlePointerDown}
@@ -103,7 +116,6 @@ export const ResizableSplitLayout: React.FC<ResizableSplitLayoutProps> = ({
                         onPointerUp={handlePointerUp}
                     >
                         {/* Centered Divider Content (Orbs) */}
-                        {/* We position this absolutely relative to the divider to allow it to overflow freely */}
                         <div
                             className="absolute top-0 bottom-0 left-0 w-0 flex flex-col items-center justify-center overflow-visible pointer-events-none"
                         >
@@ -113,10 +125,31 @@ export const ResizableSplitLayout: React.FC<ResizableSplitLayoutProps> = ({
                         </div>
                     </div>
 
-                    {/* Right Pane */}
+                    {/* ============================================
+                        RIGHT PANE - CRITICAL FIXES APPLIED
+                        ============================================
+                        
+                        🔥 KEY CHANGES:
+                        1. REMOVED flex-1 (was causing expansion)
+                        2. ADDED flex-shrink-0 (prevents collapse)
+                        3. ADDED max-width to enforce boundary
+                        4. ADDED overflow-hidden for containment
+                        
+                        WHY THIS WORKS:
+                        - width + max-width with same value = hard constraint
+                        - flex-shrink-0 prevents compression
+                        - overflow-hidden clips content instead of expanding
+                        - min-w-0 allows internal scrolling
+                        ============================================ */}
                     <div
-                        style={{ width: `${100 - ratio}%` }}
-                        className={clsx("h-full min-w-0 flex-1 transition-[width] duration-75 ease-out", isDragging && "transition-none")}
+                        style={{
+                            width: `${rightWidth}%`,
+                            maxWidth: `${rightWidth}%`, // ⭐ CRITICAL: Enforce as maximum
+                        }}
+                        className={clsx(
+                            "h-full flex-shrink-0 min-w-0 overflow-hidden transition-[width] duration-75 ease-out",
+                            isDragging && "transition-none"
+                        )}
                     >
                         {rightPane}
                     </div>
@@ -125,3 +158,17 @@ export const ResizableSplitLayout: React.FC<ResizableSplitLayoutProps> = ({
         </div>
     );
 };
+
+// ============================================
+// TECHNICAL DEBT NOTICE
+// ============================================
+// This fix addresses a fundamental CSS flexbox behavior where:
+// 1. Percentage widths are treated as "suggestions" not constraints
+// 2. Content with intrinsic width can override flexible containers
+// 3. The combination of flex-1 + percentage width creates ambiguity
+//
+// FUTURE IMPROVEMENT:
+// Consider migrating to CSS Grid for more predictable layout control:
+// grid-template-columns: ${ratio}% 6px 1fr;
+// This would eliminate the flex ambiguity entirely.
+// ============================================

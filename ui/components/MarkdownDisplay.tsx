@@ -79,7 +79,10 @@ const PreBlock = ({ children }: any) => {
 
 
   return (
-    <div className="relative bg-surface-code border border-border-subtle rounded-lg my-3 overflow-hidden max-w-full">
+    <div
+      className="relative bg-surface-code border border-border-subtle rounded-lg my-3 overflow-hidden"
+      style={{ contain: 'inline-size', maxWidth: '100%' }}
+    >
       {/* Header / Language Label */}
       {language && (
         <div className="absolute top-0 left-0 px-2 py-0.5 text-xs uppercase text-text-muted bg-surface-modal/50 rounded-br pointer-events-none z-[1]">
@@ -87,10 +90,9 @@ const PreBlock = ({ children }: any) => {
         </div>
       )}
 
-      {/* Code Content */}
-      <div className="m-0 overflow-x-auto pt-7 px-3 pb-3 w-full">
-        {/* We render children (the <code> tag) directly here */}
-        <pre className="m-0 font-[inherit] bg-transparent">
+      {/* CODE CONTENT - Horizontal scroll within contained bounds */}
+      <div className="pt-7 px-3 pb-3 overflow-x-auto custom-scrollbar">
+        <pre className="m-0 font-[inherit] bg-transparent whitespace-pre">
           {children}
         </pre>
       </div>
@@ -204,21 +206,21 @@ const MarkdownDisplay: React.FC<MarkdownDisplayProps> = React.memo(
             // Separate Block vs Inline logic explicitly
             pre: PreBlock,
             code: CodeText,
- a: ({ href, children, ...props }: any) => (
-      <a 
-        href={href} 
-        {...props} 
-        target="_blank" 
-        rel="noopener noreferrer"
-        className="text-brand-400 hover:text-brand-300 underline decoration-brand-400/30 hover:decoration-brand-400 transition-colors"
-      >
-        {children}
-      </a>
-    ),
-    // ---------------------------
+            a: ({ href, children, ...props }: any) => (
+              <a
+                href={href}
+                {...props}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-brand-400 hover:text-brand-300 underline decoration-brand-400/30 hover:decoration-brand-400 transition-colors"
+              >
+                {children}
+              </a>
+            ),
+            // ---------------------------
 
-    // Crash Fix: Map paragraphs to divs (or spans in lists)
-    p: ({ children }) => {
+            // Crash Fix: Map paragraphs to divs (or spans in lists)
+            p: ({ children }) => {
               const inList = React.useContext(ListContext);
               if (inList) {
                 // Force inline rendering for list items to prevent vertical stacking
@@ -278,7 +280,7 @@ const MarkdownDisplay: React.FC<MarkdownDisplayProps> = React.memo(
                 {children}
               </td>
             ),
-            
+
 
             ...components,
           }}

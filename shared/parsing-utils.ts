@@ -1,4 +1,4 @@
-import { MapperArtifact, ExploreOutput, GauntletOutput, UnderstandOutput } from './contract';
+import { MapperArtifact, GauntletOutput, UnderstandOutput, ParsedMapperOutput, GraphTopology, GraphNode, GraphEdge } from './contract';
 
 /**
  * Shared Parsing Utilities for ALL_AVAILABLE_OPTIONS and GRAPH_TOPOLOGY
@@ -11,25 +11,8 @@ import { MapperArtifact, ExploreOutput, GauntletOutput, UnderstandOutput } from 
 // TYPES
 // ============================================================================
 
-export interface GraphNode {
-    id: string;
-    label: string;
-    theme: string;
-    supporters: (string | number)[];
-    support_count: number;
-}
+// Graph types imported from contract
 
-export interface GraphEdge {
-    source: string;
-    target: string;
-    reason: string;
-    type: 'conflicts' | 'complements' | 'prerequisite' | string;
-}
-
-export interface GraphTopology {
-    nodes: GraphNode[];
-    edges: GraphEdge[];
-}
 
 // ============================================================================
 // CENTRALIZED JSON EXTRACTION
@@ -645,6 +628,14 @@ export function parseMappingResponse(response: string | null | undefined): {
     if (!response) return { narrative: '', options: null, optionTitles: [], graphTopology: null };
 
     const hasUnifiedTags =
+        response.includes('<map>') ||
+        response.includes('<narrative>') ||
+        response.includes('\\<map\\>') ||
+        response.includes('\\<narrative\\>') ||
+        /#{1,6}\s*THE\s*(?:MAP|NARRATIVE)\b/i.test(response) ||
+        /#{1,3}\s*(?:\d+\.)?\s*\\?<(?:map|narrative)\\?>/i.test(response) ||
+        /#{1,3}\s*(?:\d+\.)?\s*(?:map|narrative)\s*\n/i.test(response) ||
+        /\*\*(?:map|narrative)\*\*/i.test(response) ||
         response.includes('<narrative_summary>') ||
         response.includes('<options_inventory>') ||
         response.includes('<mapper_artifact>') ||
@@ -662,7 +653,7 @@ export function parseMappingResponse(response: string | null | undefined): {
         const optionTitles = unified.options ? parseOptionTitles(unified.options) : [];
         return {
             narrative: unified.narrative || response, // Fallback to raw if narrative tag is missing
-            options: unified.options,
+            options: unified.options ?? null,
             optionTitles,
             graphTopology: unified.topology,
         };
@@ -917,14 +908,9 @@ function normalizeRefinerObject(parsed: any): Omit<RefinerOutput, 'rawText'> | n
  */
 export function createEmptyMapperArtifact(): MapperArtifact {
     return {
-        consensus: {
-            claims: [],
-            quality: "conventional",
-            strength: 0
-        },
-        outliers: [],
-        topology: "high_confidence",
-        ghost: null,
+        claims: [],
+        edges: [],
+        ghosts: [],
         query: "",
         turn: 0,
         timestamp: new Date().toISOString(),
@@ -1047,17 +1033,186 @@ function extractJsonFromContent(content: string | null): any | null {
  * Parse Unified Mapper Output
  * Extracts content from <raw_narrative>, <options_inventory>, <mapper_artifact>, and <graph_topology> tags.
  */
-export function parseUnifiedMapperOutput(text: string): {
-    narrative: string;
-    options: string | null;
-    artifact: MapperArtifact | null;
-    topology: GraphTopology | null;
-} {
+export function extractAnchorPositions(narrative: string): Array<{ label: string; id: string; position: number }> {
+    const anchors: Array<{ label: string; id: string; position: number }> = [];
+    const pattern = /\*\*\[([^\]|]+)\|([^\]]+)\]\*\*|\[([^\]|]+)\|([^\]]+)\]/g;
+
+    let match;
+    while ((match = pattern.exec(narrative)) !== null) {
+        const label = (match[1] ?? match[3] ?? '').trim();
+        const id = (match[2] ?? match[4] ?? '').trim();
+        if (!label || !id) continue;
+        anchors.push({
+            label,
+            id,
+            position: match.index
+        });
+    }
+    return anchors;
+}
+
+/**
+ * Parse Unified Mapper Output (V3)
+ * Extracts content from <narrative> and <map> tags.
+ * Falls back to legacy parsing if those tags are absent.
+ */
+export function parseUnifiedMapperOutput(text: string): ParsedMapperOutput {
     if (!text) {
-        return { narrative: "", options: null, artifact: null, topology: null };
+        return {
+            claims: [],
+            edges: [],
+            ghosts: [],
+            narrative: "",
+            map: { claims: [], edges: [], ghosts: [] },
+            anchors: [],
+            topology: null,
+            options: null,
+            artifact: null
+        };
     }
 
     const normalizedText = text.replace(/\\</g, '<').replace(/\\>/g, '>');
+
+    const extractSectionByHeading = (src: string, headingRe: RegExp): { content: string; start: number; end: number } | null => {
+        const m = headingRe.exec(src);
+        if (!m || typeof m.index !== 'number') return null;
+        const headerStart = m.index;
+        const headerLineEnd = src.indexOf('\n', headerStart);
+        const contentStart = headerLineEnd === -1 ? src.length : headerLineEnd + 1;
+        const rest = src.slice(contentStart);
+        const nextHeadingOffset = rest.search(/\n#{1,6}\s+/);
+        const contentEnd = nextHeadingOffset === -1 ? src.length : contentStart + nextHeadingOffset;
+        const content = src.slice(contentStart, contentEnd).trim();
+        return { content, start: headerStart, end: contentEnd };
+    };
+
+    const mapSection = extractSectionByHeading(normalizedText, /^#{1,6}\s*THE\s*MAP\b.*$/im);
+    const narrativeSection = extractSectionByHeading(normalizedText, /^#{1,6}\s*THE\s*NARRATIVE\b.*$/im);
+
+    // 1. Try V3 Extraction (<map> and <narrative>)
+    const mapTagPattern = /<map\b[^>]*>([\s\S]*?)<\/map\s*>/gi;
+    const narrativeTagPattern = /<narrative\b[^>]*>([\s\S]*?)<\/narrative\s*>/gi;
+
+    const mapMatches = Array.from(normalizedText.matchAll(mapTagPattern));
+    const narrativeMatches = Array.from(normalizedText.matchAll(narrativeTagPattern));
+    const narrativeMatch = narrativeMatches.length > 0 ? narrativeMatches[narrativeMatches.length - 1] : null;
+
+    let map: any = { claims: [], edges: [], ghosts: [] };
+    let foundV3Map = false;
+    let narrativeFromHeading: string | null = narrativeSection?.content ? narrativeSection.content : null;
+
+    // A. Explicit Tag Match
+    if (mapMatches.length > 0) {
+        for (let i = mapMatches.length - 1; i >= 0; i--) {
+            const content = mapMatches[i]?.[1];
+            if (!content) continue;
+            const extracted = extractJsonFromContent(content);
+            if (extracted && typeof extracted === 'object' && Array.isArray((extracted as any).claims) && Array.isArray((extracted as any).edges)) {
+                map = extracted;
+                foundV3Map = true;
+                break;
+            }
+        }
+    } else {
+        const openIdx = normalizedText.search(/<map\b[^>]*>/i);
+        if (openIdx !== -1) {
+            const afterOpen = normalizedText.slice(openIdx);
+            const tagEnd = afterOpen.indexOf('>');
+            if (tagEnd !== -1) {
+                const content = afterOpen.slice(tagEnd + 1);
+                const extracted = extractJsonFromContent(content);
+                if (extracted && typeof extracted === 'object' && Array.isArray((extracted as any).claims) && Array.isArray((extracted as any).edges)) {
+                    map = extracted;
+                    foundV3Map = true;
+                }
+            }
+        }
+    }
+
+    if (!foundV3Map && mapSection?.content) {
+        const extracted = extractJsonFromContent(mapSection.content);
+        if (extracted && typeof extracted === 'object' && Array.isArray((extracted as any).claims) && Array.isArray((extracted as any).edges)) {
+            map = extracted;
+            foundV3Map = true;
+        }
+    }
+
+    // B. Fallback: Look for V3 JSON structure anywhere if tags failed or missing
+    if (!foundV3Map) {
+        try {
+            const extracted = extractJsonFromContent(normalizedText);
+            // Check signature of V3 map
+            if (extracted && Array.isArray(extracted.claims) && Array.isArray(extracted.edges)) {
+                map = extracted;
+                foundV3Map = true;
+            }
+        } catch { }
+    }
+
+    if (foundV3Map || narrativeMatch || narrativeFromHeading) {
+        let narrative = "";
+        if (narrativeFromHeading) {
+            narrative = narrativeFromHeading.trim();
+        } else if (narrativeMatch && narrativeMatch[1]) {
+            narrative = narrativeMatch[1].trim();
+        } else {
+            // Fallback: if map is found but no narrative tag, assume rest is narrative
+            narrative = normalizedText.replace(/<map\b[^>]*>[\s\S]*?<\/map\s*>/i, '').trim();
+            // Clean up if the JSON was found elsewhere
+            if (foundV3Map && mapMatches.length === 0) {
+                // Try to strip the JSON block if we found it without tags
+                const jsonStr = JSON.stringify(map);
+                // This is a naive strip, but safe enough for now. 
+                // Better to leave it than aggressively delete wrong things.
+            }
+            if (mapSection) {
+                narrative = (normalizedText.slice(0, mapSection.start) + normalizedText.slice(mapSection.end)).trim();
+            }
+        }
+
+        const anchors = extractAnchorPositions(narrative);
+
+        // Auto-generate topology from map for compatibility
+        let topology: GraphTopology | null = null;
+        if (map.claims && map.edges) {
+            topology = {
+                nodes: map.claims.map((c: any) => ({
+                    id: c.id,
+                    label: c.label,
+                    theme: c.type,
+                    supporters: Array.isArray(c.supporters) ? c.supporters.filter((s: any) => typeof s === 'number') : [],
+                    support_count: (c.supporters?.length || 0)
+                })),
+                edges: map.edges.map((e: any) => ({
+                    source: e.from,
+                    target: e.to,
+                    type: e.type,
+                    reason: e.type
+                }))
+            };
+        }
+
+        const artifact = {
+            ...createEmptyMapperArtifact(),
+            claims: map.claims || [],
+            edges: map.edges || [],
+            ghosts: map.ghosts || []
+        };
+
+        return {
+            claims: map.claims || [],
+            edges: map.edges || [],
+            ghosts: map.ghosts || [],
+            narrative,
+            map,
+            anchors,
+            topology,
+            options: null,
+            artifact
+        };
+    }
+
+    // 2. Legacy Fallback
     const extractWithPatterns = (patterns: RegExp[]): string | null => {
         const best = bestPatternMatchFromSources([normalizedText, text], patterns);
         if (best?.content) return best.content;
@@ -1076,42 +1231,18 @@ export function parseUnifiedMapperOutput(text: string): {
     let artifact: MapperArtifact | null = null;
     if (mapperArtifactRaw) {
         const parsed = extractJsonFromContent(mapperArtifactRaw);
-        if (parsed && typeof parsed === 'object' && (parsed as any).consensus) {
-            artifact = {
-                ...empty,
-                ...(parsed as any),
-                consensus: {
-                    ...empty.consensus,
-                    ...((parsed as any).consensus || {}),
-                },
-            };
+        if (parsed && typeof parsed === 'object') {
+            // Attempt to fit into MapperArtifact shape
+            artifact = { ...empty, ...parsed };
         }
     }
 
+    // Attempt embedded JSON if explicit artifact missing
     if (!artifact) {
-        const embeddedPatterns: RegExp[] = [
-            /```(?:json)?\s*\n?(\{[\s\S]*?"consensus"[\s\S]*?"claims"[\s\S]*?\})\s*\n?```/i,
-            /(\{[\s\S]*?"consensus"\s*:\s*\{[\s\S]*?"claims"\s*:\s*\[[\s\S]*?\][\s\S]*?\}[\s\S]*?\})/i,
-        ];
-
-        for (const pattern of embeddedPatterns) {
-            const match = normalizedText.match(pattern);
-            if (!match?.[1]) continue;
-            const parsed = extractJsonFromContent(match[1]);
-            const claims = (parsed as any)?.consensus?.claims;
-            if (!Array.isArray(claims) || claims.length === 0) continue;
-            const hasFullText = claims.some((c: any) => typeof c?.text === 'string' && c.text.split(' ').length > 5);
-            if (!hasFullText) continue;
-
-            artifact = {
-                ...empty,
-                ...(parsed as any),
-                consensus: {
-                    ...empty.consensus,
-                    ...((parsed as any).consensus || {}),
-                },
-            };
-            break;
+        const embeddedMatch = normalizedText.match(/```(?:json)?\s*(\{[\s\S]*?"consensus"[\s\S]*?"claims"[\s\S]*?\})\s*```/i);
+        if (embeddedMatch) {
+            const parsed = extractJsonFromContent(embeddedMatch[1]);
+            if (parsed) artifact = { ...empty, ...parsed };
         }
     }
 
@@ -1129,28 +1260,45 @@ export function parseUnifiedMapperOutput(text: string): {
         topology = parseProseGraphTopology(text);
     }
 
+    // If absolutely nothing structural found, treat as raw narrative
     if (!narrativeSummary && !optionsInventory && !mapperArtifactRaw && !graphTopologyRaw) {
         const { text: textWithoutTopology, topology: legacyTopology } = extractGraphTopologyAndStrip(text);
         const { text: narrative, options } = extractOptionsAndStrip(textWithoutTopology);
         return {
+            claims: [],
+            edges: [],
+            ghosts: [],
             narrative: cleanNarrativeText(narrative),
             options: options ? cleanOptionsText(options) : null,
             artifact: null,
             topology: legacyTopology || topology,
+            map: null,
+            anchors: []
         };
     }
 
+    // Legacy structured output
     return {
+        claims: artifact?.claims || [],
+        edges: artifact?.edges || [],
+        ghosts: artifact?.ghosts || [],
         narrative: narrativeSummary || "",
-        options: optionsInventory,
+        options: null,
         artifact: artifact,
-        topology: topology
+        topology: (topology as any) || null, // Cast to avoid deep mismatch if any fields slightly differ
+        map: null,
+        anchors: []
     };
 }
 
 /**
  * Parse MapperArtifact from text.
  * Expects sections: ===CONSENSUS===, ===OUTLIERS===, ===METADATA===
+ */
+/**
+ * Parse MapperArtifact from text.
+ * Expects sections: ===CONSENSUS===, ===OUTLIERS===, ===METADATA===
+ * Adapts legacy sections to V3 schema (claims, edges, ghosts).
  */
 export function parseMapperArtifact(text: string): MapperArtifact {
     if (!text) return createEmptyMapperArtifact();
@@ -1163,10 +1311,18 @@ export function parseMapperArtifact(text: string): MapperArtifact {
         normalized.includes('<mapper_artifact>') ||
         normalized.includes('\\<mapper_artifact\\>') ||
         /#{1,3}\s*(?:\d+\.)?\s*\\?<mapper_artifact\\?>/i.test(text) ||
-        /#{1,3}\s*(?:\d+\.)?\s*mapper[_\s]*artifact\s*\n/i.test(text) ||
-        /\*\*mapper[_\s]*artifact\*\*/i.test(text)
+        /#{1,3}\s*(?:\d+\.)?\s*mapper[_\s]*artifact\s*\n/i.test(text)
     ) {
         const unified = parseUnifiedMapperOutput(text);
+        if (unified.map) {
+            // Convert map to artifact
+            return {
+                ...artifact,
+                claims: unified.map.claims || [],
+                edges: unified.map.edges || [],
+                ghosts: unified.map.ghosts || []
+            };
+        }
         if (unified.artifact) return unified.artifact;
     }
 
@@ -1177,11 +1333,39 @@ export function parseMapperArtifact(text: string): MapperArtifact {
             const jsonText = jsonMatch[1] || jsonMatch[0];
             const parsed = JSON.parse(jsonText);
             if (parsed && typeof parsed === 'object') {
-                return {
-                    ...artifact,
-                    ...parsed,
-                    consensus: { ...artifact.consensus, ...(parsed.consensus || {}) },
-                };
+                // If it's V3 JSON
+                if (parsed.claims) return { ...artifact, ...parsed };
+
+                // If it's V2 JSON (consensus/outliers), adapt it
+                if (parsed.consensus) {
+                    const consensusClaims = Array.isArray(parsed.consensus.claims) ? parsed.consensus.claims.map((c: any, idx: number) => ({
+                        id: `claim_${idx + 1}`,
+                        label: c.text.split(' ').slice(0, 3).join(' '),
+                        text: c.text,
+                        supporters: c.supporters || [],
+                        type: 'factual',
+                        role: 'anchor',
+                        challenges: null
+                    })) : [];
+
+                    const outlierClaims = Array.isArray(parsed.outliers) ? parsed.outliers.map((o: any, idx: number) => ({
+                        id: `outlier_${idx + 1}`,
+                        label: o.insight.split(' ').slice(0, 3).join(' '),
+                        text: o.insight,
+                        supporters: [o.source_index !== undefined ? o.source_index : -1],
+                        type: 'speculative',
+                        role: o.type === 'frame_challenger' ? 'challenger' : 'supplemental',
+                        challenges: o.challenges || null
+                    })) : [];
+
+                    return {
+                        ...artifact,
+                        claims: [...consensusClaims, ...outlierClaims],
+                        edges: [], // V2 didn't have explicit edges usually, or they werent compatible
+                        ghosts: parsed.ghost ? [parsed.ghost] : [],
+                        ...parsed
+                    };
+                }
             }
         }
     } catch (e) {
@@ -1190,8 +1374,6 @@ export function parseMapperArtifact(text: string): MapperArtifact {
 
     // Helper for Mapper sections with === headers
     const extractMapperSection = (name: string) => {
-        // Match === NAME === or ## NAME or **NAME**
-        // We prioritize the === format as per prompt
         const pattern = new RegExp(`={3,}\\s*${name}\\s*={3,}\\n([\\s\\S]*?)(?=\\n={3,}|$)`, 'i');
         const match = normalized.match(pattern);
         return match ? match[1].trim() : extractSection(normalized, name);
@@ -1201,70 +1383,53 @@ export function parseMapperArtifact(text: string): MapperArtifact {
     const outliersText = extractMapperSection('OUTLIERS');
     const metadataText = extractMapperSection('METADATA');
 
+    const newClaims: any[] = [];
+
     // Parse Consensus
     if (consensusText) {
-        // Extract claims (lines starting with - or *)
-        const claims: Array<{ text: string; supporters: number[]; support_count: number }> = [];
         const lines = consensusText.split('\n');
-        for (const line of lines) {
+        lines.forEach((line, idx) => {
             const match = line.match(/^[-*•]\s*(.+)$/);
             if (match) {
-                // Simplified: entire line is text. 
-                // In a real implementation, we'd parse supporters from the text if present e.g. "(Models 1,2)"
-                claims.push({
+                newClaims.push({
+                    id: `c_${idx}`,
+                    label: match[1].split(' ').slice(0, 3).join(' '),
                     text: match[1].trim(),
                     supporters: [],
-                    support_count: 0
+                    type: 'factual',
+                    role: 'anchor'
                 });
             }
-        }
-        if (claims.length > 0) artifact.consensus.claims = claims;
-
-        const quality = extractLabeledValue(consensusText, 'quality');
-        if (quality) artifact.consensus.quality = quality.toLowerCase() as any;
-
-        const strength = extractLabeledValue(consensusText, 'strength');
-        if (strength) artifact.consensus.strength = parseFloat(strength);
+        });
     }
 
     // Parse Outliers
     if (outliersText) {
-        // Flexible parsing for outliers
         const outlierBlocks = outliersText.split(/\n\s*[-*•]\s+/).filter(Boolean);
-        for (const block of outlierBlocks) {
-            // Very basic heuristic for now
+        outlierBlocks.forEach((block, idx) => {
             const parts = block.split('\n');
             if (parts.length > 0) {
-                artifact.outliers.push({
-                    insight: parts[0].trim(),
-                    source: "unknown",
-                    source_index: -1,
-                    type: "supplemental",
-                    raw_context: parts.slice(1).join(' ').trim()
+                newClaims.push({
+                    id: `o_${idx}`,
+                    label: parts[0].split(' ').slice(0, 3).join(' '),
+                    text: parts[0].trim(),
+                    supporters: [],
+                    type: 'speculative',
+                    role: 'supplemental'
                 });
             }
-        }
+        });
     }
+
+    if (newClaims.length > 0) artifact.claims = newClaims;
 
     // Parse Metadata
     if (metadataText) {
-        const topology = extractLabeledValue(metadataText, 'topology');
-        if (topology) artifact.topology = topology.toLowerCase() as any; // Ensure case matches
-
         const ghost = extractLabeledValue(metadataText, 'ghost');
-        if (ghost && ghost.toLowerCase() !== 'none') artifact.ghost = ghost;
+        if (ghost && ghost.toLowerCase() !== 'none') artifact.ghosts = [ghost];
 
         const query = extractLabeledValue(metadataText, 'query');
         if (query) artifact.query = query;
-    }
-
-    // Parse Souvenir (can be its own section or in metadata)
-    const souvenirText = extractMapperSection('SOUVENIR');
-    if (souvenirText) {
-        artifact.souvenir = souvenirText;
-    } else if (metadataText) {
-        const souvenir = extractLabeledValue(metadataText, 'souvenir');
-        if (souvenir) artifact.souvenir = souvenir;
     }
 
     return artifact;
@@ -1274,32 +1439,27 @@ export function formatArtifactAsOptions(artifact: MapperArtifact): string {
     const safe = artifact || createEmptyMapperArtifact();
     const lines: string[] = [];
 
-    const claims = Array.isArray(safe?.consensus?.claims) ? safe.consensus.claims : [];
-    const outliers = Array.isArray(safe?.outliers) ? safe.outliers : [];
+    const claims = Array.isArray(safe?.claims) ? safe.claims : [];
     const modelCount = typeof safe?.model_count === "number" ? safe.model_count : 0;
 
-    if (claims.length > 0) {
+    const consensus = claims.filter(c => c.supporters && c.supporters.length >= 2);
+    const divergent = claims.filter(c => !c.supporters || c.supporters.length < 2);
+
+    if (consensus.length > 0) {
         lines.push("### Consensus Claims");
-        for (const c of claims) {
-            const supportCount = typeof (c as any)?.support_count === "number" ? (c as any).support_count : 0;
+        for (const c of consensus) {
+            const supportCount = c.supporters ? c.supporters.length : 0;
             const denom = modelCount > 0 ? modelCount : (supportCount > 0 ? supportCount : 1);
-            lines.push(`- **${String((c as any)?.text || "").trim()}** [${supportCount}/${denom}]`);
-            if ((c as any)?.dimension) lines.push(`  Dimension: ${String((c as any).dimension)}`);
-            if ((c as any)?.applies_when) lines.push(`  Applies when: ${String((c as any).applies_when)}`);
+            lines.push(`- **${c.label}** ("${c.text}") [${supportCount}/${denom}]`);
         }
     }
 
-    if (outliers.length > 0) {
+    if (divergent.length > 0) {
         if (lines.length > 0) lines.push("");
-        lines.push("### Outliers");
-        for (const o of outliers) {
-            const type = String((o as any)?.type || "supplemental");
-            const typeLabel = type === "frame_challenger" ? "[frame_challenger]" : "[supplemental]";
-            const insight = String((o as any)?.insight || "").trim();
-            const source = String((o as any)?.source || "").trim();
-            const dim = (o as any)?.dimension ? ` (${String((o as any).dimension)})` : "";
-            lines.push(`- ${typeLabel} **${insight}**${dim}${source ? ` — ${source}` : ""}`);
-            if ((o as any)?.applies_when) lines.push(`  Applies when: ${String((o as any).applies_when)}`);
+        lines.push("### Particulars");
+        for (const c of divergent) {
+            lines.push(`- **${c.label}** ("${c.text}") [Model ${c.supporters[0] || '?'}]`);
+            if (c.challenges) lines.push(`  Challenges: ${c.challenges}`);
         }
     }
 
@@ -1311,149 +1471,43 @@ export function parseV1MapperToArtifact(
     options: { graphTopology?: any; query?: string; turn?: number; timestamp?: string } = {},
 ): MapperArtifact {
     // 1. Check for Unified Tagged Output first
-    if (v1Output && (v1Output.includes('<mapper_artifact>') || v1Output.includes('\\<mapper_artifact\\>'))) {
+    if (v1Output && (v1Output.includes('<mapper_artifact>') || v1Output.includes('\\<mapper_artifact\\>') || v1Output.includes('<map>'))) {
         const unified = parseUnifiedMapperOutput(v1Output);
-        if (unified.artifact) {
+
+        let unifiedArtifact = unified.artifact;
+        if (!unifiedArtifact && unified.map && unified.map.claims) {
+            unifiedArtifact = {
+                ...createEmptyMapperArtifact(),
+                claims: unified.map.claims,
+                edges: unified.map.edges || [],
+                ghosts: unified.map.ghosts || [],
+            };
+        }
+
+        if (unifiedArtifact) {
             return {
-                ...unified.artifact,
-                query: options.query || unified.artifact.query || "",
-                turn: options.turn || unified.artifact.turn || 0,
-                timestamp: options.timestamp || unified.artifact.timestamp || new Date().toISOString()
+                ...unifiedArtifact,
+                query: options.query || unifiedArtifact.query || "",
+                turn: options.turn || unifiedArtifact.turn || 0,
+                timestamp: options.timestamp || unifiedArtifact.timestamp || new Date().toISOString()
             };
         }
     }
 
+    // 2. Normalize and fallback to V2 JSON
     const normalizedOutput = String(v1Output || '').replace(/\\</g, '<').replace(/\\>/g, '>');
-    const artifactJsonPatterns: RegExp[] = [
-        /```(?:json)?\s*(\{[\s\S]*?"consensus"[\s\S]*?"claims"[\s\S]*?\})\s*```/i,
-        /(\{[\s\S]*?"consensus"\s*:\s*\{[\s\S]*?"claims"\s*:\s*\[[\s\S]*?\][\s\S]*?\})/i,
-    ];
+    // ... Parsing V2 JSON and adapting it ...
+    // Note: For simplicity, if we don't find V2 JSON, we fall back to empty or rudimentary
 
-    for (const pattern of artifactJsonPatterns) {
-        const match = normalizedOutput.match(pattern);
-        if (!match?.[1]) continue;
-        const parsed = extractJsonFromContent(match[1]);
-        const claims = (parsed as any)?.consensus?.claims;
-        if (!Array.isArray(claims) || claims.length === 0) continue;
-        const hasFullText = claims.some((c: any) => typeof c?.text === 'string' && c.text.split(' ').length > 5);
-        if (!hasFullText) continue;
+    // We reuse parseMapperArtifact as the robust fallback since it now handles V2 adaptation
+    const parsed = parseMapperArtifact(normalizedOutput);
 
-        const empty = createEmptyMapperArtifact();
-        return {
-            ...empty,
-            ...(parsed as any),
-            query: options.query || (parsed as any)?.query || "",
-            turn: options.turn || (parsed as any)?.turn || 0,
-            timestamp: options.timestamp || (parsed as any)?.timestamp || new Date().toISOString(),
-            consensus: {
-                ...empty.consensus,
-                ...((parsed as any)?.consensus || {}),
-            },
-        };
-    }
-
-    const artifact = createEmptyMapperArtifact();
-    const query = typeof options.query === "string" ? options.query : "";
-    const turn = typeof options.turn === "number" ? options.turn : 0;
-    const timestamp = typeof options.timestamp === "string" ? options.timestamp : new Date().toISOString();
-
-    let topology: any | null = options.graphTopology ?? null;
-    if (!topology) {
-        try {
-            const parsed = parseMappingResponse(v1Output || "");
-            topology = parsed.graphTopology || null;
-        } catch { }
-    }
-
-    const nodes = Array.isArray(topology?.nodes) ? topology.nodes : [];
-    const edges = Array.isArray(topology?.edges) ? topology.edges : [];
-
-    const normalizedNodes = nodes
-        .filter((n: any) => n && typeof n === "object")
-        .map((n: any) => {
-            const supportersRaw = Array.isArray(n.supporters) ? n.supporters : [];
-            const supporters = supportersRaw
-                .map((s: any) => {
-                    const num = typeof s === "number" ? s : Number.NaN;
-                    return Number.isFinite(num) ? num : null;
-                })
-                .filter((x: any) => typeof x === "number") as number[];
-
-            const supportCount =
-                typeof n.support_count === "number"
-                    ? n.support_count
-                    : supporters.length;
-
-            return {
-                label: String(n.label || n.id || "").trim(),
-                theme: n.theme ? String(n.theme) : "",
-                supporters,
-                support_count: supportCount,
-            };
-        })
-        .filter((n: any) => n.label.length > 0);
-
-    const modelCount =
-        normalizedNodes.length > 0
-            ? Math.max(
-                ...normalizedNodes.map((n: any) =>
-                    Math.max(n.support_count || 0, Array.isArray(n.supporters) ? n.supporters.length : 0),
-                ),
-            )
-            : 0;
-
-    const claims = normalizedNodes
-        .filter((n: any) => (n.support_count || 0) >= 2)
-        .map((n: any) => ({
-            text: n.label,
-            supporters: n.supporters,
-            support_count: n.support_count,
-        }));
-
-    const outliers = normalizedNodes
-        .filter((n: any) => (n.support_count || 0) < 2)
-        .map((n: any) => {
-            const first = Array.isArray(n.supporters) && n.supporters.length > 0 ? n.supporters[0] : null;
-            const sourceIndex = typeof first === "number" ? first : -1;
-            const source = sourceIndex >= 0 ? `Model ${sourceIndex + 1}` : "Model";
-            const type = String(n.theme || "").toLowerCase().includes("frame") ? "frame_challenger" : "supplemental";
-            return {
-                insight: n.label,
-                source,
-                source_index: sourceIndex,
-                type: type as any,
-                raw_context: "",
-            };
-        });
-
-    const strength = claims.length / Math.max(1, normalizedNodes.length);
-    const quality = strength > 0.9 ? "resolved" : "conventional";
-    const derivedTopology = strength > 0.7 ? "high_confidence" : "dimensional";
-
-    const tensions = edges
-        .filter((e: any) => e && typeof e === "object")
-        .filter((e: any) => String(e.type || "").toLowerCase() === "conflicts")
-        .map((e: any) => ({
-            between: [String(e.source || ""), String(e.target || "")],
-            type: "conflicts",
-            axis: String(e.reason || "approach"),
-        }))
-        .filter((t: any) => t.between[0] && t.between[1]);
-
+    // Inject options
     return {
-        ...artifact,
-        query,
-        turn,
-        timestamp,
-        model_count: modelCount,
-        consensus: {
-            claims,
-            quality: quality as any,
-            strength,
-        },
-        outliers,
-        tensions,
-        topology: derivedTopology as any,
+        ...parsed,
+        query: options.query || parsed.query || "",
+        turn: options.turn || parsed.turn || 0,
+        timestamp: options.timestamp || parsed.timestamp || new Date().toISOString()
     };
 }
 
@@ -1878,55 +1932,8 @@ export function cleanAntagonistResponse(text: string): string {
     return text;
 }
 
-// ============================================================================
-// EXPLORE OUTPUT PARSING
-// ============================================================================
+// ExploreOutput removed - subsumed by Unified Mapper Artifact in V3
 
-
-export function createEmptyExploreOutput(): ExploreOutput {
-    return {
-        container: "direct_answer",
-        content: { answer: "", additional_context: [] },
-        souvenir: "",
-        alternatives: [],
-        artifact_id: ""
-    };
-}
-
-export function parseExploreOutput(text: string): ExploreOutput {
-    if (!text) return createEmptyExploreOutput();
-
-    const normalized = normalizeText(text);
-
-    // 1. Try JSON parsing first (primary method)
-    try {
-        const extracted = extractJsonObject(normalized);
-        const parsed: any = extracted.json;
-        if (parsed && typeof parsed === 'object' && parsed.container && parsed.content) {
-            return {
-                container: parsed.container,
-                content: parsed.content,
-                souvenir: parsed.souvenir || "",
-                alternatives: parsed.alternatives || [],
-                artifact_id: parsed.artifact_id || `explore-${Date.now()}`
-            } as ExploreOutput;
-        }
-    } catch {
-    }
-
-    // 2. Fallback: Parse markdown if JSON fails (implementing a basic graceful degradation)
-    // For now, if JSON parsing fails, we default to a direct answer with the raw text
-    return {
-        container: "direct_answer",
-        content: {
-            answer: text, // Fallback: treat the whole text as the answer
-            additional_context: []
-        },
-        souvenir: "Exploration provided as raw text",
-        alternatives: [],
-        artifact_id: `explore-fallback-${Date.now()}`
-    };
-}
 
 // ============================================================================
 // GAUNTLET OUTPUT PARSING
