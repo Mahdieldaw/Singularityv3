@@ -196,9 +196,9 @@ const detectProblemStructure = (
   );
   const dimensionalScore = clamp01(
     clamp01(convergencePoints / 3) * 0.6 +
-      clamp01(avgConnectivity / 2) * 0.45 +
-      clamp01(1 - isolatedRatio) * 0.25 -
-      clamp01(conflictCount / 3) * 0.25
+    clamp01(avgConnectivity / 2) * 0.45 +
+    clamp01(1 - isolatedRatio) * 0.25 -
+    clamp01(conflictCount / 3) * 0.25
   );
   const exploratoryScore = clamp01(
     clamp01(isolatedRatio / 0.5) * 0.85 +
@@ -1012,37 +1012,78 @@ export class PromptService {
       })
       .join("\n\n");
 
-    return `You are not a summarizer. You are the Epistemic Cartographer, and your mandate is the Incorruptible Distillation of Signal—preserving every Incommensurable insight while discarding only connective tissue that adds nothing to the answer.
-    
-    Index the Singular Particulars (what only one source saw) and the Consensus Meridians (where paths converged).
-    
-    Every distinct claim you identify receives a canonical label and sequential ID. That exact pairing—**[Label|claim_N]**—will bind your map to your narrative.
-    
-    User query: "${userPrompt}"
-    
-    <model_outputs>
-    ${modelOutputsBlock}
-    </model_outputs>
+    return `You are the Epistemic Cartographer. Your mandate is the Incorruptible Distillation of Signal—preserving every incommensurable insight while discarding only connective tissue that adds nothing to the answer. The user has spoken and the models responded to 
 
-    Now distill what you found into two outputs: <map> and <narrative>.
+<user_query>
+User query: "${userPrompt}"
+</user_query>
 
-    THE MAP
-    <map>
-    A JSON object with three arrays:
-    
-    claims: each carrying id, label (two to six words), text (the claim in one sentence), supporters (model numbers), type (factual | prescriptive | conditional | contested | speculative), role (anchor | branch | challenger | supplement), challenges (what premise this questions, or null).
-    
-    edges: relationships between claims, each with from, to, and type (supports | conflicts | tradeoff | prerequisite).
-    
-    ghosts: what no source addressed, or null.
-    </map>
-    
-    THE NARRATIVE
-    <narrative>
-    Weave the claims into an insightful essay revealing the landscape, using **[Label|claim_N]** anchors throughout. Lead with what matters most given the shape of responses—convergence if settled, novel insight if prescriptive, tension if comparative.
-    
-    Integrate challengers where they conceptually belong. Note agreement and divergence descriptively without endorsing either. Close with what remains uncharted, if anything does.
-    </narrative>
+#Task
+
+You are not a synthesizer. Your job description entails: Indexing positions, not topics. A position is a stance—something that can be supported, opposed, or traded against another. Where multiple sources reach the same position, note the convergence. Where only one source sees something, preserve it as a singularity. Where sources oppose each other, map the conflict. Where they optimize for different ends, map the tradeoff. Where one position depends on another, map the prerequisite. What no source addressed but matters—these are the ghosts at the edge of the map.
+
+Every distinct position you identify receives a canonical label and sequential ID. That exact pairing—**[Label|claim_N]**—will bind your map to your narrative about the models' responses below:
+
+
+
+<model_outputs>
+${modelOutputsBlock}
+</model_outputs>
+
+Now output the map first: <map> then the flowing <narrative>.
+
+---
+
+THE MAP
+<map>
+A JSON object with three arrays:
+
+claims: an array of distinct positions. Each claim has:
+- id: sequential ("claim_1", "claim_2", etc.)
+- label: a verb-phrase expressing a position. A stance that can be agreed with, opposed, or traded off—not a topic or category.
+- text: the mechanism, evidence, or reasoning behind this position (one sentence)
+- supporters: array of model indices that expressed this position
+- type: the epistemic nature
+  - factual: verifiable truth
+  - prescriptive: recommendation or ought-statement  
+  - conditional: truth depends on unstated context
+  - contested: models actively disagree
+  - speculative: prediction or uncertain projection
+- role: "challenger" if this questions a premise or reframes the problem; null otherwise
+- challenges: if role is challenger, the claim_id being challenged; null otherwise
+
+edges: an array of relationships. Each edge has:
+- from: source claim_id
+- to: target claim_id
+- type:
+  - supports: from reinforces to
+  - conflicts: from and to cannot both be true
+  - tradeoff: from and to optimize for different ends
+  - prerequisite: to depends on from being true
+
+ghosts: what no source addressed that would matter for the decision. Null if none.
+
+</map>
+
+---
+
+THE NARRATIVE
+<narrative>
+The narrative is not a summary. It is a landscape the reader walks through. Use **[Label|claim_id]** anchors to let them touch the structure as they move.
+
+Begin by surfacing the governing variable—if tradeoff or conflict edges exist, name the dimension along which the answer pivots. One sentence that orients before any detail arrives.
+
+Then signal the shape. Are the models converging? Splitting into camps? Arranged in a sequence where each step enables the next? The reader should know how to hold what follows before they hold it.
+
+Now establish the ground. Claims with broad support are the floor—state what is settled without argument. This is what does not need to be re-examined.
+
+From the ground, move to the tension. Claims connected by conflict or tradeoff edges are where the decision lives. Present opposing positions using their labels—the axis between them should be visible in the verb-phrases themselves. Do not resolve; reveal what choosing requires.
+
+After the tension, surface the edges. Claims with few supporters but high connectivity—or with challenger role—are singularities. They may be noise or they may be the key. Place them adjacent to what they challenge or extend, not quarantined at the end.
+
+Close with what remains uncharted. Ghosts are the boundary of what the models could see. Name them. The reader decides if they matter.
+
+Do not synthesize a verdict. Do not pick sides, the landscape is the product of the models' responses.
     `;
   }
 
@@ -1166,8 +1207,8 @@ ${theOneGuidance || 'Look in singular claims and challengers—they often see wh
 
 ### The Echo
 ${echoGuidance || (challengers.length > 0
-  ? 'This landscape contains frame challengers. The_echo is what your frame cannot accommodate—the sharpest edge that survives even after you\'ve found the frame.'
-  : 'What does your frame not naturally accommodate? If your frame genuinely integrates all perspectives, the_echo may be null. But be suspicious—smooth frames hide blind spots.')}
+        ? 'This landscape contains frame challengers. The_echo is what your frame cannot accommodate—the sharpest edge that survives even after you\'ve found the frame.'
+        : 'What does your frame not naturally accommodate? If your frame genuinely integrates all perspectives, the_echo may be null. But be suspicious—smooth frames hide blind spots.')}
 
 ---
 
