@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as d3 from 'd3-force';
-import { Claim, Edge, ProblemStructure } from '../../shared/contract';
+import { Claim, Edge, ProblemStructure, GraphAnalysis, EnrichedClaim } from '../../shared/contract';
 
 const DEBUG_DECISION_MAP_GRAPH = false;
 const decisionMapGraphDbg = (...args: any[]) => {
@@ -36,6 +36,8 @@ interface Props {
     claims: Claim[];
     edges: Edge[];
     problemStructure?: ProblemStructure;
+    graphAnalysis?: GraphAnalysis;
+    enrichedClaims?: EnrichedClaim[];
     citationSourceOrder?: Record<number, string>;
     onNodeClick?: (node: GraphNode) => void;
     selectedClaimIds?: string[];
@@ -65,58 +67,15 @@ function getNodeRadius(supportCount: number): number {
     return base + Math.max(1, supportCount) * scale;
 }
 
-function computePrereqDepths(nodeIds: string[], edges: Edge[]): Map<string, number> {
-    const incoming = new Map<string, string[]>();
-    for (const id of nodeIds) incoming.set(id, []);
-    for (const e of edges) {
-        if (e.type !== 'prerequisite') continue;
-        if (!incoming.has(e.to)) incoming.set(e.to, []);
-        incoming.get(e.to)!.push(e.from);
-        if (!incoming.has(e.from)) incoming.set(e.from, []);
-    }
-
-    const visiting = new Set<string>();
-    const memo = new Map<string, number>();
-    const dfs = (id: string): number => {
-        if (memo.has(id)) return memo.get(id)!;
-        if (visiting.has(id)) return 0;
-        visiting.add(id);
-        const prereqs = incoming.get(id) || [];
-        let depth = 0;
-        for (const p of prereqs) {
-            depth = Math.max(depth, dfs(p) + 1);
-        }
-        visiting.delete(id);
-        memo.set(id, depth);
-        return depth;
-    };
-
-    for (const id of nodeIds) dfs(id);
-    return memo;
-}
-
-function pickKeystoneId(nodes: GraphNode[], edges: Edge[]): string | null {
-    const out = new Map<string, number>();
-    for (const e of edges) {
-        if (e.type !== 'supports' && e.type !== 'prerequisite') continue;
-        out.set(e.from, (out.get(e.from) || 0) + 1);
-    }
-    let best: string | null = null;
-    let bestCount = -1;
-    for (const n of nodes) {
-        const c = out.get(n.id) || 0;
-        if (c > bestCount) {
-            bestCount = c;
-            best = n.id;
-        }
-    }
-    return bestCount > 0 ? best : null;
-}
+// Helper functions removed: computePrereqDepths, pickKeystoneId are no longer needed
+// as we rely on graphAnalysis props.
 
 const DecisionMapGraph: React.FC<Props> = ({
     claims: inputClaims,
     edges: inputEdges,
     problemStructure,
+    graphAnalysis,
+    enrichedClaims,
     citationSourceOrder: _citationSourceOrder,
     onNodeClick,
     selectedClaimIds,
@@ -156,36 +115,26 @@ const DecisionMapGraph: React.FC<Props> = ({
         const usableW = Math.max(1, width - padding * 2);
         const usableH = Math.max(1, height - padding * 2);
 
-        if (problemStructure?.primaryPattern === 'linear' && hasPrereqs) {
-            const depths = computePrereqDepths(nodeIds, inputEdges);
-            const maxDepth = Math.max(0, ...Array.from(depths.values()));
-            const levels: Record<number, string[]> = {};
-            nodeIds.forEach((id) => {
-                const d = depths.get(id) || 0;
-                if (!levels[d]) levels[d] = [];
-                levels[d].push(id);
+        if (problemStructure?.primaryPattern === 'linear' && graphAnalysis?.longestChain && graphAnalysis.longestChain.length > 0) {
+            const longestChain = graphAnalysis.longestChain;
+            const chainPositions = new Map<string, number>();
+            longestChain.forEach((id, idx) => chainPositions.set(id, idx));
+            const maxPos = longestChain.length - 1;
+
+            longestChain.forEach((id, idx) => {
+                const y = padding + (maxPos === 0 ? usableH / 2 : (idx / maxPos) * usableH);
+                targets.set(id, { x: width / 2, y });
             });
 
-            for (let d = 0; d <= maxDepth; d++) {
-                const levelIds = levels[d] || [];
-                const y = padding + (maxDepth === 0 ? usableH / 2 : (d / maxDepth) * usableH);
-                const count = levelIds.length;
-                levelIds.forEach((id, idx) => {
-                    const x = padding + (count === 1 ? usableW / 2 : (idx / (count - 1)) * usableW);
-                    targets.set(id, { x, y });
+            // Position non-chain nodes off to the side
+            nodeIds.filter(id => !chainPositions.has(id)).forEach((id, idx) => {
+                targets.set(id, {
+                    x: padding + 50,
+                    y: padding + (idx / Math.max(1, nodeIds.length - longestChain.length)) * usableH
                 });
-            }
+            });
         } else if (problemStructure?.primaryPattern === 'keystone') {
-            const provisionalNodes: GraphNode[] = inputClaims.map((c) => ({
-                id: c.id,
-                label: c.label,
-                text: c.text,
-                supporters: c.supporters,
-                support_count: c.support_count || c.supporters.length || 1,
-                type: c.type,
-                role: c.role,
-            }));
-            const keystoneId = pickKeystoneId(provisionalNodes, inputEdges);
+            const keystoneId = graphAnalysis?.hubClaim || null;
             if (keystoneId) {
                 targets.set(keystoneId, { x: width / 2, y: height / 2 });
                 const neighbors = inputEdges
@@ -202,6 +151,18 @@ const DecisionMapGraph: React.FC<Props> = ({
                     });
                 });
             }
+        } else if (problemStructure?.primaryPattern === 'settled') {
+            const centerX = width / 2;
+            const centerY = height / 2;
+            const radius = Math.min(usableW, usableH) * 0.25;
+
+            nodeIds.forEach((id, idx) => {
+                const angle = (idx / nodeIds.length) * Math.PI * 2;
+                targets.set(id, {
+                    x: centerX + Math.cos(angle) * radius * 0.5,
+                    y: centerY + Math.sin(angle) * radius * 0.5,
+                });
+            });
         }
 
         // Map V3 Claims to GraphNodes
@@ -223,13 +184,16 @@ const DecisionMapGraph: React.FC<Props> = ({
             };
         });
 
-        // Map V3 Edges to GraphEdges
-        const simEdges: GraphEdge[] = inputEdges.map(e => ({
-            source: e.from,
-            target: e.to,
-            type: e.type,
-            reason: e.type // Use type as reason for now or logic from meta
-        }));
+        // Map V3 Edges to GraphEdges, filtering out any edges pointing to missing nodes
+        const validNodeIds = new Set(simNodes.map(n => n.id));
+        const simEdges: GraphEdge[] = inputEdges
+            .filter(e => validNodeIds.has(e.from) && validNodeIds.has(e.to))
+            .map(e => ({
+                source: e.from,
+                target: e.to,
+                type: e.type,
+                reason: e.type // Use type as reason for now or logic from meta
+            }));
 
         decisionMapGraphDbg("init", {
             claims: inputClaims.length,
@@ -251,6 +215,7 @@ const DecisionMapGraph: React.FC<Props> = ({
 
         const isLinear = problemStructure?.primaryPattern === 'linear' && targets.size > 0;
         const isKeystone = problemStructure?.primaryPattern === 'keystone' && targets.size > 0;
+        const isSettled = problemStructure?.primaryPattern === 'settled';
 
         const simulation = d3.forceSimulation<GraphNode>(simNodes)
             .force('charge', d3.forceManyBody().strength(isLinear ? -700 : -1000))
@@ -373,6 +338,20 @@ const DecisionMapGraph: React.FC<Props> = ({
             n.id === nodeId ? { ...n, fx: null, fy: null } : n
         ));
     }, []);
+
+    const getComponentColor = useCallback((claimId: string): string => {
+        if (!graphAnalysis?.components) return 'transparent';
+
+        const componentColors = [
+            'rgba(59, 130, 246, 0.1)',   // Blue
+            'rgba(16, 185, 129, 0.1)',   // Green
+            'rgba(245, 158, 11, 0.1)',   // Amber
+            'rgba(139, 92, 246, 0.1)',   // Purple
+        ];
+
+        const componentIdx = graphAnalysis.components.findIndex(c => c.includes(claimId));
+        return componentColors[componentIdx % componentColors.length];
+    }, [graphAnalysis]);
 
     // Mouse handlers for SVG
     const dragState = useRef<{ nodeId: string | null; startX: number; startY: number }>({
@@ -670,6 +649,36 @@ const DecisionMapGraph: React.FC<Props> = ({
                     })}
                 </g>
 
+                {/* Component backgrounds (if fragmented) */}
+                {graphAnalysis && graphAnalysis.componentCount > 1 && graphAnalysis.components.map((component, idx) => {
+                    const componentNodes = nodes.filter(n => component.includes(n.id));
+                    if (componentNodes.length === 0) return null;
+
+                    const xs = componentNodes.map(n => n.x || 0);
+                    const ys = componentNodes.map(n => n.y || 0);
+                    const centerX = (Math.min(...xs) + Math.max(...xs)) / 2;
+                    const centerY = (Math.min(...ys) + Math.max(...ys)) / 2;
+                    const radius = Math.max(
+                        Math.max(...xs) - Math.min(...xs),
+                        Math.max(...ys) - Math.min(...ys)
+                    ) / 2 + 60;
+
+                    const componentColor = getComponentColor(component[0]); // Use first node to get color
+
+                    return (
+                        <circle
+                            key={`component-${idx}`}
+                            cx={centerX}
+                            cy={centerY}
+                            r={radius}
+                            fill={componentColor}
+                            stroke={componentColor.replace('0.1', '0.3')}
+                            strokeWidth={1}
+                            strokeDasharray="4,4"
+                        />
+                    );
+                })}
+
                 {/* Nodes with premium styling */}
                 <g className="nodes">
                     {nodes.map(node => {
@@ -677,8 +686,19 @@ const DecisionMapGraph: React.FC<Props> = ({
                         const y = node.y || 0;
                         const radius = getNodeRadius(node.support_count);
                         const isHovered = hoveredNode === node.id;
-                        const color = getRoleColor(node.role);
+
+                        // Find enriched data for this node
+                        const enriched = enrichedClaims?.find(c => c.id === node.id);
+
+                        // Determine color based on V3.1 flags
+                        const color = enriched?.isKeystone ? '#8b5cf6' :     // Purple for keystone
+                            enriched?.isChallenger ? '#f59e0b' :    // Amber for challenger
+                                enriched?.isEvidenceGap ? '#ef4444' :   // Red for evidence gap
+                                    enriched?.isHighSupport ? '#3b82f6' :   // Blue for high support
+                                        getRoleColor(node.role);                 // Fallback to role color
+
                         const isSelected = Array.isArray(selectedClaimIds) && selectedClaimIds.includes(node.id);
+                        const showWarning = enriched?.isEvidenceGap || enriched?.isLeverageInversion;
 
                         return (
                             <g
@@ -760,7 +780,44 @@ const DecisionMapGraph: React.FC<Props> = ({
                                     opacity={isHovered ? 0.7 : 0.4}
                                 />
 
+                                {/* NEW: Warning indicator for evidence gaps / leverage inversions */}
+                                {showWarning && (
+                                    <g transform={`translate(${-radius * 0.6}, ${-radius * 0.6})`}>
+                                        <circle r={8} fill="#ef4444" stroke="#fff" strokeWidth={1} />
+                                        <text
+                                            textAnchor="middle"
+                                            dy={4}
+                                            fill="#fff"
+                                            fontSize={10}
+                                            fontWeight="bold"
+                                        >
+                                            !
+                                        </text>
+                                    </g>
+                                )}
 
+                                {/* NEW: Keystone crown indicator */}
+                                {enriched?.isKeystone && (
+                                    <text
+                                        y={-radius - 8}
+                                        textAnchor="middle"
+                                        fontSize={14}
+                                    >
+                                        👑
+                                    </text>
+                                )}
+
+                                {/* NEW: Chain position indicator for linear patterns */}
+                                {problemStructure?.primaryPattern === 'linear' && enriched?.chainDepth !== undefined && (
+                                    <text
+                                        y={-radius - 6}
+                                        textAnchor="middle"
+                                        fill="rgba(255,255,255,0.6)"
+                                        fontSize={9}
+                                    >
+                                        Step {enriched.chainDepth + 1}
+                                    </text>
+                                )}
 
                                 {/* Support count badge */}
                                 {node.support_count > 1 && (

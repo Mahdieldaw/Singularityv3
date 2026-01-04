@@ -85,8 +85,25 @@ export interface GraphTopology {
   edges: GraphEdge[];
 }
 
+export interface CoreRatios {
+  concentration: number;      // Max support / modelCount (0-1)
+  alignment: number;          // Reinforcing edges between top claims (0-1)
+  tension: number;            // Conflict + tradeoff edges / total (0-1)
+  fragmentation: number;      // Disconnected components (0-1)
+  depth: number;              // Longest chain / claim count (0-1)
+}
+
+export interface GraphAnalysis {
+  componentCount: number;
+  components: string[][];
+  longestChain: string[];
+  chainCount: number;
+  hubClaim: string | null;
+  hubDominance: number;
+}
+
 export interface ProblemStructure {
-  primaryPattern: "linear" | "dimensional" | "tradeoff" | "contested" | "exploratory" | "keystone";
+  primaryPattern: "linear" | "dimensional" | "tradeoff" | "contested" | "exploratory" | "keystone" | "settled";
   confidence: number;
   evidence: string[];
   implications: {
@@ -118,6 +135,31 @@ export interface MapperArtifact extends MapperOutput {
   model_count?: number;
   souvenir?: string;
   problemStructure?: ProblemStructure;
+  graphAnalysis?: GraphAnalysis;
+  ratios?: CoreRatios;
+  enrichedClaims?: EnrichedClaim[];
+}
+
+export interface EnrichedClaim extends Claim {
+  supportRatio: number;
+  isHighSupport: boolean;
+  leverage: number;
+  keystoneScore: number;
+  evidenceGapScore: number;
+  supportSkew: number;
+  isLeverageInversion: boolean;
+  isKeystone: boolean;
+  isEvidenceGap: boolean;
+  isOutlier: boolean;
+  isContested: boolean;
+  isConditional: boolean;
+  isChallenger: boolean;
+  isIsolated: boolean;
+  inDegree: number;
+  outDegree: number;
+  chainDepth: number;
+  isChainRoot: boolean;
+  isChainTerminal: boolean;
 }
 
 export interface ExploreAnalysis {
@@ -137,6 +179,28 @@ export interface UnderstandOutput {
   the_echo: { position: string; source: string; merit: string } | null;
   souvenir?: string;
   artifact_id: string;
+}
+
+export interface LeverageInversion {
+  claimId: string;
+  claimLabel: string;
+  supporterCount: number;
+  reason: "challenger_prerequisite_to_consensus" | "singular_foundation" | "high_connectivity_low_support";
+  affectedClaims: string[];
+}
+
+export interface CascadeRisk {
+  sourceId: string;
+  sourceLabel: string;
+  dependentIds: string[];
+  dependentLabels: string[];
+  depth: number;
+}
+
+export interface ConflictPair {
+  claimA: { id: string; label: string; supporterCount: number };
+  claimB: { id: string; label: string; supporterCount: number };
+  isBothConsensus: boolean;
 }
 
 
