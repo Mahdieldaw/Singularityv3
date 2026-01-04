@@ -7,7 +7,7 @@ export type ProviderKey =
   | "gemini-pro"
   | "chatgpt"
   | "qwen";
-export type WorkflowStepType = "prompt" | "mapping" | "refiner" | "antagonist" | "understand" | "gauntlet";
+export type WorkflowStepType = "prompt" | "mapping" | "refiner" | "antagonist" | "understand" | "gauntlet" | "singularity";
 
 export type CognitiveMode = "auto" | "understand" | "decide";
 
@@ -100,6 +100,9 @@ export interface GraphAnalysis {
   chainCount: number;
   hubClaim: string | null;
   hubDominance: number;
+  articulationPoints: string[];
+  clusterCohesion: number;
+  localCoherence: number;
 }
 
 export interface ProblemStructure {
@@ -144,6 +147,12 @@ export interface EnrichedClaim extends Claim {
   supportRatio: number;
   isHighSupport: boolean;
   leverage: number;
+  leverageFactors: {
+    supportWeight: number;
+    roleWeight: number;
+    connectivityWeight: number;
+    positionWeight: number;
+  };
   keystoneScore: number;
   evidenceGapScore: number;
   supportSkew: number;
@@ -181,6 +190,14 @@ export interface UnderstandOutput {
   artifact_id: string;
 }
 
+export interface SingularityOutput {
+  text: string;
+  providerId: string;
+  timestamp: number;
+  leakageDetected?: boolean;
+  leakageViolations?: string[];
+}
+
 export interface LeverageInversion {
   claimId: string;
   claimLabel: string;
@@ -201,6 +218,7 @@ export interface ConflictPair {
   claimA: { id: string; label: string; supporterCount: number };
   claimB: { id: string; label: string; supporterCount: number };
   isBothConsensus: boolean;
+  dynamics: 'symmetric' | 'asymmetric';
 }
 
 
@@ -228,6 +246,7 @@ export interface InitializeRequest {
   mapper?: ProviderKey;
   refiner?: ProviderKey;
   antagonist?: ProviderKey;
+  singularity?: ProviderKey;
   useThinking?: boolean;
   providerMeta?: Partial<Record<ProviderKey, any>>;
   clientUserTurnId?: string; // Optional: client-side provisional ID for the user's turn.
@@ -254,6 +273,7 @@ export interface ExtendRequest {
   mapper?: ProviderKey;
   refiner?: ProviderKey;
   antagonist?: ProviderKey;
+  singularity?: ProviderKey;
   includeRefiner?: boolean;
   includeAntagonist?: boolean;
   useThinking?: boolean;
@@ -270,7 +290,7 @@ export interface RecomputeRequest {
   type: "recompute";
   sessionId: string;
   sourceTurnId: string;
-  stepType: "mapping" | "batch" | "refiner" | "antagonist" | "understand" | "gauntlet";
+  stepType: "mapping" | "batch" | "refiner" | "antagonist" | "understand" | "gauntlet" | "singularity";
   targetProvider: ProviderKey;
   userMessage?: string;
   useThinking?: boolean;
@@ -604,12 +624,14 @@ export interface AiTurn {
   exploreResponses?: Record<string, ProviderResponse[]>;
   understandResponses?: Record<string, ProviderResponse[]>;
   gauntletResponses?: Record<string, ProviderResponse[]>;
+  singularityResponses?: Record<string, ProviderResponse[]>;
 
   // Cognitive Pipeline Artifacts (Computed)
   mapperArtifact?: MapperArtifact;
   exploreAnalysis?: ExploreAnalysis;
   understandOutput?: UnderstandOutput;
   gauntletOutput?: GauntletOutput;
+  singularityOutput?: SingularityOutput;
 
   meta?: {
     branchPointTurnId?: string;

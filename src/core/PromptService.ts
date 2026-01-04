@@ -1,4 +1,4 @@
-import { MapperArtifact, Claim, Edge, ProblemStructure } from "../../shared/contract";
+import { MapperArtifact, Claim, Edge, ProblemStructure, EnrichedClaim, ConflictPair, CascadeRisk, LeverageInversion } from "../../shared/contract";
 
 const DEBUG_PROMPT_SERVICE = false;
 const promptDbg = (...args: any[]) => {
@@ -29,6 +29,9 @@ type GraphAnalysis = {
   chainCount: number;
   hubClaim: string | null;
   hubDominance: number;
+  articulationPoints: string[];
+  clusterCohesion: number;
+  localCoherence: number;
 };
 
 type StructuralAnalysis = {
@@ -42,7 +45,7 @@ type StructuralAnalysis = {
     modelCount: number;
     convergenceRatio: number;
   };
-  claimsWithLeverage: ClaimWithLeverage[];
+  claimsWithLeverage: EnrichedClaim[];
   patterns: {
     leverageInversions: LeverageInversion[];
     cascadeRisks: CascadeRisk[];
@@ -61,64 +64,10 @@ type StructuralAnalysis = {
   ratios: CoreRatios;
 };
 
-type ClaimWithLeverage = {
-  id: string;
-  label: string;
-  supporters: number[];
-  type: string;
-  role: string;
-  // Core computed ratios (always computed)
-  supportRatio: number;
-  leverage: number;
-  leverageFactors: {
-    supportWeight: number;
-    roleWeight: number;
-    connectivityWeight: number;
-    positionWeight: number;
-  };
-  keystoneScore: number;
-  evidenceGapScore: number;
-  supportSkew: number;
-  // Percentile-based flags (computed from distribution)
-  isHighSupport: boolean;
-  isLeverageInversion: boolean;
-  isKeystone: boolean;
-  isEvidenceGap: boolean;
-  isOutlier: boolean;
-  // Structural flags (computed from edges)
-  isContested: boolean;
-  isConditional: boolean;
-  isChallenger: boolean;
-  isIsolated: boolean;
-  // Chain position
-  inDegree: number;
-  outDegree: number;
-  chainDepth: number;
-  isChainRoot: boolean;
-  isChainTerminal: boolean;
-};
+// ClaimWithLeverage removed - using EnrichedClaim from contract
 
-type LeverageInversion = {
-  claimId: string;
-  claimLabel: string;
-  supporterCount: number;
-  reason: "challenger_prerequisite_to_consensus" | "singular_foundation" | "high_connectivity_low_support";
-  affectedClaims: string[];
-};
 
-type CascadeRisk = {
-  sourceId: string;
-  sourceLabel: string;
-  dependentIds: string[];
-  dependentLabels: string[];
-  depth: number;
-};
 
-type ConflictPair = {
-  claimA: { id: string; label: string; supporterCount: number };
-  claimB: { id: string; label: string; supporterCount: number };
-  isBothConsensus: boolean;
-};
 
 type TradeoffPair = {
   claimA: { id: string; label: string; supporterCount: number };
@@ -276,7 +225,85 @@ const computeLongestChain = (claimIds: string[], edges: Edge[]): string[] => {
 /**
  * Analyze graph topology
  */
-const analyzeGraph = (claimIds: string[], edges: Edge[]): GraphAnalysis => {
+/**
+ * Analyze graph topology
+ */
+const computeSignalStrength = (
+  claimCount: number,
+  edgeCount: number,
+  modelCount: number,
+  supporters: number[][]
+): number => {
+  const clamp01 = (n: number) => Math.max(0, Math.min(1, n));
+  const minEdgesForPattern = Math.max(3, claimCount * 0.15);
+  const edgeSignal = clamp01(edgeCount / minEdgesForPattern);
+
+  const supportCounts = supporters.map(s => s.length);
+  const maxSupport = Math.max(...supportCounts, 1);
+  const normalized = supportCounts.map(c => c / maxSupport);
+
+  const mean = normalized.reduce((a, b) => a + b, 0) / normalized.length;
+  const variance = normalized.reduce((sum, v) => sum + Math.pow(v - mean, 2), 0) / normalized.length;
+  const supportSignal = clamp01(variance * 5);
+
+  const uniqueModelCount = new Set(supporters.flat()).size;
+  const coverageSignal = uniqueModelCount / modelCount;
+
+  return (edgeSignal * 0.4 + supportSignal * 0.3 + coverageSignal * 0.3);
+};
+
+const findArticulationPoints = (claimIds: string[], edges: Edge[]): string[] => {
+  const adj = new Map<string, string[]>();
+  claimIds.forEach(id => adj.set(id, []));
+  edges.forEach(e => {
+    adj.get(e.from)?.push(e.to);
+    adj.get(e.to)?.push(e.from);
+  });
+
+  const visited = new Set<string>();
+  const discoveryTime = new Map<string, number>();
+  const lowValue = new Map<string, number>();
+  const parent = new Map<string, string | null>();
+  const ap = new Set<string>();
+  let time = 0;
+
+  const dfs = (u: string) => {
+    visited.add(u);
+    time++;
+    discoveryTime.set(u, time);
+    lowValue.set(u, time);
+    let children = 0;
+
+    const neighbors = adj.get(u) || [];
+    for (const v of neighbors) {
+      if (!visited.has(v)) {
+        children++;
+        parent.set(v, u);
+        dfs(v);
+        lowValue.set(u, Math.min(lowValue.get(u)!, lowValue.get(v)!));
+        if (parent.get(u) !== null && lowValue.get(v)! >= discoveryTime.get(u)!) {
+          ap.add(u);
+        }
+      } else if (v !== parent.get(u)) {
+        lowValue.set(u, Math.min(lowValue.get(u)!, discoveryTime.get(v)!));
+      }
+    }
+    if (parent.get(u) === null && children > 1) {
+      ap.add(u);
+    }
+  };
+
+  claimIds.forEach(id => {
+    if (!visited.has(id)) {
+      parent.set(id, null);
+      dfs(id);
+    }
+  });
+
+  return Array.from(ap);
+};
+
+const analyzeGraph = (claimIds: string[], edges: Edge[], claims: EnrichedClaim[]): GraphAnalysis => {
   const { count: componentCount, components } = computeConnectedComponents(claimIds, edges);
   const longestChain = computeLongestChain(claimIds, edges);
 
@@ -305,8 +332,46 @@ const analyzeGraph = (claimIds: string[], edges: Edge[]): GraphAnalysis => {
   const [topId, topOut] = sortedByOutDegree[0] || [null, 0];
   const secondOut = sortedByOutDegree[1]?.[1] ?? 0;
 
-  const hubDominance = secondOut > 0 ? topOut / secondOut : (topOut > 0 ? Infinity : 0);
+  const hubDominance = secondOut > 0 ? topOut / secondOut : (topOut > 0 ? 10 : 0);
   const hubClaim = hubDominance >= 1.5 && topOut >= 2 ? topId : null;
+
+  // Articulation points
+  const articulationPoints = findArticulationPoints(claimIds, edges);
+
+  // Cluster cohesion
+  const highSupportIds = new Set(claims.filter(c => c.isHighSupport).map(c => c.id));
+  const n = highSupportIds.size;
+  let clusterCohesion = 1.0;
+  if (n > 1) {
+    const possibleEdges = n * (n - 1);
+    const actualEdges = edges.filter(e =>
+      highSupportIds.has(e.from) && highSupportIds.has(e.to) &&
+      (e.type === 'supports' || e.type === 'prerequisite')
+    ).length;
+    clusterCohesion = actualEdges / possibleEdges;
+  }
+
+  // Local coherence
+  let totalCoherence = 0;
+  let weightedClaims = 0;
+
+  for (const component of components) {
+    if (component.length < 2) continue;
+
+    const componentClaims = claims.filter(c => component.includes(c.id));
+    const componentEdges = edges.filter(e =>
+      component.includes(e.from) && component.includes(e.to)
+    );
+
+    const possibleEdges = component.length * (component.length - 1);
+    const coherence = possibleEdges > 0 ? componentEdges.length / possibleEdges : 0;
+    const avgSupport = componentClaims.reduce((sum, c) => sum + c.supportRatio, 0) / component.length;
+
+    totalCoherence += coherence * avgSupport * component.length;
+    weightedClaims += component.length;
+  }
+
+  const localCoherence = weightedClaims > 0 ? totalCoherence / weightedClaims : 0;
 
   return {
     componentCount,
@@ -314,8 +379,37 @@ const analyzeGraph = (claimIds: string[], edges: Edge[]): GraphAnalysis => {
     longestChain,
     chainCount,
     hubClaim,
-    hubDominance: Number.isFinite(hubDominance) ? hubDominance : 10, // Cap infinity
+    hubDominance,
+    articulationPoints,
+    clusterCohesion,
+    localCoherence,
   };
+};
+
+// ═══════════════════════════════════════════════════════════════════════════
+// V3.5 DISCRIMINANT HELPERS
+// ═══════════════════════════════════════════════════════════════════════════
+
+const isHubLoadBearing = (
+  hubId: string,
+  claims: Partial<EnrichedClaim>[],
+  edges: Edge[]
+): boolean => {
+  const prereqOut = edges.filter(e =>
+    e.from === hubId &&
+    e.type === 'prerequisite'
+  );
+
+  // Load-bearing if enables 2+ other claims
+  return prereqOut.length >= 2;
+};
+
+const determineTensionDynamics = (
+  claimA: EnrichedClaim,
+  claimB: EnrichedClaim
+): 'symmetric' | 'asymmetric' => {
+  const diff = Math.abs(claimA.supportRatio - claimB.supportRatio);
+  return diff < 0.15 ? 'symmetric' : 'asymmetric';
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -323,7 +417,7 @@ const analyzeGraph = (claimIds: string[], edges: Edge[]): GraphAnalysis => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 const computeCoreRatios = (
-  claims: ClaimWithLeverage[],
+  claims: EnrichedClaim[],
   edges: Edge[],
   graph: GraphAnalysis,
   modelCount: number
@@ -425,7 +519,7 @@ const computeClaimRatios = (
   claim: Claim,
   edges: Edge[],
   modelCount: number
-): Omit<ClaimWithLeverage,
+): Omit<EnrichedClaim,
   'isHighSupport' | 'isLeverageInversion' | 'isKeystone' | 'isEvidenceGap' | 'isOutlier' |
   'isContested' | 'isConditional' | 'isChallenger' | 'isIsolated' | 'chainDepth'
 > => {
@@ -485,11 +579,7 @@ const computeClaimRatios = (
   const isChainTerminal = hasIncomingPrereq && !hasOutgoingPrereq;
 
   return {
-    id: claim.id,
-    label: claim.label,
-    supporters,
-    type: claim.type,
-    role: claim.role,
+    ...claim, // Spread original claim properties (text, quote, etc.)
     supportRatio,
     leverage,
     leverageFactors: {
@@ -516,7 +606,7 @@ const assignPercentileFlags = (
   edges: Edge[],
   cascadeRisks: CascadeRisk[],
   topClaimIds: Set<string>
-): ClaimWithLeverage[] => {
+): EnrichedClaim[] => {
 
   // Gather all values for percentile calculations
   const allSupportRatios = claims.map(c => c.supportRatio);
@@ -558,8 +648,9 @@ const assignPercentileFlags = (
     const isHighLeverage = isInTopPercentile(claim.leverage, allLeverages, 0.25);
     const isLeverageInversion = isLowSupport && isHighLeverage;
 
-    // Keystone: top 20% by keystone score AND outDegree >= 2
-    const isKeystone = isInTopPercentile(claim.keystoneScore, allKeystoneScores, 0.2) && claim.outDegree >= 2;
+    // Keystone: top 20% by keystone score AND outDegree >= 2 AND load-bearing
+    const isKeystoneCandidate = isInTopPercentile(claim.keystoneScore, allKeystoneScores, 0.2) && claim.outDegree >= 2;
+    const isKeystone = isKeystoneCandidate && isHubLoadBearing(claim.id, claims, edges);
 
     // Evidence gap: top 20% by gap score
     const isEvidenceGap = isInTopPercentile(evidenceGapScore, allEvidenceGaps, 0.2) && evidenceGapScore > 0;
@@ -610,7 +701,7 @@ const assignPercentileFlags = (
 // ═══════════════════════════════════════════════════════════════════════════
 
 const detectLeverageInversions = (
-  claims: ClaimWithLeverage[],
+  claims: EnrichedClaim[],
   edges: Edge[],
   topClaimIds: Set<string>
 ): LeverageInversion[] => {
@@ -720,7 +811,7 @@ const detectCascadeRisks = (
 
 const detectConflicts = (
   edges: Edge[],
-  claimMap: Map<string, ClaimWithLeverage>,
+  claimMap: Map<string, EnrichedClaim>,
   topClaimIds: Set<string>
 ): ConflictPair[] => {
   const out: ConflictPair[] = [];
@@ -729,10 +820,13 @@ const detectConflicts = (
     const a = claimMap.get(e.from);
     const b = claimMap.get(e.to);
     if (!a || !b) continue;
+    const dynamics = determineTensionDynamics(a, b);
+
     out.push({
       claimA: { id: a.id, label: a.label, supporterCount: a.supporters.length },
       claimB: { id: b.id, label: b.label, supporterCount: b.supporters.length },
       isBothConsensus: topClaimIds.has(a.id) && topClaimIds.has(b.id),
+      dynamics,
     });
   }
   return out;
@@ -740,7 +834,7 @@ const detectConflicts = (
 
 const detectTradeoffs = (
   edges: Edge[],
-  claimMap: Map<string, ClaimWithLeverage>,
+  claimMap: Map<string, EnrichedClaim>,
   topClaimIds: Set<string>
 ): TradeoffPair[] => {
   const out: TradeoffPair[] = [];
@@ -767,7 +861,7 @@ const detectTradeoffs = (
 
 const detectConvergencePoints = (
   edges: Edge[],
-  claimMap: Map<string, ClaimWithLeverage>
+  claimMap: Map<string, EnrichedClaim>
 ): ConvergencePoint[] => {
   const relevantEdges = edges.filter((e) => e.type === "prerequisite" || e.type === "supports");
   const byTargetType = new Map<string, { targetId: string; sources: string[]; type: "prerequisite" | "supports" }>();
@@ -800,11 +894,11 @@ const detectConvergencePoints = (
   return points;
 };
 
-const detectIsolatedClaims = (claims: ClaimWithLeverage[]): string[] => {
+const detectIsolatedClaims = (claims: EnrichedClaim[]): string[] => {
   return claims.filter((c) => c.isIsolated).map((c) => c.id);
 };
 
-const analyzeGhosts = (ghosts: string[], claims: ClaimWithLeverage[]): StructuralAnalysis["ghostAnalysis"] => {
+const analyzeGhosts = (ghosts: string[], claims: EnrichedClaim[]): StructuralAnalysis["ghostAnalysis"] => {
   const challengers = claims.filter((c) => c.role === "challenger" || c.isChallenger);
   return {
     count: ghosts.length,
@@ -817,198 +911,243 @@ const analyzeGhosts = (ghosts: string[], claims: ClaimWithLeverage[]): Structura
 // V3.1 PROBLEM STRUCTURE DETECTION (Ratio-based scoring)
 // ═══════════════════════════════════════════════════════════════════════════
 
-const detectProblemStructure = (
-  claims: ClaimWithLeverage[],
-  edges: Edge[],
-  patterns: StructuralAnalysis["patterns"],
-  ratios: CoreRatios,
-  graph: GraphAnalysis,
-  modelCount: number
-): ProblemStructure => {
-  const clamp01 = (n: number) => Math.max(0, Math.min(1, n));
-  const pct = (n: number) => `${Math.round(n * 100)}%`;
+const SHAPE_IMPLICATIONS: Record<string, { understand: string; gauntlet: string }> = {
+  settled: {
+    understand: "High agreement. The insight is what consensus overlooks or assumes without stating.",
+    gauntlet: "Consensus is not truth. Test the strongest claim—if it falls, consensus was groupthink.",
+  },
+  linear: {
+    understand: "Find the sequence. The insight is often where the path becomes non-obvious.",
+    gauntlet: "Test each step: is it truly prerequisite? Can steps be reordered or parallelized?",
+  },
+  keystone: {
+    understand: "Everything hinges on a keystone. The insight is the keystone, not the branches.",
+    gauntlet: "Test the keystone ruthlessly. If it fails, the entire structure collapses.",
+  },
+  contested: {
+    understand: "Disagreement is the signal. Find the axis of disagreement—that reveals the real question.",
+    gauntlet: "Force resolution. One claim per conflict must fail, or find conditions that differentiate them.",
+  },
+  tradeoff: {
+    understand: "There is no universal best. The insight is the map of what you give up for what you gain.",
+    gauntlet: "Test if tradeoffs are real or false dichotomies. Look for dominated options.",
+  },
+  dimensional: {
+    understand: "Multiple independent factors determine the answer. Find the governing conditions.",
+    gauntlet: "Test each dimension independently. Does the answer cover all relevant combinations?",
+  },
+  exploratory: {
+    understand: "No strong structure detected. Value lies in cataloging the territory and identifying patterns.",
+    gauntlet: "Test relevance: which claims answer the query vs. which are interesting but tangential?",
+  },
+};
 
+function determineShapeSparseAware(
+  ratios: CoreRatios,
+  tensions: { edgeType: string; isConditional: boolean; isBothHighSupport: boolean }[],
+  graph: GraphAnalysis,
+  claims: EnrichedClaim[],
+  edges: Edge[],
+  localCoherence: number,
+  signalStrength: number
+): ProblemStructure {
+  const clamp01 = (n: number) => Math.max(0, Math.min(1, n));
   const { concentration, alignment, tension, fragmentation, depth } = ratios;
   const claimCount = claims.length;
   const edgeCount = edges.length;
 
-  // Derived metrics
-  const tradeoffEdges = edges.filter(e => e.type === "tradeoff").length;
-  const conflictEdges = edges.filter(e => e.type === "conflicts").length;
-  const tradeoffRatio = (tradeoffEdges + conflictEdges) > 0
-    ? tradeoffEdges / (tradeoffEdges + conflictEdges)
-    : 0;
+  // Sparse-aware thresholds
+  const minEdgesForKeystone = Math.max(2, Math.ceil(claimCount * 0.1));
+  const minEdgesForLinear = Math.max(2, Math.ceil(claimCount * 0.08));
+  const minEdgesForContested = 1;
 
-  const hubScore = graph.hubClaim
-    ? clamp01((graph.hubDominance - 1) / 2) // Normalize: 1.5 → 0.25, 3.0 → 1.0
-    : 0;
+  const conflictCount = tensions.filter(t => t.edgeType === 'conflicts' && !t.isConditional).length;
+  const tradeoffCount = tensions.filter(t => t.edgeType === 'tradeoff').length;
+  const highSupportConflicts = tensions.filter(t => t.edgeType === 'conflicts' && t.isBothHighSupport && !t.isConditional).length;
 
-  const consensusConflicts = patterns.conflicts.filter((c) => c.isBothConsensus).length;
+  const hasHub = graph.hubClaim !== null;
+  const hubOutDegree = graph.hubClaim !== null ? edges.filter(e => e.from === graph.hubClaim &&
+    (e.type === 'supports' || e.type === 'prerequisite')).length : 0;
+  const hubScore = hubOutDegree >= minEdgesForKeystone ? clamp01((graph.hubDominance - 1) / 2) : 0;
 
-  // Pattern scores using weighted ratio combinations
-  const settledScore = clamp01(
-    concentration * 0.35 +
-    alignment * 0.35 +
-    (1 - tension) * 0.20 +
-    (1 - fragmentation) * 0.10
-  );
+  // Calculate scores with sparse-aware adjustments
+  const scores: Record<string, number> = {
+    settled: clamp01(
+      concentration * 0.40 +
+      alignment * 0.30 +
+      (1 - tension) * 0.20 +
+      localCoherence * 0.10
+    ),
 
-  const contestedScore = clamp01(
-    (1 - alignment) * 0.40 +
-    tension * 0.35 +
-    concentration * 0.10 +
-    (consensusConflicts > 0 ? 0.15 : 0)
-  );
+    linear: clamp01(
+      depth * 0.50 +
+      (edgeCount >= minEdgesForLinear ? 0.30 : 0) +
+      (1 - fragmentation) * 0.20
+    ),
 
-  const linearScore = clamp01(
-    depth * 0.50 +
-    (1 - fragmentation) * 0.30 +
-    (1 - tension) * 0.20
-  );
+    keystone: clamp01(
+      hubScore * 0.50 +
+      (hubOutDegree / claimCount) * 0.30 +
+      concentration * 0.20
+    ),
 
-  const keystoneScore = clamp01(
-    hubScore * 0.55 +
-    (1 - fragmentation) * 0.25 +
-    concentration * 0.20
-  );
+    contested: clamp01(
+      (highSupportConflicts >= minEdgesForContested ? 0.40 : 0) +
+      tension * 0.30 +
+      (1 - alignment) * 0.20 +
+      (conflictCount > 0 ? 0.10 : 0)
+    ),
 
-  const tradeoffScore = clamp01(
-    tradeoffRatio * 0.45 +
-    tension * 0.30 +
-    (1 - concentration) * 0.15 +
-    (1 - depth) * 0.10
-  );
+    tradeoff: clamp01(
+      (tradeoffCount > 0 ? 0.35 : 0) +
+      tension * 0.30 +
+      (1 - concentration) * 0.25 +
+      (tradeoffCount > conflictCount ? 0.10 : 0)
+    ),
 
-  const dimensionalScore = clamp01(
-    (1 - fragmentation) * 0.30 +
-    depth * 0.25 +
-    (1 - tension) * 0.20 +
-    alignment * 0.15 +
-    (patterns.convergencePoints.length > 0 ? 0.10 : 0)
-  );
+    dimensional: clamp01(
+      localCoherence * 0.35 +
+      depth * 0.25 +
+      alignment * 0.20 +
+      (graph.componentCount > 1 && graph.componentCount < claimCount * 0.5 ? 0.20 : 0)
+    ),
 
-  const exploratoryScore = clamp01(
-    fragmentation * 0.40 +
-    (1 - concentration) * 0.30 +
-    (1 - depth) * 0.20 +
-    (patterns.convergencePoints.length === 0 ? 0.10 : 0)
-  );
-
-  const scores: Array<{ pattern: ProblemStructure["primaryPattern"]; score: number }> = [
-    { pattern: "settled", score: settledScore },
-    { pattern: "keystone", score: keystoneScore },
-    { pattern: "linear", score: linearScore },
-    { pattern: "contested", score: contestedScore },
-    { pattern: "tradeoff", score: tradeoffScore },
-    { pattern: "dimensional", score: dimensionalScore },
-    { pattern: "exploratory", score: exploratoryScore },
-  ];
-  scores.sort((a, b) => b.score - a.score);
-
-  const best = scores[0];
-  const second = scores[1] || { pattern: "exploratory" as const, score: 0 };
-
-  const implications: Record<ProblemStructure["primaryPattern"], ProblemStructure["implications"]> = {
-    settled: {
-      understand: "High agreement. The insight is what consensus overlooks or assumes without stating.",
-      gauntlet: "Consensus is not truth. Test the strongest claim—if it falls, consensus was groupthink.",
-    },
-    linear: {
-      understand: "Find the sequence. The insight is often where the path becomes non-obvious.",
-      gauntlet: "Test each step: is it truly prerequisite? Can steps be reordered or parallelized?",
-    },
-    keystone: {
-      understand: "Everything hinges on a keystone. The insight is the keystone, not the branches.",
-      gauntlet: "Test the keystone ruthlessly. If it fails, the entire structure collapses.",
-    },
-    contested: {
-      understand: "Disagreement is the signal. Find the axis of disagreement—that reveals the real question.",
-      gauntlet: "Force resolution. One claim per conflict must fail, or find conditions that differentiate them.",
-    },
-    tradeoff: {
-      understand: "There is no universal best. The insight is the map of what you give up for what you gain.",
-      gauntlet: "Test if tradeoffs are real or false dichotomies. Look for dominated options.",
-    },
-    dimensional: {
-      understand: "Multiple independent factors determine the answer. Find the governing conditions.",
-      gauntlet: "Test each dimension independently. Does the answer cover all relevant combinations?",
-    },
-    exploratory: {
-      understand: "No strong structure detected. Value lies in cataloging the territory and identifying patterns.",
-      gauntlet: "Test relevance: which claims answer the query vs. which are interesting but tangential?",
-    },
+    exploratory: clamp01(
+      (1 - localCoherence) * 0.35 +
+      (1 - concentration) * 0.30 +
+      (edgeCount < minEdgesForLinear ? 0.20 : 0) +
+      (tension < 0.15 ? 0.15 : 0)
+    ),
   };
 
-  const generateEvidence = (pattern: ProblemStructure["primaryPattern"]): string[] => {
-    switch (pattern) {
-      case "settled":
-        return [
-          `Concentration: ${pct(concentration)} of models on top claim`,
-          `Alignment: ${pct(alignment)} of top-claim edges are reinforcing`,
-          `Tension: ${pct(tension)} (low)`,
-        ];
-      case "contested":
-        return [
-          `Tension: ${pct(tension)} of edges are conflicts or tradeoffs`,
-          `Alignment: ${pct(alignment)} among top claims (low)`,
-          consensusConflicts > 0 ? `${consensusConflicts} high-support conflict(s)` : "Conflicts involve lower-support claims",
-        ];
-      case "linear":
-        return [
-          `Chain depth: ${graph.longestChain.length} claims in longest chain`,
-          `Depth ratio: ${pct(depth)}`,
-          `Fragmentation: ${pct(fragmentation)} (low)`,
-        ];
-      case "keystone":
-        return [
-          graph.hubClaim ? `Hub claim with ${graph.hubDominance.toFixed(1)}x dominance` : "No dominant hub detected",
-          `Fragmentation: ${pct(fragmentation)} (low)`,
-          `Concentration: ${pct(concentration)}`,
-        ];
-      case "tradeoff":
-        return [
-          `${tradeoffEdges} tradeoff edge(s) vs ${conflictEdges} conflict(s)`,
-          `Tension: ${pct(tension)}`,
-          `No clear concentration: ${pct(1 - concentration)}`,
-        ];
-      case "dimensional":
-        return [
-          `${patterns.convergencePoints.length} convergence point(s)`,
-          `Depth: ${pct(depth)}`,
-          `Fragmentation: ${pct(fragmentation)} (low)`,
-        ];
-      case "exploratory":
-        return [
-          `Fragmentation: ${pct(fragmentation)} (${graph.componentCount} component(s))`,
-          `Low concentration: ${pct(1 - concentration)}`,
-          `Low depth: ${pct(1 - depth)}`,
-        ];
-    }
-  };
+  const sorted = Object.entries(scores).sort((a, b) => b[1] - a[1]);
+  const [pattern, score] = sorted[0];
+  const secondScore = sorted[1]?.[1] || 0;
 
-  const maxScore = best.score;
-  if (maxScore < 0.25) {
-    return {
-      primaryPattern: "exploratory",
-      confidence: clamp01(maxScore * 0.6),
-      evidence: [
-        "No dominant structural pattern detected",
-        `Highest pattern score: ${maxScore.toFixed(2)}`,
-        "Landscape may be exploratory or data insufficient",
-      ],
-      implications: implications.exploratory,
-    };
+  // Base confidence calculation
+  let baseConfidence: number;
+  if (score < 0.20) {
+    baseConfidence = 0.15;
+  } else {
+    const separation = score - secondScore;
+    baseConfidence = clamp01(0.35 + separation * 0.4 + score * 0.25);
   }
 
-  const confidence = clamp01(0.40 + (best.score - second.score) * 0.5 + best.score * 0.20);
+  // Signal strength penalty
+  const signalPenalty = (1 - signalStrength) * 0.3;
+
+  // Fragility penalties
+  let fragilityPenalty = 0;
+  const warnings: string[] = [];
+
+  // 1. Low-support articulation points
+  const lowSupportArticulations = graph.articulationPoints.filter(id => {
+    const claim = claims.find(c => c.id === id);
+    return claim && !claim.isHighSupport;
+  });
+
+  if (lowSupportArticulations.length > 0) {
+    fragilityPenalty += 0.20;
+    warnings.push(`${lowSupportArticulations.length} fragile bridge(s)`);
+  }
+
+  // 2. Conditional conflicts
+  const conditionalConflicts = tensions.filter(t => t.isConditional);
+  if (conditionalConflicts.length > 0) {
+    fragilityPenalty += Math.min(0.20, 0.10 * conditionalConflicts.length);
+    warnings.push(`${conditionalConflicts.length} hidden conflict(s)`);
+  }
+
+  // 3. Disconnected high-support claims (only penalize in denser graphs)
+  if (graph.clusterCohesion < 0.2 && concentration > 0.5 && edgeCount >= minEdgesForLinear) {
+    fragilityPenalty += 0.15;
+    warnings.push(`Disconnected consensus (${Math.round(graph.clusterCohesion * 100)}% cohesion)`);
+  }
+
+  const totalPenalty = signalPenalty + fragilityPenalty;
+  const finalConfidence = clamp01(Math.max(0.10, baseConfidence - totalPenalty));
+
+  // Generate evidence
+  const evidence = [
+    ...generateEvidenceSparseAware(pattern, ratios, tensions, graph, edgeCount, localCoherence, claimCount),
+    ...warnings,
+    `Signal strength: ${Math.round(signalStrength * 100)}%`
+  ];
 
   return {
-    primaryPattern: best.pattern,
-    confidence,
-    evidence: generateEvidence(best.pattern),
-    implications: implications[best.pattern],
+    primaryPattern: pattern as ProblemStructure["primaryPattern"],
+    confidence: finalConfidence,
+    evidence,
+    implications: SHAPE_IMPLICATIONS[pattern as ProblemStructure["primaryPattern"]],
   };
-};
+}
+
+function generateEvidenceSparseAware(
+  pattern: string,
+  ratios: CoreRatios,
+  tensions: { edgeType: string; isConditional: boolean; isBothHighSupport: boolean }[],
+  graph: GraphAnalysis,
+  edgeCount: number,
+  localCoherence: number,
+  claimCount: number
+): string[] {
+  const pct = (n: number) => `${Math.round(n * 100)}%`;
+
+  switch (pattern) {
+    case 'settled':
+      return [
+        `Concentration: ${pct(ratios.concentration)}`,
+        `Alignment: ${pct(ratios.alignment)}`,
+        `Tension: ${pct(ratios.tension)}`,
+        `Local coherence: ${pct(localCoherence)}`
+      ];
+
+    case 'linear':
+      return [
+        `Chain depth: ${graph.longestChain.length} claims`,
+        `${edgeCount} edges form sequential structure`,
+        `Fragmentation: ${pct(ratios.fragmentation)}`
+      ];
+
+    case 'keystone':
+      return [
+        `Hub: ${graph.hubClaim} (${graph.hubDominance.toFixed(1)}x dominance)`,
+        `Concentration: ${pct(ratios.concentration)}`,
+        `${edgeCount} edges radiate from hub`
+      ];
+
+    case 'contested':
+      return [
+        `${tensions.filter(t => t.edgeType === 'conflicts' && !t.isConditional).length} conflict(s)`,
+        `${tensions.filter(t => t.isBothHighSupport && !t.isConditional).length} high-support conflict(s)`,
+        `Tension: ${pct(ratios.tension)}`
+      ];
+
+    case 'tradeoff':
+      return [
+        `${tensions.filter(t => t.edgeType === 'tradeoff').length} tradeoff(s)`,
+        `Tension: ${pct(ratios.tension)}`,
+        `Distributed support: ${pct(1 - ratios.concentration)}`
+      ];
+
+    case 'dimensional':
+      return [
+        `${graph.componentCount} distinct cluster(s)`,
+        `Local coherence: ${pct(localCoherence)}`,
+        `Alignment within clusters: ${pct(ratios.alignment)}`
+      ];
+
+    case 'exploratory':
+      return [
+        `${edgeCount} edges across ${claimCount} claims`,
+        `Local coherence: ${pct(localCoherence)}`,
+        `Distributed support: ${pct(1 - ratios.concentration)}`
+      ];
+
+    default:
+      return [];
+  }
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // MAIN STRUCTURAL ANALYSIS ORCHESTRATOR
@@ -1042,10 +1181,10 @@ const computeStructuralAnalysis = (artifact: MapperArtifact): StructuralAnalysis
   const claimsWithLeverage = assignPercentileFlags(claimsWithRatios, edges, cascadeRisks, topClaimIds);
 
   // Step 6: Build claim map for pattern detection
-  const claimMap = new Map<string, ClaimWithLeverage>(claimsWithLeverage.map((c) => [c.id, c]));
+  const claimMap = new Map<string, EnrichedClaim>(claimsWithLeverage.map((c) => [c.id, c]));
 
   // Step 7: Graph analysis
-  const graph = analyzeGraph(claimIds, edges);
+  const graph = analyzeGraph(claimIds, edges, claimsWithLeverage);
 
   // Step 8: Core ratios
   const ratios = computeCoreRatios(claimsWithLeverage, edges, graph, landscape.modelCount);
@@ -1089,13 +1228,35 @@ const computeStructuralAnalysis = (artifact: MapperArtifact): StructuralAnalysis
 
 export const computeProblemStructureFromArtifact = (artifact: MapperArtifact): ProblemStructure => {
   const analysis = computeStructuralAnalysis(artifact);
-  const structure = detectProblemStructure(
+
+  // Construct tensions array for sparse-aware analysis
+  const tensions = analysis.edges
+    .filter(e => e.type === 'conflicts' || e.type === 'tradeoff')
+    .map(e => {
+      const fromC = analysis.claimsWithLeverage.find(c => c.id === e.from);
+      const toC = analysis.claimsWithLeverage.find(c => c.id === e.to);
+      return {
+        edgeType: e.type,
+        isConditional: !!(fromC?.isConditional || toC?.isConditional),
+        isBothHighSupport: !!(fromC?.isHighSupport && toC?.isHighSupport)
+      };
+    });
+
+  const signalStrength = computeSignalStrength(
+    analysis.claimsWithLeverage.length,
+    analysis.edges.length,
+    analysis.landscape.modelCount,
+    analysis.claimsWithLeverage.map(c => c.supporters)
+  );
+
+  const structure = determineShapeSparseAware(
+    analysis.ratios,
+    tensions,
+    analysis.graph,
     analysis.claimsWithLeverage,
     analysis.edges,
-    analysis.patterns,
-    analysis.ratios,
-    analysis.graph,
-    analysis.landscape.modelCount
+    analysis.graph.localCoherence,
+    signalStrength
   );
   structuralDbg("problemStructure", structure);
   return structure;
@@ -1135,13 +1296,15 @@ const getTypeFraming = (dominantType: string, mode: "understand" | "gauntlet"): 
 
 const generateModeContext = (analysis: StructuralAnalysis, mode: "understand" | "gauntlet"): ModeContext => {
   const { landscape, patterns, ghostAnalysis, ratios, graph } = analysis;
-  const problemStructure = detectProblemStructure(
+  const problemStructure = determineShapeSparseAware(
+    ratios,
+    patterns.conflicts.map(c => ({ edgeType: "conflicts", isConditional: false, isBothHighSupport: c.isBothConsensus }))
+      .concat(patterns.tradeoffs.map(t => ({ edgeType: "tradeoff", isConditional: false, isBothHighSupport: t.symmetry === "both_consensus" }))),
+    graph,
     analysis.claimsWithLeverage,
     analysis.edges,
-    analysis.patterns,
-    ratios,
-    graph,
-    landscape.modelCount
+    graph.localCoherence,
+    computeSignalStrength(analysis.claimsWithLeverage.length, analysis.edges.length, landscape.modelCount, analysis.claimsWithLeverage.map(c => c.supporters))
   );
   const structuralFraming = mode === "understand" ? problemStructure.implications.understand : problemStructure.implications.gauntlet;
   const typeFraming = getTypeFraming(landscape.dominantType, mode);
@@ -1267,7 +1430,7 @@ export {
   generateModeContext,
   buildStructuralSection,
   type StructuralAnalysis,
-  type ClaimWithLeverage,
+  type EnrichedClaim,
   type CoreRatios,
   type GraphAnalysis,
 };

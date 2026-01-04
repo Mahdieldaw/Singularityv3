@@ -1144,4 +1144,102 @@ Answer the user's message directly. Use context only to disambiguate.
     );
   }
 
+  async executeSingularityStep(step, context, _previousResults, options) {
+    const payload = step.payload;
+
+    const mapperArtifact =
+      payload.mapperArtifact ||
+      (payload.mappingText
+        ? parseV1MapperToArtifact(payload.mappingText, {
+          graphTopology: payload?.mappingMeta?.graphTopology,
+          query: payload.originalPrompt,
+        })
+        : null);
+
+    if (!mapperArtifact) {
+      throw new Error("Singularity mode requires a MapperArtifact.");
+    }
+
+    const exploreAnalysis =
+      payload.exploreAnalysis ||
+      (mapperArtifact ? computeExplore(payload.originalPrompt, mapperArtifact) : null);
+
+    // Import ConciergeService dynamically to avoid circular dependencies
+    let ConciergeService;
+    try {
+      const module = await import('../PromptService_v2');
+      ConciergeService = module.ConciergeService;
+    } catch (e) {
+      console.warn("[StepExecutor] Failed to import ConciergeService:", e);
+      // Fallback to a simple prompt if ConciergeService unavailable
+      ConciergeService = null;
+    }
+
+    let singularityPrompt;
+    if (ConciergeService && ConciergeService.buildConciergePrompt) {
+      // Compute structural analysis for shape-guided prompting
+      let analysis = null;
+      try {
+        const { computeStructuralAnalysis } = await import('../PromptService');
+        analysis = computeStructuralAnalysis(mapperArtifact);
+      } catch (e) {
+        console.warn("[StepExecutor] computeStructuralAnalysis failed:", e);
+        // Use a minimal fallback analysis
+        analysis = {
+          shape: { pattern: 'exploratory', confidence: 0.5, implication: 'Limited structural signal' },
+          tensions: [],
+          claims: mapperArtifact.claims || [],
+          leverageInversions: [],
+          graph: { hubClaimId: null, articulationPoints: [], longestChain: [] },
+          ghosts: { count: (mapperArtifact.ghosts || []).length, mayExtendChallenger: false, challengerIds: [] }
+        };
+      }
+
+      singularityPrompt = ConciergeService.buildConciergePrompt(
+        payload.originalPrompt,
+        mapperArtifact,
+        analysis,
+        [], // conversation turns (first turn)
+        payload.originalPrompt,
+        undefined // context
+      );
+    } else {
+      // Fallback prompt if ConciergeService unavailable
+      singularityPrompt = this.promptService.buildUnderstandPrompt(
+        payload.originalPrompt,
+        mapperArtifact,
+        "",
+        null
+      );
+    }
+
+    // Custom parse function that detects machinery leakage
+    const parseSingularityOutput = (text) => {
+      const output = {
+        text: text,
+        providerId: payload.singularityProvider,
+        timestamp: Date.now(),
+        leakageDetected: false,
+        leakageViolations: []
+      };
+
+      // Check for machinery leakage if ConciergeService is available
+      if (ConciergeService && ConciergeService.detectMachineryLeakage) {
+        const leakCheck = ConciergeService.detectMachineryLeakage(text);
+        output.leakageDetected = leakCheck.leaked;
+        output.leakageViolations = leakCheck.violations;
+        if (leakCheck.leaked) {
+          console.warn("[StepExecutor] Singularity response leaked machinery:", leakCheck.violations);
+        }
+      }
+
+      return output;
+    };
+
+    return this._executeGenericSingleStep(
+      step, context, payload.singularityProvider, singularityPrompt, "Singularity", options,
+      parseSingularityOutput
+    );
+  }
+
 }

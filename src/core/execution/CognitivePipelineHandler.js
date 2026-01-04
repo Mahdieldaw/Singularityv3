@@ -12,9 +12,9 @@ export class CognitivePipelineHandler {
 
   /**
    * Checks if the workflow should halt for cognitive decision-making.
-   * If yes, persists state, emits halt message, and returns true.
+   * If yes, executes Singularity step, persists state, emits halt message, and returns true.
    */
-  async handleCognitiveHalt(request, context, steps, stepResults, resolvedContext, currentUserMessage) {
+  async handleCognitiveHalt(request, context, steps, stepResults, resolvedContext, currentUserMessage, stepExecutor, streamingManager) {
     try {
       const mappingResult = Array.from(stepResults.entries()).find(([_, v]) =>
         v.status === "completed" && v.result?.mapperArtifact,
@@ -67,12 +67,91 @@ export class CognitivePipelineHandler {
       context.mapperArtifact = mapperArtifact;
       context.exploreAnalysis = exploreAnalysis;
 
+      // ✅ NEW: Execute Singularity step automatically before halt
+      let singularityOutput = null;
+      let singularityProviderId = null;
+
+      // Determine Singularity provider from request or context
+      singularityProviderId = request?.singularity ||
+        context?.singularityProvider ||
+        context?.meta?.singularity ||
+        request?.mapper || // Fallback to mapper provider
+        'gemini';  // Default fallback
+
+      if (stepExecutor && streamingManager) {
+        try {
+          console.log(`[CognitiveHandler] Executing Singularity step with provider: ${singularityProviderId}`);
+
+          const singularityStep = {
+            stepId: `singularity-${singularityProviderId}-${Date.now()}`,
+            type: 'singularity',
+            payload: {
+              singularityProvider: singularityProviderId,
+              mapperArtifact,
+              exploreAnalysis,
+              originalPrompt: userMessageForExplore,
+              mappingText: mappingResult?.text || "",
+              mappingMeta: mappingResult?.meta || {},
+            },
+          };
+
+          const executorOptions = {
+            streamingManager,
+            persistenceCoordinator: this.persistenceCoordinator,
+            sessionManager: this.sessionManager,
+          };
+
+          const singularityResult = await stepExecutor.executeSingularityStep(
+            singularityStep,
+            context,
+            new Map(),
+            executorOptions
+          );
+
+          if (singularityResult) {
+            singularityOutput = {
+              text: singularityResult.text || "",
+              providerId: singularityProviderId,
+              timestamp: Date.now(),
+              leakageDetected: singularityResult.output?.leakageDetected || false,
+              leakageViolations: singularityResult.output?.leakageViolations || [],
+            };
+
+            // Store in context for persistence
+            context.singularityOutput = singularityOutput;
+
+            // Persist the Singularity response
+            try {
+              await this.sessionManager.upsertProviderResponse(
+                context.sessionId,
+                context.canonicalAiTurnId,
+                singularityProviderId,
+                'singularity',
+                0,
+                { text: singularityOutput.text, status: 'completed', meta: { singularityOutput } }
+              );
+            } catch (persistErr) {
+              console.warn("[CognitiveHandler] Failed to persist Singularity response:", persistErr);
+            }
+          }
+
+          console.log("[CognitiveHandler] Singularity step completed");
+        } catch (singularityErr) {
+          console.error("[CognitiveHandler] Singularity step failed:", singularityErr);
+          // Continue without singularity - it's not fatal
+        }
+      } else {
+        console.warn("[CognitiveHandler] stepExecutor or streamingManager not provided - skipping Singularity");
+      }
+
       this.port.postMessage({
         type: "MAPPER_ARTIFACT_READY",
         sessionId: context.sessionId,
         aiTurnId: context.canonicalAiTurnId,
         artifact: mapperArtifact,
         analysis: exploreAnalysis,
+        singularityOutput,
+        singularityProvider: singularityProviderId,
       });
 
       return true;
@@ -81,6 +160,7 @@ export class CognitivePipelineHandler {
       return false;
     }
   }
+
 
   async handleContinueRequest(payload, stepExecutor, streamingManager, contextManager) {
     const { sessionId, aiTurnId, mode, providerId, selectedArtifacts, isRecompute, sourceTurnId } = payload || {};

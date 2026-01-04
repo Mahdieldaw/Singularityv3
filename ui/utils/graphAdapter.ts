@@ -71,7 +71,7 @@ export function generateInsightsFromAnalysis(
         leverageInversions: LeverageInversion[];
         cascadeRisks: CascadeRisk[];
         conflicts: ConflictPair[];
-    },
+    } = { leverageInversions: [], cascadeRisks: [], conflicts: [] }, // Default to empty
     graph: GraphAnalysis
 ): InsightData[] {
     const insights: InsightData[] = [];
@@ -93,16 +93,33 @@ export function generateInsightsFromAnalysis(
     }
 
     // Leverage Inversions
-    for (const inv of patterns.leverageInversions) {
-        const claim = claims.find(c => c.id === inv.claimId);
-        if (claim) {
+    // Priority: Use pattern data if available (for 'reason'), otherwise fallback to simple flag detection
+    if (patterns.leverageInversions.length > 0) {
+        for (const inv of patterns.leverageInversions) {
+            const claim = claims.find(c => c.id === inv.claimId);
+            if (claim) {
+                insights.push({
+                    type: 'leverage_inversion',
+                    claim: { label: claim.label, supporters: claim.supporters },
+                    metadata: {
+                        supportRatio: claim.supportRatio,
+                        inversionReason: inv.reason,
+                        dependentCount: inv.affectedClaims.length,
+                        leverageScore: claim.leverage,
+                    }
+                });
+            }
+        }
+    } else {
+        // Fallback: Generate generic inversion insight from flags
+        for (const claim of claims.filter(c => c.isLeverageInversion)) {
             insights.push({
                 type: 'leverage_inversion',
                 claim: { label: claim.label, supporters: claim.supporters },
                 metadata: {
                     supportRatio: claim.supportRatio,
-                    inversionReason: inv.reason,
-                    dependentCount: inv.affectedClaims.length,
+                    inversionReason: "high_connectivity_low_support", // Default reason
+                    dependentCount: 0,
                     leverageScore: claim.leverage,
                 }
             });
@@ -125,14 +142,19 @@ export function generateInsightsFromAnalysis(
     }
 
     // High-Support Conflicts
-    for (const conflict of patterns.conflicts.filter(c => c.isBothConsensus)) {
-        insights.push({
-            type: 'consensus_conflict',
-            claim: { label: conflict.claimA.label, supporters: [] },
-            metadata: {
-                conflictsWith: conflict.claimB.label,
-            }
-        });
+    if (patterns.conflicts.length > 0) {
+        for (const conflict of patterns.conflicts.filter(c => c.isBothConsensus)) {
+            insights.push({
+                type: 'consensus_conflict',
+                claim: { label: conflict.claimA.label, supporters: [] },
+                metadata: {
+                    conflictsWith: conflict.claimB.label,
+                }
+            });
+        }
+    } else {
+        // Fallback detection if no pattern object (requires edge analysis, which we don't have here easily)
+        // We skip generic conflict generation to avoid noise.
     }
 
     // Challengers

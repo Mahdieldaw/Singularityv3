@@ -24,7 +24,7 @@ import type { CognitiveTransitionOptions, SelectedArtifact } from "../../hooks/c
 import { MetricsRibbon } from "./MetricsRibbon";
 import { useProviderLimits } from "../../hooks/useProviderLimits";
 import { getProviderName } from "../../utils/provider-helpers";
-import { computeProblemStructureFromArtifact } from "../../../src/core/PromptService";
+import { computeProblemStructureFromArtifact, computeStructuralAnalysis, StructuralAnalysis, GraphAnalysis, CoreRatios } from "../../../src/core/PromptService";
 import { applyEdits } from "../../utils/apply-artifact-edits";
 
 const MapIcon = ({ className }: { className?: string }) => (
@@ -167,16 +167,29 @@ export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
         return matches ? matches.length : 0;
     }, [mapperNarrative]);
 
-    const problemStructure = useMemo<ProblemStructure | undefined>(() => {
+    const structuralAnalysis = useMemo<StructuralAnalysis | undefined>(() => {
         if (!artifactForDisplay) return undefined;
-        const fromArtifact = (artifactForDisplay as any).problemStructure as ProblemStructure | undefined;
-        if (fromArtifact && typeof fromArtifact.primaryPattern === "string") return fromArtifact;
+        try {
+            return computeStructuralAnalysis(artifactForDisplay as MapperArtifact);
+        } catch (e) {
+            console.warn("[ArtifactShowcase] structural analysis failed:", e);
+            return undefined;
+        }
+    }, [artifactForDisplay]);
+
+    const problemStructure = useMemo<ProblemStructure | undefined>(() => {
+        if (!structuralAnalysis) return undefined;
+        // Compute problem structure from the analysis
         try {
             return computeProblemStructureFromArtifact(artifactForDisplay as MapperArtifact);
         } catch {
             return undefined;
         }
-    }, [artifactForDisplay]);
+    }, [artifactForDisplay, structuralAnalysis]);
+
+    const enrichedClaims = structuralAnalysis?.claimsWithLeverage;
+    const graphAnalysis = structuralAnalysis?.graph;
+    const ratios = structuralAnalysis?.ratios;
 
     const graphData = useMemo(() => {
         const claims = Array.isArray(artifactForDisplay?.claims) ? artifactForDisplay!.claims : [];
@@ -312,6 +325,9 @@ export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
                         claimsCount={claimsCount}
                         ghostCount={ghostCount}
                         problemStructure={problemStructure}
+                        graphAnalysis={graphAnalysis}
+                        enrichedClaims={enrichedClaims}
+                        ratios={ratios}
                     />
 
                     <div className="flex items-center justify-between gap-2">
@@ -348,7 +364,7 @@ export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
                     </div>
                 </div>
             )}
- {/* Source Layer: Council Orbs */}
+            {/* Source Layer: Council Orbs */}
             <div className="mb-2">
                 <CouncilOrbs
                     providers={LLM_PROVIDERS_CONFIG}
@@ -365,59 +381,59 @@ export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
                     {mapperArtifact.souvenir && <SouvenirCard content={mapperArtifact.souvenir} />}
                     {/* GapsCard removed as per cleanup requirements */}
 
-                            {mapperNarrative && (
-                                <div className="bg-surface-raised border border-border-subtle rounded-xl overflow-hidden mb-4">
-                                    <div className="px-4 py-3 border-b border-border-subtle bg-surface-highlight/10 flex items-center justify-between">
-                                        <div className="text-xs font-semibold text-text-secondary uppercase tracking-wide">
-                                            📖 The Landscape
-                                        </div>
-                                        <div className="text-[10px] text-text-muted">
-                                            {mapperNarrativeAnchorCount} clickable claims
-                                        </div>
-                                    </div>
-                                    <div className="px-4 py-4 border-b border-border-subtle bg-surface">
-                                        <div className="space-y-3">
-                                            {problemStructure && (
-                                                <div className="space-y-3">
-                                                    <div className="flex items-center gap-3">
-                                                        <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-surface-highlight/20 border border-brand-500/30">
-                                                            <span className="text-[10px] uppercase tracking-wide text-text-muted">
-                                                                Structure
-                                                            </span>
-                                                            <span className="font-semibold text-brand-400 capitalize">
-                                                                {problemStructure.primaryPattern}
-                                                            </span>
-                                                            {problemStructure.confidence < 0.7 && (
-                                                                <span className="text-amber-400 text-xs">?</span>
-                                                            )}
-                                                        </div>
-                                                        <span className="text-xs text-text-muted">
-                                                            {Math.round((problemStructure.confidence ?? 0) * 100)}% confidence
-                                                        </span>
-                                                    </div>
-                                                    <div className="text-sm text-text-secondary px-4 py-2 bg-surface-highlight/10 rounded-lg border border-border-subtle/50">
-                                                        {getStructureGuidance(problemStructure.primaryPattern)}
-                                                    </div>
-                                                    <StructureGlyph
-                                                        pattern={problemStructure.primaryPattern}
-                                                        claimCount={graphData.claims.length}
-                                                        width={280}
-                                                        height={120}
-                                                        onClick={() => setIsDecisionMapOpen({ turnId: currentTurnId })}
-                                                    />
-                                                </div>
-                                            )}
-                                        </div>
-                                    </div>
-                                    <div className="px-5 py-5 text-sm text-text-muted leading-relaxed whitespace-pre-wrap font-serif">
-                                        <FormattedNarrative
-                                            text={mapperNarrative}
-                                            onToggle={toggleSelection}
-                                            selectedIds={selectedIds}
-                                        />
-                                    </div>
+                    {mapperNarrative && (
+                        <div className="bg-surface-raised border border-border-subtle rounded-xl overflow-hidden mb-4">
+                            <div className="px-4 py-3 border-b border-border-subtle bg-surface-highlight/10 flex items-center justify-between">
+                                <div className="text-xs font-semibold text-text-secondary uppercase tracking-wide">
+                                    📖 The Landscape
                                 </div>
-                            )}
+                                <div className="text-[10px] text-text-muted">
+                                    {mapperNarrativeAnchorCount} clickable claims
+                                </div>
+                            </div>
+                            <div className="px-4 py-4 border-b border-border-subtle bg-surface">
+                                <div className="space-y-3">
+                                    {problemStructure && (
+                                        <div className="space-y-3">
+                                            <div className="flex items-center gap-3">
+                                                <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-surface-highlight/20 border border-brand-500/30">
+                                                    <span className="text-[10px] uppercase tracking-wide text-text-muted">
+                                                        Structure
+                                                    </span>
+                                                    <span className="font-semibold text-brand-400 capitalize">
+                                                        {problemStructure.primaryPattern}
+                                                    </span>
+                                                    {problemStructure.confidence < 0.7 && (
+                                                        <span className="text-amber-400 text-xs">?</span>
+                                                    )}
+                                                </div>
+                                                <span className="text-xs text-text-muted">
+                                                    {Math.round((problemStructure.confidence ?? 0) * 100)}% confidence
+                                                </span>
+                                            </div>
+                                            <div className="text-sm text-text-secondary px-4 py-2 bg-surface-highlight/10 rounded-lg border border-border-subtle/50">
+                                                {getStructureGuidance(problemStructure.primaryPattern)}
+                                            </div>
+                                            <StructureGlyph
+                                                pattern={problemStructure.primaryPattern}
+                                                claimCount={graphData.claims.length}
+                                                width={280}
+                                                height={120}
+                                                onClick={() => setIsDecisionMapOpen({ turnId: currentTurnId })}
+                                            />
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                            <div className="px-5 py-5 text-sm text-text-muted leading-relaxed whitespace-pre-wrap font-serif">
+                                <FormattedNarrative
+                                    text={mapperNarrative}
+                                    onToggle={toggleSelection}
+                                    selectedIds={selectedIds}
+                                />
+                            </div>
+                        </div>
+                    )}
 
                     {/* V3: No Container Previews. The Narrative is the structure. */
                     /* However, we still show Challengers, Bundles, etc. if they exist in the graph */}
