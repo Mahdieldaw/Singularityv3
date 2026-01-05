@@ -1,4 +1,11 @@
-type ResponseType = "batch" | "mapping" | "refiner" | "antagonist" | "understand" | "gauntlet";
+type ResponseType =
+  | "batch"
+  | "mapping"
+  | "refiner"
+  | "antagonist"
+  | "understand"
+  | "gauntlet"
+  | "singularity";
 
 interface BatchUpdate {
   providerId: string;

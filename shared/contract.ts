@@ -5,9 +5,17 @@ export type ProviderKey =
   | "claude"
   | "gemini"
   | "gemini-pro"
+  | "gemini-exp"
   | "chatgpt"
   | "qwen";
-export type WorkflowStepType = "prompt" | "mapping" | "refiner" | "antagonist" | "understand" | "gauntlet" | "singularity";
+export type WorkflowStepType =
+  | "prompt"
+  | "mapping"
+  | "refiner"
+  | "antagonist"
+  | "understand"
+  | "gauntlet"
+  | "singularity";
 
 export type CognitiveMode = "auto" | "understand" | "decide";
 
@@ -41,6 +49,14 @@ export interface GauntletOutput {
   };
   souvenir: string;
   artifact_id: string;
+}
+
+export interface SingularityOutput {
+  text: string;
+  providerId: string;
+  timestamp: number;
+  leakageDetected?: boolean;
+  leakageViolations?: string[];
 }
 
 export interface Claim {
@@ -85,12 +101,29 @@ export interface GraphTopology {
   edges: GraphEdge[];
 }
 
+export interface ProblemStructure {
+  primaryPattern:
+    | "settled"
+    | "linear"
+    | "dimensional"
+    | "tradeoff"
+    | "contested"
+    | "exploratory"
+    | "keystone";
+  confidence: number;
+  evidence: string[];
+  implications: {
+    understand: string;
+    gauntlet: string;
+  };
+}
+
 export interface CoreRatios {
-  concentration: number;      // Max support / modelCount (0-1)
-  alignment: number;          // Reinforcing edges between top claims (0-1)
-  tension: number;            // Conflict + tradeoff edges / total (0-1)
-  fragmentation: number;      // Disconnected components (0-1)
-  depth: number;              // Longest chain / claim count (0-1)
+  concentration: number;
+  alignment: number;
+  tension: number;
+  fragmentation: number;
+  depth: number;
 }
 
 export interface GraphAnalysis {
@@ -105,14 +138,56 @@ export interface GraphAnalysis {
   localCoherence: number;
 }
 
-export interface ProblemStructure {
-  primaryPattern: "linear" | "dimensional" | "tradeoff" | "contested" | "exploratory" | "keystone" | "settled";
-  confidence: number;
-  evidence: string[];
-  implications: {
-    understand: string;
-    gauntlet: string;
+export interface EnrichedClaim extends Claim {
+  supportRatio: number;
+  leverage: number;
+  leverageFactors: {
+    supportWeight: number;
+    roleWeight: number;
+    connectivityWeight: number;
+    positionWeight: number;
   };
+  keystoneScore: number;
+  evidenceGapScore: number;
+  supportSkew: number;
+  inDegree: number;
+  outDegree: number;
+  isChainRoot: boolean;
+  isChainTerminal: boolean;
+
+  isHighSupport: boolean;
+  isLeverageInversion: boolean;
+  isKeystone: boolean;
+  isEvidenceGap: boolean;
+  isOutlier: boolean;
+  isContested: boolean;
+  isConditional: boolean;
+  isChallenger: boolean;
+  isIsolated: boolean;
+  chainDepth: number;
+}
+
+export interface LeverageInversion {
+  claimId: string;
+  claimLabel: string;
+  supporterCount: number;
+  reason: string;
+  affectedClaims: string[];
+}
+
+export interface CascadeRisk {
+  sourceId: string;
+  sourceLabel: string;
+  dependentIds: string[];
+  dependentLabels: string[];
+  depth: number;
+}
+
+export interface ConflictPair {
+  claimA: { id: string; label: string; supporterCount: number };
+  claimB: { id: string; label: string; supporterCount: number };
+  isBothConsensus: boolean;
+  dynamics: "symmetric" | "asymmetric";
 }
 
 export interface MapperOutput {
@@ -132,43 +207,15 @@ export interface ParsedMapperOutput extends MapperOutput {
 }
 
 export interface MapperArtifact extends MapperOutput {
+  id?: string;
   query?: string;
   turn?: number;
   timestamp?: string;
   model_count?: number;
   souvenir?: string;
   problemStructure?: ProblemStructure;
-  graphAnalysis?: GraphAnalysis;
-  ratios?: CoreRatios;
-  enrichedClaims?: EnrichedClaim[];
-}
-
-export interface EnrichedClaim extends Claim {
-  supportRatio: number;
-  isHighSupport: boolean;
-  leverage: number;
-  leverageFactors: {
-    supportWeight: number;
-    roleWeight: number;
-    connectivityWeight: number;
-    positionWeight: number;
-  };
-  keystoneScore: number;
-  evidenceGapScore: number;
-  supportSkew: number;
-  isLeverageInversion: boolean;
-  isKeystone: boolean;
-  isEvidenceGap: boolean;
-  isOutlier: boolean;
-  isContested: boolean;
-  isConditional: boolean;
-  isChallenger: boolean;
-  isIsolated: boolean;
-  inDegree: number;
-  outDegree: number;
-  chainDepth: number;
-  isChainRoot: boolean;
-  isChainTerminal: boolean;
+  narrative?: string;
+  anchors?: Array<{ label: string; id: string; position: number }>;
 }
 
 export interface ExploreAnalysis {
@@ -188,37 +235,6 @@ export interface UnderstandOutput {
   the_echo: { position: string; source: string; merit: string } | null;
   souvenir?: string;
   artifact_id: string;
-}
-
-export interface SingularityOutput {
-  text: string;
-  providerId: string;
-  timestamp: number;
-  leakageDetected?: boolean;
-  leakageViolations?: string[];
-}
-
-export interface LeverageInversion {
-  claimId: string;
-  claimLabel: string;
-  supporterCount: number;
-  reason: "challenger_prerequisite_to_consensus" | "singular_foundation" | "high_connectivity_low_support";
-  affectedClaims: string[];
-}
-
-export interface CascadeRisk {
-  sourceId: string;
-  sourceLabel: string;
-  dependentIds: string[];
-  dependentLabels: string[];
-  depth: number;
-}
-
-export interface ConflictPair {
-  claimA: { id: string; label: string; supporterCount: number };
-  claimB: { id: string; label: string; supporterCount: number };
-  isBothConsensus: boolean;
-  dynamics: 'symmetric' | 'asymmetric';
 }
 
 
@@ -290,7 +306,14 @@ export interface RecomputeRequest {
   type: "recompute";
   sessionId: string;
   sourceTurnId: string;
-  stepType: "mapping" | "batch" | "refiner" | "antagonist" | "understand" | "gauntlet" | "singularity";
+  stepType:
+    | "mapping"
+    | "batch"
+    | "refiner"
+    | "antagonist"
+    | "understand"
+    | "gauntlet"
+    | "singularity";
   targetProvider: ProviderKey;
   userMessage?: string;
   useThinking?: boolean;
@@ -376,10 +399,26 @@ export interface UnderstandStepPayload {
   mapperArtifact: MapperArtifact;
 }
 
+export interface SingularityStepPayload {
+  singularityProvider: ProviderKey;
+  originalPrompt: string;
+  mapperArtifact?: MapperArtifact;
+  exploreAnalysis?: ExploreAnalysis;
+  mappingText?: string;
+  mappingMeta?: any;
+}
+
 export interface WorkflowStep {
   stepId: string;
   type: WorkflowStepType;
-  payload: PromptStepPayload | MappingStepPayload | RefinerStepPayload | AntagonistStepPayload | UnderstandStepPayload | GauntletStepPayload;
+  payload:
+    | PromptStepPayload
+    | MappingStepPayload
+    | RefinerStepPayload
+    | AntagonistStepPayload
+    | UnderstandStepPayload
+    | GauntletStepPayload
+    | SingularityStepPayload;
 }
 
 export interface WorkflowContext {
@@ -422,7 +461,7 @@ export interface RecomputeContext {
   frozenBatchOutputs: Record<ProviderKey, ProviderResponse>;
   latestMappingOutput?: { providerId: string; text: string; meta: any } | null;
   providerContextsAtSourceTurn: Record<ProviderKey, { meta: any }>;
-  stepType: "mapping" | "batch" | "refiner" | "understand" | "gauntlet";
+  stepType: "mapping" | "batch" | "refiner" | "antagonist" | "understand" | "gauntlet" | "singularity";
   targetProvider: ProviderKey;
   sourceUserMessage: string;
 }

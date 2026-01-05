@@ -336,7 +336,14 @@ export class WorkflowEngine {
 
     if (step.type === 'mapping' && useCognitivePipeline) {
       const shouldHalt = await this.cognitiveHandler.handleCognitiveHalt(
-        request, context, steps, stepResults, resolvedContext, this.currentUserMessage
+        request,
+        context,
+        steps,
+        stepResults,
+        resolvedContext,
+        this.currentUserMessage,
+        this.stepExecutor,
+        this.streamingManager,
       );
       if (shouldHalt) {
         return "cognitive_halt";
@@ -483,6 +490,7 @@ export class WorkflowEngine {
       // ✅ CRITICAL: Ensure cognitive artifacts are persisted
       mapperArtifact: context?.mapperArtifact,
       exploreAnalysis: context?.exploreAnalysis,
+      singularityOutput: context?.singularityOutput,
     };
     if (resolvedContext?.type === "recompute") {
       persistRequest.sourceTurnId = resolvedContext.sourceTurnId;

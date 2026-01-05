@@ -116,6 +116,7 @@ export class ConnectionHandler {
         antagonistResponses: {},
         understandResponses: {},
         gauntletResponses: {},
+        singularityResponses: {},
       };
       for (const r of resps || []) {
         if (!r) continue;
@@ -140,6 +141,8 @@ export class ConnectionHandler {
           (buckets.understandResponses[r.providerId] ||= []).push(entry);
         } else if (r.responseType === "gauntlet") {
           (buckets.gauntletResponses[r.providerId] ||= []).push(entry);
+        } else if (r.responseType === "singularity") {
+          (buckets.singularityResponses[r.providerId] ||= []).push(entry);
         }
       }
 
@@ -149,6 +152,16 @@ export class ConnectionHandler {
         }
       }
 
+      let inferredSingularityOutput = aiTurn.singularityOutput;
+      if (!inferredSingularityOutput) {
+        try {
+          const firstProviderId = Object.keys(buckets.singularityResponses || {})[0];
+          const arr = firstProviderId ? buckets.singularityResponses[firstProviderId] : null;
+          const last = Array.isArray(arr) && arr.length > 0 ? arr[arr.length - 1] : null;
+          if (last?.meta?.singularityOutput) inferredSingularityOutput = last.meta.singularityOutput;
+        } catch (_) { }
+      }
+
       // Require at least some responses to finalize
       const hasAny =
         Object.keys(buckets.batchResponses).length > 0 ||
@@ -156,7 +169,8 @@ export class ConnectionHandler {
         Object.keys(buckets.refinerResponses).length > 0 ||
         Object.keys(buckets.antagonistResponses).length > 0 ||
         Object.keys(buckets.understandResponses).length > 0 ||
-        Object.keys(buckets.gauntletResponses).length > 0;
+        Object.keys(buckets.gauntletResponses).length > 0 ||
+        Object.keys(buckets.singularityResponses).length > 0;
       if (!hasAny) return;
 
       this.port?.postMessage({
@@ -193,9 +207,11 @@ export class ConnectionHandler {
             antagonistResponses: buckets.antagonistResponses,
             understandResponses: buckets.understandResponses,
             gauntletResponses: buckets.gauntletResponses,
+            singularityResponses: buckets.singularityResponses,
             meta: aiTurn.meta || {},
             mapperArtifact: aiTurn.mapperArtifact,
             exploreAnalysis: aiTurn.exploreAnalysis,
+            singularityOutput: inferredSingularityOutput,
           },
         },
       });

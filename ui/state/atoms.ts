@@ -252,6 +252,11 @@ export const antagonistProviderAtom = atomWithStorage<string | null>(
   null,
 );
 
+export const singularityProviderAtom = atomWithStorage<string | null>(
+  "htos_singularity_provider",
+  null,
+);
+
 /**
  * Provider locks - stored in chrome.storage.local for backend access
  * UI writes, backend reads. Not atomWithStorage because we need chrome.storage.local

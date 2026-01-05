@@ -110,6 +110,7 @@ export function createOptimisticAiTurn(
     antagonistResponses,
     understandResponses: {},
     gauntletResponses: {},
+    singularityResponses: {},
     meta: {
       isOptimistic: true,
       expectedProviders: activeProviders, // ✅ STORE expected providers
@@ -131,7 +132,14 @@ export function applyStreamingUpdates(
     providerId: string;
     text: string;
     status: string;
-    responseType: "batch" | "mapping" | "refiner" | "antagonist" | "understand" | "gauntlet";
+    responseType:
+      | "batch"
+      | "mapping"
+      | "refiner"
+      | "antagonist"
+      | "understand"
+      | "gauntlet"
+      | "singularity";
   }>,
 ) {
   let batchChanged = false;
@@ -141,6 +149,7 @@ export function applyStreamingUpdates(
   let antagonistChanged = false;
   let understandChanged = false;
   let gauntletChanged = false;
+  let singularityChanged = false;
 
   updates.forEach(({ providerId, text: delta, status, responseType }) => {
     if (responseType === "batch") {
@@ -299,6 +308,30 @@ export function applyStreamingUpdates(
         });
       }
       aiTurn.gauntletResponses[providerId] = arr;
+    } else if (responseType === "singularity") {
+      singularityChanged = true;
+      if (!aiTurn.singularityResponses) aiTurn.singularityResponses = {};
+      const arr = normalizeResponseArray(aiTurn.singularityResponses[providerId]);
+      const latest = arr.length > 0 ? arr[arr.length - 1] : undefined;
+      const isLatestTerminal =
+        latest && (latest.status === "completed" || latest.status === "error");
+
+      if (latest && !isLatestTerminal) {
+        arr[arr.length - 1] = {
+          ...latest,
+          text: (latest.text || "") + delta,
+          status: status as any,
+          updatedAt: Date.now(),
+        };
+      } else {
+        arr.push({
+          providerId: providerId as ProviderKey,
+          text: delta,
+          status: status as any,
+          createdAt: Date.now(),
+        });
+      }
+      aiTurn.singularityResponses[providerId] = arr;
     }
   });
 
@@ -310,6 +343,7 @@ export function applyStreamingUpdates(
   if (antagonistChanged) aiTurn.antagonistVersion = (aiTurn.antagonistVersion ?? 0) + 1;
   if (understandChanged) aiTurn.understandVersion = (aiTurn.understandVersion ?? 0) + 1;
   if (gauntletChanged) aiTurn.gauntletVersion = (aiTurn.gauntletVersion ?? 0) + 1;
+  if (singularityChanged) aiTurn.singularityVersion = (aiTurn.singularityVersion ?? 0) + 1;
 }
 
 /**

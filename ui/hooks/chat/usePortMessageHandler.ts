@@ -41,7 +41,17 @@ const PORT_DEBUG_UI = false;
  * CRITICAL: Step type detection must match backend stepId patterns
  * Backend generates: 'batch-<timestamp>', 'mapping-<provider>-<timestamp>'
  */
-function getStepType(stepId: string): "batch" | "mapping" | "refiner" | "antagonist" | "understand" | "gauntlet" | null {
+function getStepType(
+  stepId: string,
+):
+  | "batch"
+  | "mapping"
+  | "refiner"
+  | "antagonist"
+  | "understand"
+  | "gauntlet"
+  | "singularity"
+  | null {
   if (!stepId || typeof stepId !== "string") return null;
 
   // Match backend patterns exactly
@@ -56,6 +66,7 @@ function getStepType(stepId: string): "batch" | "mapping" | "refiner" | "antagon
   if (stepId.startsWith("understand-") || stepId.includes("understand")) return "understand";
   if (stepId.startsWith("gauntlet-") || stepId.includes("gauntlet")) return "gauntlet";
   if (stepId.startsWith("explore-")) return "batch"; // Explore currently uses batch-like routing
+  if (stepId.startsWith("singularity-") || stepId.includes("singularity")) return "singularity";
 
   console.warn(`[Port] Unknown stepId pattern: ${stepId}`);
   return null;
@@ -67,7 +78,13 @@ function getStepType(stepId: string): "batch" | "mapping" | "refiner" | "antagon
  */
 function extractProviderFromStepId(
   stepId: string,
-  stepType: "mapping" | "refiner" | "antagonist" | "understand" | "gauntlet",
+  stepType:
+    | "mapping"
+    | "refiner"
+    | "antagonist"
+    | "understand"
+    | "gauntlet"
+    | "singularity",
 ): string | null {
   // Support provider IDs with hyphens/dots/etc., assuming last segment is numeric timestamp
   const re = new RegExp(`^${stepType}-(.+)-(\\d+)$`);
@@ -115,7 +132,14 @@ export function usePortMessageHandler() {
   const activeAiTurnIdRef = useRef<string | null>(null);
   const activeRecomputeRef = useRef<{
     aiTurnId: string;
-    stepType: "mapping" | "batch" | "refiner" | "antagonist" | "understand" | "gauntlet";
+    stepType:
+      | "mapping"
+      | "batch"
+      | "refiner"
+      | "antagonist"
+      | "understand"
+      | "gauntlet"
+      | "singularity";
     providerId: string;
   } | null>(null);
   // Track whether we've already logged the first PARTIAL_RESULT for a given
@@ -625,6 +649,19 @@ export function usePortMessageHandler() {
                       aiTurn.gauntletOutput = data.meta.gauntletOutput;
                     }
                     aiTurn.gauntletVersion = (aiTurn.gauntletVersion ?? 0) + 1;
+                  } else if (stepType === "singularity") {
+                    aiTurn.singularityResponses = {
+                      ...(aiTurn.singularityResponses || {}),
+                      [normalizedId]: updateResponseList(
+                        aiTurn.singularityResponses?.[normalizedId],
+                        baseEntry,
+                      ),
+                    };
+                    if (data?.meta?.singularityOutput) {
+                      aiTurn.singularityOutput = data.meta.singularityOutput;
+                    }
+                    aiTurn.singularityVersion =
+                      (aiTurn.singularityVersion ?? 0) + 1;
                   }
 
                   // CRITICAL: ensure the Map entry is observed as changed
@@ -667,7 +704,10 @@ export function usePortMessageHandler() {
                 if (
                   (!providerId || typeof providerId !== "string") &&
                   (!providerId || typeof providerId !== "string") &&
-                  (stepType === "mapping" || stepType === "refiner" || stepType === "antagonist")
+                  (stepType === "mapping" ||
+                    stepType === "refiner" ||
+                    stepType === "antagonist" ||
+                    stepType === "singularity")
                 ) {
                   providerId = extractProviderFromStepId(stepId, stepType);
                 }
@@ -798,6 +838,33 @@ export function usePortMessageHandler() {
                       aiTurn.understandVersion = (aiTurn.understandVersion ?? 0) + 1;
                     } else if (stepType === "gauntlet") {
                       aiTurn.gauntletVersion = (aiTurn.gauntletVersion ?? 0) + 1;
+                    } else if (stepType === "singularity") {
+                      const arr = Array.isArray(aiTurn.singularityResponses?.[providerId!])
+                        ? [...(aiTurn.singularityResponses![providerId!] as any[])]
+                        : [];
+                      if (arr.length > 0) {
+                        const latest = arr[arr.length - 1] as any;
+                        arr[arr.length - 1] = {
+                          ...latest,
+                          status: "error",
+                          text: errText || (latest?.text ?? ""),
+                          updatedAt: now,
+                        } as any;
+                      } else {
+                        arr.push({
+                          providerId: providerId!,
+                          text: errText || "",
+                          status: "error",
+                          createdAt: now,
+                          updatedAt: now,
+                        } as any);
+                      }
+                      aiTurn.singularityResponses = {
+                        ...(aiTurn.singularityResponses || {}),
+                        [providerId!]: arr as any,
+                      } as any;
+                      aiTurn.singularityVersion =
+                        (aiTurn.singularityVersion ?? 0) + 1;
                     }
                   });
                 }
@@ -922,7 +989,7 @@ export function usePortMessageHandler() {
         }
 
         case "MAPPER_ARTIFACT_READY": {
-          const { aiTurnId, artifact, analysis } = message as any;
+          const { aiTurnId, artifact, analysis, singularityOutput } = message as any;
           if (!aiTurnId) return;
 
           setTurnsMap((draft: Map<string, TurnMessage>) => {
@@ -935,6 +1002,7 @@ export function usePortMessageHandler() {
               ...aiTurn,
               mapperArtifact: artifact,
               exploreAnalysis: analysis,
+              ...(singularityOutput ? { singularityOutput } : {}),
             });
           });
           break;

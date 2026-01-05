@@ -81,7 +81,7 @@ export class SessionManager {
    * @param {string} sessionId
    * @param {string} aiTurnId
    * @param {string} providerId
-   * @param {"batch"|"mapping"|"refiner"|"antagonist"|"understand"|"gauntlet"} responseType
+   * @param {"batch"|"mapping"|"refiner"|"antagonist"|"understand"|"gauntlet"|"singularity"} responseType
    * @param {number} responseIndex
    * @param {{ text?: string, status?: string, meta?: any, createdAt?: number }} payload
    */
@@ -226,6 +226,9 @@ export class SessionManager {
     const exploreAnalysis = request?.exploreAnalysis
       ? this._toJsonSafe(request.exploreAnalysis)
       : undefined;
+    const singularityOutput = request?.singularityOutput
+      ? this._toJsonSafe(request.singularityOutput)
+      : undefined;
     const aiTurnRecord = {
       id: aiTurnId,
       type: "ai",
@@ -244,6 +247,7 @@ export class SessionManager {
       antagonistResponseCount: this.countResponses(result.antagonistOutputs),
       ...(mapperArtifact ? { mapperArtifact } : {}),
       ...(exploreAnalysis ? { exploreAnalysis } : {}),
+      ...(singularityOutput ? { singularityOutput } : {}),
       lastContextSummary: contextSummary,
       meta: await this._attachRunIdMeta(aiTurnId),
     };
@@ -368,6 +372,9 @@ export class SessionManager {
     const exploreAnalysis = request?.exploreAnalysis
       ? this._toJsonSafe(request.exploreAnalysis)
       : undefined;
+    const singularityOutput = request?.singularityOutput
+      ? this._toJsonSafe(request.singularityOutput)
+      : undefined;
     const aiTurnRecord = {
       id: aiTurnId,
       type: "ai",
@@ -386,6 +393,7 @@ export class SessionManager {
       antagonistResponseCount: this.countResponses(result.antagonistOutputs),
       ...(mapperArtifact ? { mapperArtifact } : {}),
       ...(exploreAnalysis ? { exploreAnalysis } : {}),
+      ...(singularityOutput ? { singularityOutput } : {}),
       lastContextSummary: contextSummary,
       meta: await this._attachRunIdMeta(aiTurnId),
     };

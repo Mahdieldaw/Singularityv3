@@ -650,7 +650,7 @@ const DecisionMapGraph: React.FC<Props> = ({
                 </g>
 
                 {/* Component backgrounds (if fragmented) */}
-                {graphAnalysis && graphAnalysis.componentCount > 1 && graphAnalysis.components.map((component, idx) => {
+                {graphAnalysis && graphAnalysis.componentCount > 1 && graphAnalysis.components.map((component: string[], idx: number) => {
                     const componentNodes = nodes.filter(n => component.includes(n.id));
                     if (componentNodes.length === 0) return null;
 

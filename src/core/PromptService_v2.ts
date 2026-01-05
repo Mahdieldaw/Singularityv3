@@ -112,7 +112,7 @@ function buildStructuralBrief(analysis: StructuralAnalysis): string {
   }
   
   if (shape.pattern === 'settled') {
-    const consensus = claims.filter(c => c.support > 0.6).slice(0, 3);
+    const consensus = claims.filter(c => c.supportRatio > 0.6).slice(0, 3);
     brief += `\n\n**High Agreement Points:**\n`;
     consensus.forEach(c => brief += `• ${c.label}\n`);
     brief += `\nYour task: Speak with confidence. If user probes, challenge assumptions or explore edge cases.`;
@@ -141,7 +141,7 @@ function buildStructuralBrief(analysis: StructuralAnalysis): string {
     if (inversions.length > 0) {
       brief += `\n\n**Context-Dependent Choices:**\n`;
       inversions.forEach(inv => {
-        brief += `• ${inv.strongClaim}: Generally agreed, but weak in specific cases\n`;
+        brief += `• ${inv.claimLabel}: Generally agreed, but weak in specific cases\n`;
       });
       brief += `\nYour task: Help user identify which context applies to them.`;
     }
@@ -254,7 +254,7 @@ export function buildConciergePrompt(
   const conversationBrief = buildConversationBrief(turns);
   const shapeGuidance = getShapeGuidance(analysis.shape, context || {
     query,
-    originalArtifactId: artifact.id,
+    originalArtifactId: artifact.id || artifact.query || "unknown",
     resolvedTensions: [],
     providedContext: [],
     validatedClaims: [],
@@ -370,7 +370,7 @@ export function updateShapeFromContext(
   // If user resolved tensions, shape becomes more settled
   if (context.resolvedTensions.length > 0) {
     return {
-      pattern: 'contextual',
+      pattern: 'settled',
       confidence: Math.min(0.95, originalShape.confidence + 0.2),
       implication: 'User has provided context that resolves ambiguity'
     };
@@ -428,7 +428,7 @@ export function buildMetaResponse(
 
 After analyzing their responses:
 - **Structure detected:** ${analysis.shape.pattern} (${Math.round(analysis.shape.confidence * 100)}% confidence)
-- **Key points identified:** ${artifact.claims.filter(c => c.support_count >= 2).length} consensus claims
+- **Key points identified:** ${artifact.claims.filter(c => (c.support_count ?? 0) >= 2).length} consensus claims
 - **Tensions found:** ${analysis.tensions.length} areas where models diverged
 
 The "${analysis.shape.pattern}" structure means ${analysis.shape.implication.toLowerCase()}

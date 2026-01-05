@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useRef, useEffect } from "react";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
-import { providerEffectiveStateFamily, isSplitOpenAtom, mappingProviderAtom, composerModelAtom, analystModelAtom, providerAuthStatusAtom, selectedModelsAtom, refinerProviderAtom, antagonistProviderAtom, providerLocksAtom } from "../state/atoms";
+import { providerEffectiveStateFamily, isSplitOpenAtom, mappingProviderAtom, composerModelAtom, analystModelAtom, providerAuthStatusAtom, selectedModelsAtom, refinerProviderAtom, antagonistProviderAtom, singularityProviderAtom, providerLocksAtom } from "../state/atoms";
 import { LLMProvider } from "../types";
 import { PROVIDER_ACCENT_COLORS, WORKFLOW_STAGE_COLORS } from "../constants";
 import { getProviderColor, getProviderLogo } from "../utils/provider-helpers";
@@ -56,6 +56,7 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
     const [analystVal, setAnalyst] = useAtom(analystModelAtom);
     const [selectedModels, setSelectedModels] = useAtom(selectedModelsAtom);
     const [antagonistProvider, setAntagonistProvider] = useAtom(antagonistProviderAtom);
+    const [singularityProvider, setSingularityProvider] = useAtom(singularityProviderAtom);
     const setLocks = useSetAtom(providerLocksAtom);
     const containerRef = useRef<HTMLDivElement>(null);
 
@@ -255,6 +256,14 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
                 localStorage.setItem('htos_antagonist_locked', 'true');
                 chrome?.storage?.local?.set?.({ provider_lock_settings: { antagonist_locked: true } });
             } catch { }
+        }
+    };
+
+    const handleSelectSingularity = (pid: string) => {
+        if (singularityProvider === pid) {
+            setSingularityProvider(null);
+        } else {
+            setSingularityProvider(pid);
         }
     };
 
@@ -535,6 +544,33 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
                                     const isUnauthorized = authStatus && authStatus[pid] === false;
                                     return (
                                         <option key={`ant-${pid}`} value={pid} disabled={isUnauthorized}>
+                                            {p.name} {isUnauthorized ? "(Locked)" : ""}
+                                        </option>
+                                    );
+                                })}
+                            </select>
+                        </div>
+
+                        <div>
+                            <div className="flex items-center gap-2 mb-2 text-sm"><span>🕳️</span><span>Singularity</span></div>
+                            <select
+                                value={singularityProvider || ""}
+                                onChange={(e) => {
+                                    const val = e.target.value;
+                                    if (val === "") {
+                                        setSingularityProvider(null);
+                                    } else {
+                                        handleSelectSingularity(val);
+                                    }
+                                }}
+                                className="w-full bg-chip border border-border-subtle rounded-md px-2 py-1.5 text-xs text-text-primary outline-none focus:border-brand-500 transition-colors"
+                            >
+                                <option value="">None</option>
+                                {allProviders.map(p => {
+                                    const pid = String(p.id);
+                                    const isUnauthorized = authStatus && authStatus[pid] === false;
+                                    return (
+                                        <option key={`s-${pid}`} value={pid} disabled={isUnauthorized}>
                                             {p.name} {isUnauthorized ? "(Locked)" : ""}
                                         </option>
                                     );
