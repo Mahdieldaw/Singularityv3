@@ -100,10 +100,10 @@ export function useChat() {
       try {
         const effectiveMappingProvider =
           mappingProvider ||
-          (activeProviders.length > 0 ? (activeProviders[0] as any) : null);
+          (activeProviders.length > 0 ? (activeProviders[0] as any) : 'gemini');
         const shouldUseMapping = true;
 
-        const effectiveSingularityProvider = singularityProvider;
+        const effectiveSingularityProvider = singularityProvider || (activeProviders.length > 0 ? (activeProviders[0] as any) : 'gemini');
 
         const isInitialize =
           mode === "new" && (!currentSessionId || turnIds.length === 0);

@@ -565,6 +565,7 @@ export class ConnectionHandler {
       {
         providers: executeRequest.providers,
         mapper: executeRequest.mapper,
+        singularity: executeRequest.singularity,
       },
       authStatus,
       availableProviders
@@ -573,6 +574,7 @@ export class ConnectionHandler {
     // Apply results
     executeRequest.providers = result.providers;
     executeRequest.mapper = result.mapper;
+    executeRequest.singularity = result.singularity;
 
     // Emit warnings (not errors!)
     if (result.warnings.length > 0) {
@@ -586,12 +588,14 @@ export class ConnectionHandler {
     // ONLY fail if zero providers available
     const hasAnyProvider =
       result.providers.length > 0 ||
-      result.mapper !== null;
+      result.mapper !== null ||
+      result.singularity !== null;
 
     if (!hasAnyProvider) {
       const attempted = [
         ...(executeRequest.providers || []),
         executeRequest.mapper,
+        executeRequest.singularity,
       ].filter(Boolean);
 
       const errorMsg = createAuthErrorMessage(

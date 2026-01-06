@@ -19,10 +19,20 @@ export class CognitivePipelineHandler {
         v.status === "completed" && v.result?.mapperArtifact,
       )?.[1]?.result;
 
+      // DEBUG: Log what we found from stepResults
+      console.log('[CognitiveHandler] orchestrateSingularityPhase - mappingResult search:', {
+        foundMappingResult: !!mappingResult,
+        hasMapperArtifact: !!mappingResult?.mapperArtifact,
+        mapperArtifactClaimCount: mappingResult?.mapperArtifact?.claims?.length,
+        mapperArtifactModelCount: mappingResult?.mapperArtifact?.model_count,
+      });
+
       const userMessageForSingularity =
         context?.userMessage || currentUserMessage || "";
 
       let mapperArtifact = mappingResult?.mapperArtifact || null;
+      let artifactSource = mappingResult?.mapperArtifact ? 'direct_from_stepResults' : 'none';
+
       if (!mapperArtifact) {
         try {
           const mappingSteps = Array.isArray(steps)
@@ -41,16 +51,58 @@ export class CognitivePipelineHandler {
               text.includes("<mapping_output>") ||
               text.includes("<decision_map>");
 
-            if (!hasStructuralTags) continue;
+            if (!hasStructuralTags) {
+              console.log('[CognitiveHandler] Mapping text has no structural tags, skipping parse');
+              continue;
+            }
 
+            console.log('[CognitiveHandler] Attempting parseV1MapperToArtifact fallback from text');
             mapperArtifact = parseV1MapperToArtifact(text, {
               graphTopology: result?.meta?.graphTopology,
               query: userMessageForSingularity,
             });
-            if (mapperArtifact) break;
+            if (mapperArtifact) {
+              artifactSource = 'parsed_from_text';
+
+              // ⚠️ CRITICAL FIX: model_count is not set by parseV1MapperToArtifact
+              // Calculate it from citationSourceOrder or fallback to supporters count
+              if (!mapperArtifact.model_count || mapperArtifact.model_count === 0) {
+                const citationOrder = result?.meta?.citationSourceOrder;
+                if (citationOrder && typeof citationOrder === 'object') {
+                  mapperArtifact.model_count = Object.keys(citationOrder).length;
+                  console.log('[CognitiveHandler] Set model_count from citationSourceOrder:', mapperArtifact.model_count);
+                } else {
+                  // Fallback: count unique supporters across claims
+                  const supporterSet = new Set();
+                  (mapperArtifact.claims || []).forEach(c => {
+                    (c.supporters || []).forEach(s => {
+                      if (typeof s === 'number') supporterSet.add(s);
+                    });
+                  });
+                  mapperArtifact.model_count = supporterSet.size > 0 ? supporterSet.size : 1;
+                  console.log('[CognitiveHandler] Set model_count from supporters:', mapperArtifact.model_count);
+                }
+              }
+
+              console.log('[CognitiveHandler] parseV1MapperToArtifact result:', {
+                claimCount: mapperArtifact?.claims?.length,
+                edgeCount: mapperArtifact?.edges?.length,
+                modelCount: mapperArtifact?.model_count,
+              });
+              break;
+            }
           }
-        } catch (_) { }
+        } catch (e) {
+          console.error('[CognitiveHandler] Fallback parsing failed:', e);
+        }
       }
+
+      console.log('[CognitiveHandler] Final mapperArtifact source:', artifactSource, {
+        hasArtifact: !!mapperArtifact,
+        claimCount: mapperArtifact?.claims?.length,
+        edgeCount: mapperArtifact?.edges?.length,
+        modelCount: mapperArtifact?.model_count,
+      });
 
       if (!mapperArtifact) {
         console.warn("[CognitiveHandler] Missing mapperArtifact - forcing end of loop");
@@ -68,7 +120,7 @@ export class CognitivePipelineHandler {
       singularityProviderId = request?.singularity ||
         context?.singularityProvider ||
         context?.meta?.singularity ||
-        request?.mapper || 
+        request?.mapper ||
         'gemini';
 
       if (stepExecutor && streamingManager) {
@@ -140,7 +192,9 @@ export class CognitivePipelineHandler {
         singularityProvider: singularityProviderId,
       });
 
-      return true;
+      // ✅ Return false to let workflow continue to natural completion
+      // Singularity step has already executed above, no need to halt early
+      return false;
     } catch (e) {
       console.error("[CognitiveHandler] Orchestration failed:", e);
       return false;
@@ -214,7 +268,7 @@ export class CognitivePipelineHandler {
           mappingText: latestMappingText,
           mappingMeta: latestMappingMeta,
           selectedArtifacts: Array.isArray(selectedArtifacts) ? selectedArtifacts : [],
-          stance: payload.stance || null, 
+          stance: payload.stance || null,
           useThinking: payload.useThinking || false,
         },
       };

@@ -10,107 +10,7 @@ import { TurnEmitter } from './execution/TurnEmitter';
 import { CognitivePipelineHandler } from './execution/CognitivePipelineHandler';
 import { formatArtifactAsOptions, parseV1MapperToArtifact } from '../../shared/parsing-utils';
 
-function normalizeCitationId(value) {
-  if (value == null) return null;
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  const s = String(value).trim();
-  if (!s) return null;
-  if (/^\d+$/.test(s)) return Number(s);
-  return null;
-}
-
-function normalizeSupporterProviderIds(supporters, citationSourceOrder) {
-  const out = new Set();
-  const list = Array.isArray(supporters) ? supporters : [];
-  const order = citationSourceOrder && typeof citationSourceOrder === "object" ? citationSourceOrder : {};
-
-  for (const s of list) {
-    const citationNum = normalizeCitationId(s);
-    if (citationNum != null) {
-      const pid = order[citationNum] || order[String(citationNum)];
-      if (pid) {
-        out.add(String(pid));
-      } else {
-        out.add(String(citationNum));
-      }
-      continue;
-    }
-    if (s != null) out.add(String(s));
-  }
-
-  return Array.from(out);
-}
-
-function computeConsensusGateFromMapping({ stepResults, mappingSteps }) {
-  try {
-    const mappingStep = Array.isArray(mappingSteps) ? mappingSteps[0] : null;
-    if (!mappingStep) return null;
-
-    const mappingTake = stepResults?.get(mappingStep.stepId);
-    const mappingResult = mappingTake?.status === "completed" ? mappingTake.result : null;
-    const mappingMeta = mappingResult?.meta && typeof mappingResult.meta === "object" ? mappingResult.meta : null;
-    const graphTopology = mappingMeta?.graphTopology;
-    const nodes = graphTopology?.nodes;
-    if (!Array.isArray(nodes) || nodes.length === 0) return null;
-
-    const batchStepId = Array.isArray(mappingStep?.payload?.sourceStepIds) ? mappingStep.payload.sourceStepIds[0] : null;
-    if (!batchStepId) return null;
-    const batchTake = stepResults?.get(batchStepId);
-    const batchResults = batchTake?.status === "completed" ? batchTake.result?.results : null;
-    if (!batchResults || typeof batchResults !== "object") return null;
-
-    const completedProviders = Object.entries(batchResults)
-      .filter(([_pid, r]) => r && r.status === "completed" && String(r.text || "").trim().length > 0)
-      .map(([pid]) => String(pid));
-
-    const totalCompleted = completedProviders.length;
-    const completedSet = new Set(completedProviders);
-
-    const citationSourceOrder = mappingMeta?.citationSourceOrder;
-
-    const approaches = nodes
-      .map((n) => {
-        const supporterIds = normalizeSupporterProviderIds(n?.supporters, citationSourceOrder).filter((pid) =>
-          completedSet.has(pid),
-        );
-        const supportCount = supporterIds.length;
-        const supportRatio = totalCompleted > 0 ? supportCount / totalCompleted : 0;
-        return {
-          id: n?.id != null ? String(n.id) : "",
-          label: n?.label != null ? String(n.label) : "",
-          supportCount,
-          supportRatio,
-          supporterProviderIds: supporterIds,
-        };
-      })
-      .filter((a) => a.id || a.label);
-
-    if (approaches.length === 0) return null;
-
-    const maxSupporters = Math.max(...approaches.map((a) => a.supportCount));
-    // skipRefiner/Antagonist logic removed as these steps are deprecated.
-    
-    let reason = "has_anchor_outlier";
-    if (approaches.length === 1) reason = "monoculture";
-    else if (maxSupporters <= 2) reason = "no_anchor";
-
-    return {
-      consensusOnly: false, // Legacy flag, might be unused but keeping structure safe
-      reason,
-      stats: {
-        totalModelsCompleted: totalCompleted,
-        approachesCount: approaches.length,
-        maxSupporters,
-        approaches,
-      },
-    };
-  } catch (_) {
-    return null;
-  }
-}
-
-export class WorkflowEngine {
-  constructor(orchestrator, sessionManager, port, options = {}) {
+export class WorkflowEngine {  constructor(orchestrator, sessionManager, port, options = {}) {
     this.orchestrator = orchestrator;
     this.sessionManager = sessionManager;
     this.port = port;
@@ -189,12 +89,6 @@ export class WorkflowEngine {
 
       // ✅ SINGLE LOOP - Steps are already ordered by WorkflowCompiler
       for (const step of steps) {
-        // Skip check for consensus-gated steps
-        if (this._shouldSkipStep(step, context)) {
-          console.log(`[WorkflowEngine] Skipping ${step.type} step (consensus gate)`);
-          continue;
-        }
-
         // Execute the step
         const result = await this._executeStep(
           step, context, stepResults, workflowContexts, resolvedContext
@@ -209,9 +103,6 @@ export class WorkflowEngine {
           await this._haltWorkflow(request, context, steps, stepResults, resolvedContext, haltReason);
           return;
         }
-
-        // Post-step hooks (consensus gate after mapping)
-        this._postStepHooks(step, context, stepResults);
       }
 
       // All steps completed successfully
@@ -315,11 +206,6 @@ export class WorkflowEngine {
   // CONTROL FLOW
   // ═══════════════════════════════════════════════════════════════════════════
 
-  _shouldSkipStep(_step, _context) {
-    // Consensus gate logic for deprecated steps removed.
-    return false;
-  }
-
   async _checkHaltConditions(step, result, request, context, steps, stepResults, resolvedContext, useCognitivePipeline) {
     if (step.type === 'prompt') {
       const resultsObj = result?.results || {};
@@ -346,16 +232,6 @@ export class WorkflowEngine {
     }
 
     return null;
-  }
-
-  _postStepHooks(step, context, stepResults) {
-    if (step.type === 'mapping') {
-      const mappingSteps = [step];
-      const consensusGate = computeConsensusGateFromMapping({ stepResults, mappingSteps });
-      if (consensusGate) {
-        context.workflowControl = consensusGate;
-      }
-    }
   }
 
   async _haltWorkflow(request, context, steps, stepResults, resolvedContext, haltReason) {
@@ -522,7 +398,6 @@ export class WorkflowEngine {
       sessionId: context.sessionId,
       workflowId: request.workflowId,
       finalResults: Object.fromEntries(stepResults),
-      ...(context?.workflowControl?.consensusOnly ? { haltReason: "consensus_only" } : {}),
     });
 
     this.turnEmitter.emitTurnFinalized(context, steps, stepResults, resolvedContext, this.currentUserMessage);

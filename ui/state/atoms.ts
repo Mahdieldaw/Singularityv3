@@ -385,12 +385,6 @@ export const activeSplitPanelAtom = atom<{ turnId: string; providerId: string } 
 // Derived atom for performance: ChatView subscribes to this boolean, not the full object
 export const isSplitOpenAtom = atom((get) => get(activeSplitPanelAtom) !== null);
 
-export type TrustPanelSection = 'blockers' | 'risks' | 'context' | null;
-
-export const trustPanelFocusAtom = atom<{
-  turnId: string;
-  section: TrustPanelSection;
-} | null>(null);
 
 export const isDecisionMapOpenAtom = atom<{ turnId: string } | null>(null);
 export const isDecisionMapVisibleAtom = atom((get) => get(isDecisionMapOpenAtom) !== null);

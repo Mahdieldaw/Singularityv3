@@ -1982,6 +1982,14 @@ export const computeStructuralAnalysis = (artifact: MapperArtifact): StructuralA
     );
 
     // Layer 8: Shape Data Builders
+    console.log('[PromptMethods] Building shape data for pattern:', shape.primaryPattern, {
+        claimCount: claimsWithLeverage.length,
+        edgeCount: edges.length,
+        ghostCount: ghosts.length,
+        conflictCount: enrichedConflicts.length,
+        tradeoffCount: patterns.tradeoffs.length,
+    });
+
     try {
         switch (shape.primaryPattern) {
             case 'settled':
@@ -1993,9 +2001,15 @@ export const computeStructuralAnalysis = (artifact: MapperArtifact): StructuralA
             case 'keystone':
                 if (graph.hubClaim) {
                     shape.data = buildKeystoneShapeData(claimsWithLeverage, edges, graph, patterns);
+                } else {
+                    console.warn('[PromptMethods] Keystone pattern but no hubClaim - shape.data will be undefined');
                 }
                 break;
             case 'contested':
+                console.log('[PromptMethods] Building contested shape data with', {
+                    conflictInfos: enrichedConflicts.length,
+                    conflictClusters: conflictClusters.length,
+                });
                 shape.data = buildContestedShapeData(
                     claimsWithLeverage,
                     patterns,
@@ -2017,10 +2031,15 @@ export const computeStructuralAnalysis = (artifact: MapperArtifact): StructuralA
                 shape.data = buildExploratoryShapeData(claimsWithLeverage, graph, ghosts, signalStrength);
                 break;
         }
+        console.log('[PromptMethods] Shape data built successfully:', {
+            hasData: !!shape.data,
+            dataPattern: (shape.data as any)?.pattern,
+        });
     } catch (e) {
-        console.warn("Failed to build shape data:", e);
+        console.error("[PromptMethods] Failed to build shape data:", e);
         // Fallback to exploratory if shape-specific builder fails
         shape.data = buildExploratoryShapeData(claimsWithLeverage, graph, ghosts, signalStrength);
+        console.log('[PromptMethods] Fell back to exploratory shape data');
     }
 
     const analysis: StructuralAnalysis = {

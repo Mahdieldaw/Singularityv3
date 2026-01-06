@@ -85,6 +85,17 @@ export async function runPreflight(request, authStatus, availableProviders) {
         mapper = selectBestProvider('mapping', authStatus, availableProviders);
     }
 
-    return { providers, mapper, warnings };
+    // === Singularity ===
+    let singularity = request.singularity || null;
+    if (singularity && !isProviderAuthorized(singularity, authStatus)) {
+        // We reuse the mapping lock for now or assume singularity follows best authorized
+        const fallback = selectBestProvider('singularity', authStatus, availableProviders);
+        warnings.push(`Singularity provider "${singularity}" is unauthorized; using "${fallback}" for this request`);
+        singularity = fallback;
+    } else if (!singularity) {
+        singularity = selectBestProvider('singularity', authStatus, availableProviders);
+    }
+
+    return { providers, mapper, singularity, warnings };
 }
 

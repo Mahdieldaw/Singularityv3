@@ -6,6 +6,11 @@ export const PROVIDER_PRIORITIES = {
     mapping: ['gemini', 'qwen', 'chatgpt', 'gemini-exp', 'claude', 'gemini-pro'],
 
     /**
+     * For singularity: Final synthesis quality
+     */
+    singularity: ['gemini', 'qwen', 'chatgpt', 'gemini-exp', 'claude', 'gemini-pro'],
+
+    /**
      * For batch queries: Balance of speed + quality
      */
     batch: ['claude', 'gemini-exp', 'qwen', 'gemini-pro', 'chatgpt', 'gemini'],

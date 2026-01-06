@@ -54,17 +54,13 @@ export const CouncilOrbsVertical: React.FC<CouncilOrbsVerticalProps> = React.mem
     // Filter display providers to only those that contributed
     const displayProviders = allProviders.filter(p => contributingIds.includes(String(p.id)));
 
-    const showTrustButton = !!singularityOutput;
-    const isTrustActive = activeProviderId === '__trust__';
-    const middleIndex = Math.max(0, Math.floor(displayProviders.length / 2));
-
     return (
         <div className={clsx("flex flex-col items-center gap-3 py-4 w-full transition-opacity duration-150", isTransitioning && "opacity-60")}>
             {displayProviders.map((p, idx) => {
                 const pid = String(p.id);
                 const isActive = pid === activeProviderId;
 
-                const orbElement = (
+                return (
                     <VerticalOrb
                         key={pid}
                         turnId={turnId}
@@ -75,49 +71,7 @@ export const CouncilOrbsVertical: React.FC<CouncilOrbsVerticalProps> = React.mem
                         hoveredOrb={hoveredOrb}
                     />
                 );
-
-                if (showTrustButton && idx === middleIndex) {
-                    return (
-                        <React.Fragment key={pid}>
-                            <button
-                                onClick={() => setActiveSplitPanel({ turnId, providerId: '__trust__' })}
-                                className={clsx(
-                                    "flex items-center justify-center w-6 h-6 rounded-full transition-all duration-300 shrink-0",
-                                    isTrustActive
-                                        ? "bg-brand-500 shadow-glow-brand-soft ring-2 ring-brand-400"
-                                        : "bg-surface-raised border border-border-subtle hover:bg-surface-highlight hover:scale-110"
-                                )}
-                                title="Trust Pane (Singularity Audit)"
-                            >
-                                <span className={clsx("text-[10px]", isTrustActive ? "text-white" : "text-brand-400")}>
-                                    ✨
-                                </span>
-                            </button>
-                            {orbElement}
-                        </React.Fragment>
-                    );
-                }
-
-                return orbElement;
             })}
-
-            {/* Fallback if no providers but trust button should show */}
-            {displayProviders.length === 0 && showTrustButton && (
-                <button
-                    onClick={() => setActiveSplitPanel({ turnId, providerId: '__trust__' })}
-                    className={clsx(
-                        "flex items-center justify-center w-6 h-6 rounded-full transition-all duration-300",
-                        isTrustActive
-                            ? "bg-brand-500 shadow-glow-brand-soft ring-2 ring-brand-400"
-                            : "bg-surface-raised border border-border-subtle hover:bg-surface-highlight hover:scale-110"
-                    )}
-                    title="Trust Pane (Singularity Audit)"
-                >
-                    <span className={clsx("text-[10px]", isTrustActive ? "text-white" : "text-brand-400")}>
-                        ✨
-                    </span>
-                </button>
-            )}
         </div>
     );
 });

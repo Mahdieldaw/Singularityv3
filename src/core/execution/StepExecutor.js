@@ -813,6 +813,15 @@ Answer the user's message directly. Use context only to disambiguate.
       throw new Error("Singularity mode requires a MapperArtifact.");
     }
 
+    // DEBUG: Log what mapperArtifact we received
+    console.log('[StepExecutor] executeSingularityStep mapperArtifact:', {
+      hasArtifact: !!mapperArtifact,
+      claimCount: mapperArtifact?.claims?.length,
+      edgeCount: mapperArtifact?.edges?.length,
+      ghostCount: mapperArtifact?.ghosts?.length,
+      modelCount: mapperArtifact?.model_count,
+      query: mapperArtifact?.query?.slice(0, 50),
+    });
 
     // Import ConciergeService dynamically to avoid circular dependencies
     let ConciergeService;
@@ -831,7 +840,15 @@ Answer the user's message directly. Use context only to disambiguate.
       let analysis = null;
       try {
         const { computeStructuralAnalysis } = await import('../PromptMethods');
+        console.log('[StepExecutor] Calling computeStructuralAnalysis...');
         analysis = computeStructuralAnalysis(mapperArtifact);
+        console.log('[StepExecutor] computeStructuralAnalysis result:', {
+          hasAnalysis: !!analysis,
+          shape: analysis?.shape?.primaryPattern,
+          shapeHasData: !!analysis?.shape?.data,
+          claimCount: analysis?.landscape?.claimCount,
+          modelCount: analysis?.landscape?.modelCount,
+        });
       } catch (e) {
         console.error("[StepExecutor] computeStructuralAnalysis failed:", e);
         throw new Error(`Structural Analysis Failed: ${e.message || String(e)}`);

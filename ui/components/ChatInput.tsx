@@ -210,21 +210,20 @@ const ChatInput = ({
         <div className="relative w-full max-w-[min(900px,calc(100%-24px))] flex justify-center mb-[-8px] z-10 !bg-transparent">
           <CouncilOrbs
             providers={LLM_PROVIDERS_CONFIG}
-            voiceProviderId={mappingProvider}
+            voiceProviderId={singularityProvider}
             variant="active"
             workflowProgress={workflowProgress as any}
             onCrownMove={(pid) => {
-              setMappingProvider(pid);
-              setLocks(prev => ({ ...prev, mapping: true }));
+              setSingularityProvider(pid);
               try {
-                localStorage.setItem('htos_mapping_locked', 'true');
                 chrome?.storage?.local?.set?.({
                   provider_lock_settings: {
-                    mapping_locked: true
+                    singularity_locked: true,
+                    singularity_provider: pid
                   }
                 });
               } catch (e) {
-                console.error("Failed to save mapping lock:", e);
+                console.error("Failed to save singularity selection:", e);
               }
             }}
           />

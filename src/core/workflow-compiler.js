@@ -104,6 +104,7 @@ export class WorkflowCompiler {
       context: workflowContext,
       steps,
       mode: request.mode,
+      singularity: request.singularity,
     };
   }
 
