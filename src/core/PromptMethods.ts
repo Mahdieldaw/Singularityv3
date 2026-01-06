@@ -863,34 +863,27 @@ const analyzeGhosts = (ghosts: string[], claims: EnrichedClaim[]): StructuralAna
 // V3.1 PROBLEM STRUCTURE DETECTION (Ratio-based scoring)
 // ═══════════════════════════════════════════════════════════════════════════
 
-const SHAPE_IMPLICATIONS: Record<string, { understand: string; gauntlet: string }> = {
+const SHAPE_IMPLICATIONS: Record<string, { action: string }> = {
     settled: {
-        understand: "High agreement. The insight is what consensus overlooks or assumes without stating.",
-        gauntlet: "Consensus is not truth. Test the strongest claim—if it falls, consensus was groupthink.",
+        action: "Focus on consensus blind spots and hidden assumptions.",
     },
     linear: {
-        understand: "Find the sequence. The insight is often where the path becomes non-obvious.",
-        gauntlet: "Test each step: is it truly prerequisite? Can steps be reordered or parallelized?",
+        action: "Validate sequential dependencies and potential reordering.",
     },
     keystone: {
-        understand: "Everything hinges on a keystone. The insight is the keystone, not the branches.",
-        gauntlet: "Test the keystone ruthlessly. If it fails, the entire structure collapses.",
+        action: "Stress-test the central claim that supports the entire structure.",
     },
     contested: {
-        understand: "Disagreement is the signal. Find the axis of disagreement—that reveals the real question.",
-        gauntlet: "Force resolution. One claim per conflict must fail, or find conditions that differentiate them.",
+        action: "Identify the primary axis of disagreement and force resolution.",
     },
     tradeoff: {
-        understand: "There is no universal best. The insight is the map of what you give up for what you gain.",
-        gauntlet: "Test if tradeoffs are real or false dichotomies. Look for dominated options.",
+        action: "Map the cost-benefit landscape and surface dominated options.",
     },
     dimensional: {
-        understand: "Multiple independent factors determine the answer. Find the governing conditions.",
-        gauntlet: "Test each dimension independently. Does the answer cover all relevant combinations?",
+        action: "Analyze independent factors and their governing conditions.",
     },
     exploratory: {
-        understand: "No strong structure detected. Value lies in cataloging the territory and identifying patterns.",
-        gauntlet: "Test relevance: which claims answer the query vs. which are interesting but tangential?",
+        action: "Map the territory and identify emerging patterns and signals.",
     },
 };
 
@@ -2062,162 +2055,6 @@ export const computeProblemStructureFromArtifact = (artifact: MapperArtifact): P
     return computeStructuralAnalysis(artifact).shape;
 };
 
-// ═══════════════════════════════════════════════════════════════════════════
-// MODE CONTEXT GENERATION
-// ═══════════════════════════════════════════════════════════════════════════
-
-const TYPE_FRAMINGS: Record<string, { understand: string; gauntlet: string }> = {
-    factual: {
-        understand: "Factual landscape. Consensus reflects common knowledge. Value lies in specific, verifiable claims that others assumed without stating.",
-        gauntlet: "Factual landscape. Test specificity and verifiability. Vague claims fail regardless of support count. Popular does not mean true.",
-    },
-    prescriptive: {
-        understand: "Prescriptive landscape. Consensus reflects conventional wisdom the user likely knows. Value lies in claims with clear conditions and boundaries.",
-        gauntlet: "Prescriptive landscape. Test actionability and conditional coverage. Advice without context is noise. Claims must specify when they apply.",
-    },
-    conditional: {
-        understand: "Conditional landscape. Claims branch on context. The key insight is often the governing condition that structures the branches.",
-        gauntlet: "Conditional landscape. Both branches may survive if they cover non-overlapping conditions. Eliminate claims with vague or unfalsifiable conditions.",
-    },
-    contested: {
-        understand: "Contested landscape. Disagreement is the signal. The key insight is often the dimension on which claims disagree—that reveals the real question.",
-        gauntlet: "Contested landscape. Conflict forces choice. Apply supremacy test: which claim passes where the other fails? Or find conditions that differentiate them.",
-    },
-    speculative: {
-        understand: "Speculative landscape. Agreement is weak signal for predictions. Value lies in claims with grounded mechanisms, not confident predictions.",
-        gauntlet: "Speculative landscape. Test mechanism and grounding. Predictions without causal explanation are eliminated. Future claims must explain how.",
-    },
-};
-
-const getTypeFraming = (dominantType: string, mode: "understand" | "gauntlet"): string => {
-    const framing = TYPE_FRAMINGS[dominantType] || TYPE_FRAMINGS.prescriptive;
-    return framing[mode];
-};
-
-const generateModeContext = (analysis: StructuralAnalysis, mode: "understand" | "gauntlet"): ModeContext => {
-    const { landscape, patterns, ghostAnalysis, shape } = analysis;
-    const problemStructure = shape;
-
-    const structuralFraming = mode === "understand" ? problemStructure.implications.understand : problemStructure.implications.gauntlet;
-    const typeFraming = getTypeFraming(landscape.dominantType, mode);
-
-    const structuralObservations: string[] = [];
-
-    for (const inv of patterns.leverageInversions) {
-        if (inv.reason === "challenger_prerequisite_to_consensus") {
-            structuralObservations.push(
-                `${inv.claimLabel} (low support, challenger) is prerequisite to ${inv.affectedClaims.length} high - support claim(s).`
-            );
-        } else if (inv.reason === "singular_foundation") {
-            structuralObservations.push(
-                `${inv.claimLabel} (low support) enables ${inv.affectedClaims.length} downstream claim(s).`
-            );
-        }
-    }
-
-    for (const risk of patterns.cascadeRisks) {
-        if (risk.dependentIds.length >= 2) {
-            structuralObservations.push(
-                `${risk.sourceLabel} is prerequisite to ${risk.dependentIds.length} claims(cascade depth: ${risk.depth}).`
-            );
-        }
-    }
-
-    for (const conflict of patterns.conflicts) {
-        const qualifier = conflict.isBothConsensus ? " (both high-support)" : "";
-        structuralObservations.push(`${conflict.claimA.label} conflicts with ${conflict.claimB.label}${qualifier}.`);
-    }
-
-    for (const tradeoff of patterns.tradeoffs) {
-        structuralObservations.push(
-            `${tradeoff.claimA.label} ↔ ${tradeoff.claimB.label} (tradeoff, ${tradeoff.symmetry.replace("_", " ")}).`
-        );
-    }
-
-    for (const conv of patterns.convergencePoints) {
-        if (conv.edgeType === "prerequisite") {
-            structuralObservations.push(`${conv.targetLabel} requires all of: ${conv.sourceLabels.join(", ")}.`);
-        }
-    }
-
-    let leverageNotes: string | null = null;
-    let cascadeWarnings: string | null = null;
-    let conflictNotes: string | null = null;
-    let tradeoffNotes: string | null = null;
-    let ghostNotes: string | null = null;
-
-    if (mode === "understand") {
-        if (patterns.leverageInversions.length > 0) {
-            const candidates = patterns.leverageInversions.map((i) => i.claimLabel);
-            leverageNotes = `High - leverage claims with low support: ${candidates.join(", ")}. These may contain overlooked insights.`;
-        }
-
-        if (ghostAnalysis.mayExtendChallenger) {
-            ghostNotes = `${ghostAnalysis.count} ghost(s) detected.May represent territory challengers were pointing toward.`;
-        }
-    }
-
-    if (mode === "gauntlet") {
-        if (patterns.cascadeRisks.length > 0) {
-            const warnings = patterns.cascadeRisks
-                .filter((r) => r.dependentIds.length >= 1)
-                .map((r) => `Eliminating ${r.sourceLabel} cascades to: ${r.dependentLabels.join(", ")}.`);
-            if (warnings.length > 0) cascadeWarnings = warnings.join("\n");
-        }
-
-        if (patterns.conflicts.length > 0) {
-            conflictNotes = `${patterns.conflicts.length} conflict(s) require resolution.One claim per conflict must be eliminated or conditions must differentiate them.`;
-        }
-
-        const asymmetricTradeoffs = patterns.tradeoffs.filter((t) => t.symmetry === "asymmetric");
-        if (asymmetricTradeoffs.length > 0) {
-            tradeoffNotes = `${asymmetricTradeoffs.length} asymmetric tradeoff(s): low - support claims challenging high - support positions.Test if challenger survives superiority.`;
-        }
-    }
-
-    return {
-        problemStructure,
-        structuralFraming,
-        typeFraming,
-        structuralObservations,
-        leverageNotes,
-        cascadeWarnings,
-        conflictNotes,
-        tradeoffNotes,
-        ghostNotes,
-    };
-};
-
-const buildStructuralSection = (context: ModeContext, mode: "understand" | "gauntlet"): string => {
-    const sections: string[] = [];
-    sections.push(
-        `## Problem Structure: ${context.problemStructure.primaryPattern.toUpperCase()} \n\n${context.structuralFraming} \n\n ** Evidence:**\n${context.problemStructure.evidence
-            .map((e) => `• ${e}`)
-            .join("\n")
-        } \n\n ** Confidence:** ${Math.round(context.problemStructure.confidence * 100)}% `
-    );
-    sections.push(`## Landscape Type\n\n${context.typeFraming} `);
-    if (context.structuralObservations.length > 0) {
-        sections.push(`## Structural Observations\n\n${context.structuralObservations.map((o) => `• ${o}`).join("\n")} `);
-    }
-
-    if (mode === "understand") {
-        if (context.leverageNotes) sections.push(`## High - Leverage Claims\n\n${context.leverageNotes} `);
-        if (context.ghostNotes) sections.push(`## Gaps\n\n${context.ghostNotes} `);
-    }
-
-    if (mode === "gauntlet") {
-        if (context.cascadeWarnings) sections.push(`## Cascade Warnings\n\n${context.cascadeWarnings} `);
-        if (context.conflictNotes) sections.push(`## Conflicts\n\n${context.conflictNotes} `);
-        if (context.tradeoffNotes) sections.push(`## Asymmetric Tradeoffs\n\n${context.tradeoffNotes} `);
-    }
-
-    return sections.join("\n\n---\n\n");
-};
-
-
 export {
-    generateModeContext,
-    buildStructuralSection,
     getTopNCount
 };

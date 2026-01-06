@@ -2,27 +2,18 @@ import React from 'react';
 import { AiTurn } from '../../types';
 import MarkdownDisplay from '../MarkdownDisplay';
 import { SectionHeader } from './SectionHeader';
-import { AntagonistOutputState } from '../../hooks/useAntagonistOutput';
-import { RefinerOutputState } from '../../hooks/useRefinerOutput';
 import { SingularityOutputState } from '../../hooks/useSingularityOutput';
-import { TrustSignalsPanel } from '../refinerui/TrustSignalsPanel';
 
 interface SingularityOutputViewProps {
     aiTurn: AiTurn;
     singularityState: SingularityOutputState;
-    antagonistState: AntagonistOutputState;
-    refinerState: RefinerOutputState;
     onRecompute: (options?: any) => void;
-    onDecide: (options?: any) => void;
     isLoading?: boolean;
 }
 
 const SingularityOutputView: React.FC<SingularityOutputViewProps> = ({
     singularityState,
-    // antagonistState,
-    refinerState,
     onRecompute,
-    onDecide,
     isLoading
 }) => {
     const { output } = singularityState;
@@ -81,25 +72,22 @@ const SingularityOutputView: React.FC<SingularityOutputViewProps> = ({
                     {/* Action Bar */}
                     <div className="mt-8 flex items-center justify-end gap-3">
                         <button
-                            onClick={() => onDecide()}
+                            onClick={() => onRecompute({ stance: 'challenge' })}
+                            className="group flex items-center gap-3 px-8 py-3 rounded-xl bg-surface-raised border border-border-subtle text-text-secondary font-semibold hover:bg-surface-highlight transition-all"
+                        >
+                            <span>Challenge Perspective</span>
+                            <span className="text-xl group-hover:rotate-12 transition-transform">⚖️</span>
+                        </button>
+                        <button
+                            onClick={() => onRecompute({ stance: 'decide' })}
                             className="group flex items-center gap-3 px-8 py-3 rounded-xl bg-brand-500 text-white font-semibold hover:bg-brand-600 transition-all shadow-glow-brand"
                         >
-                            <span>Run the Gauntlet</span>
-                            <span className="text-xl group-hover:translate-x-1 transition-transform">⚖️</span>
+                            <span>Final Decision</span>
+                            <span className="text-xl group-hover:translate-x-1 transition-transform">🚀</span>
                         </button>
                     </div>
                 </div>
 
-                {/* Sidebar Audit Panels */}
-                <div className="w-full lg:w-80 flex flex-col gap-6 shrink-0 pt-0 lg:pt-[72px]">
-                    <TrustSignalsPanel
-                        refiner={refinerState.output}
-                        isLoading={refinerState.isLoading}
-                        isError={!!refinerState.error}
-                        providerId={refinerState.providerId}
-                        error={refinerState.error}
-                    />
-                </div>
             </div>
         </div>
     );

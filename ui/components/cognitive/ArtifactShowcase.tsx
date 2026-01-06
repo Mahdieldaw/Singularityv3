@@ -10,12 +10,9 @@ import { SelectionBar } from "./SelectionBar";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { SouvenirCard } from "./cards/SouvenirCard";
 import { CouncilOrbs } from "../CouncilOrbs";
-import RefinerDot from '../refinerui/RefinerDot';
 import { activeSplitPanelAtom, includePromptInCopyAtom, isDecisionMapOpenAtom } from "../../state/atoms";
 import { formatTurnForMd, formatDecisionMapForMd } from "../../utils/copy-format-utils";
 import { getLatestResponse } from "../../utils/turn-helpers";
-import { useRefinerOutput } from "../../hooks/useRefinerOutput";
-import { useAntagonistOutput } from "../../hooks/useAntagonistOutput";
 import { PipelineErrorBanner } from "../PipelineErrorBanner";
 import { CopyButton } from "../CopyButton";
 import { SelectableCard } from "./LegacyArtifactViews";
@@ -83,8 +80,6 @@ interface ArtifactShowcaseProps {
     mapperArtifact?: MapperArtifact;
     analysis?: ExploreAnalysis;
     turn: AiTurn;
-    onUnderstand?: (options?: CognitiveTransitionOptions) => void;
-    onDecide?: (options?: CognitiveTransitionOptions) => void;
     onRetryMapping?: (pid: string) => void;
     isLoading?: boolean;
 }
@@ -105,8 +100,6 @@ export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
     mapperArtifact,
     analysis,
     turn,
-    onUnderstand,
-    onDecide,
     onRetryMapping,
     isLoading = false,
 }) => {
@@ -117,9 +110,6 @@ export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
     const includePromptInCopy = useAtomValue(includePromptInCopyAtom);
     const setIsDecisionMapOpen = useSetAtom(isDecisionMapOpenAtom);
 
-    // Hooks for Refiner and Antagonist
-    const { output: refinerOutput, providerId: refinerPid } = useRefinerOutput(turn?.id);
-    const { output: antagonistOutput, providerId: antagonistPid } = useAntagonistOutput(turn?.id);
 
     // Get modified artifact
     const currentTurnId = turn?.id || mapperArtifact?.turn?.toString() || "";
@@ -297,18 +287,14 @@ export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
         const md = formatTurnForMd(
             turn.id,
             userPrompt,
-            null, // Analysis (Understand/Gauntlet) - not available in artifact view yet
-            undefined,
+            turn.singularityOutput?.text || null,
+            turn.singularityOutput?.providerId,
             decisionMap,
             batchResponses,
-            includePromptInCopy,
-            refinerOutput,
-            refinerPid,
-            antagonistOutput,
-            antagonistPid
+            includePromptInCopy
         );
         navigator.clipboard.writeText(md);
-    }, [turn, refinerOutput, refinerPid, antagonistOutput, antagonistPid, includePromptInCopy]);
+    }, [turn, includePromptInCopy]);
 
 
 
@@ -350,11 +336,6 @@ export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
                         </button>
 
                         <div className="flex items-center gap-1.5">
-                            <RefinerDot
-                                refiner={refinerOutput}
-                                isLoading={false}
-                                onClick={() => setActiveSplitPanel({ turnId: turn.id, providerId: '__trust__' })}
-                            />
                         </div>
                         <div className="border-l border-border-subtle h-4 mx-1" />
                         <CopyButton
@@ -539,41 +520,6 @@ export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
                 />
             </div>
 
-            {mapperArtifact && analysis && (
-                <div className="flex gap-3 mt-6 pt-2">
-                    <button
-                        onClick={() => onUnderstand?.({
-                            providerId: nextProviderId,
-                            selectedArtifacts,
-                            mapperArtifact: modifiedArtifact!, // null check done above
-                            userNotes
-                        })}
-                        disabled={isLoading}
-                        className="flex-1 px-4 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 
-                                hover:from-blue-500 hover:to-indigo-500 
-                                text-white rounded-lg font-medium transition-all
-                                disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                        🧠 Understand
-                    </button>
-                    <button
-                        onClick={() => onDecide?.({
-                            providerId: nextProviderId,
-                            selectedArtifacts,
-                            mapperArtifact: modifiedArtifact!,
-                            userNotes
-                        })}
-                        disabled={isLoading}
-                        className={`flex-1 px-4 py-3 text-white rounded-lg font-medium transition-all
-                                disabled:opacity-50 disabled:cursor-not-allowed
-                                ${(analysis.convergenceRatio ?? 0) >= 0.6
-                                ? "bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 border border-emerald-400/30"
-                                : "bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500"}`}
-                    >
-                        {(analysis.convergenceRatio ?? 0) >= 0.6 ? "🚀 Ready to Decide" : "⚡ Decide"}
-                    </button>
-                </div>
-            )}
 
             <RawResponseCard turn={turn} />
 

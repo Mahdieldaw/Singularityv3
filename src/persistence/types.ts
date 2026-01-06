@@ -81,13 +81,9 @@ export interface AiTurnRecord extends BaseTurnRecord {
   };
   batchResponseCount: number;
   mappingResponseCount: number;
-  refinerResponseCount?: number;
-  antagonistResponseCount?: number;
   providerContexts?: Record<string, any>;
   mapperArtifact?: any;
   exploreAnalysis?: any;
-  understandOutput?: any;
-  gauntletOutput?: any;
   singularityOutput?: any;
 }
 
@@ -100,13 +96,13 @@ export interface ProviderResponseRecord {
   aiTurnId: string;
   providerId: string;
   responseType:
-    | "batch"
-    | "mapping"
-    | "refiner"
-    | "antagonist"
-    | "understand"
-    | "gauntlet"
-    | "singularity";
+  | "batch"
+  | "mapping"
+  | "refiner"
+  | "antagonist"
+  | "understand"
+  | "gauntlet"
+  | "singularity";
   responseIndex: number;
   text: string;
   status: "pending" | "streaming" | "completed" | "error" | "cancelled";

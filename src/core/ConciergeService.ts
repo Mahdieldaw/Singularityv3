@@ -680,7 +680,7 @@ function buildGenericBrief(analysis: StructuralAnalysis): string {
     let brief = '';
 
     brief += `## Shape: ${shape.primaryPattern.toUpperCase()} (${Math.round(shape.confidence * 100)}%)\n\n`;
-    brief += `${shape.implications.understand}\n\n`;
+    brief += `${shape.implications.action}\n\n`;
 
     brief += `## Metrics\n\n`;
     brief += `• Claims: ${landscape.claimCount} from ${landscape.modelCount} sources\n`;
@@ -943,7 +943,7 @@ export function buildMetaResponse(analysis: StructuralAnalysis): string {
 • **Tensions**: ${tensionCount}
 • **Gaps**: ${ghostAnalysis.count}
 
-${shape.implications.understand}
+${shape.implications.action}
 
 Want the full breakdown, or shall we continue?`;
 }

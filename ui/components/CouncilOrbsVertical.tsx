@@ -3,7 +3,7 @@ import { useAtomValue, useSetAtom } from "jotai";
 import { activeSplitPanelAtom, providerEffectiveStateFamily, turnsMapAtom } from "../state/atoms";
 import { LLM_PROVIDERS_CONFIG } from "../constants";
 import type { AiTurn } from "../types";
-import { useRefinerOutput } from "../hooks/useRefinerOutput";
+import { useSingularityOutput } from "../hooks/useSingularityOutput";
 import clsx from "clsx";
 
 interface CouncilOrbsVerticalProps {
@@ -24,7 +24,7 @@ export const CouncilOrbsVertical: React.FC<CouncilOrbsVerticalProps> = React.mem
 
     const { turnId, providerId: activeProviderId } = activePanel;
     const turn = turnsMap.get(turnId);
-    const { output: refinerOutput } = useRefinerOutput(turnId);
+    const { output: singularityOutput } = useSingularityOutput(turnId);
 
     useEffect(() => {
         if (prevTurnIdRef.current && prevTurnIdRef.current !== turnId) {
@@ -54,7 +54,7 @@ export const CouncilOrbsVertical: React.FC<CouncilOrbsVerticalProps> = React.mem
     // Filter display providers to only those that contributed
     const displayProviders = allProviders.filter(p => contributingIds.includes(String(p.id)));
 
-    const showTrustButton = !!(refinerOutput?.gem || refinerOutput?.trustInsights);
+    const showTrustButton = !!singularityOutput;
     const isTrustActive = activeProviderId === '__trust__';
     const middleIndex = Math.max(0, Math.floor(displayProviders.length / 2));
 
@@ -87,10 +87,10 @@ export const CouncilOrbsVertical: React.FC<CouncilOrbsVerticalProps> = React.mem
                                         ? "bg-brand-500 shadow-glow-brand-soft ring-2 ring-brand-400"
                                         : "bg-surface-raised border border-border-subtle hover:bg-surface-highlight hover:scale-110"
                                 )}
-                                title="Trust Pane (Epistemic Audit)"
+                                title="Trust Pane (Singularity Audit)"
                             >
                                 <span className={clsx("text-[10px]", isTrustActive ? "text-white" : "text-brand-400")}>
-                                    💎
+                                    ✨
                                 </span>
                             </button>
                             {orbElement}
@@ -111,10 +111,10 @@ export const CouncilOrbsVertical: React.FC<CouncilOrbsVerticalProps> = React.mem
                             ? "bg-brand-500 shadow-glow-brand-soft ring-2 ring-brand-400"
                             : "bg-surface-raised border border-border-subtle hover:bg-surface-highlight hover:scale-110"
                     )}
-                    title="Trust Pane (Epistemic Audit)"
+                    title="Trust Pane (Singularity Audit)"
                 >
                     <span className={clsx("text-[10px]", isTrustActive ? "text-white" : "text-brand-400")}>
-                        💎
+                        ✨
                     </span>
                 </button>
             )}

@@ -92,6 +92,7 @@ export class CognitivePipelineHandler {
               originalPrompt: userMessageForExplore,
               mappingText: mappingResult?.text || "",
               mappingMeta: mappingResult?.meta || {},
+              useThinking: request?.useThinking || false,
             },
           };
 
@@ -183,42 +184,35 @@ export class CognitivePipelineHandler {
       let mapperArtifact = payload.mapperArtifact || aiTurn.mapperArtifact || null;
       let exploreAnalysis = payload.exploreAnalysis || aiTurn.exploreAnalysis || null;
 
-      if (mode !== "understand" && mode !== "gauntlet" && mode !== "refine" && mode !== "antagonist") {
-        throw new Error(`Unknown cognitive mode: ${mode}`);
+      if (mode !== "singularity") {
+        throw new Error(`Unknown or deprecated cognitive mode: ${mode}. Use 'singularity'.`);
       }
 
       const priorResponses = await adapter.getResponsesByTurnId(aiTurnId);
 
       const mappingResponses = (priorResponses || [])
         .filter((r) => r && r.responseType === "mapping" && r.providerId)
-        .sort((a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0))
-      const mappingProviders = mappingResponses.map((r) => r.providerId);
+        .sort((a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0));
       const latestMappingText = mappingResponses?.[0]?.text || "";
       const latestMappingMeta = mappingResponses?.[0]?.meta || {};
 
       if (!mapperArtifact && mappingResponses?.[0]) {
-        const text = String(latestMappingText || "");
-        const isLegacyV1 =
-          text.includes("<mapping_output>") || text.includes("<decision_map>");
-        if (isLegacyV1) {
-          mapperArtifact = parseV1MapperToArtifact(text, {
-            graphTopology: latestMappingMeta?.graphTopology,
-            query: originalPrompt,
-          });
-        }
+        mapperArtifact = parseV1MapperToArtifact(String(latestMappingText), {
+          graphTopology: latestMappingMeta?.graphTopology,
+          query: originalPrompt,
+        });
       }
       if (!exploreAnalysis && mapperArtifact) {
         exploreAnalysis = computeExplore(originalPrompt, mapperArtifact);
       }
 
       if (!mapperArtifact) {
-        throw new Error(`MapperArtifact missing for turn ${aiTurnId}. Cannot continue cognitive mode.`);
+        throw new Error(`MapperArtifact missing for turn ${aiTurnId}. Cannot continue.`);
       }
 
       const preferredProvider = providerId ||
-        mappingProviders[0] ||
+        aiTurn.meta?.singularity ||
         aiTurn.meta?.mapper ||
-        aiTurn.meta?.mappingProvider ||
         "gemini";
 
       const context = {
@@ -235,193 +229,24 @@ export class CognitivePipelineHandler {
         sessionManager: this.sessionManager
       };
 
-      let step;
-      const stepTypeIdPrefix = mode === "refine" ? "refiner" : mode;
-      const stepId = `${stepTypeIdPrefix}-${preferredProvider}-${Date.now()}`;
+      const stepId = `singularity-${preferredProvider}-${Date.now()}`;
+      const step = {
+        stepId,
+        type: 'singularity',
+        payload: {
+          singularityProvider: preferredProvider,
+          mapperArtifact,
+          exploreAnalysis,
+          originalPrompt,
+          mappingText: latestMappingText,
+          mappingMeta: latestMappingMeta,
+          selectedArtifacts: Array.isArray(selectedArtifacts) ? selectedArtifacts : [],
+          stance: payload.stance || null, // Allow overriding stance
+          useThinking: payload.useThinking || false,
+        },
+      };
 
-      if (mode === "understand" || mode === "gauntlet") {
-        step = {
-          stepId,
-          type: mode,
-          payload: {
-            [`${mode}Provider`]: preferredProvider,
-            mapperArtifact,
-            exploreAnalysis,
-            originalPrompt,
-            mappingText: latestMappingText,
-            mappingMeta: latestMappingMeta,
-            selectedArtifacts: Array.isArray(selectedArtifacts) ? selectedArtifacts : [],
-            useThinking: false,
-          },
-        };
-      } else if (mode === "refine") {
-        const hasUnderstand =
-          !!aiTurn.understandOutput ||
-          (priorResponses || []).some(
-            (r) =>
-              r &&
-              r.responseType === "understand" &&
-              ((r.meta && r.meta.understandOutput) ||
-                (typeof r.text === "string" && r.text.trim().length > 0)),
-          );
-        const hasGauntlet =
-          !!aiTurn.gauntletOutput ||
-          (priorResponses || []).some(
-            (r) =>
-              r &&
-              r.responseType === "gauntlet" &&
-              ((r.meta && r.meta.gauntletOutput) ||
-                (typeof r.text === "string" && r.text.trim().length > 0)),
-          );
-
-        if (!hasUnderstand && !hasGauntlet) {
-          const pivotMode = "understand";
-          const pivotProvider = mappingProviders[0] || aiTurn.meta?.mapper || preferredProvider;
-          const pivotStepId = `${pivotMode}-${pivotProvider}-${Date.now()}`;
-          const pivotStep = {
-            stepId: pivotStepId,
-            type: pivotMode,
-            payload: {
-              [`${pivotMode}Provider`]: pivotProvider,
-              mapperArtifact,
-              exploreAnalysis,
-              originalPrompt,
-              mappingText: latestMappingText,
-              mappingMeta: latestMappingMeta,
-              selectedArtifacts: [],
-              useThinking: false,
-            },
-          };
-
-          const pivotResult = await stepExecutor.executeUnderstandStep(
-            pivotStep,
-            context,
-            new Map(),
-            executorOptions,
-          );
-
-          try {
-            this.port.postMessage({
-              type: "WORKFLOW_STEP_UPDATE",
-              sessionId: effectiveSessionId,
-              stepId: pivotStepId,
-              status: "completed",
-              result: pivotResult,
-              ...(isRecompute ? { isRecompute: true, sourceTurnId: sourceTurnId || aiTurnId } : {}),
-            });
-          } catch (_) { }
-
-          await this.sessionManager.upsertProviderResponse(
-            effectiveSessionId,
-            aiTurnId,
-            pivotProvider,
-            pivotMode,
-            0,
-            { text: pivotResult?.text || "", status: pivotResult?.status || "completed", meta: pivotResult?.meta || {} },
-          );
-        }
-
-        step = {
-          stepId,
-          type: "refiner",
-          payload: {
-            refinerProvider: preferredProvider,
-            originalPrompt,
-            mappingText: latestMappingText,
-            mapperArtifact,
-            sourceHistorical: { turnId: aiTurnId }
-          }
-        };
-      } else if (mode === "antagonist") {
-        const hasUnderstand =
-          !!aiTurn.understandOutput ||
-          (priorResponses || []).some(
-            (r) =>
-              r &&
-              r.responseType === "understand" &&
-              ((r.meta && r.meta.understandOutput) ||
-                (typeof r.text === "string" && r.text.trim().length > 0)),
-          );
-        const hasGauntlet =
-          !!aiTurn.gauntletOutput ||
-          (priorResponses || []).some(
-            (r) =>
-              r &&
-              r.responseType === "gauntlet" &&
-              ((r.meta && r.meta.gauntletOutput) ||
-                (typeof r.text === "string" && r.text.trim().length > 0)),
-          );
-
-        if (!hasUnderstand && !hasGauntlet) {
-          const pivotMode = "understand";
-          const pivotProvider = mappingProviders[0] || aiTurn.meta?.mapper || preferredProvider;
-          const pivotStepId = `${pivotMode}-${pivotProvider}-${Date.now()}`;
-          const pivotStep = {
-            stepId: pivotStepId,
-            type: pivotMode,
-            payload: {
-              [`${pivotMode}Provider`]: pivotProvider,
-              mapperArtifact,
-              exploreAnalysis,
-              originalPrompt,
-              mappingText: latestMappingText,
-              mappingMeta: latestMappingMeta,
-              selectedArtifacts: [],
-              useThinking: false,
-            },
-          };
-
-          const pivotResult = await stepExecutor.executeUnderstandStep(
-            pivotStep,
-            context,
-            new Map(),
-            executorOptions,
-          );
-
-          try {
-            this.port.postMessage({
-              type: "WORKFLOW_STEP_UPDATE",
-              sessionId: effectiveSessionId,
-              stepId: pivotStepId,
-              status: "completed",
-              result: pivotResult,
-              ...(isRecompute ? { isRecompute: true, sourceTurnId: sourceTurnId || aiTurnId } : {}),
-            });
-          } catch (_) { }
-
-          await this.sessionManager.upsertProviderResponse(
-            effectiveSessionId,
-            aiTurnId,
-            pivotProvider,
-            pivotMode,
-            0,
-            { text: pivotResult?.text || "", status: pivotResult?.status || "completed", meta: pivotResult?.meta || {} },
-          );
-        }
-
-        step = {
-          stepId,
-          type: "antagonist",
-          payload: {
-            antagonistProvider: preferredProvider,
-            originalPrompt,
-            mappingText: latestMappingText,
-            mapperArtifact,
-            sourceHistorical: { turnId: aiTurnId }
-          }
-        };
-      }
-
-      let result;
-      if (mode === "understand") {
-        result = await stepExecutor.executeUnderstandStep(step, context, new Map(), executorOptions);
-      } else if (mode === "gauntlet") {
-        result = await stepExecutor.executeGauntletStep(step, context, new Map(), executorOptions);
-      } else if (mode === "refine") {
-        result = await stepExecutor.executeRefinerStep(step, context, new Map(), executorOptions);
-      } else if (mode === "antagonist") {
-        result = await stepExecutor.executeAntagonistStep(step, context, new Map(), executorOptions);
-      }
+      const result = await stepExecutor.executeSingularityStep(step, context, new Map(), executorOptions);
 
       try {
         this.port.postMessage({
@@ -434,13 +259,11 @@ export class CognitivePipelineHandler {
         });
       } catch (_) { }
 
-      const responseTypeForDb = mode === 'refine' ? 'refiner' : mode;
-
       await this.sessionManager.upsertProviderResponse(
         effectiveSessionId,
         aiTurnId,
         preferredProvider,
-        responseTypeForDb,
+        'singularity',
         0,
         { text: result?.text || "", status: result?.status || "completed", meta: result?.meta || {} },
       );
@@ -450,10 +273,7 @@ export class CognitivePipelineHandler {
       const buckets = {
         batchResponses: {},
         mappingResponses: {},
-        refinerResponses: {},
-        antagonistResponses: {},
-        understandResponses: {},
-        gauntletResponses: {},
+        singularityResponses: {},
       };
 
       for (const r of responses || []) {
@@ -473,15 +293,9 @@ export class CognitivePipelineHandler {
             ? buckets.batchResponses
             : r.responseType === "mapping"
               ? buckets.mappingResponses
-              : r.responseType === "refiner"
-                ? buckets.refinerResponses
-                : r.responseType === "antagonist"
-                  ? buckets.antagonistResponses
-                  : r.responseType === "understand"
-                    ? buckets.understandResponses
-                    : r.responseType === "gauntlet"
-                      ? buckets.gauntletResponses
-                      : null;
+              : r.responseType === "singularity"
+                ? buckets.singularityResponses
+                : null;
 
         if (!target || !entry.providerId) continue;
         (target[entry.providerId] ||= []).push(entry);
@@ -492,15 +306,6 @@ export class CognitivePipelineHandler {
           group[pid].sort((a, b) => (a.responseIndex ?? 0) - (b.responseIndex ?? 0));
         }
       }
-
-      const hasAny =
-        Object.keys(buckets.batchResponses).length > 0 ||
-        Object.keys(buckets.mappingResponses).length > 0 ||
-        Object.keys(buckets.refinerResponses).length > 0 ||
-        Object.keys(buckets.antagonistResponses).length > 0 ||
-        Object.keys(buckets.understandResponses).length > 0 ||
-        Object.keys(buckets.gauntletResponses).length > 0;
-      if (!hasAny) return;
 
       this.port?.postMessage({
         type: "TURN_FINALIZED",
@@ -532,10 +337,7 @@ export class CognitivePipelineHandler {
             createdAt: aiTurn.createdAt || Date.now(),
             batchResponses: buckets.batchResponses,
             mappingResponses: buckets.mappingResponses,
-            refinerResponses: buckets.refinerResponses,
-            antagonistResponses: buckets.antagonistResponses,
-            understandResponses: buckets.understandResponses,
-            gauntletResponses: buckets.gauntletResponses,
+            singularityResponses: buckets.singularityResponses,
             meta: aiTurn.meta || {},
           },
         },

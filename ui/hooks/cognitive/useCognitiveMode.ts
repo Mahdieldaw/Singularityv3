@@ -12,7 +12,7 @@ import api from "../../services/extension-api";
 
 import { MapperArtifact } from "../../../shared/contract";
 
-export type CognitiveMode = 'understand' | 'gauntlet' | 'refine' | 'antagonist' | 'singularity';
+export type CognitiveMode = 'singularity';
 
 export type SelectedArtifact = {
     id: string;
@@ -64,8 +64,7 @@ export function useCognitiveMode(trackedAiTurnId?: string) {
             setGlobalIsLoading(true);
 
             if (options.isRecompute && options.providerId) {
-                const stepTypeForUi =
-                    mode === "refine" ? "refiner" : mode;
+                const stepTypeForUi = mode;
                 setActiveRecomputeState({
                     aiTurnId,
                     stepType: stepTypeForUi as any,

@@ -93,11 +93,7 @@ export interface AiTurn extends Omit<ContractAiTurn, "type"> {
   // UI-only fields for efficient dependency tracking in React hooks
   batchVersion?: number;
   mappingVersion?: number;
-  refinerVersion?: number;
-  antagonistVersion?: number;
   exploreVersion?: number;
-  understandVersion?: number;
-  gauntletVersion?: number;
   singularityVersion?: number;
 }
 
@@ -146,4 +142,4 @@ export interface FullSessionPayload {
 
 export type { GraphNode, GraphEdge, GraphTopology } from "../../shared/contract";
 
-export type CognitiveViewMode = 'artifact' | 'understand' | 'gauntlet' | 'singularity';
+export type CognitiveViewMode = 'artifact' | 'singularity';

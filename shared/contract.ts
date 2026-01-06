@@ -11,45 +11,10 @@ export type ProviderKey =
 export type WorkflowStepType =
   | "prompt"
   | "mapping"
-  | "refiner"
-  | "antagonist"
-  | "understand"
-  | "gauntlet"
   | "singularity";
 
-export type CognitiveMode = "auto" | "understand" | "decide";
+export type CognitiveMode = "auto" | "decide";
 
-export interface GauntletOutput {
-  optimal_end: string;
-  the_answer: {
-    statement: string;
-    reasoning: string;
-    next_step: string;
-  };
-  survivors: {
-    primary: {
-      claim: string;
-      survived_because: string;
-      extent: string;
-      breaking_point: string;
-      presumptions: string[];
-    };
-    supporting: Array<{ claim: string; relationship: string; extent?: string }>;
-    conditional: Array<{ claim: string; condition: string; becomes_primary_if?: string }>;
-  };
-  eliminated: {
-    from_consensus: Array<{ claim: string; killed_because: string }>;
-    from_outliers: Array<{ claim: string; source: string; killed_because: string }>;
-    ghost: string | null;
-  };
-  the_void: string;
-  confidence: {
-    score: number; // 0-1
-    notes: string[];
-  };
-  souvenir: string;
-  artifact_id: string;
-}
 
 export interface SingularityOutput {
   text: string;
@@ -114,8 +79,7 @@ export interface ProblemStructure {
   confidence: number;
   evidence: string[];
   implications: {
-    understand: string;
-    gauntlet: string;
+    action: string;
   };
   // Layer 8 Data (Optional/Dynamic based on pattern)
   data?: ContestedShapeData | SettledShapeData | KeystoneShapeData | LinearShapeData | TradeoffShapeData | DimensionalShapeData | ExploratoryShapeData | ContextualShapeData;
@@ -530,14 +494,6 @@ export interface ExploreAnalysis {
   hasChallengers: boolean;
 }
 
-export interface UnderstandOutput {
-  short_answer: string;
-  long_answer: string;
-  the_one: { insight: string; source: string | null; why_this: string } | null;
-  the_echo: { position: string; source: string; merit: string } | null;
-  souvenir?: string;
-  artifact_id: string;
-}
 
 
 // ============================================================================
@@ -559,11 +515,7 @@ export interface InitializeRequest {
   userMessage: string;
   providers: ProviderKey[];
   includeMapping: boolean;
-  includeRefiner?: boolean;
-  includeAntagonist?: boolean;
   mapper?: ProviderKey;
-  refiner?: ProviderKey;
-  antagonist?: ProviderKey;
   singularity?: ProviderKey;
   useThinking?: boolean;
   providerMeta?: Partial<Record<ProviderKey, any>>;
@@ -589,11 +541,7 @@ export interface ExtendRequest {
   forcedContextReset?: ProviderKey[];
   includeMapping: boolean;
   mapper?: ProviderKey;
-  refiner?: ProviderKey;
-  antagonist?: ProviderKey;
   singularity?: ProviderKey;
-  includeRefiner?: boolean;
-  includeAntagonist?: boolean;
   useThinking?: boolean;
   providerMeta?: Partial<Record<ProviderKey, any>>;
   clientUserTurnId?: string;
@@ -611,10 +559,6 @@ export interface RecomputeRequest {
   stepType:
   | "mapping"
   | "batch"
-  | "refiner"
-  | "antagonist"
-  | "understand"
-  | "gauntlet"
   | "singularity";
   targetProvider: ProviderKey;
   userMessage?: string;
@@ -649,57 +593,6 @@ export interface MappingStepPayload {
 }
 
 
-export interface RefinerStepPayload {
-  refinerProvider: ProviderKey;
-  sourceStepIds?: string[];
-  mappingStepIds?: string[];
-  understandOutput?: UnderstandOutput;
-  gauntletOutput?: GauntletOutput;
-  sourceHistorical?: {
-    turnId: string;
-    responseType: "batch" | "mapping" | "understand" | "gauntlet";
-  };
-  originalPrompt: string;
-}
-
-export interface AntagonistStepPayload {
-  antagonistProvider: ProviderKey;
-  sourceStepIds?: string[];
-  mappingStepIds?: string[];
-  refinerStepIds?: string[];
-  understandOutput?: UnderstandOutput;
-  gauntletOutput?: GauntletOutput;
-  refinerOutput?: any;
-  sourceHistorical?: {
-    turnId: string;
-    responseType: "batch" | "mapping" | "understand" | "gauntlet" | "refiner";
-  };
-  originalPrompt: string;
-}
-
-export interface GauntletStepPayload {
-  gauntletProvider: ProviderKey;
-  sourceStepIds?: string[];
-  mappingStepIds?: string[];
-  sourceHistorical?: {
-    turnId: string;
-    responseType: "batch" | "mapping";
-  };
-  originalPrompt: string;
-  mapperArtifact: MapperArtifact;
-}
-
-export interface UnderstandStepPayload {
-  understandProvider: ProviderKey;
-  sourceStepIds?: string[];
-  mappingStepIds?: string[];
-  sourceHistorical?: {
-    turnId: string;
-    responseType: "batch" | "mapping";
-  };
-  originalPrompt: string;
-  mapperArtifact: MapperArtifact;
-}
 
 export interface SingularityStepPayload {
   singularityProvider: ProviderKey;
@@ -716,10 +609,6 @@ export interface WorkflowStep {
   payload:
   | PromptStepPayload
   | MappingStepPayload
-  | RefinerStepPayload
-  | AntagonistStepPayload
-  | UnderstandStepPayload
-  | GauntletStepPayload
   | SingularityStepPayload;
 }
 
@@ -763,7 +652,7 @@ export interface RecomputeContext {
   frozenBatchOutputs: Record<ProviderKey, ProviderResponse>;
   latestMappingOutput?: { providerId: string; text: string; meta: any } | null;
   providerContextsAtSourceTurn: Record<ProviderKey, { meta: any }>;
-  stepType: "mapping" | "batch" | "refiner" | "antagonist" | "understand" | "gauntlet" | "singularity";
+  stepType: "mapping" | "batch" | "singularity";
   targetProvider: ProviderKey;
   sourceUserMessage: string;
 }
@@ -970,8 +859,6 @@ export interface AiTurn {
   // Cognitive Pipeline Artifacts (Computed)
   mapperArtifact?: MapperArtifact;
   exploreAnalysis?: ExploreAnalysis;
-  understandOutput?: UnderstandOutput;
-  gauntletOutput?: GauntletOutput;
   singularityOutput?: SingularityOutput;
 
   meta?: {
@@ -1004,11 +891,8 @@ export function isPromptPayload(payload: any): payload is PromptStepPayload {
 export function isMappingPayload(payload: any): payload is MappingStepPayload {
   return "mappingProvider" in payload;
 }
-export function isRefinerPayload(payload: any): payload is RefinerStepPayload {
-  return "refinerProvider" in payload;
-}
-export function isGauntletPayload(payload: any): payload is GauntletStepPayload {
-  return "gauntletProvider" in payload;
+export function isSingularityPayload(payload: any): payload is SingularityStepPayload {
+  return "singularityProvider" in payload;
 }
 
 export function isUserTurn(turn: any): turn is { type: "user" } {

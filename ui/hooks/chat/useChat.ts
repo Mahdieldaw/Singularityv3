@@ -130,8 +130,6 @@ export function useChat() {
           (activeProviders.length > 0 ? (activeProviders[0] as any) : null);
         const shouldUseMapping = true;
 
-        const effectiveRefinerProvider = refinerProvider;
-        const effectiveAntagonistProvider = antagonistProvider;
         const effectiveSingularityProvider = singularityProvider;
 
         const isInitialize =
@@ -183,17 +181,9 @@ export function useChat() {
             mapper: shouldUseMapping
               ? (effectiveMappingProvider as ProviderKey)
               : undefined,
-            refiner: effectiveRefinerProvider
-              ? (effectiveRefinerProvider as ProviderKey)
-              : undefined,
-            antagonist: effectiveAntagonistProvider
-              ? (effectiveAntagonistProvider as ProviderKey)
-              : undefined,
             singularity: effectiveSingularityProvider
               ? (effectiveSingularityProvider as ProviderKey)
               : undefined,
-            includeRefiner: !!(effectiveRefinerProvider),
-            includeAntagonist: !!(effectiveAntagonistProvider),
             useThinking: computeThinkFlag({
               modeThinkButtonOn: thinkOnChatGPT,
               input: prompt,
@@ -211,17 +201,9 @@ export function useChat() {
             mapper: shouldUseMapping
               ? (effectiveMappingProvider as ProviderKey)
               : undefined,
-            refiner: effectiveRefinerProvider
-              ? (effectiveRefinerProvider as ProviderKey)
-              : undefined,
-            antagonist: effectiveAntagonistProvider
-              ? (effectiveAntagonistProvider as ProviderKey)
-              : undefined,
             singularity: effectiveSingularityProvider
               ? (effectiveSingularityProvider as ProviderKey)
               : undefined,
-            includeRefiner: !!(effectiveRefinerProvider),
-            includeAntagonist: !!(effectiveAntagonistProvider),
             useThinking: computeThinkFlag({
               modeThinkButtonOn: thinkOnChatGPT,
               input: prompt,
@@ -252,8 +234,6 @@ export function useChat() {
       setActiveAiTurnId,
       mappingEnabled,
       mappingProvider,
-      refinerProvider,
-      antagonistProvider,
       singularityProvider,
       thinkOnChatGPT,
       powerUserMode,
@@ -375,16 +355,10 @@ export function useChat() {
               batchResponses,
 
               mappingResponses: normalizeResponseMap(round.mappingResponses),
-              refinerResponses: normalizeResponseMap(round.refinerResponses),
-              antagonistResponses: normalizeResponseMap(round.antagonistResponses),
-              understandResponses: normalizeResponseMap(round.understandResponses),
-              gauntletResponses: normalizeResponseMap(round.gauntletResponses),
               singularityResponses: normalizeResponseMap(round.singularityResponses),
               // Cognitive pipeline structured outputs
               mapperArtifact: round.mapperArtifact || undefined,
               exploreAnalysis: round.exploreAnalysis || undefined,
-              understandOutput: round.understandOutput || undefined,
-              gauntletOutput: round.gauntletOutput || undefined,
               singularityOutput: round.singularityOutput || undefined,
             };
             newIds.push(aiTurn.id);

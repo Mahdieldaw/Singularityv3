@@ -1,7 +1,6 @@
 import { AiTurn, GraphTopology, ProviderResponse, UserTurn, TurnMessage, isUserTurn, isAiTurn } from "../types";
 import { LLM_PROVIDERS_CONFIG } from "../constants";
 import { getProviderName } from "./provider-helpers";
-import { RefinerOutput, AntagonistOutput } from "../../shared/parsing-utils";
 
 // ============================================================================
 // MARKDOWN FORMATTING UTILITIES
@@ -77,15 +76,11 @@ export function formatProviderResponseForMd(response: ProviderResponse, provider
 export function formatTurnForMd(
     _turnid: string,
     userPrompt: string | null,
-    analysisOutput: any | null,
-    analysisProviderId: string | undefined,
+    singularityText: string | null,
+    singularityProviderId: string | undefined,
     decisionMap: { narrative?: string; options?: string | null; topology?: GraphTopology | null } | null,
     batchResponses: Record<string, ProviderResponse>,
-    includePrompt: boolean = true,
-    refinerOutput?: RefinerOutput | null,
-    refinerProviderId?: string | null,
-    antagonistOutput?: AntagonistOutput | null,
-    antagonistProviderId?: string | null
+    includePrompt: boolean = true
 ): string {
     let md = "";
 
@@ -94,24 +89,13 @@ export function formatTurnForMd(
         md += `## User\n\n${userPrompt}\n\n`;
     }
 
-    // 1. Antagonist
-    if (antagonistOutput) {
-        const providerName = antagonistProviderId ? getProviderName(antagonistProviderId) : "Antagonist";
-        md += formatAntagonistOutputForMd(antagonistOutput, providerName);
-    }
-
-    // 2. Refiner
-    if (refinerOutput) {
-        const providerName = refinerProviderId ? getProviderName(refinerProviderId) : "Refiner";
-        md += formatRefinerOutputForMd(refinerOutput, providerName);
-    }
-
-    // 3. Analysis / Verdict (Understand/Gauntlet)
-    if (analysisOutput) {
-        const providerName = analysisProviderId
-            ? getProviderName(analysisProviderId)
-            : "Unknown";
-        md += formatAnalysisContextForMd(analysisOutput, providerName);
+    // 1. Singularity Analysis
+    if (singularityText) {
+        const providerName = singularityProviderId
+            ? getProviderName(singularityProviderId)
+            : "Singularity";
+        md += `## Singularity Analysis (via ${providerName})\n\n`;
+        md += `${singularityText}\n\n`;
     }
 
     // 4. Decision Map (Mappers)
@@ -201,18 +185,18 @@ export function formatSessionForMarkdown(fullSession: { title: string, turns: Tu
                 // If the array is ordered, we likely saw it.
             }
 
-            // Extract Analysis Context (Understand or Gauntlet)
-            let analysisOutput = aiTurn.understandOutput || aiTurn.gauntletOutput || null;
-            let analysisProviderId = undefined;
+            // Extract Singularity Text
+            let singularityText = aiTurn.singularityOutput?.text || null;
+            let singularityProviderId = aiTurn.singularityOutput?.providerId;
 
-            if (analysisOutput) {
-                // Determine the provider ID for the analysis
-                const targetType = aiTurn.understandOutput ? 'understand' : 'gauntlet';
-                const responses = (aiTurn as any)[`${targetType}Responses`] || {};
-                analysisProviderId = Object.keys(responses).find(pid => {
-                    const arr = responses[pid];
-                    return Array.isArray(arr) && arr.some(r => r.text);
-                });
+            if (!singularityText && aiTurn.singularityResponses) {
+                const keys = Object.keys(aiTurn.singularityResponses);
+                if (keys.length > 0) {
+                    const latest = aiTurn.singularityResponses[keys[keys.length - 1]];
+                    const resp = Array.isArray(latest) ? latest[latest.length - 1] : latest;
+                    singularityText = resp?.text || null;
+                    singularityProviderId = keys[keys.length - 1];
+                }
             }
 
             // Decision Map
@@ -252,8 +236,8 @@ export function formatSessionForMarkdown(fullSession: { title: string, turns: Tu
             md += formatTurnForMd(
                 aiTurn.id,
                 userPrompt,
-                analysisOutput,
-                analysisProviderId,
+                singularityText,
+                singularityProviderId,
                 decisionMap,
                 batchResponses,
                 !!userPrompt // include prompt if we found it
@@ -262,7 +246,6 @@ export function formatSessionForMarkdown(fullSession: { title: string, turns: Tu
         }
     });
 
-    // If there's a dangling user turn at the end (no AI response yet)
     if (lastUserTurn) {
         md += `## User\n\n${(lastUserTurn as UserTurn).text}\n\n`;
     }
@@ -338,24 +321,14 @@ export function sanitizeSessionForExport(
         }
 
         if (isAiTurn(turn)) {
-            // 1. Extract Analysis Context (Understand or Gauntlet)
+            // 1. Extract Singularity Analysis
             let analysis: { providerId: string; output: any; type: string } | undefined;
-            const targetType = turn.understandOutput ? 'understand' : turn.gauntletOutput ? 'gauntlet' : null;
-
-            if (targetType) {
-                const responses = (turn as any)[`${targetType}Responses`] || {};
-                const pid = Object.keys(responses).find(p => {
-                    const arr = responses[p];
-                    return Array.isArray(arr) && arr.some(r => r.text);
-                });
-
-                if (pid) {
-                    analysis = {
-                        providerId: pid,
-                        output: (turn as any)[`${targetType}Output`],
-                        type: targetType
-                    };
-                }
+            if (turn.singularityOutput) {
+                analysis = {
+                    providerId: turn.singularityOutput.providerId,
+                    output: turn.singularityOutput,
+                    type: 'singularity'
+                };
             }
 
             // 2. Extract Decision Map (Mapping)
@@ -477,81 +450,3 @@ export function sanitizeSessionForExport(
     return exportObj;
 }
 
-/**
- * Formats Refiner output into Markdown.
- */
-export function formatRefinerOutputForMd(output: RefinerOutput, providerName: string = "Refiner"): string {
-    if (!output) return "";
-    let md = `## Refiner Analysis (via ${providerName})\n\n`;
-
-    if (output.trustInsights) {
-        md += `### Trust Insights\n\n${output.trustInsights}\n\n`;
-    }
-
-    if (output.gem) {
-        md += `### Hidden Gem\n\n`;
-        md += `**Insight:** ${output.gem.insight}\n`;
-        md += `**Source:** ${output.gem.source}\n`;
-        md += `**Impact:** ${output.gem.impact}\n\n`;
-    }
-
-    if (output.outlier) {
-        md += `### Dissenting Outlier\n\n`;
-        md += `**Position:** ${output.outlier.position}\n`;
-        md += `**Source:** ${output.outlier.source}\n`;
-        md += `**Why:** ${output.outlier.why}\n\n`;
-    }
-
-    if (output.attributions && output.attributions.length > 0) {
-        md += `### Attributions\n\n`;
-        output.attributions.forEach(a => {
-            md += `- ${a.claim} (${a.source})\n`;
-        });
-        md += `\n`;
-    }
-
-    if (output.leap && output.leap.rationale) {
-        md += `### The Next Step\n\n`;
-        md += `**Action:** ${output.leap.action.toUpperCase()}\n`;
-        md += `**Rationale:** ${output.leap.rationale}\n\n`;
-    }
-
-    return md;
-}
-
-/**
- * Formats Antagonist output into Markdown.
- */
-export function formatAntagonistOutputForMd(output: AntagonistOutput, providerName: string = "Antagonist"): string {
-    if (!output) return "";
-    let md = `## Antagonist Stress-Test (via ${providerName})\n\n`;
-
-    if (output.the_audit && output.the_audit.missed && output.the_audit.missed.length > 0) {
-        md += `### Missed Approaches\n\n`;
-        output.the_audit.missed.forEach(m => {
-            md += `- **${m.approach}** (Source: ${m.source})\n`;
-        });
-        md += `\n`;
-    }
-
-    if (output.the_prompt && output.the_prompt.text) {
-        md += `### Generated Stress-Test Prompt\n\n${output.the_prompt.text}\n\n`;
-
-        if (output.the_prompt.dimensions && output.the_prompt.dimensions.length > 0) {
-            md += `#### Key Dimensions\n\n`;
-            output.the_prompt.dimensions.forEach(d => {
-                md += `- **${d.variable}**: ${d.options}\n  *Why:* ${d.why}\n`;
-            });
-            md += `\n`;
-        }
-
-        if (output.the_prompt.grounding) {
-            md += `**Grounding:** ${output.the_prompt.grounding}\n\n`;
-        }
-        if (output.the_prompt.payoff) {
-            md += `**Expected Payoff:** ${output.the_prompt.payoff}\n\n`;
-        }
-    }
-
-    return md;
-}

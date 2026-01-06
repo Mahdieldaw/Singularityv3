@@ -21,11 +21,11 @@ export function useModeSwitching(aiTurnId: string) {
     }, [setActiveMode]);
 
     const triggerAndSwitch = useCallback(async (
-        mode: 'understand' | 'gauntlet' | 'refine' | 'antagonist' | 'singularity',
+        mode: 'singularity',
         options: CognitiveTransitionOptions = {},
     ) => {
         // Change UI mode immediately to show loading if needed for top-level views
-        if (mode === 'understand' || mode === 'gauntlet' || mode === 'singularity') {
+        if (mode === 'singularity') {
             setActiveMode(mode);
         }
         // Trigger backend
