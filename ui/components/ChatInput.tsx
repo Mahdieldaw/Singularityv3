@@ -17,6 +17,7 @@ import {
   isRoundActiveAtom,
   selectedModeAtom,
   mappingProviderAtom,
+  singularityProviderAtom,
   providerLocksAtom,
 } from "../state/atoms";
 import { useChat } from "../hooks/chat/useChat";
@@ -64,6 +65,7 @@ const ChatInput = ({
   const [currentSessionId] = useAtom(currentSessionIdAtom);
   const setActiveRecomputeState = useSetAtom(activeRecomputeStateAtom);
   const [mappingProvider, setMappingProvider] = useAtom(mappingProviderAtom);
+  const [singularityProvider, setSingularityProvider] = useAtom(singularityProviderAtom);
   const setLocks = useSetAtom(providerLocksAtom);
 
   // Callbacks

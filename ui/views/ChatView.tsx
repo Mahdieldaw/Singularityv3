@@ -21,9 +21,6 @@ import { useChat } from "../hooks/chat/useChat";
 import { SplitPaneRightPanel } from "../components/SplitPaneRightPanel";
 import { CouncilOrbsVertical } from "../components/CouncilOrbsVertical";
 import { useSmartProviderDefaults } from "../hooks/providers/useSmartProviderDefaults";
-import { useScrollSyncedTurn } from "../hooks/chat/useScrollSyncedTurn";
-
-
 import { safeLazy } from "../utils/safeLazy";
 // Lazy load DecisionMapSheet (named export adapter)
 // Uses safeLazy for robust loading
@@ -49,10 +46,6 @@ export default function ChatView() {
 
   // Smart Defaults
   useSmartProviderDefaults();
-
-  useScrollSyncedTurn({ enabled: !!isSplitOpen });
-
-
 
   const virtuosoRef = useRef<VirtuosoHandle | null>(null);
   const { selectChat } = useChat();
@@ -217,7 +210,7 @@ export default function ChatView() {
               data={turnIds}
               followOutput={(isAtBottom: boolean) => {
                 if (!isAtBottom) return false;
-                return isRoundActive ? "auto" : "smooth";
+                return "smooth";
               }}
               increaseViewportBy={{ top: 300, bottom: 200 }}
               components={{

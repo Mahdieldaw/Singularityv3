@@ -1,4 +1,4 @@
-import { MapperArtifact, ParsedMapperOutput, GraphTopology, GraphNode, GraphEdge } from './contract';
+import { Claim, Edge, MapperArtifact, ParsedMapperOutput, GraphTopology, GraphNode, GraphEdge } from './contract';
 
 /**
  * Shared Parsing Utilities for ALL_AVAILABLE_OPTIONS and GRAPH_TOPOLOGY
@@ -970,18 +970,76 @@ export function parseUnifiedMapperOutput(text: string): ParsedMapperOutput {
 
         const anchors = extractAnchorPositions(narrative);
 
+        const normalizeClaimType = (t: any): Claim["type"] => {
+            const v = String(t || "").toLowerCase();
+            if (v === "factual" || v === "prescriptive" || v === "conditional" || v === "contested" || v === "speculative") {
+                return v as Claim["type"];
+            }
+            return "speculative";
+        };
+
+        const normalizeClaimRole = (r: any): Claim["role"] => {
+            const v = String(r || "").toLowerCase();
+            if (v === "anchor" || v === "branch" || v === "challenger" || v === "supplement") {
+                return v as Claim["role"];
+            }
+            return "branch";
+        };
+
+        const normalizedClaims: Claim[] = Array.isArray((map as any).claims)
+            ? (map as any).claims
+                .filter((c: any) => c && (c.id || c.label))
+                .map((c: any): Claim => {
+                    const role = normalizeClaimRole(c.role);
+                    return {
+                        id: String(c.id ?? ""),
+                        label: String(c.label ?? ""),
+                        text: String(c.text ?? ""),
+                        supporters: Array.isArray(c.supporters) ? c.supporters.filter((s: any) => typeof s === "number") : [],
+                        type: normalizeClaimType(c.type),
+                        role,
+                        challenges: role === "challenger" && typeof c.challenges === "string" ? c.challenges : null,
+                        ...(typeof c.quote === "string" ? { quote: c.quote } : {}),
+                        ...(typeof c.support_count === "number" ? { support_count: c.support_count } : {}),
+                        ...(typeof c.originalId === "string" ? { originalId: c.originalId } : {}),
+                    };
+                })
+                .filter((c: any) => c.id && c.label)
+            : [];
+
+        const normalizedEdges: Edge[] = Array.isArray((map as any).edges)
+            ? (map as any).edges
+                .filter((e: any) => e && (e.from || e.to))
+                .map((e: any) => ({
+                    from: String(e.from ?? ""),
+                    to: String(e.to ?? ""),
+                    type:
+                        e.type === "supports" || e.type === "conflicts" || e.type === "tradeoff" || e.type === "prerequisite"
+                            ? e.type
+                            : "supports",
+                }))
+                .filter((e: any) => e.from && e.to)
+            : [];
+
+        const normalizedGhosts: string[] | null =
+            (map as any).ghosts == null
+                ? null
+                : Array.isArray((map as any).ghosts)
+                    ? (map as any).ghosts.map((g: any) => String(g)).filter((g: any) => g && g.trim())
+                    : [String((map as any).ghosts)].filter((g: any) => g && g.trim());
+
         // Auto-generate topology from map for compatibility
         let topology: GraphTopology | null = null;
-        if (map.claims && map.edges) {
+        if (normalizedClaims.length > 0 || normalizedEdges.length > 0) {
             topology = {
-                nodes: map.claims.map((c: any) => ({
+                nodes: normalizedClaims.map((c: any) => ({
                     id: c.id,
                     label: c.label,
                     theme: c.type,
                     supporters: Array.isArray(c.supporters) ? c.supporters.filter((s: any) => typeof s === 'number') : [],
                     support_count: (c.supporters?.length || 0)
                 })),
-                edges: map.edges.map((e: any) => ({
+                edges: normalizedEdges.map((e: any) => ({
                     source: e.from,
                     target: e.to,
                     type: e.type,
@@ -992,17 +1050,17 @@ export function parseUnifiedMapperOutput(text: string): ParsedMapperOutput {
 
         const artifact = {
             ...createEmptyMapperArtifact(),
-            claims: map.claims || [],
-            edges: map.edges || [],
-            ghosts: map.ghosts || []
+            claims: normalizedClaims,
+            edges: normalizedEdges,
+            ghosts: normalizedGhosts
         };
 
         return {
-            claims: map.claims || [],
-            edges: map.edges || [],
-            ghosts: map.ghosts || [],
+            claims: normalizedClaims,
+            edges: normalizedEdges,
+            ghosts: normalizedGhosts,
             narrative,
-            map,
+            map: { claims: normalizedClaims, edges: normalizedEdges, ghosts: normalizedGhosts },
             anchors,
             topology,
             options: null,
@@ -1152,7 +1210,7 @@ export function parseMapperArtifact(text: string): MapperArtifact {
                         text: o.insight,
                         supporters: [o.source_index !== undefined ? o.source_index : -1],
                         type: 'speculative',
-                        role: o.type === 'frame_challenger' ? 'challenger' : 'supplemental',
+                        role: o.type === 'frame_challenger' ? 'challenger' : 'supplement',
                         challenges: o.challenges || null
                     })) : [];
 
@@ -1204,19 +1262,19 @@ export function parseMapperArtifact(text: string): MapperArtifact {
     // Parse Outliers
     if (outliersText) {
         const outlierBlocks = outliersText.split(/\n\s*[-*•]\s+/).filter(Boolean);
-        outlierBlocks.forEach((block, idx) => {
-            const parts = block.split('\n');
-            if (parts.length > 0) {
-                newClaims.push({
-                    id: `o_${idx}`,
-                    label: parts[0].split(' ').slice(0, 3).join(' '),
-                    text: parts[0].trim(),
-                    supporters: [],
-                    type: 'speculative',
-                    role: 'supplemental'
-                });
-            }
-        });
+                    outlierBlocks.forEach((block, idx) => {
+                        const parts = block.split('\n');
+                        if (parts.length > 0) {
+                            newClaims.push({
+                                id: `o_${idx}`,
+                                label: parts[0].split(' ').slice(0, 3).join(' '),
+                                text: parts[0].trim(),
+                                supporters: [],
+                                type: 'speculative',
+                                role: 'supplement'
+                            });
+                        }
+                    });
     }
 
     if (newClaims.length > 0) artifact.claims = newClaims;
@@ -1268,8 +1326,14 @@ export function parseV1MapperToArtifact(
     v1Output: string,
     options: { graphTopology?: any; query?: string; turn?: number; timestamp?: string } = {},
 ): MapperArtifact {
-    // 1. Check for Unified Tagged Output first
-    if (v1Output && (v1Output.includes('<mapper_artifact>') || v1Output.includes('\\<mapper_artifact\\>') || v1Output.includes('<map>'))) {
+    const normalizedForTags = String(v1Output || '').replace(/\\</g, '<').replace(/\\>/g, '>');
+    const hasUnifiedTaggedOutput =
+        /<mapper_artifact\b/i.test(normalizedForTags) ||
+        /<map\b/i.test(normalizedForTags) ||
+        /#{1,6}\s*THE\s*MAP\b/im.test(normalizedForTags) ||
+        /#{1,6}\s*THE\s*NARRATIVE\b/im.test(normalizedForTags);
+
+    if (hasUnifiedTaggedOutput) {
         const unified = parseUnifiedMapperOutput(v1Output);
 
         let unifiedArtifact = unified.artifact;
@@ -1293,16 +1357,88 @@ export function parseV1MapperToArtifact(
     }
 
     // 2. Normalize and fallback to V2 JSON
-    const normalizedOutput = String(v1Output || '').replace(/\\</g, '<').replace(/\\>/g, '>');
+    const normalizedOutput = normalizedForTags;
     // ... Parsing V2 JSON and adapting it ...
     // Note: For simplicity, if we don't find V2 JSON, we fall back to empty or rudimentary
 
     // We reuse parseMapperArtifact as the robust fallback since it now handles V2 adaptation
     const parsed = parseMapperArtifact(normalizedOutput);
 
-    // Inject options
+    const topologyCandidate = options.graphTopology && typeof options.graphTopology === 'object'
+        ? (options.graphTopology as GraphTopology)
+        : null;
+
+    const claimTypeFromNode = (nodeType: any): Claim['type'] => {
+        const t = String(nodeType || '').toLowerCase();
+        if (t === 'factual' || t === 'prescriptive' || t === 'conditional' || t === 'contested' || t === 'speculative') {
+            return t as Claim['type'];
+        }
+        return 'speculative';
+    };
+
+    const edgeTypeFromGraph = (raw: any): Edge['type'] => {
+        const t = String(raw || '').toLowerCase();
+        if (t.includes('conflict')) return 'conflicts';
+        if (t.includes('trade')) return 'tradeoff';
+        if (t.includes('pre') && t.includes('req')) return 'prerequisite';
+        if (t === 'supports' || t === 'conflicts' || t === 'tradeoff' || t === 'prerequisite') return t as Edge['type'];
+        return 'supports';
+    };
+
+    let claims: Claim[] = Array.isArray(parsed.claims) ? parsed.claims : [];
+    let edges: Edge[] = Array.isArray(parsed.edges) ? parsed.edges : [];
+    const ghosts = parsed.ghosts ?? null;
+
+    if (topologyCandidate?.nodes?.length && claims.length === 0) {
+        claims = topologyCandidate.nodes
+            .filter((n: any) => n && (n.id || n.label))
+            .map((n: any): Claim => {
+                const supporters: number[] = Array.isArray(n.supporters)
+                    ? n.supporters.filter((s: any) => typeof s === 'number')
+                    : [];
+                return {
+                    id: String(n.id ?? ''),
+                    label: String(n.label ?? ''),
+                    text: String(n.text ?? n.label ?? ''),
+                    supporters,
+                    type: claimTypeFromNode(n.type ?? n.theme),
+                    role: 'branch',
+                    challenges: null,
+                    support_count: typeof n.support_count === 'number' ? n.support_count : supporters.length,
+                };
+            })
+            .filter((c: Claim) => !!c.id && !!c.label);
+    }
+
+    if (topologyCandidate?.edges?.length && edges.length === 0) {
+        edges = topologyCandidate.edges
+            .filter((e: any) => e && (e.source || e.target))
+            .map((e: any) => ({
+                from: String(e.source ?? ''),
+                to: String(e.target ?? ''),
+                type: edgeTypeFromGraph(e.type),
+            }))
+            .filter((e: any) => e.from && e.to);
+    }
+
+    let model_count = typeof parsed.model_count === 'number' ? parsed.model_count : 0;
+    if ((!model_count || model_count === 0) && topologyCandidate?.nodes?.length) {
+        let maxSupporter = 0;
+        for (const n of topologyCandidate.nodes) {
+            const supporters = Array.isArray((n as any)?.supporters) ? (n as any).supporters : [];
+            for (const s of supporters) {
+                if (typeof s === 'number' && s > maxSupporter) maxSupporter = s;
+            }
+        }
+        model_count = maxSupporter || 0;
+    }
+
     return {
         ...parsed,
+        claims,
+        edges,
+        ghosts,
+        ...(model_count ? { model_count } : {}),
         query: options.query || parsed.query || "",
         turn: options.turn || parsed.turn || 0,
         timestamp: options.timestamp || parsed.timestamp || new Date().toISOString()

@@ -87,18 +87,18 @@ export const ModelResponsePanel: React.FC<ModelResponsePanelProps> = React.memo(
         const text = latestResponse?.text || '';
         const artifacts = (latestResponse?.artifacts || []) as Artifact[];
         const hasText = !!text.trim();
-        
+
         // Check progress from workflowProgressAtom
         const progress = workflowProgress[shownProviderId];
         const stage = progress?.stage || 'idle';
-        
+
         // It's "loading/generating" if the stage is thinking or streaming, 
         // OR if global loading is true and this is the active turn and we have no response yet or are retrying.
         const isGenerating = stage === 'thinking' || stage === 'streaming' || status === 'streaming';
-        
+
         // Hide error if we are currently retrying or in a generating stage
         const rawIsError = status === 'error' || (status as string) === 'failed' || (status as string) === 'skipped';
-        const isError = rawIsError && !isGenerating && stage !== 'thinking';
+        const isError = rawIsError && !isGenerating;
 
         const errorObj = (latestResponse?.meta as any)?.error;
         const errorMsg = typeof errorObj === 'string'
@@ -117,30 +117,6 @@ export const ModelResponsePanel: React.FC<ModelResponsePanelProps> = React.memo(
         handleBranchContinue(shownProviderId, branchInput);
         setBranchInput('');
     }, [branchInput, handleBranchContinue, shownProviderId]);
-
-    // Branching visual state
-    const isBranching = activeRecompute?.providerId === shownProviderId &&
-        activeRecompute?.aiTurnId === shownTurnId &&
-        activeRecompute?.stepType === 'batch';
-
-    const isTargeted = activeTarget?.providerId === shownProviderId;
-    const hasHistory = historyCount > 1;
-
-    // Empty/loading state
-    // We show the "Waiting" block if we have no response AND we are not in an error state
-    // OR if we are in a 'thinking' stage and have no text yet.
-    if ((!latestResponse && !derivedState.isError) || (derivedState.stage === 'thinking' && !derivedState.hasText)) {
-        return (
-            <div className="h-full w-full min-w-0 flex flex-col items-center justify-center bg-surface-raised border border-border-subtle rounded-2xl shadow-lg">
-                <div className="flex flex-col items-center gap-3">
-                    <div className="w-8 h-8 border-2 border-brand-500/30 border-t-brand-500 rounded-full animate-spin" />
-                    <div className="text-text-muted text-sm animate-pulse">
-                        {derivedState.stage === 'thinking' ? "Thinking..." : "Waiting for response..."}
-                    </div>
-                </div>
-            </div>
-        );
-    }
 
     const displayContent = useMemo(() => {
         const raw = derivedState.text || (derivedState.isError ? derivedState.errorMsg || "Error occurred" : "");
@@ -206,6 +182,31 @@ export const ModelResponsePanel: React.FC<ModelResponsePanelProps> = React.memo(
             promptPreview: preview && preview.length > 90 ? `${preview.slice(0, 90)}…` : preview,
         };
     }, [turnIds, turnsMap, shownTurnId]);
+
+    // Branching visual state
+    const isBranching = activeRecompute?.providerId === shownProviderId &&
+        activeRecompute?.aiTurnId === shownTurnId &&
+        activeRecompute?.stepType === 'batch';
+
+    const isTargeted = activeTarget?.providerId === shownProviderId;
+    const hasHistory = historyCount > 1;
+
+    // Empty/loading state
+    // We show the "Waiting" block if we have no response AND we are not in an error state
+    // OR if we are in a 'thinking' stage and have no text yet.
+    // RULE OF HOOKS: Conditional return MUST come AFTER all hook calls.
+    if ((!latestResponse && !derivedState.isError) || (derivedState.stage === 'thinking' && !derivedState.hasText)) {
+        return (
+            <div className="h-full w-full min-w-0 flex flex-col items-center justify-center bg-surface-raised border border-border-subtle rounded-2xl shadow-lg">
+                <div className="flex flex-col items-center gap-3">
+                    <div className="w-8 h-8 border-2 border-brand-500/30 border-t-brand-500 rounded-full animate-spin" />
+                    <div className="text-text-muted text-sm animate-pulse">
+                        {derivedState.stage === 'thinking' ? "Thinking..." : "Waiting for response..."}
+                    </div>
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div

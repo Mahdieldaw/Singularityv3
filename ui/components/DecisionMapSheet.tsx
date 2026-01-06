@@ -50,6 +50,49 @@ interface ParsedTheme {
   options: ParsedOption[];
 }
 
+function buildThemesFromClaims(claims: any[]): ParsedTheme[] {
+  if (!Array.isArray(claims) || claims.length === 0) return [];
+
+  const themesByName = new Map<string, ParsedTheme>();
+
+  const getThemeNameForClaim = (claim: any): string => {
+    const role = String(claim?.role || '').toLowerCase();
+    if (role === 'anchor') return 'Anchors';
+    if (role === 'challenger') return 'Challengers';
+    if (role === 'supplement') return 'Supplements';
+    if (role === 'branch') return 'Branches';
+    return 'Claims';
+  };
+
+  for (const claim of claims) {
+    if (!claim) continue;
+    const themeName = getThemeNameForClaim(claim);
+    if (!themesByName.has(themeName)) {
+      themesByName.set(themeName, { name: themeName, options: [] });
+    }
+    const theme = themesByName.get(themeName)!;
+
+    const rawId = claim.id != null ? String(claim.id) : '';
+    const rawLabel = typeof claim.label === 'string' ? claim.label : '';
+
+    const titleParts: string[] = [];
+    if (rawId.trim()) titleParts.push(rawId.trim());
+    if (rawLabel.trim()) titleParts.push(rawLabel.trim());
+    const title = titleParts.length > 0 ? titleParts.join(' · ') : 'Claim';
+
+    const description = typeof claim.text === 'string' ? claim.text : '';
+    const supporters = Array.isArray(claim.supporters) ? claim.supporters : [];
+
+    theme.options.push({
+      title,
+      description,
+      citations: supporters,
+    });
+  }
+
+  return Array.from(themesByName.values());
+}
+
 function parseOptionsIntoThemes(optionsText: string | null): ParsedTheme[] {
   if (!optionsText) return [];
 
@@ -970,6 +1013,11 @@ export const DecisionMapSheet = React.memo(() => {
     }
   }, [artifactForStructure]);
 
+  const claimThemes = useMemo(() => {
+    if (!artifactForStructure || !Array.isArray((artifactForStructure as any).claims)) return [];
+    return buildThemesFromClaims((artifactForStructure as any).claims);
+  }, [artifactForStructure]);
+
   const mappingText = useMemo(() => {
     return parsedMapping.narrative || '';
   }, [parsedMapping.narrative]);
@@ -985,8 +1033,9 @@ export const DecisionMapSheet = React.memo(() => {
   }, [latestMapping, parsedMapping.options]);
 
   const parsedThemes = useMemo(() => {
+    if (claimThemes.length > 0) return claimThemes;
     return parseOptionsIntoThemes(optionsText || '');
-  }, [optionsText]);
+  }, [claimThemes, optionsText]);
 
   // Extract citation source order from mapping metadata for correct citation-to-model mapping
   const citationSourceOrder = useMemo(() => {

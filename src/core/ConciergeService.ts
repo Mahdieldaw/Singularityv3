@@ -774,19 +774,7 @@ Identify what context would help.`,
 function buildStructuralBrief(analysis: StructuralAnalysis): string {
     const { shape } = analysis;
 
-    // DEBUG: Log what we received
-    console.log('[ConciergeService] buildStructuralBrief called with:', {
-        primaryPattern: shape?.primaryPattern,
-        hasShapeData: !!shape?.data,
-        shapeDataPattern: (shape?.data as any)?.pattern,
-        shapeConfidence: shape?.confidence,
-        claimCount: analysis?.landscape?.claimCount,
-        modelCount: analysis?.landscape?.modelCount,
-        edgeCount: analysis?.edges?.length,
-    });
-
     if (!shape.data) {
-        console.warn('[ConciergeService] shape.data is falsy, falling back to buildGenericBrief');
         return buildGenericBrief(analysis);
     }
 
@@ -820,22 +808,9 @@ export function buildConciergePrompt(
     analysis: StructuralAnalysis,
     stance: ConciergeStance = 'default'
 ): string {
-    // DEBUG: Log what we're building the prompt with
-    console.log('[ConciergeService] buildConciergePrompt called:', {
-        userMessageLength: userMessage?.length,
-        hasAnalysis: !!analysis,
-        analysisShape: analysis?.shape?.primaryPattern,
-        analysisClaimCount: analysis?.claimsWithLeverage?.length,
-        analysisEdgeCount: analysis?.edges?.length,
-        stance,
-    });
-
     const structuralBrief = buildStructuralBrief(analysis);
     const shapeGuidance = getShapeGuidance(analysis.shape);
     const stanceGuidance = getStanceGuidance(stance);
-
-    // DEBUG: Log the brief length to verify it contains content
-    console.log('[ConciergeService] structuralBrief length:', structuralBrief?.length, 'first 200 chars:', structuralBrief?.slice(0, 200));
 
     const framingLine = stanceGuidance.framing
         ? `\n${stanceGuidance.framing}\n`

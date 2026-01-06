@@ -229,10 +229,19 @@ export function usePortMessageHandler() {
             draft.set(aiTurnId, aiTurn);
           });
 
-          // Ensure ordering in ID list (user first, then AI)
           setTurnIds((idsDraft: string[]) => {
             if (!idsDraft.includes(userTurnId)) idsDraft.push(userTurnId);
             if (!idsDraft.includes(aiTurnId)) idsDraft.push(aiTurnId);
+
+            const seen = new Set<string>();
+            for (let i = idsDraft.length - 1; i >= 0; i--) {
+              const id = idsDraft[i];
+              if (seen.has(id)) {
+                idsDraft.splice(i, 1);
+              } else {
+                seen.add(id);
+              }
+            }
           });
 
           setActiveAiTurnId(aiTurnId);
