@@ -484,16 +484,6 @@ export interface MapperArtifact extends MapperOutput {
   anchors?: Array<{ label: string; id: string; position: number }>;
 }
 
-export interface ExploreAnalysis {
-  claimCount: number;
-  consensusCount: number;
-  outlierCount: number;
-  challengerCount: number;
-  convergenceRatio: number;
-  conflictCount: number;
-  hasChallengers: boolean;
-}
-
 
 
 // ============================================================================
@@ -598,7 +588,6 @@ export interface SingularityStepPayload {
   singularityProvider: ProviderKey;
   originalPrompt: string;
   mapperArtifact?: MapperArtifact;
-  exploreAnalysis?: ExploreAnalysis;
   mappingText?: string;
   mappingMeta?: any;
 }
@@ -852,7 +841,6 @@ export interface AiTurn {
 
   // Cognitive Pipeline Artifacts (Computed)
   mapperArtifact?: MapperArtifact;
-  exploreAnalysis?: ExploreAnalysis;
   singularityOutput?: SingularityOutput;
 
   meta?: {

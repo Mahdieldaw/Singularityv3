@@ -1,5 +1,4 @@
 
-import { computeExplore } from '../cognitive/explore-computer';
 import { parseV1MapperToArtifact } from '../../../shared/parsing-utils';
 import { extractUserMessage } from '../context-utils.js';
 
@@ -11,16 +10,16 @@ export class CognitivePipelineHandler {
   }
 
   /**
-   * Checks if the workflow should halt for cognitive decision-making.
-   * If yes, executes Singularity step, persists state, emits halt message, and returns true.
+   * Orchestrates the transition to the Singularity (Concierge) phase.
+   * Executes Singularity step, persists state, and notifies UI that artifacts are ready.
    */
-  async handleCognitiveHalt(request, context, steps, stepResults, _resolvedContext, currentUserMessage, stepExecutor, streamingManager) {
+  async orchestrateSingularityPhase(request, context, steps, stepResults, _resolvedContext, currentUserMessage, stepExecutor, streamingManager) {
     try {
       const mappingResult = Array.from(stepResults.entries()).find(([_, v]) =>
         v.status === "completed" && v.result?.mapperArtifact,
       )?.[1]?.result;
 
-      const userMessageForExplore =
+      const userMessageForSingularity =
         context?.userMessage || currentUserMessage || "";
 
       let mapperArtifact = mappingResult?.mapperArtifact || null;
@@ -46,7 +45,7 @@ export class CognitivePipelineHandler {
 
             mapperArtifact = parseV1MapperToArtifact(text, {
               graphTopology: result?.meta?.graphTopology,
-              query: userMessageForExplore,
+              query: userMessageForSingularity,
             });
             if (mapperArtifact) break;
           }
@@ -54,20 +53,14 @@ export class CognitivePipelineHandler {
       }
 
       if (!mapperArtifact) {
-        console.warn("[CognitiveHandler] Cognitive pipeline missing mapperArtifact - forcing halt");
+        console.warn("[CognitiveHandler] Missing mapperArtifact - forcing end of loop");
         return true;
       }
 
-      const exploreAnalysis = computeExplore(
-        userMessageForExplore,
-        mapperArtifact,
-      );
-
-      // ✅ CRITICAL: Populate context so WorkflowEngine/TurnEmitter can see them
+      // ✅ Populate context so WorkflowEngine/TurnEmitter can see it
       context.mapperArtifact = mapperArtifact;
-      context.exploreAnalysis = exploreAnalysis;
 
-      // ✅ NEW: Execute Singularity step automatically before halt
+      // ✅ Execute Singularity step automatically
       let singularityOutput = null;
       let singularityProviderId = null;
 
@@ -75,12 +68,12 @@ export class CognitivePipelineHandler {
       singularityProviderId = request?.singularity ||
         context?.singularityProvider ||
         context?.meta?.singularity ||
-        request?.mapper || // Fallback to mapper provider
-        'gemini';  // Default fallback
+        request?.mapper || 
+        'gemini';
 
       if (stepExecutor && streamingManager) {
         try {
-          console.log(`[CognitiveHandler] Executing Singularity step with provider: ${singularityProviderId}`);
+          console.log(`[CognitiveHandler] Orchestrating Singularity step via: ${singularityProviderId}`);
 
           const singularityStep = {
             stepId: `singularity-${singularityProviderId}-${Date.now()}`,
@@ -88,8 +81,7 @@ export class CognitivePipelineHandler {
             payload: {
               singularityProvider: singularityProviderId,
               mapperArtifact,
-              exploreAnalysis,
-              originalPrompt: userMessageForExplore,
+              originalPrompt: userMessageForSingularity,
               mappingText: mappingResult?.text || "",
               mappingMeta: mappingResult?.meta || {},
               useThinking: request?.useThinking || false,
@@ -118,7 +110,6 @@ export class CognitivePipelineHandler {
               leakageViolations: singularityResult.output?.leakageViolations || [],
             };
 
-            // Store in context for persistence
             context.singularityOutput = singularityOutput;
 
             // Persist the Singularity response
@@ -132,17 +123,12 @@ export class CognitivePipelineHandler {
                 { text: singularityOutput.text, status: 'completed', meta: { singularityOutput } }
               );
             } catch (persistErr) {
-              console.warn("[CognitiveHandler] Failed to persist Singularity response:", persistErr);
+              console.warn("[CognitiveHandler] Persistence failed:", persistErr);
             }
           }
-
-          console.log("[CognitiveHandler] Singularity step completed");
         } catch (singularityErr) {
-          console.error("[CognitiveHandler] Singularity step failed:", singularityErr);
-          // Continue without singularity - it's not fatal
+          console.error("[CognitiveHandler] Singularity execution failed:", singularityErr);
         }
-      } else {
-        console.warn("[CognitiveHandler] stepExecutor or streamingManager not provided - skipping Singularity");
       }
 
       this.port.postMessage({
@@ -150,46 +136,37 @@ export class CognitivePipelineHandler {
         sessionId: context.sessionId,
         aiTurnId: context.canonicalAiTurnId,
         artifact: mapperArtifact,
-        analysis: exploreAnalysis,
         singularityOutput,
         singularityProvider: singularityProviderId,
       });
 
       return true;
     } catch (e) {
-      console.error("[CognitiveHandler] computeExplore failed:", e);
+      console.error("[CognitiveHandler] Orchestration failed:", e);
       return false;
     }
   }
 
 
   async handleContinueRequest(payload, stepExecutor, streamingManager, contextManager) {
-    const { sessionId, aiTurnId, mode, providerId, selectedArtifacts, isRecompute, sourceTurnId } = payload || {};
-    console.log(`[CognitiveHandler] Continuing cognitive workflow for turn ${aiTurnId} with mode ${mode}`);
+    const { sessionId, aiTurnId, providerId, selectedArtifacts, isRecompute, sourceTurnId } = payload || {};
+    console.log(`[CognitiveHandler] Resuming singularity flow for turn ${aiTurnId}`);
 
     try {
       const adapter = this.sessionManager?.adapter;
       if (!adapter) throw new Error("Persistence adapter not available");
 
       const aiTurn = await adapter.get("turns", aiTurnId);
-      if (!aiTurn) throw new Error(`AI turn ${aiTurnId} not found in persistence.`);
+      if (!aiTurn) throw new Error(`AI turn ${aiTurnId} not found.`);
 
       const effectiveSessionId = sessionId || aiTurn.sessionId;
-
       const userTurnId = aiTurn.userTurnId;
       const userTurn = userTurnId ? await adapter.get("turns", userTurnId) : null;
-
       const originalPrompt = extractUserMessage(userTurn);
 
       let mapperArtifact = payload.mapperArtifact || aiTurn.mapperArtifact || null;
-      let exploreAnalysis = payload.exploreAnalysis || aiTurn.exploreAnalysis || null;
-
-      if (mode !== "singularity") {
-        throw new Error(`Unknown or deprecated cognitive mode: ${mode}. Use 'singularity'.`);
-      }
 
       const priorResponses = await adapter.getResponsesByTurnId(aiTurnId);
-
       const mappingResponses = (priorResponses || [])
         .filter((r) => r && r.responseType === "mapping" && r.providerId)
         .sort((a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0));
@@ -202,12 +179,9 @@ export class CognitivePipelineHandler {
           query: originalPrompt,
         });
       }
-      if (!exploreAnalysis && mapperArtifact) {
-        exploreAnalysis = computeExplore(originalPrompt, mapperArtifact);
-      }
 
       if (!mapperArtifact) {
-        throw new Error(`MapperArtifact missing for turn ${aiTurnId}. Cannot continue.`);
+        throw new Error(`MapperArtifact missing for turn ${aiTurnId}.`);
       }
 
       const preferredProvider = providerId ||
@@ -236,12 +210,11 @@ export class CognitivePipelineHandler {
         payload: {
           singularityProvider: preferredProvider,
           mapperArtifact,
-          exploreAnalysis,
           originalPrompt,
           mappingText: latestMappingText,
           mappingMeta: latestMappingMeta,
           selectedArtifacts: Array.isArray(selectedArtifacts) ? selectedArtifacts : [],
-          stance: payload.stance || null, // Allow overriding stance
+          stance: payload.stance || null, 
           useThinking: payload.useThinking || false,
         },
       };
@@ -344,12 +317,12 @@ export class CognitivePipelineHandler {
       });
 
     } catch (error) {
-      console.error(`[CognitiveHandler] handleContinueCognitiveRequest failed:`, error);
+      console.error(`[CognitiveHandler] Orchestration failed:`, error);
       try {
         this.port.postMessage({
           type: "WORKFLOW_STEP_UPDATE",
           sessionId: sessionId || "unknown",
-          stepId: `continue-${mode}-error`,
+          stepId: `continue-singularity-error`,
           status: "failed",
           error: error.message || String(error),
           ...(isRecompute ? { isRecompute: true, sourceTurnId: sourceTurnId || aiTurnId } : {}),

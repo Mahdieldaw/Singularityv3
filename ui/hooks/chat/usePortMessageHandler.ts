@@ -863,7 +863,7 @@ export function usePortMessageHandler() {
         }
 
         case "MAPPER_ARTIFACT_READY": {
-          const { aiTurnId, artifact, analysis, singularityOutput } = message as any;
+          const { aiTurnId, artifact, singularityOutput } = message as any;
           if (!aiTurnId) return;
 
           setTurnsMap((draft: Map<string, TurnMessage>) => {
@@ -875,7 +875,6 @@ export function usePortMessageHandler() {
             draft.set(aiTurnId, {
               ...aiTurn,
               mapperArtifact: artifact,
-              exploreAnalysis: analysis,
               ...(singularityOutput ? { singularityOutput } : {}),
             });
           });

@@ -330,7 +330,7 @@ export class WorkflowEngine {
     }
 
     if (step.type === 'mapping' && useCognitivePipeline) {
-      const shouldHalt = await this.cognitiveHandler.handleCognitiveHalt(
+      const shouldHalt = await this.cognitiveHandler.orchestrateSingularityPhase(
         request,
         context,
         steps,
@@ -341,7 +341,7 @@ export class WorkflowEngine {
         this.streamingManager,
       );
       if (shouldHalt) {
-        return "cognitive_halt";
+        return "singularity_orchestration_complete";
       }
     }
 
@@ -424,21 +424,21 @@ export class WorkflowEngine {
           .find(text => text.includes("<mapping_output>") || text.includes("<decision_map>"));
 
         if (v1MappingText) {
-          console.log("[WorkflowEngine] Hydrating MapperArtifact from V1 output for crossover...");
+          console.log("[WorkflowEngine] Hydrating V2 MapperArtifact from V1 output tags for cross-version compatibility...");
           context.mapperArtifact = parseV1MapperToArtifact(v1MappingText, {
             query: context.userMessage || ""
           });
         }
       } catch (err) {
-        console.warn("[WorkflowEngine] Failed to hydrate V1 artifact:", err);
+        console.warn("[WorkflowEngine] Cross-version hydration failed:", err);
       }
     }
     if (context.mapperArtifact && !context.extractedOptions) {
       try {
-        console.log("[WorkflowEngine] Flattening V2 MapperArtifact for V1 pipeline...");
+        console.log("[WorkflowEngine] Flattening V2 MapperArtifact for V1-compatible consumers...");
         context.extractedOptions = formatArtifactAsOptions(context.mapperArtifact);
       } catch (err) {
-        console.warn("[WorkflowEngine] Failed to flatten V2 artifact:", err);
+        console.warn("[WorkflowEngine] V2 artifact flattening failed:", err);
       }
     }
   }
@@ -482,7 +482,6 @@ export class WorkflowEngine {
       userMessage: this.currentUserMessage,
       // ✅ CRITICAL: Ensure cognitive artifacts are persisted
       mapperArtifact: context?.mapperArtifact,
-      exploreAnalysis: context?.exploreAnalysis,
       singularityOutput: context?.singularityOutput,
     };
     if (resolvedContext?.type === "recompute") {

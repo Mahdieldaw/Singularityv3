@@ -93,7 +93,6 @@ export interface AiTurn extends Omit<ContractAiTurn, "type"> {
   // UI-only fields for efficient dependency tracking in React hooks
   batchVersion?: number;
   mappingVersion?: number;
-  exploreVersion?: number;
   singularityVersion?: number;
 }
 

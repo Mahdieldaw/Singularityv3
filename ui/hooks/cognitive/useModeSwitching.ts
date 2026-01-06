@@ -5,31 +5,33 @@ import { CognitiveTransitionOptions, useCognitiveMode } from "./useCognitiveMode
 import { useCallback } from "react";
 
 /**
- * Hook to manage switching between cognitive views
- * and triggering backend transitions if data isn't present yet.
+ * Hook to manage switching between cognitive views (Map vs. Singularity)
+ * and triggering backend recomputes (e.g. for stance changes).
  */
 export function useModeSwitching(aiTurnId: string) {
     const [activeMode, setActiveMode] = useAtom(turnCognitiveModeFamily(aiTurnId));
     const { transitionToMode, isTransitioning, error } = useCognitiveMode(aiTurnId);
 
+    /**
+     * Simply flips the UI tab (e.g. from 'artifact' to 'singularity')
+     */
     const switchToMode = useCallback(async (mode: CognitiveViewMode) => {
-        // If switching to a mode that needs a backend run (understand/gauntlet),
-        // we might need to trigger it if it's not and we're not already transitioning.
-        // However, usually the PostMapperView handles the initial trigger.
-        // This setter just changes the LOCAL UI active mode.
         setActiveMode(mode);
     }, [setActiveMode]);
 
+    /**
+     * Triggers a backend Singularity recompute (e.g. new model or stance change)
+     * and switches the view.
+     */
     const triggerAndSwitch = useCallback(async (
         mode: 'singularity',
         options: CognitiveTransitionOptions = {},
     ) => {
-        // Change UI mode immediately to show loading if needed for top-level views
-        if (mode === 'singularity') {
-            setActiveMode(mode);
-        }
-        // Trigger backend
-        await transitionToMode(aiTurnId, mode as any, options);
+        // Change UI mode immediately to show loading
+        setActiveMode(mode);
+        
+        // Trigger backend execution via useCognitiveMode
+        await transitionToMode(aiTurnId, mode, options);
     }, [aiTurnId, setActiveMode, transitionToMode]);
 
     return {

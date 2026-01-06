@@ -813,7 +813,6 @@ Answer the user's message directly. Use context only to disambiguate.
       throw new Error("Singularity mode requires a MapperArtifact.");
     }
 
-    // exploreAnalysis removed (unused)
 
     // Import ConciergeService dynamically to avoid circular dependencies
     let ConciergeService;

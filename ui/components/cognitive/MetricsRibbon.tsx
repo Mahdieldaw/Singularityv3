@@ -1,10 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { CoreRatios, EnrichedClaim, ExploreAnalysis, GraphAnalysis, MapperArtifact, ProblemStructure } from '../../../shared/contract';
+import { CoreRatios, EnrichedClaim, GraphAnalysis, MapperArtifact, ProblemStructure } from '../../../shared/contract';
 import { StructuralInsight } from "../StructuralInsight";
 import { generateInsightsFromAnalysis } from '../../utils/graphAdapter';
 
 interface MetricsRibbonProps {
-    analysis?: ExploreAnalysis;
     artifact?: MapperArtifact;
     claimsCount: number;
     ghostCount: number;
@@ -17,8 +16,6 @@ interface MetricsRibbonProps {
 }
 
 export const MetricsRibbon: React.FC<MetricsRibbonProps> = ({
-    // analysis,
-    // artifact,
     claimsCount,
     ghostCount,
     problemStructure,

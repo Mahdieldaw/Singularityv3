@@ -190,7 +190,6 @@ export class ConnectionHandler {
             singularityResponses: buckets.singularityResponses,
             meta: aiTurn.meta || {},
             mapperArtifact: aiTurn.mapperArtifact,
-            exploreAnalysis: aiTurn.exploreAnalysis,
             singularityOutput: inferredSingularityOutput,
           },
         },

@@ -314,7 +314,6 @@ export function useChat() {
               singularityResponses: normalizeResponseMap(round.singularityResponses),
               // Cognitive pipeline structured outputs
               mapperArtifact: round.mapperArtifact || undefined,
-              exploreAnalysis: round.exploreAnalysis || undefined,
               singularityOutput: round.singularityOutput || undefined,
             };
             newIds.push(aiTurn.id);
