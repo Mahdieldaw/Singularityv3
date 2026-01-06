@@ -57,7 +57,7 @@ The following files and components were created or fundamentally transformed to 
     workflow-engine.js**: Orchestrates the multi-stage pipeline, implements `Cognitive Halt` logic, and handles workflow resumption.
 6. **
     
-    PromptService.ts**: Contains the sophisticated prompts for Mapper V2, Explore, Understand, and the Gauntlet.
+    MapperService.ts**: Contains the sophisticated prompts for Mapper V2, Explore, Understand, and the Gauntlet.
 7. **
     
     explore-computer.ts**: [NEW] Performs topological triage to select the optimal Explore container.
@@ -152,7 +152,7 @@ _Standardized cards for cognitive outputs:_
     workflow-engine.js**: Integrated the Triage → Halt → Specialized Loop logic.
 4. **
     
-    PromptService.ts**: Built sophisticated multi-stage prompts for the pipeline.
+    MapperService.ts**: Built sophisticated multi-stage prompts for the pipeline.
 5. **
     
     connection-handler.js**: Added `CONTINUE_COGNITIVE_WORKFLOW` protocol support.

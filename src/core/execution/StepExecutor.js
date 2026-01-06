@@ -17,9 +17,9 @@ const wdbg = (...args) => {
 };
 
 export class StepExecutor {
-  constructor(orchestrator, promptService, responseProcessor, healthTracker) {
+  constructor(orchestrator, mapperService, responseProcessor, healthTracker) {
     this.orchestrator = orchestrator;
-    this.promptService = promptService;
+    this.mapperService = mapperService;
     this.responseProcessor = responseProcessor;
     this.healthTracker = healthTracker;
   }
@@ -359,7 +359,7 @@ Answer the user's message directly. Use context only to disambiguate.
       sourceData.some((s) => s.providerId === pid),
     );
 
-    const mappingPrompt = this.promptService.buildMappingPrompt(
+    const mappingPrompt = this.mapperService.buildMappingPrompt(
       payload.originalPrompt,
       sourceData,
       citationOrder,
@@ -854,7 +854,7 @@ Answer the user's message directly. Use context only to disambiguate.
       }
     }
 
-    let refinerPrompt = this.promptService.buildRefinerPrompt({
+    let refinerPrompt = this.MapperService.buildRefinerPrompt({
       originalPrompt,
       mappingText,
       batchResponses,
@@ -972,7 +972,7 @@ Answer the user's message directly. Use context only to disambiguate.
       })
       .join('\n\n');
 
-    let antagonistPrompt = this.promptService.buildAntagonistPrompt(
+    let antagonistPrompt = this.MapperService.buildAntagonistPrompt(
       originalPrompt,
       fullOptionsText,
       modelOutputsBlock,
@@ -1039,7 +1039,7 @@ Answer the user's message directly. Use context only to disambiguate.
       narrativeSummary = parsed.narrative;
     }
 
-    let understandPrompt = this.promptService.buildUnderstandPrompt(
+    let understandPrompt = this.MapperService.buildUnderstandPrompt(
       payload.originalPrompt,
       mapperArtifact,
       narrativeSummary,
@@ -1102,7 +1102,7 @@ Answer the user's message directly. Use context only to disambiguate.
       narrativeSummary = parsed.narrative;
     }
 
-    let gauntletPrompt = this.promptService.buildGauntletPrompt(
+    let gauntletPrompt = this.MapperService.buildGauntletPrompt(
       payload.originalPrompt,
       mapperArtifact,
       narrativeSummary,
@@ -1163,7 +1163,7 @@ Answer the user's message directly. Use context only to disambiguate.
     // Import ConciergeService dynamically to avoid circular dependencies
     let ConciergeService;
     try {
-      const module = await import('../PromptService_v2');
+      const module = await import('../ConciergeService');
       ConciergeService = module.ConciergeService;
     } catch (e) {
       console.warn("[StepExecutor] Failed to import ConciergeService:", e);
@@ -1176,7 +1176,7 @@ Answer the user's message directly. Use context only to disambiguate.
       // Compute structural analysis for shape-guided prompting
       let analysis = null;
       try {
-        const { computeStructuralAnalysis } = await import('../PromptService');
+        const { computeStructuralAnalysis } = await import('../MapperService');
         analysis = computeStructuralAnalysis(mapperArtifact);
       } catch (e) {
         console.warn("[StepExecutor] computeStructuralAnalysis failed:", e);
@@ -1234,7 +1234,7 @@ Answer the user's message directly. Use context only to disambiguate.
       );
     } else {
       // Fallback prompt if ConciergeService unavailable
-      singularityPrompt = this.promptService.buildUnderstandPrompt(
+      singularityPrompt = this.MapperService.buildUnderstandPrompt(
         payload.originalPrompt,
         mapperArtifact,
         "",

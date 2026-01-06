@@ -24,10 +24,10 @@ import {
     ContextualShapeData,
     CentralConflict,
     FloorClaim,
-    ChallengerInfo,
     ChainStep,
+    DimensionCluster,
+    ChallengerInfo,
     TradeoffOption,
-    DimensionCluster
 } from "../../shared/contract";
 
 const DEBUG_STRUCTURAL_ANALYSIS = true;
@@ -1250,8 +1250,7 @@ const detectConflictClusters = (
 const buildSettledShapeData = (
     claims: EnrichedClaim[],
     edges: Edge[],
-    ghosts: string[],
-    patterns: StructuralAnalysis['patterns']
+    ghosts: string[]
 ): SettledShapeData => {
 
     const floorClaims = claims.filter(c => c.isHighSupport);
@@ -1429,7 +1428,6 @@ const buildKeystoneShapeData = (
 
 const buildContestedShapeData = (
     claims: EnrichedClaim[],
-    edges: Edge[],
     patterns: StructuralAnalysis['patterns'],
     conflictInfos: ConflictInfo[],
     conflictClusters: ConflictCluster[]
@@ -1554,7 +1552,6 @@ const buildContestedShapeData = (
 
 const buildTradeoffShapeData = (
     claims: EnrichedClaim[],
-    edges: Edge[],
     tradeoffPairs: TradeoffPair[]
 ): TradeoffShapeData => {
 
@@ -1594,11 +1591,8 @@ const buildTradeoffShapeData = (
                 ? [t.optionA, t.optionB]
                 : [t.optionB, t.optionA];
 
-            // Check if lower has any unique advantage (conflicts or prerequisites)
-            const lowerHasUniqueValue = edges.some(e =>
-                (e.from === lower.id || e.to === lower.id) &&
-                e.type === 'prerequisite'
-            );
+            // Check if lower has any unique advantage (simple heuristic: here we remove edges usage as requested)
+            const lowerHasUniqueValue = false;
 
             if (!lowerHasUniqueValue) {
                 dominatedOptions.push({
@@ -1725,7 +1719,6 @@ const buildDimensionalShapeData = (
 
 const buildExploratoryShapeData = (
     claims: EnrichedClaim[],
-    edges: Edge[],
     graph: GraphAnalysis,
     ghosts: string[],
     signalStrength: number
@@ -1826,7 +1819,6 @@ const buildExploratoryShapeData = (
 
 const buildContextualShapeData = (
     claims: EnrichedClaim[],
-    edges: Edge[],
     ghosts: string[]
 ): ContextualShapeData => {
 
@@ -1847,14 +1839,10 @@ const buildContextualShapeData = (
         claims: FloorClaim[];
     }> = [];
 
-    // Simple heuristic: use components as branches
-    const prereqEdges = edges.filter(e => e.type === 'prerequisite');
-    const roots = claims.filter(c =>
-        !prereqEdges.some(e => e.to === c.id) &&
-        prereqEdges.some(e => e.from === c.id)
-    );
+    // Simplified branch detection (using claims only as requested)
+    const roots = claims.filter(c => c.type === 'conditional');
 
-    roots.forEach((root, idx) => {
+    roots.forEach((root) => {
         const branchClaims: FloorClaim[] = [{
             id: root.id,
             label: root.label,
@@ -1865,11 +1853,9 @@ const buildContextualShapeData = (
             contestedBy: []
         }];
 
-        // Add claims that depend on this root
-        const dependents = prereqEdges
-            .filter(e => e.from === root.id)
-            .map(e => claims.find(c => c.id === e.to))
-            .filter(Boolean) as EnrichedClaim[];
+        // Since edges are removed, we'll skip adding dependents for now
+        // or add logic to find them if available in claims
+        const dependents: EnrichedClaim[] = [];
 
         dependents.forEach(d => {
             branchClaims.push({
@@ -2007,7 +1993,7 @@ export const computeStructuralAnalysis = (artifact: MapperArtifact): StructuralA
     try {
         switch (shape.primaryPattern) {
             case 'settled':
-                shape.data = buildSettledShapeData(claimsWithLeverage, edges, ghosts, patterns);
+                shape.data = buildSettledShapeData(claimsWithLeverage, edges, ghosts);
                 break;
             case 'linear':
                 shape.data = buildLinearShapeData(claimsWithLeverage, edges, graph, patterns.cascadeRisks);
@@ -2020,30 +2006,29 @@ export const computeStructuralAnalysis = (artifact: MapperArtifact): StructuralA
             case 'contested':
                 shape.data = buildContestedShapeData(
                     claimsWithLeverage,
-                    edges,
                     patterns,
                     enrichedConflicts,
                     conflictClusters
                 );
                 break;
             case 'tradeoff':
-                shape.data = buildTradeoffShapeData(claimsWithLeverage, edges, patterns.tradeoffs);
+                shape.data = buildTradeoffShapeData(claimsWithLeverage, patterns.tradeoffs);
                 break;
             case 'dimensional':
                 shape.data = buildDimensionalShapeData(claimsWithLeverage, edges, graph, ghosts);
                 break;
             case 'contextual':
-                shape.data = buildContextualShapeData(claimsWithLeverage, edges, ghosts);
+                shape.data = buildContextualShapeData(claimsWithLeverage, ghosts);
                 break;
             case 'exploratory':
             default:
-                shape.data = buildExploratoryShapeData(claimsWithLeverage, edges, graph, ghosts, signalStrength);
+                shape.data = buildExploratoryShapeData(claimsWithLeverage, graph, ghosts, signalStrength);
                 break;
         }
     } catch (e) {
         console.warn("Failed to build shape data:", e);
         // Fallback to exploratory if shape-specific builder fails
-        shape.data = buildExploratoryShapeData(claimsWithLeverage, edges, graph, ghosts, signalStrength);
+        shape.data = buildExploratoryShapeData(claimsWithLeverage, graph, ghosts, signalStrength);
     }
 
     const analysis: StructuralAnalysis = {

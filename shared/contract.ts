@@ -1019,7 +1019,7 @@ export function isAiTurn(turn: any): turn is { type: "ai" } {
 }
 
 // ============================================================================
-// STRUCTURAL ANALYSIS TYPES (Moved from PromptService)
+// STRUCTURAL ANALYSIS TYPES (Moved from MapperService)
 // ============================================================================
 
 export interface TradeoffPair {

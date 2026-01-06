@@ -36,7 +36,7 @@ import { persistenceMonitor } from "./core/PersistenceMonitor.js";
 
 // Global Services Registry
 import { services } from "./core/service-registry.js";
-import { PromptService } from "./core/PromptService";
+import { MapperService } from "./core/MapperService";
 import { ResponseProcessor } from "./core/ResponseProcessor";
 
 // ============================================================================
@@ -485,8 +485,8 @@ async function initializeGlobalServices(injectedPrefs = {}) {
     const contextResolver = new ContextResolver(sm);
     services.register('contextResolver', contextResolver);
 
-    const promptService = new PromptService();
-    services.register('promptService', promptService);
+    const mapperService = new MapperService();
+    services.register('mapperService', mapperService);
 
     const responseProcessor = new ResponseProcessor();
     services.register('responseProcessor', responseProcessor);
@@ -500,7 +500,7 @@ async function initializeGlobalServices(injectedPrefs = {}) {
       compiler,
       contextResolver,
       persistenceLayer: pl,
-      promptService,
+      mapperService,
       responseProcessor,
       authManager,
       providerRegistry: services.get('providerRegistry')
@@ -571,29 +571,6 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
         })().catch(e => sendResponse({ success: false, error: e.message }));
         return true;
 
-      case "RUN_ANALYST": {
-        (async () => {
-          const { fragment, context, authoredPrompt, analystModel, originalPrompt } = message.payload;
-          const prompt = svcs.promptService.buildAnalystPrompt(originalPrompt || fragment, context, authoredPrompt);
-          const result = await svcs.orchestrator.executeSingle(prompt, analystModel, { timeout: 60000 });
-          const content = svcs.responseProcessor.extractContent(result.text);
-          const parsed = svcs.responseProcessor.parseAnalystResponse(content);
-          sendResponse({ success: true, data: { ...parsed, raw: content } });
-        })().catch(e => sendResponse({ success: false, error: e.message }));
-        return true;
-      }
-
-      case "RUN_COMPOSER": {
-        (async () => {
-          const { draftPrompt, context, composerModel, analystCritique } = message.payload;
-          const prompt = svcs.promptService.buildComposerPrompt(draftPrompt, context, analystCritique);
-          const result = await svcs.orchestrator.executeSingle(prompt, composerModel, { timeout: 60000 });
-          const content = svcs.responseProcessor.extractContent(result.text);
-          const parsed = svcs.responseProcessor.parseComposerResponse(content);
-          sendResponse({ success: true, data: { ...parsed, raw: content } });
-        })().catch(e => sendResponse({ success: false, error: e.message }));
-        return true;
-      }
 
       case "GET_FULL_HISTORY": {
         const allSessions = await sm.adapter.getAllSessions() || [];

@@ -39,7 +39,7 @@ export class ServiceRegistry {
     get persistenceLayer() { return this.get('persistenceLayer'); }
     get orchestrator() { return this.get('orchestrator'); }
     get authManager() { return this.get('authManager'); }
-    get promptService() { return this.get('promptService'); }
+    get mapperService() { return this.get('mapperService'); }
     get responseProcessor() { return this.get('responseProcessor'); }
 }
 

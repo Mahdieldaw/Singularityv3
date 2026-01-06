@@ -1,5 +1,5 @@
 
-import { PromptService } from './PromptService';
+import { MapperService } from './MapperService';
 import { ResponseProcessor } from './ResponseProcessor';
 import { getHealthTracker } from './provider-health-tracker.js';
 import { StepExecutor } from './execution/StepExecutor';
@@ -118,14 +118,14 @@ export class WorkflowEngine {
     this.port = port;
 
     // Services
-    this.promptService = options.promptService || new PromptService();
+    this.mapperService = options.mapperService || options.MapperService || new MapperService();
     this.responseProcessor = options.responseProcessor || new ResponseProcessor();
     this.healthTracker = getHealthTracker();
 
     // Components
     this.stepExecutor = new StepExecutor(
       orchestrator,
-      this.promptService,
+      this.mapperService,
       this.responseProcessor,
       this.healthTracker
     );
