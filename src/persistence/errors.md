@@ -1142,6 +1142,8 @@ return (
                     {problemStructure.implications.understand}
                 </div>
 
+            
+
                 <div className="text-[11px] text-text-muted space-y-1">
                     <div className="font-medium text-text-secondary mb-1">Evidence:</div>
                     {problemStructure.evidence.map((e, i) => (

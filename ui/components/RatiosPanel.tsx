@@ -120,7 +120,7 @@ export const RatiosPanel: React.FC<RatiosPanelProps> = ({
                     <span className="text-white font-medium">{Math.round(pattern.confidence * 100)}%</span>
                 </div>
                 <div className="mt-2 text-[10px] text-gray-500 italic">
-                    {pattern.implications.understand}
+                    {pattern.implications.action}
                 </div>
             </div>
         </div>

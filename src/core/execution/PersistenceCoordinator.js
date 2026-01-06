@@ -31,9 +31,7 @@ export class PersistenceCoordinator {
     const out = {
       batchOutputs: {},
       mappingOutputs: {},
-      refinerOutputs: {},
-      antagonistOutputs: {},
-      gauntletOutputs: {},
+      singularityOutputs: {},
     };
 
     const stepById = new Map((steps || []).map((s) => [s.stepId, s]));
@@ -65,36 +63,16 @@ export class PersistenceCoordinator {
           };
           return;
         }
-        if (step.type === "refiner") {
-          const providerId = result?.providerId || step?.payload?.refinerProvider;
+        if (step.type === "singularity") {
+          const providerId = result?.providerId || step?.payload?.singularityProvider;
           if (!providerId) return;
-          out.refinerOutputs[providerId] = {
+          out.singularityOutputs[providerId] = {
             providerId,
             text: result?.text || "",
             status: result?.status || "completed",
             meta: result?.meta || {},
           };
           return;
-        }
-        if (step.type === "antagonist") {
-          const providerId = result?.providerId || step?.payload?.antagonistProvider;
-          if (!providerId) return;
-          out.antagonistOutputs[providerId] = {
-            providerId,
-            text: result?.text || "",
-            status: result?.status || "completed",
-            meta: result?.meta || {},
-          };
-        }
-        if (step.type === "gauntlet") {
-          const providerId = result?.providerId || step?.payload?.gauntletProvider;
-          if (!providerId) return;
-          out.gauntletOutputs[providerId] = {
-            providerId,
-            text: result?.text || "",
-            status: result?.status || "completed",
-            meta: result?.meta || {},
-          };
         }
         return;
       }
@@ -123,36 +101,16 @@ export class PersistenceCoordinator {
           };
           return;
         }
-        if (step.type === "refiner") {
-          const providerId = step?.payload?.refinerProvider;
+        if (step.type === "singularity") {
+          const providerId = step?.payload?.singularityProvider;
           if (!providerId) return;
-          out.refinerOutputs[providerId] = {
+          out.singularityOutputs[providerId] = {
             providerId,
             text: "",
             status: "error",
             meta: { error: errorText },
           };
           return;
-        }
-        if (step.type === "antagonist") {
-          const providerId = step?.payload?.antagonistProvider;
-          if (!providerId) return;
-          out.antagonistOutputs[providerId] = {
-            providerId,
-            text: "",
-            status: "error",
-            meta: { error: errorText },
-          };
-        }
-        if (step.type === "gauntlet") {
-          const providerId = step?.payload?.gauntletProvider;
-          if (!providerId) return;
-          out.gauntletOutputs[providerId] = {
-            providerId,
-            text: "",
-            status: "error",
-            meta: { error: errorText },
-          };
         }
       }
     });
@@ -208,3 +166,4 @@ export class PersistenceCoordinator {
     );
   }
 }
+

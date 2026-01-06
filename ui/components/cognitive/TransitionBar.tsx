@@ -19,8 +19,6 @@ const TransitionBar: React.FC<TransitionBarProps> = ({
     // Labels and Icons
     const modeConfigs: Record<CognitiveViewMode, { label: string; emoji: string }> = {
         artifact: { label: 'Landscape', emoji: '🗺️' },
-        understand: { label: 'Understand', emoji: '🧠' },
-        gauntlet: { label: 'Decide', emoji: '⚖️' },
         singularity: { label: 'Singularity', emoji: '🌌' }
     };
 

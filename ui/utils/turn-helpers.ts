@@ -28,13 +28,12 @@ export function createOptimisticAiTurn(
   userTurn: UserTurn,
   activeProviders: ProviderKey[],
   shouldUseMapping: boolean,
-  shouldUseRefiner: boolean,
+  shouldUseSingularity: boolean,
   mappingProvider?: string,
-  refinerProvider?: string,
-  antagonistProvider?: string,
+  singularityProvider?: string,
   timestamp?: number,
   explicitUserTurnId?: string,
-  requestedFeatures?: { mapping: boolean; refiner: boolean; antagonist: boolean },
+  requestedFeatures?: { mapping: boolean; singularity: boolean },
 ): AiTurn {
   const now = timestamp || Date.now();
 
@@ -54,8 +53,6 @@ export function createOptimisticAiTurn(
     ];
   });
 
-
-
   // Initialize mapping responses if enabled
   const mappingResponses: Record<string, ProviderResponse[]> = {};
   if (shouldUseMapping && mappingProvider) {
@@ -71,28 +68,21 @@ export function createOptimisticAiTurn(
       },
     ];
   }
-  // --- NEW: Refiner setup ---
-  const refinerResponses: Record<string, ProviderResponse[]> = {};
-  if (shouldUseRefiner && refinerProvider) {
-    refinerResponses[refinerProvider] = [{
-      providerId: refinerProvider as ProviderKey,
-      text: "",
-      status: PRIMARY_STREAMING_PROVIDER_IDS.includes(String(refinerProvider)) ? "streaming" : "pending",
-      createdAt: now,
-      updatedAt: now,
-    }];
-  }
 
-  // --- NEW: Antagonist setup ---
-  const antagonistResponses: Record<string, ProviderResponse[]> = {};
-  if (requestedFeatures?.antagonist && antagonistProvider) {
-    antagonistResponses[antagonistProvider] = [{
-      providerId: antagonistProvider as ProviderKey,
-      text: "",
-      status: PRIMARY_STREAMING_PROVIDER_IDS.includes(String(antagonistProvider)) ? "streaming" : "pending",
-      createdAt: now,
-      updatedAt: now,
-    }];
+  // Initialize singularity responses if enabled
+  const singularityResponses: Record<string, ProviderResponse[]> = {};
+  if (shouldUseSingularity && singularityProvider) {
+    singularityResponses[singularityProvider] = [
+      {
+        providerId: singularityProvider as ProviderKey,
+        text: "",
+        status: PRIMARY_STREAMING_PROVIDER_IDS.includes(String(singularityProvider))
+          ? "streaming"
+          : "pending",
+        createdAt: now,
+        updatedAt: now,
+      },
+    ];
   }
 
   const effectiveUserTurnId = explicitUserTurnId || userTurn.id;
@@ -106,21 +96,15 @@ export function createOptimisticAiTurn(
     userTurnId: effectiveUserTurnId,
     batchResponses: pendingBatch,
     mappingResponses,
-    refinerResponses,
-    antagonistResponses,
-    understandResponses: {},
-    gauntletResponses: {},
-    singularityResponses: {},
+    singularityResponses,
     meta: {
       isOptimistic: true,
       expectedProviders: activeProviders, // ✅ STORE expected providers
       mapper: mappingProvider,
-      refiner: refinerProvider,
-      antagonist: antagonistProvider,
+      singularity: singularityProvider,
       ...(requestedFeatures ? { requestedFeatures } : {}),
       ...(mappingProvider ? { mapper: mappingProvider } : {}),
-      ...(refinerProvider ? { refiner: refinerProvider } : {}),
-      ...(antagonistProvider ? { antagonist: antagonistProvider } : {}),
+      ...(singularityProvider ? { singularity: singularityProvider } : {}),
     },
   };
 }
@@ -135,20 +119,11 @@ export function applyStreamingUpdates(
     responseType:
       | "batch"
       | "mapping"
-      | "refiner"
-      | "antagonist"
-      | "understand"
-      | "gauntlet"
       | "singularity";
   }>,
 ) {
   let batchChanged = false;
-
   let mappingChanged = false;
-  let refinerChanged = false;
-  let antagonistChanged = false;
-  let understandChanged = false;
-  let gauntletChanged = false;
   let singularityChanged = false;
 
   updates.forEach(({ providerId, text: delta, status, responseType }) => {
@@ -212,102 +187,6 @@ export function applyStreamingUpdates(
       }
 
       aiTurn.mappingResponses[providerId] = arr;
-    } else if (responseType === "refiner") {
-      refinerChanged = true;
-      if (!aiTurn.refinerResponses) aiTurn.refinerResponses = {};
-      const arr = normalizeResponseArray(aiTurn.refinerResponses[providerId]);
-
-      const latest = arr.length > 0 ? arr[arr.length - 1] : undefined;
-      const isLatestTerminal = latest && (latest.status === "completed" || latest.status === "error");
-
-      if (latest && !isLatestTerminal) {
-        arr[arr.length - 1] = {
-          ...latest,
-          text: (latest.text || "") + delta,
-          status: status as any,
-          updatedAt: Date.now(),
-        };
-      } else {
-        arr.push({
-          providerId: providerId as ProviderKey,
-          text: delta,
-          status: status as any,
-          createdAt: Date.now(),
-        });
-      }
-
-      aiTurn.refinerResponses[providerId] = arr;
-    } else if (responseType === "antagonist") {
-      antagonistChanged = true;
-      if (!aiTurn.antagonistResponses) aiTurn.antagonistResponses = {};
-      const arr = normalizeResponseArray(aiTurn.antagonistResponses[providerId]);
-
-      const latest = arr.length > 0 ? arr[arr.length - 1] : undefined;
-      const isLatestTerminal = latest && (latest.status === "completed" || latest.status === "error");
-
-      if (latest && !isLatestTerminal) {
-        arr[arr.length - 1] = {
-          ...latest,
-          text: (latest.text || "") + delta,
-          status: status as any,
-          updatedAt: Date.now(),
-        };
-      } else {
-        arr.push({
-          providerId: providerId as ProviderKey,
-          text: delta,
-          status: status as any,
-          createdAt: Date.now(),
-        });
-      }
-
-      aiTurn.antagonistResponses[providerId] = arr;
-    } else if (responseType === "understand") {
-      understandChanged = true;
-      if (!aiTurn.understandResponses) aiTurn.understandResponses = {};
-      const arr = normalizeResponseArray(aiTurn.understandResponses[providerId]);
-      const latest = arr.length > 0 ? arr[arr.length - 1] : undefined;
-      const isLatestTerminal = latest && (latest.status === "completed" || latest.status === "error");
-
-      if (latest && !isLatestTerminal) {
-        arr[arr.length - 1] = {
-          ...latest,
-          text: (latest.text || "") + delta,
-          status: status as any,
-          updatedAt: Date.now(),
-        };
-      } else {
-        arr.push({
-          providerId: providerId as ProviderKey,
-          text: delta,
-          status: status as any,
-          createdAt: Date.now(),
-        });
-      }
-      aiTurn.understandResponses[providerId] = arr;
-    } else if (responseType === "gauntlet") {
-      gauntletChanged = true;
-      if (!aiTurn.gauntletResponses) aiTurn.gauntletResponses = {};
-      const arr = normalizeResponseArray(aiTurn.gauntletResponses[providerId]);
-      const latest = arr.length > 0 ? arr[arr.length - 1] : undefined;
-      const isLatestTerminal = latest && (latest.status === "completed" || latest.status === "error");
-
-      if (latest && !isLatestTerminal) {
-        arr[arr.length - 1] = {
-          ...latest,
-          text: (latest.text || "") + delta,
-          status: status as any,
-          updatedAt: Date.now(),
-        };
-      } else {
-        arr.push({
-          providerId: providerId as ProviderKey,
-          text: delta,
-          status: status as any,
-          createdAt: Date.now(),
-        });
-      }
-      aiTurn.gauntletResponses[providerId] = arr;
     } else if (responseType === "singularity") {
       singularityChanged = true;
       if (!aiTurn.singularityResponses) aiTurn.singularityResponses = {};
@@ -337,12 +216,7 @@ export function applyStreamingUpdates(
 
   // ✅ Bump versions only for changed types
   if (batchChanged) aiTurn.batchVersion = (aiTurn.batchVersion ?? 0) + 1;
-
   if (mappingChanged) aiTurn.mappingVersion = (aiTurn.mappingVersion ?? 0) + 1;
-  if (refinerChanged) aiTurn.refinerVersion = (aiTurn.refinerVersion ?? 0) + 1;
-  if (antagonistChanged) aiTurn.antagonistVersion = (aiTurn.antagonistVersion ?? 0) + 1;
-  if (understandChanged) aiTurn.understandVersion = (aiTurn.understandVersion ?? 0) + 1;
-  if (gauntletChanged) aiTurn.gauntletVersion = (aiTurn.gauntletVersion ?? 0) + 1;
   if (singularityChanged) aiTurn.singularityVersion = (aiTurn.singularityVersion ?? 0) + 1;
 }
 
@@ -420,10 +294,7 @@ export function normalizeBackendRoundsToTurns(
         createdAt: round.completedAt || round.createdAt || Date.now(),
         batchResponses,
         mappingResponses: normalizeResponseMap(round.mappingResponses),
-        refinerResponses: normalizeResponseMap(round.refinerResponses),
-        antagonistResponses: normalizeResponseMap(round.antagonistResponses),
-        understandResponses: normalizeResponseMap(round.understandResponses),
-        gauntletResponses: normalizeResponseMap(round.gauntletResponses),
+        singularityResponses: normalizeResponseMap(round.singularityResponses),
         meta: round.meta || {},
       };
       normalized.push(aiTurn);

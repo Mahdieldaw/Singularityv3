@@ -712,8 +712,6 @@ export interface TurnCreatedMessage {
   aiTurnId: string;
   providers?: ProviderKey[];
   mappingProvider?: ProviderKey | null;
-  refinerProvider?: ProviderKey | null;
-  antagonistProvider?: ProviderKey | null;
 }
 
 export interface TurnFinalizedMessage {
@@ -849,11 +847,7 @@ export interface AiTurn {
   // Arrays for all response buckets for uniform handling
   batchResponses: Record<string, ProviderResponse[]>;
   mappingResponses: Record<string, ProviderResponse[]>;
-  refinerResponses?: Record<string, ProviderResponse[]>;
-  antagonistResponses?: Record<string, ProviderResponse[]>;
   exploreResponses?: Record<string, ProviderResponse[]>;
-  understandResponses?: Record<string, ProviderResponse[]>;
-  gauntletResponses?: Record<string, ProviderResponse[]>;
   singularityResponses?: Record<string, ProviderResponse[]>;
 
   // Cognitive Pipeline Artifacts (Computed)

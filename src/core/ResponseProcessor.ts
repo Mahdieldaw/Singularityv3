@@ -4,8 +4,7 @@
 // Pure response processing - NO I/O
 // ═══════════════════════════════════════════════════════════════════════════
 
-import { parseRefinerOutput, RefinerOutput, parseMappingResponse, parseOptionTitles } from '../../shared/parsing-utils';
-export type { RefinerOutput };
+import { parseMappingResponse, parseOptionTitles } from '../../shared/parsing-utils';
 
 
 export class ResponseProcessor {
@@ -57,14 +56,6 @@ export class ResponseProcessor {
             options,
             optionTitles,
         };
-    }
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // REFINER RESPONSE PARSER
-    // ─────────────────────────────────────────────────────────────────────────
-
-    parseRefinerResponse(text: string): RefinerOutput {
-        return parseRefinerOutput(text);
     }
 
     parseOptionTitles(text: string): string[] {

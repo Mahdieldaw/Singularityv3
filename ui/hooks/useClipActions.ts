@@ -1,6 +1,6 @@
 import { useCallback } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
-import { turnsMapAtom, alertTextAtom, mappingProviderAtom, refinerProviderAtom, antagonistProviderAtom, singularityProviderAtom } from "../state/atoms";
+import { turnsMapAtom, alertTextAtom, mappingProviderAtom, singularityProviderAtom } from "../state/atoms";
 import { useRoundActions } from "./chat/useRoundActions";
 import type { AiTurn } from "../types";
 import { PRIMARY_STREAMING_PROVIDER_IDS } from "../constants";
@@ -8,17 +8,15 @@ import { PRIMARY_STREAMING_PROVIDER_IDS } from "../constants";
 export function useClipActions() {
   const turnsMap = useAtomValue(turnsMapAtom);
   const setMappingProvider = useSetAtom(mappingProviderAtom);
-  const setRefinerProvider = useSetAtom(refinerProviderAtom);
-  const setAntagonistProvider = useSetAtom(antagonistProviderAtom);
   const setSingularityProvider = useSetAtom(singularityProviderAtom);
   const setAlertText = useSetAtom(alertTextAtom);
   const setTurnsMap = useSetAtom(turnsMapAtom);
-  const { runMappingForAiTurn, runRefinerForAiTurn, runAntagonistForAiTurn, runSingularityForAiTurn } = useRoundActions();
+  const { runMappingForAiTurn, runSingularityForAiTurn } = useRoundActions();
 
   const handleClipClick = useCallback(
     async (
       aiTurnId: string,
-      type: "mapping" | "refiner" | "antagonist" | "singularity",
+      type: "mapping" | "singularity",
       providerId: string,
     ) => {
       try {
@@ -45,13 +43,9 @@ export function useClipActions() {
         const responsesMap =
           type === "mapping"
             ? aiTurn.mappingResponses || {}
-            : type === "refiner"
-              ? aiTurn.refinerResponses || {}
-              : type === "antagonist"
-                ? aiTurn.antagonistResponses || {}
-                : type === "singularity"
-                  ? aiTurn.singularityResponses || {}
-                  : {};
+            : type === "singularity"
+              ? aiTurn.singularityResponses || {}
+              : {};
         const responseEntry = responsesMap[providerId];
 
         // Check if we have a valid (non-error) existing response
@@ -63,10 +57,6 @@ export function useClipActions() {
         // Update global provider preference (Crown Move / Mapper Select)
         if (type === "mapping") {
           setMappingProvider(providerId);
-        } else if (type === "refiner") {
-          setRefinerProvider(providerId);
-        } else if (type === "antagonist") {
-          setAntagonistProvider(providerId);
         } else if (type === "singularity") {
           setSingularityProvider(providerId);
         }
@@ -100,11 +90,6 @@ export function useClipActions() {
 
         if (type === "mapping") {
           await runMappingForAiTurn(aiTurnId, providerId);
-        } else if (type === "refiner") {
-          // Refiner Recompute
-          await runRefinerForAiTurn(aiTurnId, providerId);
-        } else if (type === "antagonist") {
-          await runAntagonistForAiTurn(aiTurnId, providerId);
         } else if (type === "singularity") {
           await runSingularityForAiTurn(aiTurnId, providerId);
         }
@@ -116,14 +101,10 @@ export function useClipActions() {
     [
       turnsMap,
       runMappingForAiTurn,
-      runRefinerForAiTurn,
       setAlertText,
       setTurnsMap,
       setMappingProvider,
-      setRefinerProvider,
-      setAntagonistProvider,
       setSingularityProvider,
-      runAntagonistForAiTurn,
       runSingularityForAiTurn,
     ],
   );

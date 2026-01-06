@@ -13,8 +13,6 @@ import {
   mappingEnabledAtom,
   mappingProviderAtom,
 
-  refinerProviderAtom,
-  antagonistProviderAtom,
   lastActivityAtAtom,
   workflowProgressAtom,
   providerErrorsAtom,
@@ -46,10 +44,6 @@ function getStepType(
 ):
   | "batch"
   | "mapping"
-  | "refiner"
-  | "antagonist"
-  | "understand"
-  | "gauntlet"
   | "singularity"
   | null {
   if (!stepId || typeof stepId !== "string") return null;
@@ -58,13 +52,7 @@ function getStepType(
 
   if (stepId.startsWith("mapping-") || stepId.includes("-mapping-"))
     return "mapping";
-  if (stepId.startsWith("refiner-") || stepId.includes("-refiner-"))
-    return "refiner";
-  if (stepId.startsWith("antagonist-") || stepId.includes("-antagonist-"))
-    return "antagonist";
   if (stepId.startsWith("batch-") || stepId.includes("prompt")) return "batch";
-  if (stepId.startsWith("understand-") || stepId.includes("understand")) return "understand";
-  if (stepId.startsWith("gauntlet-") || stepId.includes("gauntlet")) return "gauntlet";
   if (stepId.startsWith("explore-")) return "batch"; // Explore currently uses batch-like routing
   if (stepId.startsWith("singularity-") || stepId.includes("singularity")) return "singularity";
 
@@ -80,10 +68,6 @@ function extractProviderFromStepId(
   stepId: string,
   stepType:
     | "mapping"
-    | "refiner"
-    | "antagonist"
-    | "understand"
-    | "gauntlet"
     | "singularity",
 ): string | null {
   // Support provider IDs with hyphens/dots/etc., assuming last segment is numeric timestamp
@@ -106,8 +90,6 @@ export function usePortMessageHandler() {
   const mappingEnabled = useAtomValue(mappingEnabledAtom);
   const mappingProvider = useAtomValue(mappingProviderAtom);
 
-  const refinerProvider = useAtomValue(refinerProviderAtom);
-  const antagonistProvider = useAtomValue(antagonistProviderAtom);
   const setLastActivityAt = useSetAtom(lastActivityAtAtom);
   const setWorkflowProgress = useSetAtom(workflowProgressAtom);
   const setProviderErrors = useSetAtom(providerErrorsAtom);
@@ -135,10 +117,6 @@ export function usePortMessageHandler() {
     stepType:
       | "mapping"
       | "batch"
-      | "refiner"
-      | "antagonist"
-      | "understand"
-      | "gauntlet"
       | "singularity";
     providerId: string;
   } | null>(null);
@@ -190,9 +168,7 @@ export function usePortMessageHandler() {
             sessionId: msgSessionId,
             providers: msgProviders,
 
-            mappingProvider: msgMappingProvider,
-            refinerProvider: msgRefinerProvider,
-            antagonistProvider: msgAntagonistProvider
+            mappingProvider: msgMappingProvider
           } = message;
 
           // Always adopt the backend sessionId for TURN_CREATED
@@ -210,8 +186,6 @@ export function usePortMessageHandler() {
 
 
           const effectiveMappingProvider = msgMappingProvider || mappingProvider;
-          const effectiveRefinerProvider = msgRefinerProvider || refinerProvider;
-          const effectiveAntagonistProvider = msgAntagonistProvider || antagonistProvider;
 
           // Single atomic update to turnsMap ensures we read the latest user turn
           setTurnsMap((draft: Map<string, TurnMessage>) => {
@@ -242,16 +216,14 @@ export function usePortMessageHandler() {
               ensuredUser,
               activeProviders,
               !!mappingEnabled && !!effectiveMappingProvider,
-              !!effectiveRefinerProvider,
+              false, // singularity not auto-triggered on creation usually
               effectiveMappingProvider || undefined,
-              effectiveRefinerProvider || undefined,
-              effectiveAntagonistProvider || undefined,
+              undefined,
               Date.now(),
               ensuredUser.id,
               {
                 mapping: !!mappingEnabled && !!effectiveMappingProvider,
-                refiner: !!effectiveRefinerProvider,
-                antagonist: !!effectiveAntagonistProvider
+                singularity: false
               },
             );
             draft.set(aiTurnId, aiTurn);
@@ -345,6 +317,10 @@ export function usePortMessageHandler() {
                   mappingResponses: {
                     ...(existingAi.mappingResponses || {}),
                     ...((turn.ai as AiTurn)?.mappingResponses || {}),
+                  },
+                  singularityResponses: {
+                    ...(existingAi.singularityResponses || {}),
+                    ...((turn.ai as AiTurn)?.singularityResponses || {}),
                   },
                   meta: {
                     ...(existingAi.meta || {}),
@@ -605,50 +581,6 @@ export function usePortMessageHandler() {
                         baseEntry,
                       ),
                     };
-                  } else if (stepType === "refiner") {
-                    aiTurn.refinerResponses = {
-                      ...(aiTurn.refinerResponses || {}),
-                      [normalizedId]: updateResponseList(
-                        aiTurn.refinerResponses?.[normalizedId],
-                        baseEntry,
-                      ),
-                    };
-                    aiTurn.refinerVersion = (aiTurn.refinerVersion ?? 0) + 1;
-                  } else if (stepType === "antagonist") {
-                    aiTurn.antagonistResponses = {
-                      ...(aiTurn.antagonistResponses || {}),
-                      [normalizedId]: updateResponseList(
-                        aiTurn.antagonistResponses?.[normalizedId],
-                        baseEntry,
-                      ),
-                    };
-                    aiTurn.antagonistVersion = (aiTurn.antagonistVersion ?? 0) + 1;
-                  } else if (stepType === "understand") {
-                    aiTurn.understandResponses = {
-                      ...(aiTurn.understandResponses || {}),
-                      [normalizedId]: updateResponseList(
-                        aiTurn.understandResponses?.[normalizedId],
-                        baseEntry,
-                      ),
-                    };
-                    // Extract structured output from meta if available
-                    if (data?.meta?.understandOutput) {
-                      aiTurn.understandOutput = data.meta.understandOutput;
-                    }
-                    aiTurn.understandVersion = (aiTurn.understandVersion ?? 0) + 1;
-                  } else if (stepType === "gauntlet") {
-                    aiTurn.gauntletResponses = {
-                      ...(aiTurn.gauntletResponses || {}),
-                      [normalizedId]: updateResponseList(
-                        aiTurn.gauntletResponses?.[normalizedId],
-                        baseEntry,
-                      ),
-                    };
-                    // Extract structured output from meta if available
-                    if (data?.meta?.gauntletOutput) {
-                      aiTurn.gauntletOutput = data.meta.gauntletOutput;
-                    }
-                    aiTurn.gauntletVersion = (aiTurn.gauntletVersion ?? 0) + 1;
                   } else if (stepType === "singularity") {
                     aiTurn.singularityResponses = {
                       ...(aiTurn.singularityResponses || {}),
@@ -705,8 +637,6 @@ export function usePortMessageHandler() {
                   (!providerId || typeof providerId !== "string") &&
                   (!providerId || typeof providerId !== "string") &&
                   (stepType === "mapping" ||
-                    stepType === "refiner" ||
-                    stepType === "antagonist" ||
                     stepType === "singularity")
                 ) {
                   providerId = extractProviderFromStepId(stepId, stepType);
@@ -782,62 +712,6 @@ export function usePortMessageHandler() {
                         ...(aiTurn.batchResponses || {}),
                         [providerId!]: arr as any,
                       } as any;
-                    } else if (stepType === "refiner") {
-                      const arr = Array.isArray(aiTurn.refinerResponses?.[providerId!])
-                        ? [...(aiTurn.refinerResponses![providerId!] as any[])]
-                        : [];
-                      if (arr.length > 0) {
-                        const latest = arr[arr.length - 1] as any;
-                        arr[arr.length - 1] = {
-                          ...latest,
-                          status: "error",
-                          text: errText || (latest?.text ?? ""),
-                          updatedAt: now,
-                        } as any;
-                      } else {
-                        arr.push({
-                          providerId: providerId!,
-                          text: errText || "",
-                          status: "error",
-                          createdAt: now,
-                          updatedAt: now,
-                        } as any);
-                      }
-                      aiTurn.refinerResponses = {
-                        ...(aiTurn.refinerResponses || {}),
-                        [providerId!]: arr as any,
-                      } as any;
-                      aiTurn.refinerVersion = (aiTurn.refinerVersion ?? 0) + 1;
-                    } else if (stepType === "antagonist") {
-                      const arr = Array.isArray(aiTurn.antagonistResponses?.[providerId!])
-                        ? [...(aiTurn.antagonistResponses![providerId!] as any[])]
-                        : [];
-                      if (arr.length > 0) {
-                        const latest = arr[arr.length - 1] as any;
-                        arr[arr.length - 1] = {
-                          ...latest,
-                          status: "error",
-                          text: errText || (latest?.text ?? ""),
-                          updatedAt: now,
-                        } as any;
-                      } else {
-                        arr.push({
-                          providerId: providerId!,
-                          text: errText || "",
-                          status: "error",
-                          createdAt: now,
-                          updatedAt: now,
-                        } as any);
-                      }
-                      aiTurn.antagonistResponses = {
-                        ...(aiTurn.antagonistResponses || {}),
-                        [providerId!]: arr as any,
-                      } as any;
-                      aiTurn.antagonistVersion = (aiTurn.antagonistVersion ?? 0) + 1;
-                    } else if (stepType === "understand") {
-                      aiTurn.understandVersion = (aiTurn.understandVersion ?? 0) + 1;
-                    } else if (stepType === "gauntlet") {
-                      aiTurn.gauntletVersion = (aiTurn.gauntletVersion ?? 0) + 1;
                     } else if (stepType === "singularity") {
                       const arr = Array.isArray(aiTurn.singularityResponses?.[providerId!])
                         ? [...(aiTurn.singularityResponses![providerId!] as any[])]

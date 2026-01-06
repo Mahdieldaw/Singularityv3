@@ -588,8 +588,6 @@ Answer the user's message directly. Use context only to disambiguate.
       let sourceContainer;
       switch (responseType) {
         case "mapping": sourceContainer = aiTurn.mappingResponses || {}; break;
-        case "refiner": sourceContainer = aiTurn.refinerResponses || {}; break;
-        case "antagonist": sourceContainer = aiTurn.antagonistResponses || {}; break;
         default: sourceContainer = aiTurn.batchResponses || {}; break;
       }
 

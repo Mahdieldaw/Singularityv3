@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useRef, useEffect } from "react";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
-import { providerEffectiveStateFamily, isSplitOpenAtom, mappingProviderAtom, providerAuthStatusAtom, selectedModelsAtom, refinerProviderAtom, antagonistProviderAtom, singularityProviderAtom, providerLocksAtom } from "../state/atoms";
+import { providerEffectiveStateFamily, isSplitOpenAtom, mappingProviderAtom, providerAuthStatusAtom, selectedModelsAtom, singularityProviderAtom, providerLocksAtom } from "../state/atoms";
 import { LLMProvider } from "../types";
 import { PROVIDER_ACCENT_COLORS, WORKFLOW_STAGE_COLORS } from "../constants";
 import { getProviderColor, getProviderLogo } from "../utils/provider-helpers";
@@ -51,9 +51,7 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
     const isSplitOpen = useAtomValue(isSplitOpenAtom);
     const authStatus = useAtomValue(providerAuthStatusAtom);
     const [mapProviderVal, setMapProvider] = useAtom(mappingProviderAtom);
-    const [refinerProvider, setRefinerProvider] = useAtom(refinerProviderAtom);
     const [selectedModels, setSelectedModels] = useAtom(selectedModelsAtom);
-    const [antagonistProvider, setAntagonistProvider] = useAtom(antagonistProviderAtom);
     const [singularityProvider, setSingularityProvider] = useAtom(singularityProviderAtom);
     const setLocks = useSetAtom(providerLocksAtom);
     const containerRef = useRef<HTMLDivElement>(null);

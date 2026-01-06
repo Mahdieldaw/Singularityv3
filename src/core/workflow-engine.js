@@ -88,16 +88,14 @@ function computeConsensusGateFromMapping({ stepResults, mappingSteps }) {
     if (approaches.length === 0) return null;
 
     const maxSupporters = Math.max(...approaches.map((a) => a.supportCount));
-    const skipRefiner = approaches.length === 1 || maxSupporters <= 2;
-
+    // skipRefiner/Antagonist logic removed as these steps are deprecated.
+    
     let reason = "has_anchor_outlier";
     if (approaches.length === 1) reason = "monoculture";
     else if (maxSupporters <= 2) reason = "no_anchor";
 
     return {
-      consensusOnly: !!skipRefiner,
-      skipRefiner: !!skipRefiner,
-      skipAntagonist: !!skipRefiner,
+      consensusOnly: false, // Legacy flag, might be unused but keeping structure safe
       reason,
       stats: {
         totalModelsCompleted: totalCompleted,
@@ -318,10 +316,7 @@ export class WorkflowEngine {
   // ═══════════════════════════════════════════════════════════════════════════
 
   _shouldSkipStep(step, context) {
-    const consensusOnly = !!context?.workflowControl?.consensusOnly;
-    if (consensusOnly && ['refiner', 'antagonist'].includes(step.type)) {
-      return true;
-    }
+    // Consensus gate logic for deprecated steps removed.
     return false;
   }
 

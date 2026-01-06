@@ -85,34 +85,6 @@ export async function runPreflight(request, authStatus, availableProviders) {
         mapper = selectBestProvider('mapping', authStatus, availableProviders);
     }
 
-    // === Antagonist ===
-    let antagonist = request.antagonist || null;
-    if (antagonist && !isProviderAuthorized(antagonist, authStatus)) {
-        if (locks.antagonist) {
-            const fallback = selectBestProvider('antagonist', authStatus, availableProviders);
-            warnings.push(`Antagonist "${antagonist}" is locked but unauthorized; using "${fallback}" for this request`);
-            antagonist = fallback;
-        } else {
-            antagonist = selectBestProvider('antagonist', authStatus, availableProviders);
-        }
-    } else if (!antagonist) {
-        antagonist = selectBestProvider('antagonist', authStatus, availableProviders);
-    }
-
-    // === Refiner ===
-    let refiner = request.refiner || null;
-    if (refiner && !isProviderAuthorized(refiner, authStatus)) {
-        if (locks.refiner) {
-            const fallback = selectBestProvider('refiner', authStatus, availableProviders);
-            warnings.push(`Refiner "${refiner}" is locked but unauthorized; using "${fallback}" for this request`);
-            refiner = fallback;
-        } else {
-            refiner = selectBestProvider('refiner', authStatus, availableProviders);
-        }
-    } else if (!refiner) {
-        refiner = selectBestProvider('refiner', authStatus, availableProviders);
-    }
-
-    return { providers, mapper, antagonist, refiner, warnings };
+    return { providers, mapper, warnings };
 }
 

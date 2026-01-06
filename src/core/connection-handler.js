@@ -112,10 +112,6 @@ export class ConnectionHandler {
       const buckets = {
         batchResponses: {},
         mappingResponses: {},
-        refinerResponses: {},
-        antagonistResponses: {},
-        understandResponses: {},
-        gauntletResponses: {},
         singularityResponses: {},
       };
       for (const r of resps || []) {
@@ -133,14 +129,6 @@ export class ConnectionHandler {
           (buckets.batchResponses[r.providerId] ||= []).push(entry);
         } else if (r.responseType === "mapping") {
           (buckets.mappingResponses[r.providerId] ||= []).push(entry);
-        } else if (r.responseType === "refiner") {
-          (buckets.refinerResponses[r.providerId] ||= []).push(entry);
-        } else if (r.responseType === "antagonist") {
-          (buckets.antagonistResponses[r.providerId] ||= []).push(entry);
-        } else if (r.responseType === "understand") {
-          (buckets.understandResponses[r.providerId] ||= []).push(entry);
-        } else if (r.responseType === "gauntlet") {
-          (buckets.gauntletResponses[r.providerId] ||= []).push(entry);
         } else if (r.responseType === "singularity") {
           (buckets.singularityResponses[r.providerId] ||= []).push(entry);
         }
@@ -166,10 +154,6 @@ export class ConnectionHandler {
       const hasAny =
         Object.keys(buckets.batchResponses).length > 0 ||
         Object.keys(buckets.mappingResponses).length > 0 ||
-        Object.keys(buckets.refinerResponses).length > 0 ||
-        Object.keys(buckets.antagonistResponses).length > 0 ||
-        Object.keys(buckets.understandResponses).length > 0 ||
-        Object.keys(buckets.gauntletResponses).length > 0 ||
         Object.keys(buckets.singularityResponses).length > 0;
       if (!hasAny) return;
 
@@ -203,10 +187,6 @@ export class ConnectionHandler {
             createdAt: aiTurn.createdAt || Date.now(),
             batchResponses: buckets.batchResponses,
             mappingResponses: buckets.mappingResponses,
-            refinerResponses: buckets.refinerResponses,
-            antagonistResponses: buckets.antagonistResponses,
-            understandResponses: buckets.understandResponses,
-            gauntletResponses: buckets.gauntletResponses,
             singularityResponses: buckets.singularityResponses,
             meta: aiTurn.meta || {},
             mapperArtifact: aiTurn.mapperArtifact,
@@ -408,22 +388,11 @@ export class ConnectionHandler {
 
       if (executeRequest.type === "recompute") {
         const stepType = executeRequest.stepType;
-        if (["understand", "gauntlet", "refiner", "antagonist"].includes(stepType)) {
-          const mode =
-            stepType === "refiner"
-              ? "refine"
-              : stepType;
-          await this.workflowEngine.handleContinueCognitiveRequest({
-            sessionId: executeRequest.sessionId,
-            aiTurnId: executeRequest.sourceTurnId,
-            mode,
-            providerId: executeRequest.targetProvider,
-            selectedArtifacts: [],
-            isRecompute: true,
-            sourceTurnId: executeRequest.sourceTurnId,
-          });
-          return;
-        }
+        // Only handle valid recompute types if any remain, otherwise this block might be empty or removed.
+        // Assuming singularity/concierge recompute might use this or handleContinueCognitiveRequest logic is different.
+        // If 'singularity' is handled here, keep it. If not, remove the block.
+        // The previous code only checked for ["understand", "gauntlet", "refiner", "antagonist"].
+        // If singularity uses a different path or is not in this list, we can remove the block.
       }
 
       // Step 1: Resolve context
@@ -598,8 +567,6 @@ export class ConnectionHandler {
       {
         providers: executeRequest.providers,
         mapper: executeRequest.mapper,
-        antagonist: executeRequest.antagonist,
-        refiner: executeRequest.refiner,
       },
       authStatus,
       availableProviders
@@ -608,8 +575,6 @@ export class ConnectionHandler {
     // Apply results
     executeRequest.providers = result.providers;
     executeRequest.mapper = result.mapper;
-    executeRequest.antagonist = result.antagonist;
-    executeRequest.refiner = result.refiner;
 
     // Emit warnings (not errors!)
     if (result.warnings.length > 0) {
@@ -623,16 +588,12 @@ export class ConnectionHandler {
     // ONLY fail if zero providers available
     const hasAnyProvider =
       result.providers.length > 0 ||
-      result.mapper !== null ||
-      result.antagonist !== null ||
-      result.refiner !== null;
+      result.mapper !== null;
 
     if (!hasAnyProvider) {
       const attempted = [
         ...(executeRequest.providers || []),
         executeRequest.mapper,
-        executeRequest.antagonist,
-        executeRequest.refiner,
       ].filter(Boolean);
 
       const errorMsg = createAuthErrorMessage(

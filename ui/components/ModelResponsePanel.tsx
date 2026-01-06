@@ -19,8 +19,11 @@ import { ArtifactOverlay, Artifact } from "./ArtifactOverlay";
 import { ChevronDownIcon, ChevronUpIcon } from "./Icons";
 import { CopyButton } from "./CopyButton";
 import { formatProviderResponseForMd } from "../utils/copy-format-utils";
-import { useRefinerOutput } from "../hooks/useRefinerOutput";
-import { TrustSignalsPanel } from "./refinerui/TrustSignalsPanel";
+import {
+  AiTurn,
+  ProviderResponse,
+  LLMProvider,
+} from "../types";
 import { useClipActions } from "../hooks/useClipActions";
 import clsx from "clsx";
 
@@ -99,14 +102,6 @@ export const ModelResponsePanel: React.FC<ModelResponsePanelProps> = React.memo(
         return { status, text, hasText, isStreaming, isError, artifacts, errorMsg, requiresReauth };
     }, [latestResponse, streamingState.activeProviderId, shownProviderId]);
 
-    const {
-        output: refinerOutput,
-        isLoading: isRefinerLoading,
-        isError: isRefinerError,
-        providerId: refinerPid,
-        rawText: refinerRawText,
-        error: refinerError
-    } = useRefinerOutput(shownTurnId);
     const chatInputHeight = useAtomValue(chatInputHeightAtom);
 
     // Branch send handler
@@ -115,26 +110,6 @@ export const ModelResponsePanel: React.FC<ModelResponsePanelProps> = React.memo(
         handleBranchContinue(shownProviderId, branchInput);
         setBranchInput('');
     }, [branchInput, handleBranchContinue, shownProviderId]);
-
-    // Trust mode
-    if (shownProviderId === '__trust__') {
-        return (
-            <div className="h-full w-full min-w-0 flex flex-col bg-surface-raised border border-border-subtle rounded-2xl shadow-lg overflow-hidden">
-                <TrustSignalsPanel
-                    refiner={refinerOutput}
-                    isLoading={isRefinerLoading}
-                    isError={isRefinerError}
-                    providerId={refinerPid}
-                    onRetry={(pid) => handleClipClick(shownTurnId, "refiner", pid)}
-                    rawText={refinerRawText || undefined}
-                    onClose={onClose}
-                    bottomPadding={(chatInputHeight || 80) + 32}
-                    turnId={shownTurnId}
-                    error={refinerError}
-                />
-            </div>
-        );
-    }
 
     // Branching visual state
     const isBranching = activeRecompute?.providerId === shownProviderId &&

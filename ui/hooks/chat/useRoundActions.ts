@@ -210,7 +210,7 @@ export function useRoundActions() {
     ],
   );
 
-  const runUnderstandForAiTurn = useCallback(
+  const runSingularityForAiTurn = useCallback(
     async (aiTurnId: string, providerIdOverride?: string) => {
       if (!currentSessionId) return;
 
@@ -220,149 +220,7 @@ export function useRoundActions() {
         return;
       }
 
-      const hasMapper = !!ai.mapperArtifact;
-      if (!hasMapper) {
-        setAlertText("Understand requires mapping to be completed first.");
-        return;
-      }
-
-      const effectiveProviderId =
-        providerIdOverride || ai.meta?.mapper || Object.keys(ai.mappingResponses || {})[0] || "gemini";
-
-      setActiveAiTurnId(ai.id);
-      setIsLoading(true);
-      setUiPhase("streaming");
-
-      setActiveRecomputeState({
-        aiTurnId: ai.id,
-        stepType: "understand",
-        providerId: effectiveProviderId,
-      });
-
-      try {
-        await api.sendPortMessage({
-          type: "CONTINUE_COGNITIVE_WORKFLOW",
-          payload: {
-            sessionId: currentSessionId,
-            aiTurnId: ai.id,
-            mode: "understand",
-            providerId: effectiveProviderId,
-            isRecompute: true,
-            sourceTurnId: ai.id,
-          },
-        });
-      } catch (err) {
-        console.error("[RoundActions] Understand run failed:", err);
-        setAlertText("Understand request failed. Please try again.");
-        setIsLoading(false);
-        setUiPhase("awaiting_action");
-        setActiveAiTurnId(null);
-        setActiveRecomputeState(null);
-      }
-    },
-    [
-      currentSessionId,
-      turnsMap,
-      setActiveAiTurnId,
-      setIsLoading,
-      setUiPhase,
-      setActiveRecomputeState,
-      setAlertText,
-    ],
-  );
-
-  const runGauntletForAiTurn = useCallback(
-    async (aiTurnId: string, providerIdOverride?: string) => {
-      if (!currentSessionId) return;
-
-      const ai = turnsMap.get(aiTurnId) as AiTurn | undefined;
-      if (!ai || ai.type !== "ai") {
-        console.warn(`[RoundActions] AI turn ${aiTurnId} not found`);
-        return;
-      }
-
-      const hasMapper = !!ai.mapperArtifact;
-      if (!hasMapper) {
-        setAlertText("Gauntlet requires mapping to be completed first.");
-        return;
-      }
-
-      const effectiveProviderId =
-        providerIdOverride || ai.meta?.mapper || Object.keys(ai.mappingResponses || {})[0] || "gemini";
-
-      setActiveAiTurnId(ai.id);
-      setIsLoading(true);
-      setUiPhase("streaming");
-
-      setActiveRecomputeState({
-        aiTurnId: ai.id,
-        stepType: "gauntlet",
-        providerId: effectiveProviderId,
-      });
-
-      try {
-        await api.sendPortMessage({
-          type: "CONTINUE_COGNITIVE_WORKFLOW",
-          payload: {
-            sessionId: currentSessionId,
-            aiTurnId: ai.id,
-            mode: "gauntlet",
-            providerId: effectiveProviderId,
-            isRecompute: true,
-            sourceTurnId: ai.id,
-          },
-        });
-      } catch (err) {
-        console.error("[RoundActions] Gauntlet run failed:", err);
-        setAlertText("Gauntlet request failed. Please try again.");
-        setIsLoading(false);
-        setUiPhase("awaiting_action");
-        setActiveAiTurnId(null);
-        setActiveRecomputeState(null);
-      }
-    },
-    [
-      currentSessionId,
-      turnsMap,
-      setActiveAiTurnId,
-      setIsLoading,
-      setUiPhase,
-      setActiveRecomputeState,
-      setAlertText,
-    ],
-  );
-
-
-  const runRefinerForAiTurn = useCallback(
-    async (aiTurnId: string, providerIdOverride?: string) => {
-      if (!currentSessionId) return;
-
-      const ai = turnsMap.get(aiTurnId) as AiTurn | undefined;
-      if (!ai || ai.type !== "ai") {
-        console.warn(`[RoundActions] AI turn ${aiTurnId} not found`);
-        return;
-      }
-
-      const hasMapper = !!ai.mapperArtifact;
-      const hasPivot = !!ai.understandOutput || !!ai.gauntletOutput;
-      if (!hasMapper) {
-        setAlertText("Refiner requires mapping to be completed first.");
-        return;
-      }
-      if (!hasPivot) {
-        setAlertText("Refiner requires Understand or Gauntlet to be run first.");
-        return;
-      }
-
-      // Determine provider
-      let effectiveProviderId = providerIdOverride;
-      if (!effectiveProviderId) {
-        try {
-          const stored = localStorage.getItem("htos_last_refiner_model");
-          if (stored) effectiveProviderId = stored;
-        } catch { }
-      }
-      if (!effectiveProviderId) effectiveProviderId = "gemini"; // Default
+      const effectiveProviderId = providerIdOverride || "gemini";
 
       // Initialize optimistic state
       setTurnsMap((draft: Map<string, TurnMessage>) => {
@@ -370,7 +228,7 @@ export function useRoundActions() {
         if (!existing || existing.type !== "ai") return;
         const aiTurn = existing as AiTurn;
 
-        const prev = aiTurn.refinerResponses || {};
+        const prev = aiTurn.singularityResponses || {};
         const next: Record<string, ProviderResponse[]> = { ...prev };
 
         const arr = Array.isArray(next[effectiveProviderId]) ? [...next[effectiveProviderId]] : [];
@@ -385,7 +243,7 @@ export function useRoundActions() {
           createdAt: Date.now(),
         });
         next[effectiveProviderId] = arr;
-        aiTurn.refinerResponses = next;
+        aiTurn.singularityResponses = next;
       });
 
       // Set Loading
@@ -396,7 +254,7 @@ export function useRoundActions() {
       try {
         setActiveRecomputeState({
           aiTurnId: ai.id,
-          stepType: "refiner" as any, // Cast to 'any' if types aren't updated yet
+          stepType: "singularity" as any,
           providerId: effectiveProviderId,
         });
 
@@ -405,136 +263,20 @@ export function useRoundActions() {
           payload: {
             sessionId: currentSessionId,
             aiTurnId: ai.id,
-            mode: "refine",
+            mode: "singularity",
             providerId: effectiveProviderId,
             isRecompute: true,
             sourceTurnId: ai.id,
           },
         });
-
-        // Persist last refiner used
-        try {
-          localStorage.setItem("htos_last_refiner_model", effectiveProviderId);
-        } catch { }
-
       } catch (err) {
-        console.error("[RoundActions] Refiner run failed:", err);
-        setAlertText("Refiner request failed. Please try again.");
-
-
-        // Revert optimistic
-        setTurnsMap((draft) => {
-          const turn = draft.get(ai.id) as AiTurn | undefined;
-          if (!turn || turn.type !== "ai" || !turn.refinerResponses) return;
-          const arr = turn.refinerResponses[effectiveProviderId];
-          if (Array.isArray(arr) && arr.length > 0) {
-            const last = arr[arr.length - 1];
-            if (last.status === "streaming" || last.status === "pending") {
-              last.status = "error";
-              last.text = "Request failed";
-            }
-          }
-        });
-        setIsLoading(false);
-        setUiPhase("awaiting_action");
-        setActiveAiTurnId(null);
-        setActiveRecomputeState(null);
-      }
-    },
-    [currentSessionId, turnsMap, setTurnsMap, setActiveAiTurnId, setIsLoading, setUiPhase, setActiveRecomputeState, setAlertText]
-  );
-
-  const runAntagonistForAiTurn = useCallback(
-    async (aiTurnId: string, providerIdOverride?: string) => {
-      if (!currentSessionId) return;
-
-      const ai = turnsMap.get(aiTurnId) as AiTurn | undefined;
-      if (!ai || ai.type !== "ai") {
-        console.warn(`[RoundActions] AI turn ${aiTurnId} not found`);
-        return;
-      }
-
-      const hasMapper = !!ai.mapperArtifact;
-      const hasPivot = !!ai.understandOutput || !!ai.gauntletOutput;
-      if (!hasMapper) {
-        setAlertText("Antagonist requires mapping to be completed first.");
-        return;
-      }
-      if (!hasPivot) {
-        setAlertText("Antagonist requires Understand or Gauntlet to be run first.");
-        return;
-      }
-
-      // Determine provider
-      let effectiveProviderId = providerIdOverride;
-      if (!effectiveProviderId) {
-        try {
-          const stored = localStorage.getItem("htos_last_antagonist_model");
-          if (stored) effectiveProviderId = stored;
-        } catch { }
-      }
-      if (!effectiveProviderId) effectiveProviderId = "gemini"; // Default
-
-      // Initialize optimistic state
-      setTurnsMap((draft: Map<string, TurnMessage>) => {
-        const existing = draft.get(ai.id);
-        if (!existing || existing.type !== "ai") return;
-        const aiTurn = existing as AiTurn;
-
-        const prev = aiTurn.antagonistResponses || {};
-        const next: Record<string, ProviderResponse[]> = { ...prev };
-
-        const arr = Array.isArray(next[effectiveProviderId]) ? [...next[effectiveProviderId]] : [];
-        const initialStatus = PRIMARY_STREAMING_PROVIDER_IDS.includes(effectiveProviderId)
-          ? "streaming"
-          : "pending";
-
-        arr.push({
-          providerId: effectiveProviderId as ProviderKey,
-          text: "",
-          status: initialStatus,
-          createdAt: Date.now(),
-        });
-        next[effectiveProviderId] = arr;
-        aiTurn.antagonistResponses = next;
-      });
-
-      // Set Loading
-      setActiveAiTurnId(ai.id);
-      setIsLoading(true);
-      setUiPhase("streaming");
-
-      try {
-        setActiveRecomputeState({
-          aiTurnId: ai.id,
-          stepType: "antagonist" as any,
-          providerId: effectiveProviderId,
-        });
-
-        await api.sendPortMessage({
-          type: "CONTINUE_COGNITIVE_WORKFLOW",
-          payload: {
-            sessionId: currentSessionId,
-            aiTurnId: ai.id,
-            mode: "antagonist",
-            providerId: effectiveProviderId,
-            isRecompute: true,
-            sourceTurnId: ai.id,
-          },
-        });
-
-        try {
-          localStorage.setItem("htos_last_antagonist_model", effectiveProviderId);
-        } catch { }
-
-      } catch (err) {
-        console.error("[RoundActions] Antagonist run failed:", err);
-        setAlertText("Antagonist request failed. Please try again.");
+        console.error("[RoundActions] Singularity run failed:", err);
+        setAlertText("Singularity request failed. Please try again.");
 
         setTurnsMap((draft) => {
           const turn = draft.get(ai.id) as AiTurn | undefined;
-          if (!turn || turn.type !== "ai" || !turn.antagonistResponses) return;
-          const arr = turn.antagonistResponses[effectiveProviderId];
+          if (!turn || turn.type !== "ai" || !turn.singularityResponses) return;
+          const arr = turn.singularityResponses[effectiveProviderId];
           if (Array.isArray(arr) && arr.length > 0) {
             const last = arr[arr.length - 1];
             if (last.status === "streaming" || last.status === "pending") {
@@ -557,12 +299,6 @@ export function useRoundActions() {
   // ============================================================================
 
   /**
-  
-   * NOTE: This uses userTurnId as the key for backward compatibility with existing UI state.
-   */
-
-
-  /**
    * Select mapping provider for a specific user turn.
    * NOTE: This uses userTurnId as the key for backward compatibility with existing UI state.
    */
@@ -577,96 +313,8 @@ export function useRoundActions() {
   );
 
   return {
-
     runMappingForAiTurn,
-    runUnderstandForAiTurn,
-    runGauntletForAiTurn,
-    runRefinerForAiTurn,
-    runAntagonistForAiTurn,
-    runSingularityForAiTurn: useCallback(
-      async (aiTurnId: string, providerIdOverride?: string) => {
-        if (!currentSessionId) return;
-
-        const ai = turnsMap.get(aiTurnId) as AiTurn | undefined;
-        if (!ai || ai.type !== "ai") {
-          console.warn(`[RoundActions] AI turn ${aiTurnId} not found`);
-          return;
-        }
-
-        const effectiveProviderId = providerIdOverride || "gemini";
-
-        // Initialize optimistic state
-        setTurnsMap((draft: Map<string, TurnMessage>) => {
-          const existing = draft.get(ai.id);
-          if (!existing || existing.type !== "ai") return;
-          const aiTurn = existing as AiTurn;
-
-          const prev = aiTurn.singularityResponses || {};
-          const next: Record<string, ProviderResponse[]> = { ...prev };
-
-          const arr = Array.isArray(next[effectiveProviderId]) ? [...next[effectiveProviderId]] : [];
-          const initialStatus = PRIMARY_STREAMING_PROVIDER_IDS.includes(effectiveProviderId)
-            ? "streaming"
-            : "pending";
-
-          arr.push({
-            providerId: effectiveProviderId as ProviderKey,
-            text: "",
-            status: initialStatus,
-            createdAt: Date.now(),
-          });
-          next[effectiveProviderId] = arr;
-          aiTurn.singularityResponses = next;
-        });
-
-        // Set Loading
-        setActiveAiTurnId(ai.id);
-        setIsLoading(true);
-        setUiPhase("streaming");
-
-        try {
-          setActiveRecomputeState({
-            aiTurnId: ai.id,
-            stepType: "singularity" as any,
-            providerId: effectiveProviderId,
-          });
-
-          await api.sendPortMessage({
-            type: "CONTINUE_COGNITIVE_WORKFLOW",
-            payload: {
-              sessionId: currentSessionId,
-              aiTurnId: ai.id,
-              mode: "singularity",
-              providerId: effectiveProviderId,
-              isRecompute: true,
-              sourceTurnId: ai.id,
-            },
-          });
-        } catch (err) {
-          console.error("[RoundActions] Singularity run failed:", err);
-          setAlertText("Singularity request failed. Please try again.");
-
-          setTurnsMap((draft) => {
-            const turn = draft.get(ai.id) as AiTurn | undefined;
-            if (!turn || turn.type !== "ai" || !turn.singularityResponses) return;
-            const arr = turn.singularityResponses[effectiveProviderId];
-            if (Array.isArray(arr) && arr.length > 0) {
-              const last = arr[arr.length - 1];
-              if (last.status === "streaming" || last.status === "pending") {
-                last.status = "error";
-                last.text = "Request failed";
-              }
-            }
-          });
-          setIsLoading(false);
-          setUiPhase("awaiting_action");
-          setActiveAiTurnId(null);
-          setActiveRecomputeState(null);
-        }
-      },
-      [currentSessionId, turnsMap, setTurnsMap, setActiveAiTurnId, setIsLoading, setUiPhase, setActiveRecomputeState, setAlertText]
-    ),
-
+    runSingularityForAiTurn,
     selectMappingForRound,
   };
 }

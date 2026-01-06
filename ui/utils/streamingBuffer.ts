@@ -1,10 +1,6 @@
 type ResponseType =
   | "batch"
   | "mapping"
-  | "refiner"
-  | "antagonist"
-  | "understand"
-  | "gauntlet"
   | "singularity";
 
 interface BatchUpdate {

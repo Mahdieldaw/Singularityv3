@@ -3,7 +3,7 @@ import { LLM_PROVIDERS_CONFIG } from '../constants';
 import clsx from 'clsx';
 
 interface PipelineErrorBannerProps {
-    type: 'mapping' | 'refiner' | 'antagonist' | 'understand' | 'gauntlet';
+    type: 'mapping' | 'singularity';
     failedProviderId: string;
     onRetry: (pid: string) => void;
     onExplore?: () => void;
@@ -28,10 +28,7 @@ export const PipelineErrorBanner: React.FC<PipelineErrorBannerProps> = ({
     const getTitle = () => {
         switch (type) {
             case 'mapping': return 'Mapping unavailable';
-            case 'refiner': return 'Enhancement unavailable';
-            case 'antagonist': return 'Context refinement unavailable';
-            case 'understand': return 'Understanding unavailable';
-            case 'gauntlet': return 'Decision unavailable';
+            case 'singularity': return 'intelligence unavailable';
             default: return 'Step unavailable';
         }
     };
@@ -40,10 +37,7 @@ export const PipelineErrorBanner: React.FC<PipelineErrorBannerProps> = ({
         if (errorMessage) return errorMessage;
         switch (type) {
             case 'mapping': return 'Advanced insights require a successful cross-reference of multiple sources.';
-            case 'refiner': return 'We couldn\'t generate additional insights or actions for this response.';
-            case 'antagonist': return 'Prompt refinement and context checking are currently unavailable.';
-            case 'understand': return 'The synthesis of perspectives into a coherent frame is currently unavailable.';
-            case 'gauntlet': return 'The final verdict and stress-testing of claims are currently unavailable.';
+            case 'singularity': return 'The intelligence is currently unavailable.';
             default: return 'An error occurred during this pipeline step.';
         }
     };
@@ -51,10 +45,8 @@ export const PipelineErrorBanner: React.FC<PipelineErrorBannerProps> = ({
     const getIcon = () => {
         switch (type) {
             case 'mapping': return '📊';
-            case 'refiner': return '💎';
-            case 'antagonist': return '💭';
-            case 'understand': return '🧠';
-            case 'gauntlet': return '🗡️';
+            case 'singularity': return '🧠';
+
             default: return '⚠️';
         }
     };

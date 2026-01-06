@@ -1,5 +1,4 @@
-export { default as GauntletOutputView } from './GauntletOutputView';
-export { default as UnderstandOutputView } from './UnderstandOutputView';
+export { default as SingularityOutputView } from './SingularityOutputView';
 
 export { SelectionBar } from './SelectionBar';
 
