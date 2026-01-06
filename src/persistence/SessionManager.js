@@ -81,7 +81,7 @@ export class SessionManager {
    * @param {string} sessionId
    * @param {string} aiTurnId
    * @param {string} providerId
-   * @param {"batch"|"mapping"|"refiner"|"antagonist"|"understand"|"gauntlet"|"singularity"} responseType
+   * @param {"batch"|"mapping"|"singularity"} responseType
    * @param {number} responseIndex
    * @param {{ text?: string, status?: string, meta?: any, createdAt?: number }} payload
    */
@@ -131,11 +131,11 @@ export class SessionManager {
   }
 
   /**
-   * NEW: Primary persistence entry point (Phase 4)
+   * Primary persistence entry point
    * Routes to appropriate primitive-specific handler
    * @param {Object} request - { type, sessionId, userMessage, sourceTurnId?, stepType?, targetProvider? }
    * @param {Object} context - ResolvedContext from ContextResolver
-   * @param {Object} result - { batchOutputs, mappingOutputs, refinerOutputs, antagonistOutputs, understandOutputs, gauntletOutputs }
+   * @param {Object} result - { batchOutputs, mappingOutputs, singularityOutputs }
    * @returns {Promise<{sessionId, userTurnId?, aiTurnId?}>}
    */
   async persist(request, context, result) {
@@ -243,10 +243,8 @@ export class SessionManager {
       sequence: 1,
       batchResponseCount: this.countResponses(result.batchOutputs),
       mappingResponseCount: this.countResponses(result.mappingOutputs),
-      refinerResponseCount: this.countResponses(result.refinerOutputs),
-      antagonistResponseCount: this.countResponses(result.antagonistOutputs),
+      singularityResponseCount: this.countResponses(result.singularityOutputs),
       ...(mapperArtifact ? { mapperArtifact } : {}),
-      ...(exploreAnalysis ? { exploreAnalysis } : {}),
       ...(singularityOutput ? { singularityOutput } : {}),
       lastContextSummary: contextSummary,
       meta: await this._attachRunIdMeta(aiTurnId),
@@ -389,10 +387,8 @@ export class SessionManager {
       sequence: nextSequence + 1,
       batchResponseCount: this.countResponses(result.batchOutputs),
       mappingResponseCount: this.countResponses(result.mappingOutputs),
-      refinerResponseCount: this.countResponses(result.refinerOutputs),
-      antagonistResponseCount: this.countResponses(result.antagonistOutputs),
+      singularityResponseCount: this.countResponses(result.singularityOutputs),
       ...(mapperArtifact ? { mapperArtifact } : {}),
-      ...(exploreAnalysis ? { exploreAnalysis } : {}),
       ...(singularityOutput ? { singularityOutput } : {}),
       lastContextSummary: contextSummary,
       meta: await this._attachRunIdMeta(aiTurnId),
@@ -468,15 +464,13 @@ export class SessionManager {
     if (!sourceTurn)
       throw new Error(`[SessionManager] Source turn ${sourceTurnId} not found`);
 
-    // 2) Extract Result Data (UNIFIED)
+    // 2) Extract Result Data
     let output;
     if (stepType === "batch") output = result?.batchOutputs?.[targetProvider];
     else if (stepType === "mapping")
       output = result?.mappingOutputs?.[targetProvider];
-    else if (stepType === "refiner")
-      output = result?.refinerOutputs?.[targetProvider];
-    else if (stepType === "antagonist")
-      output = result?.antagonistOutputs?.[targetProvider];
+    else if (stepType === "singularity")
+      output = result?.singularityOutputs?.[targetProvider];
 
     if (!output) {
       console.warn(
@@ -535,12 +529,9 @@ export class SessionManager {
         else if (stepType === "mapping")
           freshTurn.mappingResponseCount =
             (freshTurn.mappingResponseCount || 0) + 1;
-        else if (stepType === "refiner")
-          freshTurn.refinerResponseCount =
-            (freshTurn.refinerResponseCount || 0) + 1;
-        else if (stepType === "antagonist")
-          freshTurn.antagonistResponseCount =
-            (freshTurn.antagonistResponseCount || 0) + 1;
+        else if (stepType === "singularity")
+          freshTurn.singularityResponseCount =
+            (freshTurn.singularityResponseCount || 0) + 1;
 
         // Update snapshot context ONLY for batch retries
         if (stepType === "batch") {
@@ -574,11 +565,7 @@ export class SessionManager {
         if (output?.meta && Object.keys(output.meta).length > 0)
           contexts[pid] = this._safeMeta(output.meta);
       });
-      Object.entries(result?.refinerOutputs || {}).forEach(([pid, output]) => {
-        if (output?.meta && Object.keys(output.meta).length > 0)
-          contexts[pid] = this._safeMeta(output.meta);
-      });
-      Object.entries(result?.antagonistOutputs || {}).forEach(([pid, output]) => {
+      Object.entries(result?.singularityOutputs || {}).forEach(([pid, output]) => {
         if (output?.meta && Object.keys(output.meta).length > 0)
           contexts[pid] = this._safeMeta(output.meta);
       });
@@ -671,13 +658,13 @@ export class SessionManager {
       });
     }
 
-    // 4. Refiner (idempotent/singleton per provider)
-    for (const [providerId, output] of Object.entries(result?.refinerOutputs || {})) {
+    // 4. Singularity (idempotent/singleton per provider)
+    for (const [providerId, output] of Object.entries(result?.singularityOutputs || {})) {
       const existing = existingResponses.find(
-        r => r.providerId === providerId && r.responseType === "refiner" && r.responseIndex === 0
+        r => r.providerId === providerId && r.responseType === "singularity" && r.responseIndex === 0
       );
 
-      const respId = existing?.id || `pr-${sessionId}-${aiTurnId}-${providerId}-refiner-0-${now}-${count++}`;
+      const respId = existing?.id || `pr-${sessionId}-${aiTurnId}-${providerId}-singularity-0-${now}-${count++}`;
       const createdAtKeep = existing?.createdAt || now;
 
       recordsToSave.push({
@@ -685,32 +672,7 @@ export class SessionManager {
         sessionId,
         aiTurnId,
         providerId,
-        responseType: "refiner",
-        responseIndex: 0,
-        text: output?.text || existing?.text || "",
-        status: output?.status || existing?.status || "completed",
-        meta: this._safeMeta(output?.meta ?? existing?.meta ?? {}),
-        createdAt: createdAtKeep,
-        updatedAt: now,
-        completedAt: now,
-      });
-    }
-
-    // 5. Antagonist (idempotent/singleton per provider)
-    for (const [providerId, output] of Object.entries(result?.antagonistOutputs || {})) {
-      const existing = existingResponses.find(
-        r => r.providerId === providerId && r.responseType === "antagonist" && r.responseIndex === 0
-      );
-
-      const respId = existing?.id || `pr-${sessionId}-${aiTurnId}-${providerId}-antagonist-0-${now}-${count++}`;
-      const createdAtKeep = existing?.createdAt || now;
-
-      recordsToSave.push({
-        id: respId,
-        sessionId,
-        aiTurnId,
-        providerId,
-        responseType: "antagonist",
+        responseType: "singularity",
         responseIndex: 0,
         text: output?.text || existing?.text || "",
         status: output?.status || existing?.status || "completed",

@@ -12,6 +12,9 @@ export class TurnEmitter {
   /**
    * Emit TURN_FINALIZED message with canonical turn data
    * This allows UI to replace optimistic placeholders with backend-confirmed data
+   * 
+   * Post-refactor: Only handles batch, mapping, and singularity responses.
+   * Deprecated persona steps (refiner, antagonist, understand, gauntlet) have been removed.
    */
   emitTurnFinalized(context, steps, stepResults, resolvedContext, currentUserMessage) {
     // Skip TURN_FINALIZED for recompute operations (they don't create new turns)
@@ -46,11 +49,7 @@ export class TurnEmitter {
       // Collect AI results from step results
       const batchResponses = {};
       const mappingResponses = {};
-      const refinerResponses = {};
-      const antagonistResponses = {};
-      const exploreResponses = {};
-      const understandResponses = {};
-      const gauntletResponses = {};
+      const singularityResponses = {};
       let primaryMapper = null;
 
       const stepById = new Map((steps || []).map((s) => [s.stepId, s]));
@@ -91,72 +90,12 @@ export class TurnEmitter {
               primaryMapper = providerId;
               break;
             }
-            case "refiner": {
-              const providerId = result?.providerId || step?.payload?.refinerProvider;
+            case "singularity": {
+              const providerId = result?.providerId || step?.payload?.singularityProvider;
               if (!providerId) return;
-              if (!refinerResponses[providerId])
-                refinerResponses[providerId] = [];
-              refinerResponses[providerId].push({
-                providerId,
-                text: result?.text || "",
-                status: result?.status || "completed",
-                createdAt: timestamp,
-                updatedAt: timestamp,
-                meta: result?.meta || {},
-              });
-              break;
-            }
-            case "explore": {
-              const providerId = result?.providerId || step?.payload?.exploreProvider;
-              if (!providerId) return;
-              if (!exploreResponses[providerId])
-                exploreResponses[providerId] = [];
-              exploreResponses[providerId].push({
-                providerId,
-                text: result?.text || "",
-                status: result?.status || "completed",
-                createdAt: timestamp,
-                updatedAt: timestamp,
-                meta: result?.meta || {},
-              });
-              break;
-            }
-            case "antagonist": {
-              const providerId = result?.providerId || step?.payload?.antagonistProvider;
-              if (!providerId) return;
-              if (!antagonistResponses[providerId])
-                antagonistResponses[providerId] = [];
-              antagonistResponses[providerId].push({
-                providerId,
-                text: result?.text || "",
-                status: result?.status || "completed",
-                createdAt: timestamp,
-                updatedAt: timestamp,
-                meta: result?.meta || {},
-              });
-              break;
-            }
-            case "understand": {
-              const providerId = result?.providerId || step?.payload?.understandProvider;
-              if (!providerId) return;
-              if (!understandResponses[providerId])
-                understandResponses[providerId] = [];
-              understandResponses[providerId].push({
-                providerId,
-                text: result?.text || "",
-                status: result?.status || "completed",
-                createdAt: timestamp,
-                updatedAt: timestamp,
-                meta: result?.meta || {},
-              });
-              break;
-            }
-            case "gauntlet": {
-              const providerId = result?.providerId || step?.payload?.gauntletProvider;
-              if (!providerId) return;
-              if (!gauntletResponses[providerId])
-                gauntletResponses[providerId] = [];
-              gauntletResponses[providerId].push({
+              if (!singularityResponses[providerId])
+                singularityResponses[providerId] = [];
+              singularityResponses[providerId].push({
                 providerId,
                 text: result?.text || "",
                 status: result?.status || "completed",
@@ -187,12 +126,12 @@ export class TurnEmitter {
               });
               break;
             }
-            case "refiner": {
-              const providerId = step?.payload?.refinerProvider;
+            case "mapping": {
+              const providerId = step?.payload?.mappingProvider;
               if (!providerId) return;
-              if (!refinerResponses[providerId])
-                refinerResponses[providerId] = [];
-              refinerResponses[providerId].push({
+              if (!mappingResponses[providerId])
+                mappingResponses[providerId] = [];
+              mappingResponses[providerId].push({
                 providerId,
                 text: errorText || "",
                 status: "error",
@@ -202,57 +141,12 @@ export class TurnEmitter {
               });
               break;
             }
-            case "explore": {
-              const providerId = step?.payload?.exploreProvider;
+            case "singularity": {
+              const providerId = step?.payload?.singularityProvider;
               if (!providerId) return;
-              if (!exploreResponses[providerId])
-                exploreResponses[providerId] = [];
-              exploreResponses[providerId].push({
-                providerId,
-                text: errorText || "",
-                status: "error",
-                createdAt: timestamp,
-                updatedAt: timestamp,
-                meta: { error: errorText },
-              });
-              break;
-            }
-            case "antagonist": {
-              const providerId = step?.payload?.antagonistProvider;
-              if (!providerId) return;
-              if (!antagonistResponses[providerId])
-                antagonistResponses[providerId] = [];
-              antagonistResponses[providerId].push({
-                providerId,
-                text: errorText || "",
-                status: "error",
-                createdAt: timestamp,
-                updatedAt: timestamp,
-                meta: { error: errorText },
-              });
-              break;
-            }
-            case "understand": {
-              const providerId = step?.payload?.understandProvider;
-              if (!providerId) return;
-              if (!understandResponses[providerId])
-                understandResponses[providerId] = [];
-              understandResponses[providerId].push({
-                providerId,
-                text: errorText || "",
-                status: "error",
-                createdAt: timestamp,
-                updatedAt: timestamp,
-                meta: { error: errorText },
-              });
-              break;
-            }
-            case "gauntlet": {
-              const providerId = step?.payload?.gauntletProvider;
-              if (!providerId) return;
-              if (!gauntletResponses[providerId])
-                gauntletResponses[providerId] = [];
-              gauntletResponses[providerId].push({
+              if (!singularityResponses[providerId])
+                singularityResponses[providerId] = [];
+              singularityResponses[providerId].push({
                 providerId,
                 text: errorText || "",
                 status: "error",
@@ -269,11 +163,7 @@ export class TurnEmitter {
       const hasData =
         Object.keys(batchResponses).length > 0 ||
         Object.keys(mappingResponses).length > 0 ||
-        Object.keys(refinerResponses).length > 0 ||
-        Object.keys(antagonistResponses).length > 0 ||
-        Object.keys(exploreResponses).length > 0 ||
-        Object.keys(understandResponses).length > 0 ||
-        Object.keys(gauntletResponses).length > 0;
+        Object.keys(singularityResponses).length > 0;
 
       if (!hasData) {
         console.log("[TurnEmitter] No AI responses to finalize");
@@ -289,26 +179,18 @@ export class TurnEmitter {
         createdAt: timestamp,
         batchResponses,
         mappingResponses,
-        refinerResponses,
-        antagonistResponses,
-        exploreResponses,
-        understandResponses,
-        gauntletResponses,
+        singularityResponses,
         meta: {
           mapper: primaryMapper,
           requestedFeatures: {
             mapping: steps.some((s) => s.type === "mapping"),
-            refiner: !!(steps.some((s) => s.type === "refiner") && !context?.workflowControl?.consensusOnly),
-            antagonist: !!(steps.some((s) => s.type === "antagonist") && !context?.workflowControl?.consensusOnly),
-            explore: !!(steps.some((s) => s.type === "explore")),
-            understand: !!(steps.some((s) => s.type === "understand")),
-            gauntlet: !!(steps.some((s) => s.type === "gauntlet")),
+            singularity: steps.some((s) => s.type === "singularity"),
           },
           ...(context?.workflowControl ? { workflowControl: context.workflowControl } : {}),
         },
-        // ✅ CRITICAL: Pass cognitive artifacts to UI
+        // Cognitive artifacts
         mapperArtifact: context?.mapperArtifact || undefined,
-        exploreAnalysis: context?.exploreAnalysis || undefined,
+        singularityOutput: context?.singularityOutput || undefined,
       };
 
       console.log("[TurnEmitter] Emitting TURN_FINALIZED", {
@@ -316,6 +198,7 @@ export class TurnEmitter {
         aiTurnId: aiTurn.id,
         batchCount: Object.keys(batchResponses).length,
         mappingCount: Object.keys(mappingResponses).length,
+        singularityCount: Object.keys(singularityResponses).length,
       });
 
       this.port.postMessage({

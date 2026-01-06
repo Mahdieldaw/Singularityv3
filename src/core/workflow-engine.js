@@ -136,7 +136,7 @@ export class WorkflowEngine {
     this.cognitiveHandler = new CognitivePipelineHandler(port, this.persistenceCoordinator, sessionManager);
 
     // Executor mapping - FOUNDATION ONLY
-    // Cognitive steps (understand, gauntlet, refiner, antagonist) are handled via handleContinueCognitiveRequest
+    // Singularity/Concierge steps are handled via handleContinueCognitiveRequest
     this._executors = {
       prompt: (step, ctx, _results, _wfCtx, _resolved, opts) =>
         this.stepExecutor.executePromptStep(step, ctx, opts),
@@ -465,9 +465,7 @@ export class WorkflowEngine {
     const result = {
       batchOutputs: {},
       mappingOutputs: {},
-      refinerOutputs: {}, // Empty in foundation phase
-      antagonistOutputs: {}, // Empty in foundation phase
-      gauntletOutputs: {}, // Empty in foundation phase
+      singularityOutputs: {},
     };
 
     const stepById = new Map((steps || []).map((s) => [s.stepId, s]));

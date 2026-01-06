@@ -98,10 +98,6 @@ export interface ProviderResponseRecord {
   responseType:
   | "batch"
   | "mapping"
-  | "refiner"
-  | "antagonist"
-  | "understand"
-  | "gauntlet"
   | "singularity";
   responseIndex: number;
   text: string;

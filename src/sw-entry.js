@@ -623,34 +623,20 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
             }
 
             const responses = (responsesByAi.get(primaryAi.id) || []).sort((a, b) => (a.responseIndex ?? 0) - (b.responseIndex ?? 0));
-            const providers = {}, mappingResponses = {};
-            const refinerResponses = {}, antagonistResponses = {}, understandResponses = {}, gauntletResponses = {}, singularityResponses = {};
+            const providers = {}, mappingResponses = {}, singularityResponses = {};
 
             for (const r of responses) {
               const base = { providerId: r.providerId, text: r.text || "", status: r.status || "completed", meta: r.meta || {}, createdAt: r.createdAt || 0, updatedAt: r.updatedAt || 0 };
               if (r.responseType === "batch") (providers[r.providerId] ||= []).push(base);
               else if (r.responseType === "mapping") (mappingResponses[r.providerId] ||= []).push(base);
-              else if (r.responseType === "refiner") (refinerResponses[r.providerId] ||= []).push(base);
-              else if (r.responseType === "antagonist") (antagonistResponses[r.providerId] ||= []).push(base);
-              else if (r.responseType === "understand") (understandResponses[r.providerId] ||= []).push(base);
-              else if (r.responseType === "gauntlet") (gauntletResponses[r.providerId] ||= []).push(base);
               else if (r.responseType === "singularity") (singularityResponses[r.providerId] ||= []).push(base);
             }
 
-
-            // Extract structured outputs from response meta if available
-            let extractedUnderstandOutput = primaryAi.understandOutput || null;
-            let extractedGauntletOutput = primaryAi.gauntletOutput || null;
+            // Extract singularity output from response meta if available
             let extractedSingularityOutput = primaryAi.singularityOutput || null;
 
-            // Check responses for structured outputs if not on turn record
+            // Check responses for singularity output if not on turn record
             for (const r of responses) {
-              if (!extractedUnderstandOutput && r.responseType === "understand" && r.meta?.understandOutput) {
-                extractedUnderstandOutput = r.meta.understandOutput;
-              }
-              if (!extractedGauntletOutput && r.responseType === "gauntlet" && r.meta?.gauntletOutput) {
-                extractedGauntletOutput = r.meta.gauntletOutput;
-              }
               if (!extractedSingularityOutput && r.responseType === "singularity" && r.meta?.singularityOutput) {
                 extractedSingularityOutput = r.meta.singularityOutput;
               }
@@ -659,13 +645,9 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
             rounds.push({
               userTurnId: user.id, aiTurnId: primaryAi.id,
               user: { id: user.id, text: user.text || user.content || "", createdAt: user.createdAt || 0 },
-              providers, mappingResponses,
-              refinerResponses, antagonistResponses, understandResponses, gauntletResponses, singularityResponses,
+              providers, mappingResponses, singularityResponses,
               // Include cognitive pipeline data for proper restoration
               mapperArtifact: primaryAi.mapperArtifact || null,
-              exploreAnalysis: primaryAi.exploreAnalysis || null,
-              understandOutput: extractedUnderstandOutput,
-              gauntletOutput: extractedGauntletOutput,
               singularityOutput: extractedSingularityOutput,
               createdAt: user.createdAt || 0, completedAt: primaryAi.updatedAt || 0
             });
