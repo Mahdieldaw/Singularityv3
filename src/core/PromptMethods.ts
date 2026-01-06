@@ -27,7 +27,6 @@ import {
     ChainStep,
     DimensionCluster,
     ChallengerInfo,
-    TradeoffOption,
 } from "../../shared/contract";
 
 const DEBUG_STRUCTURAL_ANALYSIS = true;

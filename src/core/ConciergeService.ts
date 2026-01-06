@@ -242,7 +242,7 @@ But be constructive—challenge to strengthen, not to destroy.`,
 // ═══════════════════════════════════════════════════════════════════════════
 
 function buildSettledBrief(analysis: StructuralAnalysis): string {
-    const { shape, landscape, ratios, ghostAnalysis } = analysis;
+    const { shape, landscape, ratios } = analysis;
     const data = shape.data as SettledShapeData;
 
     if (!data || data.pattern !== 'settled') {

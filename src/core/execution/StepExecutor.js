@@ -831,56 +831,11 @@ Answer the user's message directly. Use context only to disambiguate.
       // Compute structural analysis for shape-guided prompting
       let analysis = null;
       try {
-        const { computeStructuralAnalysis } = await import('../MapperService');
+        const { computeStructuralAnalysis } = await import('../PromptMethods');
         analysis = computeStructuralAnalysis(mapperArtifact);
       } catch (e) {
-        console.warn("[StepExecutor] computeStructuralAnalysis failed:", e);
-        // Use a minimal fallback analysis
-        analysis = {
-          shape: { primaryPattern: /** @type {'exploratory'} */ ('exploratory'), confidence: 0.5, evidence: [], implications: { understand: '', gauntlet: '' } },
-          claimsWithLeverage: mapperArtifact.claims || [],
-          patterns: {
-            conflicts: [],
-            tradeoffs: [],
-            leverageInversions: [],
-            cascadeRisks: [],
-            convergencePoints: [],
-            isolatedClaims: []
-          },
-          graph: {
-            hubClaim: null,
-            articulationPoints: [],
-            longestChain: [],
-            componentCount: 0,
-            components: [],
-            chainCount: 0,
-            hubDominance: 0,
-            clusterCohesion: 0,
-            localCoherence: 0
-          },
-          ratios: {
-            concentration: 0,
-            alignment: 0,
-            tension: 0,
-            fragmentation: 0,
-            depth: 0
-          },
-          ghostAnalysis: {
-            count: (mapperArtifact.ghosts || []).length,
-            mayExtendChallenger: false,
-            challengerIds: []
-          },
-          landscape: {
-            claimCount: (mapperArtifact.claims || []).length,
-            modelCount: 0,
-            dominantType: 'unknown',
-            typeDistribution: {},
-            dominantRole: 'anchor',
-            roleDistribution: {},
-            convergenceRatio: 0
-          },
-          edges: mapperArtifact.edges || []
-        };
+        console.error("[StepExecutor] computeStructuralAnalysis failed:", e);
+        throw new Error(`Structural Analysis Failed: ${e.message || String(e)}`);
       }
 
       singularityPrompt = ConciergeService.buildConciergePrompt(
@@ -888,13 +843,7 @@ Answer the user's message directly. Use context only to disambiguate.
         analysis
       );
     } else {
-      // Fallback prompt if ConciergeService unavailable
-      singularityPrompt = this.MapperService.buildUnderstandPrompt(
-        payload.originalPrompt,
-        mapperArtifact,
-        "",
-        null
-      );
+      throw new Error("ConciergeService is not available. Cannot execute Singularity step.");
     }
 
     // Custom parse function that detects machinery leakage

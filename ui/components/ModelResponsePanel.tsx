@@ -19,12 +19,6 @@ import { ArtifactOverlay, Artifact } from "./ArtifactOverlay";
 import { ChevronDownIcon, ChevronUpIcon } from "./Icons";
 import { CopyButton } from "./CopyButton";
 import { formatProviderResponseForMd } from "../utils/copy-format-utils";
-import {
-  AiTurn,
-  ProviderResponse,
-  LLMProvider,
-} from "../types";
-import { useClipActions } from "../hooks/useClipActions";
 import clsx from "clsx";
 
 interface ModelResponsePanelProps {
@@ -73,7 +67,6 @@ export const ModelResponsePanel: React.FC<ModelResponsePanelProps> = React.memo(
     // Actions hook
     const { handleRetryProvider, handleBranchContinue, handleToggleTarget, activeTarget } =
         useProviderActions(sessionId, shownTurnId);
-    const { handleClipClick } = useClipActions();
 
     // Local state
     const [showHistory, setShowHistory] = useState(false);

@@ -1,6 +1,5 @@
 import React, { useEffect, useMemo, useCallback, useState } from "react";
 import { MapperArtifact, AiTurn, ProviderResponse, ProblemStructure, Claim, StructuralAnalysis, ExploreAnalysis } from "../../../shared/contract";
-import { artifactEditsAtom } from "../../state/artifact-edits";
 import { RawResponseCard } from "./cards/RawResponseCard";
 import { extractGraphTopologyAndStrip, parseMappingResponse } from "../../../shared/parsing-utils";
 import StructureGlyph from "../StructureGlyph";
@@ -17,12 +16,11 @@ import { PipelineErrorBanner } from "../PipelineErrorBanner";
 import { CopyButton } from "../CopyButton";
 import { SelectableCard } from "./LegacyArtifactViews";
 import { LLM_PROVIDERS_CONFIG } from "../../constants";
-import type { CognitiveTransitionOptions, SelectedArtifact } from "../../hooks/cognitive/useCognitiveMode";
+import type { SelectedArtifact } from "../../hooks/cognitive/useCognitiveMode";
 import { MetricsRibbon } from "./MetricsRibbon";
 import { useProviderLimits } from "../../hooks/useProviderLimits";
 import { getProviderName } from "../../utils/provider-helpers";
 import { computeProblemStructureFromArtifact, computeStructuralAnalysis } from "../../../src/core/PromptMethods";
-import { applyEdits } from "../../../src/utils/artifact-edits";
 
 const MapIcon = ({ className }: { className?: string }) => (
     <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><rect width="18" height="18" x="3" y="3" rx="2" ry="2" /><line x1="3" x2="21" y1="9" y2="9" /><line x1="9" x2="9" y1="21" y2="9" /></svg>
@@ -105,21 +103,13 @@ export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
 }) => {
     const [selectedIds, setSelectedIds] = useAtom(selectedArtifactsAtom);
     const selectedModels = useAtomValue(selectedModelsAtom);
-    const [allEdits] = useAtom(artifactEditsAtom);
     const setActiveSplitPanel = useSetAtom(activeSplitPanelAtom);
     const includePromptInCopy = useAtomValue(includePromptInCopyAtom);
     const setIsDecisionMapOpen = useSetAtom(isDecisionMapOpenAtom);
 
-
-    // Get modified artifact
-    const currentTurnId = turn?.id || mapperArtifact?.turn?.toString() || "";
-    const edits = allEdits.get(currentTurnId);
-    const modifiedArtifact = useMemo(
-        () => (mapperArtifact ? applyEdits(mapperArtifact, edits) : null),
-        [mapperArtifact, edits]
-    );
-    const userNotes = edits?.userNotes;
-    const artifactForDisplay = modifiedArtifact || mapperArtifact || null;
+    // Display the mapper artifact directly
+    const currentTurnId = turn?.id || "";
+    const artifactForDisplay = mapperArtifact || null;
 
     const activeMapperPid = useMemo(() => {
         if (turn.meta?.mapper) return turn.meta.mapper;

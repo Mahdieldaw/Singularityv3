@@ -1,8 +1,9 @@
 import React from 'react';
 import { AiTurn } from '../../types';
 import MarkdownDisplay from '../MarkdownDisplay';
-import { SectionHeader } from './SectionHeader';
 import { SingularityOutputState } from '../../hooks/useSingularityOutput';
+import { CopyButton } from '../CopyButton';
+import { PipelineErrorBanner } from '../PipelineErrorBanner';
 
 interface SingularityOutputViewProps {
     aiTurn: AiTurn;
@@ -11,84 +12,135 @@ interface SingularityOutputViewProps {
     isLoading?: boolean;
 }
 
+/**
+ * Clean, chat-like display of the Singularity (Concierge) response.
+ * Front and center, just like any modern chat interface.
+ */
 const SingularityOutputView: React.FC<SingularityOutputViewProps> = ({
+    aiTurn,
     singularityState,
     onRecompute,
     isLoading
 }) => {
-    const { output } = singularityState;
+    const { output, isError, error, providerId } = singularityState;
+
+    if (isError) {
+        return (
+            <div className="py-8">
+                <PipelineErrorBanner
+                    type="singularity"
+                    failedProviderId={providerId || aiTurn.meta?.singularity || ""}
+                    onRetry={(pid) => onRecompute({ providerId: pid })}
+                    errorMessage={typeof error === 'string' ? error : error?.message}
+                    requiresReauth={!!error?.requiresReauth}
+                />
+            </div>
+        );
+    }
 
     if (!output && !isLoading) {
         return (
-            <div className="flex flex-col items-center justify-center py-20 text-text-muted italic gap-4">
-                <span className="text-4xl filter grayscale opacity-20">🕳️</span>
-                <span>No Singularity response generated for this turn.</span>
+            <div className="flex flex-col items-center justify-center py-16 text-text-muted italic gap-4">
+                <span className="text-5xl filter opacity-30">✨</span>
+                <span className="text-sm">No response generated yet.</span>
                 <button
                     onClick={() => onRecompute()}
-                    className="mt-4 px-6 py-2 rounded-full bg-brand-500/10 hover:bg-brand-500/20 text-brand-500 text-sm font-medium transition-colors border border-brand-500/20"
+                    className="mt-2 px-6 py-2.5 rounded-xl bg-brand-500/10 hover:bg-brand-500/20 text-brand-500 text-sm font-medium transition-colors border border-brand-500/20"
                 >
-                    Run Concierge
+                    Generate Response
                 </button>
             </div>
         );
     }
 
-    return (
-        <div className="flex flex-col gap-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
-            {/* Main Content Area */}
-            <div className="flex flex-col lg:flex-row gap-8 items-start">
-                <div className="flex-1 w-full min-w-0">
-                    <SectionHeader
-                        icon="✨"
-                        title="The Singularity"
-                        subtitle="Consolidated Expert Synthesis"
-                        onAction={() => onRecompute()}
-                        actionLabel="Recompute"
-                    />
-
-                    <div className="bg-surface border border-border-subtle rounded-2xl p-8 shadow-sm relative overflow-hidden mt-6">
-                        <div className="absolute top-0 right-0 w-96 h-96 bg-brand-500/5 rounded-full blur-[100px] -translate-y-1/2 translate-x-1/3 pointer-events-none" />
-
-                        <div className="prose prose-lg dark:prose-invert max-w-none relative z-10">
-                            <MarkdownDisplay content={output?.text || "Converging..."} />
-                        </div>
-
-                        {output?.leakageDetected && output.leakageViolations && (
-                            <div className="mt-8 pt-6 border-t border-border-subtle/50 relative z-10">
-                                <div className="flex items-center gap-2 text-amber-500 text-[10px] font-bold uppercase tracking-widest mb-3">
-                                    <span>⚠️ Machinery Leakage</span>
-                                </div>
-                                <div className="flex flex-wrap gap-2">
-                                    {output.leakageViolations.map((v, i) => (
-                                        <span key={i} className="px-2 py-0.5 rounded-md bg-amber-500/10 border border-amber-500/20 text-[10px] text-amber-400 font-mono">
-                                            {v}
-                                        </span>
-                                    ))}
-                                </div>
-                            </div>
-                        )}
+    if (isLoading && !output) {
+        return (
+            <div className="flex flex-col items-center justify-center py-16">
+                <div className="relative">
+                    <div className="w-16 h-16 rounded-full bg-brand-500/10 animate-pulse flex items-center justify-center">
+                        <span className="text-3xl">✨</span>
                     </div>
+                    <div className="absolute inset-0 rounded-full border-2 border-brand-500/30 animate-ping" />
+                </div>
+                <div className="text-text-secondary font-medium mt-6">
+                    Synthesizing response...
+                </div>
+                <div className="text-xs text-text-muted mt-2">
+                    Converging insights from the council
+                </div>
+            </div>
+        );
+    }
 
-                    {/* Action Bar */}
-                    <div className="mt-8 flex items-center justify-end gap-3">
-                        <button
-                            onClick={() => onRecompute({ stance: 'challenge' })}
-                            className="group flex items-center gap-3 px-8 py-3 rounded-xl bg-surface-raised border border-border-subtle text-text-secondary font-semibold hover:bg-surface-highlight transition-all"
-                        >
-                            <span>Challenge Perspective</span>
-                            <span className="text-xl group-hover:rotate-12 transition-transform">⚖️</span>
-                        </button>
-                        <button
-                            onClick={() => onRecompute({ stance: 'decide' })}
-                            className="group flex items-center gap-3 px-8 py-3 rounded-xl bg-brand-500 text-white font-semibold hover:bg-brand-600 transition-all shadow-glow-brand"
-                        >
-                            <span>Final Decision</span>
-                            <span className="text-xl group-hover:translate-x-1 transition-transform">🚀</span>
-                        </button>
+    const handleCopy = () => {
+        if (output?.text) {
+            navigator.clipboard.writeText(output.text);
+        }
+    };
+
+    return (
+        <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+            {/* Main Response Container - Clean and readable */}
+            <div className="bg-surface border border-border-subtle rounded-2xl overflow-hidden shadow-sm relative">
+                {/* Subtle gradient accent */}
+                <div className="absolute top-0 right-0 w-80 h-80 bg-brand-500/5 rounded-full blur-[100px] -translate-y-1/2 translate-x-1/3 pointer-events-none" />
+
+                {/* Response Content */}
+                <div className="relative z-10 px-6 py-8 md:px-8">
+                    <div className="prose prose-lg dark:prose-invert max-w-none">
+                        <MarkdownDisplay content={output?.text || ""} />
                     </div>
                 </div>
 
+                {/* Footer Actions */}
+                <div className="relative z-10 px-6 py-4 border-t border-border-subtle/50 bg-surface-highlight/5 flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-xs text-text-muted">
+                        {output?.providerId && (
+                            <span className="px-2 py-0.5 rounded-md bg-surface-highlight border border-border-subtle">
+                                {output.providerId}
+                            </span>
+                        )}
+                        {output?.leakageDetected && (
+                            <span className="px-2 py-0.5 rounded-md bg-amber-500/10 border border-amber-500/20 text-amber-400">
+                                ⚠️ Machinery detected
+                            </span>
+                        )}
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <CopyButton
+                            onCopy={handleCopy}
+                            label="Copy response"
+                            variant="icon"
+                        />
+                        <button
+                            onClick={() => onRecompute()}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-text-secondary hover:text-text-primary hover:bg-surface-highlight border border-border-subtle transition-colors"
+                        >
+                            <span>↻</span>
+                            <span>Regenerate</span>
+                        </button>
+                    </div>
+                </div>
             </div>
+
+            {/* Leakage Details (if any) */}
+            {output?.leakageDetected && output.leakageViolations && output.leakageViolations.length > 0 && (
+                <div className="mt-4 p-4 rounded-xl bg-amber-500/5 border border-amber-500/20">
+                    <div className="text-[10px] font-bold uppercase tracking-widest text-amber-400 mb-2">
+                        ⚠️ Machinery Leakage Detected
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                        {output.leakageViolations.map((v, i) => (
+                            <span
+                                key={i}
+                                className="px-2 py-0.5 rounded-md bg-amber-500/10 border border-amber-500/20 text-[10px] text-amber-400 font-mono"
+                            >
+                                {v}
+                            </span>
+                        ))}
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

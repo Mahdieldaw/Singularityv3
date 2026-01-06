@@ -43,3 +43,6 @@ oldsynthesisbubble.tsx
 /.md
 .md/
 .txt
+
+docs/*
+docs/

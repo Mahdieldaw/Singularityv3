@@ -387,7 +387,6 @@ export class ConnectionHandler {
       );
 
       if (executeRequest.type === "recompute") {
-        const stepType = executeRequest.stepType;
         // Only handle valid recompute types if any remain, otherwise this block might be empty or removed.
         // Assuming singularity/concierge recompute might use this or handleContinueCognitiveRequest logic is different.
         // If 'singularity' is handled here, keep it. If not, remove the block.

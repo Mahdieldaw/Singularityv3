@@ -315,7 +315,7 @@ export class WorkflowEngine {
   // CONTROL FLOW
   // ═══════════════════════════════════════════════════════════════════════════
 
-  _shouldSkipStep(step, context) {
+  _shouldSkipStep(_step, _context) {
     // Consensus gate logic for deprecated steps removed.
     return false;
   }

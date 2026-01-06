@@ -22,7 +22,6 @@ import {
   activeProviderTargetAtom,
   selectedArtifactsAtom, // Added
 } from "../../state/atoms";
-import { artifactEditsAtom } from "../../state/artifact-edits";
 // Optimistic AI turn creation is now handled upon TURN_CREATED from backend
 import type {
   ProviderKey,
@@ -72,7 +71,6 @@ export function useChat() {
   // Artifact Selection
   const selectedArtifacts = useAtomValue(selectedArtifactsAtom); // READ
   const setSelectedArtifacts = useSetAtom(selectedArtifactsAtom); // WRITE
-  const artifactEditsMap = useAtomValue(artifactEditsAtom);
 
 
   const sendMessage = useCallback(
@@ -131,10 +129,7 @@ export function useChat() {
         const isInitialize =
           mode === "new" && (!currentSessionId || turnIds.length === 0);
 
-        const artifactEdits = activeAiTurnId
-          ? artifactEditsMap.get(activeAiTurnId) || null
-          : null;
-
+        // Artifact curation with selected artifacts but no edits (edit system removed)
         const artifactCuration: ArtifactCurationPayload | undefined =
           isInitialize
             ? undefined
@@ -142,7 +137,7 @@ export function useChat() {
               turnId: activeAiTurnId || null,
               timestamp: ts,
               selectedArtifactIds,
-              edits: artifactEdits,
+              edits: null,
             };
 
         // Validate continuation has a sessionId and bind the port before sending
@@ -451,8 +446,6 @@ export function useChat() {
       setActiveTarget,
     ],
   );
-
-  const turnsMap = useAtomValue(turnsMapAtom);
 
 
   const abort = useCallback(async (): Promise<void> => {

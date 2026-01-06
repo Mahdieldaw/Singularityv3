@@ -223,9 +223,6 @@ export class SessionManager {
     const mapperArtifact = request?.mapperArtifact
       ? this._toJsonSafe(request.mapperArtifact)
       : undefined;
-    const exploreAnalysis = request?.exploreAnalysis
-      ? this._toJsonSafe(request.exploreAnalysis)
-      : undefined;
     const singularityOutput = request?.singularityOutput
       ? this._toJsonSafe(request.singularityOutput)
       : undefined;
@@ -366,9 +363,6 @@ export class SessionManager {
     const aiTurnId = request.canonicalAiTurnId || `ai-${now}`;
     const mapperArtifact = request?.mapperArtifact
       ? this._toJsonSafe(request.mapperArtifact)
-      : undefined;
-    const exploreAnalysis = request?.exploreAnalysis
-      ? this._toJsonSafe(request.exploreAnalysis)
       : undefined;
     const singularityOutput = request?.singularityOutput
       ? this._toJsonSafe(request.singularityOutput)
