@@ -379,39 +379,12 @@ export const isFirstTurnAtom = atom((get) => {
   return !ids.some((id) => map.get(id)?.type === "user");
 });
 
-// -----------------------------
-// Prompt Refiner State
-// -----------------------------
-export const iscomposingAtom = atom<boolean>(false);
-export const composerModelAtom = atomWithStorage<string | null>(
-  "htos_composer_model",
-  "gemini",
-  undefined,
-  { getOnInit: true }
-);
-export const analystModelAtom = atomWithStorage<string | null>(
-  "htos_analyst_model",
-  "gemini",
-  undefined,
-  { getOnInit: true }
-);
 export const chatInputValueAtom = atomWithStorage<string>(
   "htos_chat_input_value",
   "",
   undefined,
   { getOnInit: true }
 );
-export const hasRejectedRefinementAtom = atom<boolean>(false);
-
-// -----------------------------
-// Composer/Analyst Refinement State
-// -----------------------------
-// Original prompt saved when Composer replaces input (for Revert)
-export const originalPromptAtom = atom<string | null>(null);
-
-
-// Track refinement state for current draft: "composer" | "analyst" | "both" | null
-export const currentRefinementStateAtom = atom<"composer" | "analyst" | "both" | null>(null);
 
 // -----------------------------
 // Global Toast Notification
@@ -443,19 +416,6 @@ export const trustPanelFocusAtom = atom<{
 export const isDecisionMapOpenAtom = atom<{ turnId: string } | null>(null);
 export const isDecisionMapVisibleAtom = atom((get) => get(isDecisionMapOpenAtom) !== null);
 
-// -----------------------------
-// Launchpad State
-// -----------------------------
-import type { LaunchpadDraft } from "../types";
-
-export const launchpadDraftsAtom = atomWithStorage<LaunchpadDraft[]>(
-  "htos_launchpad_drafts",
-  [],
-);
-
-export const launchpadOpenAtom = atom<boolean>(false);
-
-export const showLaunchpadTabAtom = atom((get) => get(launchpadDraftsAtom).length > 0);
 
 // =============================================================================
 // Workflow Progress (for Council Orbs UI)

@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useRef, useEffect } from "react";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
-import { providerEffectiveStateFamily, isSplitOpenAtom, mappingProviderAtom, composerModelAtom, analystModelAtom, providerAuthStatusAtom, selectedModelsAtom, refinerProviderAtom, antagonistProviderAtom, singularityProviderAtom, providerLocksAtom } from "../state/atoms";
+import { providerEffectiveStateFamily, isSplitOpenAtom, mappingProviderAtom, providerAuthStatusAtom, selectedModelsAtom, refinerProviderAtom, antagonistProviderAtom, singularityProviderAtom, providerLocksAtom } from "../state/atoms";
 import { LLMProvider } from "../types";
 import { PROVIDER_ACCENT_COLORS, WORKFLOW_STAGE_COLORS } from "../constants";
 import { getProviderColor, getProviderLogo } from "../utils/provider-helpers";
@@ -52,8 +52,6 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
     const authStatus = useAtomValue(providerAuthStatusAtom);
     const [mapProviderVal, setMapProvider] = useAtom(mappingProviderAtom);
     const [refinerProvider, setRefinerProvider] = useAtom(refinerProviderAtom);
-    const [composerVal, setComposer] = useAtom(composerModelAtom);
-    const [analystVal, setAnalyst] = useAtom(analystModelAtom);
     const [selectedModels, setSelectedModels] = useAtom(selectedModelsAtom);
     const [antagonistProvider, setAntagonistProvider] = useAtom(antagonistProviderAtom);
     const [singularityProvider, setSingularityProvider] = useAtom(singularityProviderAtom);
@@ -231,21 +229,6 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
         }
     };
 
-    const handleSelectComposer = (pid: string) => {
-        setComposer(pid);
-        try {
-            localStorage.setItem('htos_composer_locked', 'true');
-            chrome?.storage?.local?.set?.({ provider_lock_settings: { composer_locked: true } });
-        } catch { }
-    };
-
-    const handleSelectAnalyst = (pid: string) => {
-        setAnalyst(pid);
-        try {
-            localStorage.setItem('htos_analyst_locked', 'true');
-            chrome?.storage?.local?.set?.({ provider_lock_settings: { analyst_locked: true } });
-        } catch { }
-    };
 
     const handleSelectAntagonist = (pid: string) => {
         if (antagonistProvider === pid) {
@@ -439,32 +422,6 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
                             </select>
                         </div>
 
-                        <div>
-                            <div className="flex items-center gap-2 mb-2 text-sm"><span>✏️</span><span>Composer</span></div>
-                            <select
-                                value={composerVal || ""}
-                                onChange={(e) => {
-                                    const val = e.target.value;
-                                    if (val === "") {
-                                        setComposer(null);
-                                    } else {
-                                        handleSelectComposer(val);
-                                    }
-                                }}
-                                className="w-full bg-chip border border-border-subtle rounded-md px-2 py-1.5 text-xs text-text-primary outline-none focus:border-brand-500 transition-colors"
-                            >
-                                <option value="">None</option>
-                                {allProviders.map(p => {
-                                    const pid = String(p.id);
-                                    const isUnauthorized = authStatus && authStatus[pid] === false;
-                                    return (
-                                        <option key={`c-${pid}`} value={pid} disabled={isUnauthorized}>
-                                            {p.name} {isUnauthorized ? "(Locked)" : ""}
-                                        </option>
-                                    );
-                                })}
-                            </select>
-                        </div>
 
                         <div>
                             <div className="flex items-center gap-2 mb-2 text-sm"><span>🔒</span><span>Refiner</span></div>
@@ -495,32 +452,6 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
                             </select>
                         </div>
 
-                        <div>
-                            <div className="flex items-center gap-2 mb-2 text-sm"><span>🧠</span><span>Analyst</span></div>
-                            <select
-                                value={analystVal || ""}
-                                onChange={(e) => {
-                                    const val = e.target.value;
-                                    if (val === "") {
-                                        setAnalyst(null);
-                                    } else {
-                                        handleSelectAnalyst(val);
-                                    }
-                                }}
-                                className="w-full bg-chip border border-border-subtle rounded-md px-2 py-1.5 text-xs text-text-primary outline-none focus:border-brand-500 transition-colors"
-                            >
-                                <option value="">None</option>
-                                {allProviders.map(p => {
-                                    const pid = String(p.id);
-                                    const isUnauthorized = authStatus && authStatus[pid] === false;
-                                    return (
-                                        <option key={`a-${pid}`} value={pid} disabled={isUnauthorized}>
-                                            {p.name} {isUnauthorized ? "(Locked)" : ""}
-                                        </option>
-                                    );
-                                })}
-                            </select>
-                        </div>
 
                         <div>
                             <div className="flex items-center gap-2 mb-2 text-sm"><span>🎭</span><span>Antagonist</span></div>

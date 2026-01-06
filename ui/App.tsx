@@ -16,9 +16,7 @@ const SettingsPanel = safeLazy(() => import("./components/SettingsPanel"));
 import { Toast } from "./components/Toast";
 import { isHistoryPanelOpenAtom, connectionStatusAtom } from "./state/atoms"; // Import connection atom
 
-import { useInitialization } from "./hooks/useInitialization"; // Import the new hook
-import LaunchpadTab from "./components/LaunchpadTab"; // Import LaunchpadTab
-const LaunchpadDrawer = safeLazy(() => import("./components/LaunchpadDrawer")); // Lazy load LaunchpadDrawer
+import { useInitialization } from "./hooks/useInitialization";
 import { useSmartProviderDefaults } from "./hooks/providers/useSmartProviderDefaults";
 import { useOnClickOutside } from "usehooks-ts";
 import { useKey } from "./hooks/ui/useKey";
@@ -68,7 +66,6 @@ export default function App() {
 
       {/* Main content area */}
       <div className="flex flex-1 relative min-h-0">
-        <LaunchpadTab /> {/* Add Launchpad Tab */}
 
         <main className="chat-main flex-1 flex flex-col relative min-h-0">
           <Suspense fallback={
@@ -80,9 +77,6 @@ export default function App() {
           </Suspense>
         </main>
 
-        <Suspense fallback={null}>
-          <LaunchpadDrawer /> {/* Add Launchpad Drawer */}
-        </Suspense>
 
         {/* History Panel Overlay */}
         {isHistoryOpen && (

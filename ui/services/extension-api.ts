@@ -315,31 +315,6 @@ class ExtensionAPI {
 
 
 
-  runAnalyst(
-    fragment: string,
-    context: any,
-    authoredPrompt: string,
-    analystModel?: string,
-    originalPrompt?: string
-  ): Promise<{ audit: string; variants: string[] } | null> {
-    return this.queryBackend<{ audit: string; variants: string[] } | null>({
-      type: "RUN_ANALYST",
-      payload: { fragment, context, authoredPrompt, analystModel, originalPrompt },
-    });
-  }
-
-  runComposer(
-    draftPrompt: string,
-    context: any,
-    composerModel?: string,
-    analystCritique?: string
-  ): Promise<{ refinedPrompt: string; explanation: string } | null> {
-    return this.queryBackend<{ refinedPrompt: string; explanation: string } | null>({
-      type: "RUN_COMPOSER",
-      payload: { draftPrompt, context, composerModel, analystCritique },
-    });
-  }
-
   async refreshAuthStatus(): Promise<Record<string, boolean>> {
     return this.queryBackend<Record<string, boolean>>({ type: REFRESH_AUTH_STATUS });
   }

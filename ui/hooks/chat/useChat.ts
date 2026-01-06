@@ -21,14 +21,7 @@ import {
   uiPhaseAtom,
   isHistoryPanelOpenAtom,
   selectedModeAtom,
-
-  iscomposingAtom, // Import new atom
-  composerModelAtom, // Import new atom
-  analystModelAtom,
-  hasRejectedRefinementAtom,
   activeProviderTargetAtom,
-  launchpadDraftsAtom, // Import launchpad atom
-  launchpadOpenAtom,
   selectedArtifactsAtom, // Added
 } from "../../state/atoms";
 import { artifactEditsAtom } from "../../state/artifact-edits";
@@ -77,13 +70,8 @@ export function useChat() {
   const setCurrentAppStep = useSetAtom(currentAppStepAtom);
   const setUiPhase = useSetAtom(uiPhaseAtom);
   const setIsHistoryPanelOpen = useSetAtom(isHistoryPanelOpenAtom);
-
-  const setiscomposing = useSetAtom(iscomposingAtom); // Set new atom
-  const setHasRejectedRefinement = useSetAtom(hasRejectedRefinementAtom);
   const setActiveTarget = useSetAtom(activeProviderTargetAtom);
 
-  const setLaunchpadDrafts = useSetAtom(launchpadDraftsAtom);
-  const setLaunchpadOpen = useSetAtom(launchpadOpenAtom);
 
   // Artifact Selection
   const selectedArtifacts = useAtomValue(selectedArtifactsAtom); // READ
@@ -94,8 +82,6 @@ export function useChat() {
   const sendMessage = useCallback(
     async (prompt: string, mode: "new" | "continuation") => {
       if (!prompt || !prompt.trim()) return;
-
-      setHasRejectedRefinement(false); // Reset rejection state on send
 
       setIsLoading(true);
       setUiPhase("streaming");
@@ -498,145 +484,6 @@ export function useChat() {
 
   const turnsMap = useAtomValue(turnsMapAtom);
 
-  const composerModel = useAtomValue(composerModelAtom);
-  const analystModel = useAtomValue(analystModelAtom);
-
-
-  const runComposerFlow = useCallback(
-    async (draftPrompt: string, mode: "compose" | "explain", originalPromptContext?: string) => {
-      if (!draftPrompt || !draftPrompt.trim()) return;
-
-      setiscomposing(true);
-
-      try {
-        const lastTurnId = turnIds[turnIds.length - 1];
-
-        let userPrompt = "";
-
-        let mappingText = "";
-        let batchText = "";
-
-        if (lastTurnId) {
-          const lastTurn = turnsMap.get(lastTurnId);
-          if (lastTurn && lastTurn.type === "ai") {
-            const aiTurn = lastTurn as AiTurn;
-            const userTurn = turnsMap.get(aiTurn.userTurnId);
-            userPrompt = userTurn?.type === "user" ? userTurn.text : "";
-
-
-
-            mappingText = Object.values(aiTurn.mappingResponses || {})
-              .flat()
-              .map((r) => r.text)
-              .join("\n\n");
-
-            batchText = Object.entries(aiTurn.batchResponses || {})
-              .map(([pid, v]: [string, any]) => {
-                const arr = Array.isArray(v) ? v : [v];
-                const last = arr[arr.length - 1];
-                return `[${pid}]: ${last?.text || ""}`;
-              })
-              .join("\n\n");
-          }
-        }
-
-        const context = {
-          userPrompt,
-
-          mappingText,
-          batchText,
-          sessionId: currentSessionId || null,
-          isInitialize: !currentSessionId || turnIds.length === 0,
-        };
-
-        // Determine the User Intent (Original Prompt)
-        // If provided (chaining), use it. Otherwise, if starting fresh, the input IS the original.
-        const effectiveOriginal = originalPromptContext || draftPrompt;
-
-        if (mode === "compose") {
-          // Compose Mode: Run Composer
-          // Note: In new flow, we don't automatically pass critique unless we chain it. 
-          // For now, simple run.
-          const result = await api.runComposer(draftPrompt, context, composerModel ?? undefined);
-
-          if (result) {
-            const snippet = (result.refinedPrompt || "").slice(0, 60).trim();
-            const newDraft: any = {
-              id: `draft-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-              title: `Composer – ${snippet}`,
-              text: result.refinedPrompt,
-              source: "composer",
-              createdAt: Date.now(),
-              originalPrompt: effectiveOriginal, // PERSIST INTENT
-              primarySectionId: 'refined',
-              sections: [
-                { id: 'refined', title: 'Refined Prompt', text: result.refinedPrompt },
-                ...(result.explanation ? [{ id: 'notes', title: 'Notes', text: result.explanation }] : [])
-              ],
-            };
-            setLaunchpadDrafts((prev: any[]) => [newDraft, ...prev]);
-            setLaunchpadOpen(true);
-          }
-        } else {
-          // Explain Mode: Run Analyst
-          // analyze the current text box content (draftPrompt) as the "candidate"
-          const candidatePrompt = draftPrompt;
-
-          const result = await api.runAnalyst(
-            effectiveOriginal, // User Intent
-            context,
-            candidatePrompt, // The Text to Analyze
-            analystModel ?? undefined,
-            effectiveOriginal
-          );
-
-          if (result) {
-            const ts = Date.now();
-            const snippet = (candidatePrompt || "").slice(0, 60).trim();
-            const sections: any[] = [];
-            const primaryId = 'audit';
-
-            const auditText = result.audit || "";
-            if (auditText) {
-              sections.push({ id: 'audit', title: 'Audit', text: auditText });
-            }
-            if (result.variants && result.variants.length > 0) {
-              const numbered = result.variants.map((v, i) => `${i + 1}. ${v}`).join('\n\n');
-              sections.push({ id: 'variants', title: 'Variants', text: numbered });
-            }
-
-            const analystDraft: any = {
-              id: `draft-${ts}-${Math.random().toString(36).slice(2, 8)}`,
-              title: `Analyst – ${snippet}`,
-              text: auditText || (result.variants || []).join('\n\n'),
-              source: "analyst-audit",
-              createdAt: ts,
-              originalPrompt: effectiveOriginal, // PERSIST INTENT
-              primarySectionId: primaryId,
-              sections,
-            };
-            setLaunchpadDrafts((prev: any[]) => [analystDraft, ...prev]);
-            setLaunchpadOpen(true);
-          }
-        }
-
-      } catch (err) {
-        console.error("Failed to run composer flow:", err);
-      } finally {
-        setiscomposing(false);
-      }
-    },
-    [
-      turnIds,
-      turnsMap,
-      setiscomposing,
-      currentSessionId,
-      composerModel,
-      analystModel,
-      setLaunchpadDrafts,
-      setLaunchpadOpen
-    ],
-  );
 
   const abort = useCallback(async (): Promise<void> => {
     try {
@@ -664,7 +511,6 @@ export function useChat() {
     deleteChat,
     deleteChats,
     abort,
-    runComposerFlow,
     messages,
   };
 }
