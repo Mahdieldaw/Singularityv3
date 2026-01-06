@@ -233,6 +233,96 @@ export interface FloorClaim {
   label: string;
   text: string;
   supportCount: number;
+  supportRatio: number;
+  isContested: boolean;
+  contestedBy: string[];
+}
+
+export interface ChallengerInfo {
+  id: string;
+  label: string;
+  text: string;
+  supportCount: number;
+  challenges: string | null;
+  targetsClaim: string | null;
+}
+
+export interface ChainStep {
+  id: string;
+  label: string;
+  text: string;
+  supportCount: number;
+  supportRatio: number;
+  position: number;
+  enables: string[];
+  isWeakLink: boolean;
+  weakReason: string | null;
+}
+
+export interface TradeoffOption {
+  id: string;
+  label: string;
+  text: string;
+  supportCount: number;
+  supportRatio: number;
+}
+
+export interface DimensionCluster {
+  id: string;
+  theme: string;
+  claims: Array<{
+    id: string;
+    label: string;
+    text: string;
+    supportCount: number;
+  }>;
+  cohesion: number;
+  avgSupport: number;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SHAPE DATA INTERFACES
+// ═══════════════════════════════════════════════════════════════════════════
+
+export interface SettledShapeData {
+  pattern: 'settled';
+  floor: FloorClaim[];
+  floorStrength: 'strong' | 'moderate' | 'weak';
+  challengers: ChallengerInfo[];
+  blindSpots: string[];
+  confidence: number;
+}
+
+export interface LinearShapeData {
+  pattern: 'linear';
+  chain: ChainStep[];
+  chainLength: number;
+  weakLinks: Array<{
+    step: ChainStep;
+    cascadeSize: number;
+  }>;
+  alternativeChains: ChainStep[][];
+  terminalClaim: ChainStep | null;
+}
+
+export interface KeystoneShapeData {
+  pattern: 'keystone';
+  keystone: {
+    id: string;
+    label: string;
+    text: string;
+    supportCount: number;
+    supportRatio: number;
+    dominance: number;
+    isFragile: boolean;
+  };
+  dependencies: Array<{
+    id: string;
+    label: string;
+    relationship: 'prerequisite' | 'supports';
+  }>;
+  cascadeSize: number;
+  challengers: ChallengerInfo[];
 }
 
 export interface ContestedShapeData {
@@ -252,44 +342,77 @@ export interface ContestedShapeData {
   collapsingQuestion: string | null;
 }
 
-export interface SettledShapeData {
-  pattern: 'settled';
-  floor: FloorClaim[];
-  blindSpots: string[];
-}
-
-export interface KeystoneShapeData {
-  pattern: 'keystone';
-  keystoneClaim: ConflictClaim;
-  dependencies: string[];
-  risk: string;
-}
-
-export interface LinearShapeData {
-  pattern: 'linear';
-  stages: string[];
-  branches: string[];
-}
-
 export interface TradeoffShapeData {
   pattern: 'tradeoff';
-  pairs: ConflictInfo[];
+  tradeoffs: Array<{
+    id: string;
+    optionA: TradeoffOption;
+    optionB: TradeoffOption;
+    symmetry: 'both_high' | 'both_low' | 'asymmetric';
+    governingFactor: string | null;
+  }>;
+  dominatedOptions: Array<{
+    dominated: string;
+    dominatedBy: string;
+    reason: string;
+  }>;
+  floor: FloorClaim[];
 }
 
 export interface DimensionalShapeData {
   pattern: 'dimensional';
-  dimensions: string[];
+  dimensions: DimensionCluster[];
+  interactions: Array<{
+    dimensionA: string;
+    dimensionB: string;
+    relationship: 'independent' | 'overlapping' | 'conflicting';
+  }>;
+  gaps: string[];
+  governingConditions: string[];
 }
 
 export interface ExploratoryShapeData {
   pattern: 'exploratory';
-  clusters: string[];
+  strongestSignals: Array<{
+    id: string;
+    label: string;
+    text: string;
+    supportCount: number;
+    reason: string;
+  }>;
+  looseClusters: DimensionCluster[];
+  isolatedClaims: Array<{
+    id: string;
+    label: string;
+    text: string;
+  }>;
+  clarifyingQuestions: string[];
+  signalStrength: number;
 }
 
 export interface ContextualShapeData {
   pattern: 'contextual';
-  variables: string[];
+  governingCondition: string;
+  branches: Array<{
+    condition: string;
+    claims: FloorClaim[];
+  }>;
+  defaultPath: {
+    exists: boolean;
+    claims: FloorClaim[];
+  } | null;
+  missingContext: string[];
 }
+
+export type ShapeData =
+  | SettledShapeData
+  | LinearShapeData
+  | KeystoneShapeData
+  | ContestedShapeData
+  | TradeoffShapeData
+  | DimensionalShapeData
+  | ExploratoryShapeData
+  | ContextualShapeData;
 
 
 export interface CoreRatios {
