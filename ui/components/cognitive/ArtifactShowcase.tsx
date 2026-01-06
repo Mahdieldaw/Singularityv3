@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useCallback, useState } from "react";
-import { MapperArtifact, AiTurn, ExploreAnalysis, ProviderResponse, ProblemStructure, Claim } from "../../../shared/contract";
+import { MapperArtifact, AiTurn, ProviderResponse, ProblemStructure, Claim, StructuralAnalysis, ExploreAnalysis } from "../../../shared/contract";
 import { artifactEditsAtom } from "../../state/artifact-edits";
 import { RawResponseCard } from "./cards/RawResponseCard";
 import { extractGraphTopologyAndStrip, parseMappingResponse } from "../../../shared/parsing-utils";
@@ -24,7 +24,7 @@ import type { CognitiveTransitionOptions, SelectedArtifact } from "../../hooks/c
 import { MetricsRibbon } from "./MetricsRibbon";
 import { useProviderLimits } from "../../hooks/useProviderLimits";
 import { getProviderName } from "../../utils/provider-helpers";
-import { computeProblemStructureFromArtifact, computeStructuralAnalysis, StructuralAnalysis, GraphAnalysis, CoreRatios } from "../../../src/core/PromptService";
+import { computeProblemStructureFromArtifact, computeStructuralAnalysis } from "../../../src/core/PromptMethods";
 import { applyEdits } from "../../utils/apply-artifact-edits";
 
 const MapIcon = ({ className }: { className?: string }) => (
@@ -118,8 +118,8 @@ export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
     const setIsDecisionMapOpen = useSetAtom(isDecisionMapOpenAtom);
 
     // Hooks for Refiner and Antagonist
-    const { output: refinerOutput, providerId: refinerPid, error: refinerError } = useRefinerOutput(turn?.id);
-    const { output: antagonistOutput, providerId: antagonistPid, error: antagonistError } = useAntagonistOutput(turn?.id);
+    const { output: refinerOutput, providerId: refinerPid } = useRefinerOutput(turn?.id);
+    const { output: antagonistOutput, providerId: antagonistPid } = useAntagonistOutput(turn?.id);
 
     // Get modified artifact
     const currentTurnId = turn?.id || mapperArtifact?.turn?.toString() || "";
@@ -324,6 +324,7 @@ export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
                         artifact={mapperArtifact}
                         claimsCount={claimsCount}
                         ghostCount={ghostCount}
+                        ghosts={mapperArtifact?.ghosts || []}
                         problemStructure={problemStructure}
                         graphAnalysis={graphAnalysis}
                         enrichedClaims={enrichedClaims}
@@ -456,23 +457,6 @@ export const ArtifactShowcase: React.FC<ArtifactShowcaseProps> = ({
                                     </div>
                                 </summary>
                                 <div className="p-4 space-y-3 border-t border-border-subtle/50 bg-surface">
-                                    {artifactForDisplay.ghosts && artifactForDisplay.ghosts.length > 0 && (
-                                        <div className="p-4 rounded-xl border border-dashed border-border-subtle bg-surface-highlight/10">
-                                            <div className="flex items-center justify-between gap-3 mb-2">
-                                                <div className="text-xs font-semibold text-text-secondary">👻 Ghosts</div>
-                                                <div className="text-[10px] text-text-muted">
-                                                    {artifactForDisplay.ghosts.length}
-                                                </div>
-                                            </div>
-                                            <div className="space-y-2">
-                                                {artifactForDisplay.ghosts.map((ghost: string, idx: number) => (
-                                                    <div key={idx} className="text-sm text-text-muted italic leading-relaxed">
-                                                        {ghost}
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        </div>
-                                    )}
                                     {artifactForDisplay.claims.map((claim: Claim) => (
                                         <SelectableCard
                                             key={claim.id}

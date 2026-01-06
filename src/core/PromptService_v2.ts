@@ -1,449 +1,368 @@
-// ═══════════════════════════════════════════════════════════════════════════
-// CONCIERGE SYSTEM - THE INTELLIGENCE LAYER
-// ═══════════════════════════════════════════════════════════════════════════
-// 
-// PHILOSOPHY:
-// The user experiences conversation with the most intelligent entity they've 
-// ever encountered. This intelligence comes from:
-// 1. Multi-model synthesis (hidden complexity)
-// 2. Structure-guided responses (invisible scaffolding)
-// 3. Conversational memory (evolved understanding)
-// 4. Voice consistency (one unified intelligence)
-//
-// The machinery is never exposed. The intelligence is in the prompt injection.
-// ═══════════════════════════════════════════════════════════════════════════
-
-import { 
-  MapperArtifact, 
-  Claim, 
-  Edge, 
+import {
   ProblemStructure,
-  EnrichedClaim,
-  ConflictPair,
-  LeverageInversion 
+  StructuralAnalysis, // Imported from contract
 } from "../../shared/contract";
 
 // ═══════════════════════════════════════════════════════════════════════════
-// TYPES - CONCIERGE CONVERSATION STATE
+// STRUCTURAL ANALYSIS INTERFACE
 // ═══════════════════════════════════════════════════════════════════════════
 
-interface ConversationContext {
-  query: string;
-  originalArtifactId: string;
-  
-  // Evolved state (only what changed)
-  resolvedTensions: Array<{
-    axis: string;
-    resolution: 'side_a' | 'side_b' | 'contextual';
-    context?: string;
-  }>;
-  
-  providedContext: string[];      // User constraints
-  validatedClaims: string[];      // Claims user probed
-  exploredGhosts: string[];       // Gaps user asked about
-  
-  // Current shape (mutates as context evolves)
-  currentShape: {
-    pattern: ProblemShape['pattern'];
-    confidence: number;
-  };
-}
-
-interface Turn {
-  role: 'user' | 'concierge';
-  content: string;
-  timestamp: number;
-}
-
-type ProblemShape = {
-  pattern: 'settled' | 'contested' | 'keystone' | 'linear' | 'dimensional' | 'exploratory';
-  confidence: number;
-  implication: string;
-};
-
-interface StructuralAnalysis {
-  shape: ProblemShape;
-  claims: EnrichedClaim[];
-  tensions: Array<{
-    claimA: { id: string; label: string; support: number };
-    claimB: { id: string; label: string; support: number };
-    axis: string;
-    isBothHighSupport: boolean;
-  }>;
-  graph: {
-    hubClaimId: string | null;
-    articulationPoints: string[];
-    longestChain: string[];
-  };
-  leverageInversions: LeverageInversion[];
-  ghosts: {
-    count: number;
-    mayExtendChallenger: boolean;
-    challengerIds: string[];
-  };
-}
+// TradeoffPair and StructuralAnalysis removed - using types from shared/contract
 
 // ═══════════════════════════════════════════════════════════════════════════
-// THE CONTEXT SIEVE - Reduces structure to shape-relevant signals
+// THE STRUCTURAL BRIEF
 // ═══════════════════════════════════════════════════════════════════════════
 
 function buildStructuralBrief(analysis: StructuralAnalysis): string {
-  const { shape, tensions, claims, leverageInversions } = analysis;
-  
-  // Map patterns to concise, actionable implications
-  const shapeImplications: Record<string, string> = {
-    settled: "There is strong consensus on the core approach.",
-    contested: "There is genuine disagreement on the key axis of choice.",
-    keystone: "Everything hinges on one critical assumption.",
-    linear: "There is a clear sequence of steps.",
-    dimensional: "Multiple valid paths exist depending on priorities.",
-    exploratory: "The landscape is sparse—more context needed."
-  };
-  
-  let brief = shapeImplications[shape.pattern];
-  
-  // Add ONLY the most critical structural signal for each pattern
-  if (shape.pattern === 'contested' && tensions.length > 0) {
-    const primaryTension = tensions.find(t => t.isBothHighSupport) || tensions[0];
-    brief += `\n\n**The Core Split:**\n`;
-    brief += `Position A: ${primaryTension.claimA.label} (${Math.round(primaryTension.claimA.support * 100)}% agreement)\n`;
-    brief += `Position B: ${primaryTension.claimB.label} (${Math.round(primaryTension.claimB.support * 100)}% agreement)\n`;
-    brief += `\nYour task: Help the user see this tradeoff without labeling it as "disagreement."`;
-  }
-  
-  if (shape.pattern === 'settled') {
-    const consensus = claims.filter(c => c.supportRatio > 0.6).slice(0, 3);
-    brief += `\n\n**High Agreement Points:**\n`;
-    consensus.forEach(c => brief += `• ${c.label}\n`);
-    brief += `\nYour task: Speak with confidence. If user probes, challenge assumptions or explore edge cases.`;
-  }
-  
-  if (shape.pattern === 'keystone' && analysis.graph.hubClaimId) {
-    const keystoneClaim = claims.find(c => c.id === analysis.graph.hubClaimId);
-    if (keystoneClaim) {
-      brief += `\n\n**The Keystone:** "${keystoneClaim.label}"\n`;
-      brief += `Everything depends on this. Center your response around it. Test it if user asks "why?" or "what if?".`;
-    }
-  }
-  
-  if (shape.pattern === 'linear' && analysis.graph.longestChain.length > 0) {
-    const chainLabels = analysis.graph.longestChain
-      .map(id => claims.find(c => c.id === id)?.label)
-      .filter(Boolean)
-      .slice(0, 5);
-    brief += `\n\n**Sequential Steps:**\n`;
-    chainLabels.forEach((label, i) => brief += `${i + 1}. ${label}\n`);
-    brief += `\nYour task: Walk through the sequence. Emphasize why order matters.`;
-  }
-  
-  if (shape.pattern === 'dimensional') {
-    const inversions = leverageInversions.slice(0, 2);
-    if (inversions.length > 0) {
-      brief += `\n\n**Context-Dependent Choices:**\n`;
-      inversions.forEach(inv => {
-        brief += `• ${inv.claimLabel}: Generally agreed, but weak in specific cases\n`;
-      });
-      brief += `\nYour task: Help user identify which context applies to them.`;
-    }
-  }
-  
-  if (shape.pattern === 'exploratory') {
-    brief += `\n\n**Current State:** Low structural confidence. Landscape is sparse.\n`;
-    brief += `Your task: Be honest about uncertainty. Don't overstate. Ask clarifying questions to collapse ambiguity.`;
-  }
-  
-  return brief;
-}
+  const {
+    shape,
+    claimsWithLeverage: claims,
+    patterns,
+    graph,
+    ratios,
+    ghostAnalysis,
+    landscape,
+    edges
+  } = analysis;
 
-// ═══════════════════════════════════════════════════════════════════════════
-// CONVERSATION MEMORY - Only keep what matters
-// ═══════════════════════════════════════════════════════════════════════════
-
-function buildConversationBrief(turns: Turn[]): string {
-  if (turns.length === 0) return '';
-  
-  // Only last 3 exchanges to avoid prompt bloat
-  const recentTurns = turns.slice(-3);
-  
   let brief = '';
-  recentTurns.forEach(turn => {
-    const speaker = turn.role === 'user' ? 'User' : 'You';
-    const content = turn.content.length > 500 
-      ? turn.content.substring(0, 500) + '...' 
-      : turn.content;
-    brief += `**${speaker}:** ${content}\n\n`;
+
+  // Shape
+  brief += `## Shape: ${shape.primaryPattern.toUpperCase()} (${Math.round(shape.confidence * 100)}%)\n\n`;
+  brief += `${shape.implications.understand}\n\n`;
+  brief += `**Evidence:**\n${shape.evidence.map(e => `• ${e}`).join('\n')}\n\n`;
+
+  // Metrics
+  brief += `## Metrics\n\n`;
+  brief += `• Claims: ${landscape.claimCount} from ${landscape.modelCount} sources\n`;
+  brief += `• Edges: ${edges.length}\n`;
+  brief += `• Concentration: ${Math.round(ratios.concentration * 100)}%\n`;
+  brief += `• Alignment: ${Math.round(ratios.alignment * 100)}%\n`;
+  brief += `• Tension: ${Math.round(ratios.tension * 100)}%\n`;
+  brief += `• Fragmentation: ${Math.round(ratios.fragmentation * 100)}%\n`;
+  brief += `• Depth: ${Math.round(ratios.depth * 100)}%\n\n`;
+
+  // Floor
+  const floor = claims.filter(c => c.isHighSupport);
+  brief += `## Floor (${floor.length})\n\n`;
+  floor.forEach(c => {
+    brief += `**${c.label}** [${c.supporters.length}/${landscape.modelCount}]\n`;
+    brief += `${c.text}\n\n`;
   });
-  
+  if (floor.length === 0) brief += `None.\n\n`;
+
+  // Tensions
+  brief += `## Tensions\n\n`;
+  if (patterns.conflicts.length > 0) {
+    patterns.conflicts.forEach(c => {
+      const q = c.isBothConsensus ? ' [both high-support]' : '';
+      const d = c.dynamics === 'symmetric' ? ' (evenly split)' : ' (asymmetric)';
+      brief += `• ${c.claimA.label} vs ${c.claimB.label}${q}${d}\n`;
+    });
+  }
+  if (patterns.tradeoffs.length > 0) {
+    patterns.tradeoffs.forEach(t => {
+      brief += `• ${t.claimA.label} ↔ ${t.claimB.label} (${t.symmetry.replace('_', ' ')})\n`;
+    });
+  }
+  if (patterns.conflicts.length === 0 && patterns.tradeoffs.length === 0) {
+    brief += `None.\n`;
+  }
+  brief += `\n`;
+
+  // Fragilities
+  brief += `## Fragilities\n\n`;
+  if (patterns.leverageInversions.length > 0) {
+    patterns.leverageInversions.forEach(inv => {
+      brief += `• ${inv.claimLabel}: ${inv.reason.replace(/_/g, ' ')}`;
+      if (inv.affectedClaims.length > 0) brief += ` (affects ${inv.affectedClaims.length})`;
+      brief += `\n`;
+    });
+  }
+  if (patterns.cascadeRisks.filter(r => r.dependentIds.length >= 2).length > 0) {
+    patterns.cascadeRisks.filter(r => r.dependentIds.length >= 2).forEach(r => {
+      brief += `• ${r.sourceLabel} → ${r.dependentIds.length} dependents (depth ${r.depth})\n`;
+    });
+  }
+  if (graph.articulationPoints.length > 0) {
+    graph.articulationPoints.forEach(id => {
+      const c = claims.find(c => c.id === id);
+      if (c) brief += `• Bridge: ${c.label} [${c.supporters.length}]\n`;
+    });
+  }
+  if (patterns.leverageInversions.length === 0 &&
+    patterns.cascadeRisks.length === 0 &&
+    graph.articulationPoints.length === 0) {
+    brief += `None.\n`;
+  }
+  brief += `\n`;
+
+  // Topology
+  brief += `## Topology\n\n`;
+  brief += `• Components: ${graph.componentCount}\n`;
+  brief += `• Longest chain: ${graph.longestChain.length}\n`;
+  brief += `• Cluster cohesion: ${Math.round(graph.clusterCohesion * 100)}%\n`;
+  brief += `• Local coherence: ${Math.round(graph.localCoherence * 100)}%\n`;
+  if (graph.hubClaim) {
+    const hub = claims.find(c => c.id === graph.hubClaim);
+    brief += `• Hub: ${hub?.label || graph.hubClaim} (${graph.hubDominance.toFixed(1)}x)\n`;
+  }
+  brief += `\n`;
+
+  // Low-support
+  const lowSupport = claims.filter(c => !c.isHighSupport);
+  brief += `## Low-Support (${lowSupport.length})\n\n`;
+  lowSupport.forEach(c => {
+    const icon = c.role === 'challenger' ? '⚡' : c.isLeverageInversion ? '⚠' : '○';
+    brief += `${icon} **${c.label}** [${c.supporters.length}/${landscape.modelCount}]\n`;
+    brief += `${c.text}\n\n`;
+  });
+  if (lowSupport.length === 0) brief += `None.\n\n`;
+
+  // Ghosts
+  brief += `## Gaps\n\n`;
+  brief += ghostAnalysis.count > 0
+    ? `${ghostAnalysis.count} unaddressed area(s).${ghostAnalysis.mayExtendChallenger ? ' May extend challenger perspectives.' : ''}\n`
+    : `None.\n`;
+  brief += `\n`;
+
+  // Convergence
+  if (patterns.convergencePoints.length > 0) {
+    brief += `## Convergence\n\n`;
+    patterns.convergencePoints.forEach(cp => {
+      brief += `• ${cp.targetLabel} ← ${cp.sourceLabels.join(', ')} (${cp.edgeType})\n`;
+    });
+    brief += `\n`;
+  }
+
+  // Isolated
+  if (patterns.isolatedClaims.length > 0) {
+    brief += `## Isolated\n\n`;
+    patterns.isolatedClaims.forEach(id => {
+      const c = claims.find(c => c.id === id);
+      if (c) brief += `• ${c.label}\n`;
+    });
+    brief += `\n`;
+  }
+
   return brief;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// SHAPE-GUIDED RESPONSE RULES - Voice consistency engine
+// SHAPE-SPECIFIC GUIDANCE
 // ═══════════════════════════════════════════════════════════════════════════
 
-function getShapeGuidance(shape: ProblemShape, context: ConversationContext): string {
-  const baseRules = `**Voice Principles:**
-- Direct. No preamble. No "Great question!"
-- Start immediately with substance
-- End with forward motion—a question, next step, or clear conclusion
-- Never reference "models," "analysis," "structure," or "consensus"
-- If uncertain, explain WHY (missing context, tradeoffs) not just "it depends"`;
+function getShapeGuidance(shape: ProblemStructure): string {
+  const guidance: Record<ProblemStructure['primaryPattern'], string> = {
 
-  const shapeSpecificGuidance: Record<string, string> = {
-    settled: `**For This Settled Landscape:**
-- Speak with confidence—the structure supports strong claims
-- Lead with the consensus position
-- If user challenges, probe their specific case (maybe they're an exception)
-- Reference the few key points, integrated naturally
-${baseRules}`,
+    settled: `**Shape Guidance: SETTLED**
+The landscape has strong agreement. Speak with confidence—the structure supports it.
+Lead with the answer. If the user probes, challenge assumptions or explore edge cases.
+Watch for blind spots in the consensus.`,
 
-    contested: `**For This Contested Landscape:**
-- Surface the tradeoff without calling it "disagreement"
-- Present both sides as valid depending on priorities
-- Ask clarifying questions to help user choose
-- Don't force consensus where none exists
-${baseRules}`,
+    contested: `**Shape Guidance: CONTESTED**
+Genuine disagreement exists on a clear axis. Surface this tension naturally.
+Present both sides as valid depending on priorities. Don't pick a side unless user gives context.
+Help them see what choosing requires.`,
 
-    keystone: `**For This Keystone Structure:**
-- Everything revolves around the central assumption
-- Test that assumption with the user
-- Show how alternatives branch from accepting/rejecting it
-- Be explicit about the dependency
-${baseRules}`,
+    keystone: `**Shape Guidance: KEYSTONE**
+Everything hinges on one critical claim. Center your response around it.
+Show what depends on it. If user asks "why" or "what if," stress-test the keystone.
+If it fails, acknowledge the cascade.`,
 
-    linear: `**For This Sequential Structure:**
-- Walk through steps in order
-- Explain why order matters (prerequisites, dependencies)
-- If user asks about step N, reference where they are in the chain
-- Help them identify their current position
-${baseRules}`,
+    linear: `**Shape Guidance: LINEAR**
+There's a clear sequence. Walk through steps in order.
+Emphasize why order matters (prerequisites, dependencies).
+Help user identify where they are in the chain.`,
 
-    dimensional: `**For This Context-Dependent Structure:**
-- Different contexts require different approaches
-- Ask about their specific situation
-- Present options tied to conditions
-- Help them identify which dimension applies
-${baseRules}`,
+    tradeoff: `**Shape Guidance: TRADEOFF**
+Explicit tradeoffs exist. No universal best.
+Map what is sacrificed for what is gained. Ask about priorities.
+Don't force a choice—show consequences of each path.`,
 
-    exploratory: `**For This Sparse Landscape:**
-- Acknowledge limited signal honestly
-- Don't overstate confidence
-- Ask questions that would collapse ambiguity
-- Identify what context would help
-${baseRules}`
+    dimensional: `**Shape Guidance: DIMENSIONAL**
+Multiple valid paths depending on context. Different situations require different approaches.
+Ask which dimension matters to them. Present options tied to conditions.
+Don't collapse prematurely.`,
+
+    contextual: `**Shape Guidance: CONTEXTUAL**
+The answer depends on specific external factors. Don't guess.
+Ask for the missing context directly.
+Explain why the answer changes based on that context.`,
+
+    exploratory: `**Shape Guidance: EXPLORATORY**
+Structure is sparse. Low confidence. Be honest about uncertainty.
+Don't overstate. Ask clarifying questions that would collapse ambiguity.
+Identify what context would help.`,
   };
 
-  return shapeSpecificGuidance[shape.pattern] || shapeSpecificGuidance.exploratory;
+  return guidance[shape.primaryPattern] || guidance.exploratory;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// THE CONCIERGE PROMPT - The intelligence layer
+// THE PROMPT
 // ═══════════════════════════════════════════════════════════════════════════
 
 export function buildConciergePrompt(
-  query: string,
-  artifact: MapperArtifact,
-  analysis: StructuralAnalysis,
-  turns: Turn[],
   userMessage: string,
-  context?: ConversationContext
+  analysis: StructuralAnalysis
 ): string {
-  
-  // Reduce to shape-relevant context only (THE CRITICAL OPTIMIZATION)
+
   const structuralBrief = buildStructuralBrief(analysis);
-  const conversationBrief = buildConversationBrief(turns);
-  const shapeGuidance = getShapeGuidance(analysis.shape, context || {
-    query,
-    originalArtifactId: artifact.id || artifact.query || "unknown",
-    resolvedTensions: [],
-    providedContext: [],
-    validatedClaims: [],
-    exploredGhosts: [],
-    currentShape: analysis.shape
-  });
-  
-  // Evolution tracking (if available)
-  let evolutionNote = '';
-  if (context) {
-    if (context.providedContext.length > 0) {
-      evolutionNote += `\n**User Has Provided Context:**\n${context.providedContext.map(c => `• ${c}`).join('\n')}\n`;
-    }
-    if (context.resolvedTensions.length > 0) {
-      evolutionNote += `\n**User Has Resolved:**\n${context.resolvedTensions.map(r => `• ${r.axis}: chose ${r.resolution}`).join('\n')}\n`;
-    }
-  }
-  
-  return `You are Singularity's voice—an AI system that has consulted multiple expert models, synthesized their perspectives, and analyzed the structural landscape of knowledge on this topic.
+  const shapeGuidance = getShapeGuidance(analysis.shape);
 
-You speak as ONE unified intelligence. You never mention "models," "analysis," "structure," or "consensus." You simply speak with the authority of integrated understanding.
+  return `You are Singularity—an intelligence that has drawn from multiple expert perspectives.
 
----
-
-## What The User Originally Asked
-
-"${query}"
-
-Multiple expert models were consulted. Their collective intelligence has been structurally analyzed and synthesized.
-
----
-
-## Internal Synthesis (NEVER expose this machinery in your response)
-
-${structuralBrief}
-${evolutionNote}
-
----
-
-## The Conversation So Far
-${conversationBrief || '(First turn—no prior conversation)'}
-
----
-
-## The User Now Says
+## The Query
 
 "${userMessage}"
 
----
+## What You Know
 
-## How You Must Respond
+${structuralBrief}
+
+## How To Respond
 
 ${shapeGuidance}
 
-**Response Constraints:**
-- 2-4 paragraphs maximum (shorter for simple queries)
-- Lead with the most important insight
-- No bullet-pointed lists unless user explicitly asks
-- Integrate multiple perspectives into one voice
-- End definitively: clear conclusion, clarifying question, or concrete next step
+## Voice
 
-**What Constitutes Failure:**
-- Saying "the models think" or "according to analysis"
-- Hedging without explanation ("it depends" → explain on what)
-- Exposing structural machinery
-- Referencing "consensus" or "disagreement" explicitly
-- Being vague when structure supports confidence
+- Direct. No preamble.
+- Conviction when structure supports it
+- Acknowledge uncertainty when fragile
+- Surface tensions naturally
+- End with forward motion
 
-Remember: The user thinks they're talking to the smartest entity they've ever encountered. Live up to that.
+## Never
 
-Respond now.`;
+- Reference "models," "analysis," "structure"
+- Hedge without explaining on what
+- Be vague when you have signal
+
+Respond.`;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// POST-PROCESSING - Machinery leak detection
+// WORD SWAPPING
 // ═══════════════════════════════════════════════════════════════════════════
 
-export function detectMachineryLeakage(response: string): {
-  leaked: boolean;
-  violations: string[];
-} {
-  const leakPatterns = [
-    { pattern: /based on (the )?structural/gi, description: "Exposed structural analysis" },
-    { pattern: /according to (the )?analysis/gi, description: "Referenced analysis machinery" },
-    { pattern: /the models (think|suggest|say|indicate)/gi, description: "Exposed multi-model synthesis" },
-    { pattern: /consensus shows/gi, description: "Explicitly mentioned consensus" },
-    { pattern: /as evidenced by/gi, description: "Academic hedging language" },
-    { pattern: /from the (structural |graph |topology )?analysis/gi, description: "Direct analysis reference" },
-    { pattern: /the (mapper|refiner|antagonist)/gi, description: "Exposed system components" },
-  ];
-  
-  const violations: string[] = [];
-  let leaked = false;
-  
-  leakPatterns.forEach(({ pattern, description }) => {
-    if (pattern.test(response)) {
-      leaked = true;
-      violations.push(description);
-    }
+const SWAPS: Array<[RegExp, string]> = [
+  [/\bthe models\b/gi, 'the experts'],
+  [/\bmodels\b/gi, 'perspectives'],
+  [/\baccording to (the )?analysis\b/gi, 'from what I see'],
+  [/\bbased on (the )?(structural )?analysis\b/gi, 'from the evidence'],
+  [/\bthe analysis (shows|indicates|suggests)\b/gi, 'the evidence $1'],
+  [/\bconsensus\b/gi, 'agreement'],
+  [/\bclaim_\d+\b/gi, ''],
+  [/\bstructural(ly)?\b/gi, ''],
+  [/\bhigh-support claim/gi, 'strong position'],
+  [/\blow-support claim/gi, 'minority view'],
+];
+
+export function postProcess(response: string): string {
+  let out = response;
+  SWAPS.forEach(([pattern, replacement]) => {
+    out = out.replace(pattern, replacement);
   });
-  
-  return { leaked, violations };
+  return out.replace(/\s{2,}/g, ' ').trim();
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// SHAPE EVOLUTION - Update shape as conversation progresses
-// ═══════════════════════════════════════════════════════════════════════════
-
-export function updateShapeFromContext(
-  originalShape: ProblemShape,
-  context: ConversationContext
-): ProblemShape {
-  // If user resolved tensions, shape becomes more settled
-  if (context.resolvedTensions.length > 0) {
-    return {
-      pattern: 'settled',
-      confidence: Math.min(0.95, originalShape.confidence + 0.2),
-      implication: 'User has provided context that resolves ambiguity'
-    };
-  }
-  
-  // If user added multiple constraints, shape may become dimensional
-  if (context.providedContext.length >= 2) {
-    return {
-      pattern: 'dimensional',
-      confidence: Math.min(0.85, originalShape.confidence + 0.15),
-      implication: 'Multiple contextual dimensions identified'
-    };
-  }
-  
-  // If user validated claims, increase confidence
-  if (context.validatedClaims.length > 0) {
-    return {
-      ...originalShape,
-      confidence: Math.min(0.95, originalShape.confidence + 0.1)
-    };
-  }
-  
-  // Otherwise maintain original shape
-  return originalShape;
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// META-QUERY DETECTION - When user asks about the system
+// META HANDLING
 // ═══════════════════════════════════════════════════════════════════════════
 
 export function isMetaQuery(message: string): boolean {
-  const metaPatterns = [
-    /how many models/i,
-    /what models (are|did)/i,
-    /what['']?s your confidence/i,
-    /show (me )?(the )?(structure|map|graph|analysis)/i,
-    /how (do|does) (you|this|the system) work/i,
-    /what['']?s your methodology/i,
-    /how (did|do) you (analyze|determine|decide)/i,
-  ];
-  
-  return metaPatterns.some(pattern => pattern.test(message));
+  return [
+    /how many (models|experts|sources)/i,
+    /what (models|sources)/i,
+    /show (me )?(the )?(structure|map|graph)/i,
+    /how (do|does) (you|this) work/i,
+    /where (does|did) this come from/i,
+  ].some(p => p.test(message));
 }
 
-export function buildMetaResponse(
-  query: string,
-  analysis: StructuralAnalysis,
-  artifact: MapperArtifact
-): string {
-  const modelCount = new Set(
-    artifact.claims.flatMap(c => c.supporters || [])
-  ).size;
-  
-  return `I consulted ${modelCount} AI models on your question: "${query}"
+export function buildMetaResponse(analysis: StructuralAnalysis): string {
+  const { landscape, patterns, shape, ghostAnalysis } = analysis;
+  const highSupportCount = analysis.claimsWithLeverage.filter(c => c.isHighSupport).length;
+  const tensionCount = patterns.conflicts.length + patterns.tradeoffs.length;
 
-After analyzing their responses:
-- **Structure detected:** ${analysis.shape.pattern} (${Math.round(analysis.shape.confidence * 100)}% confidence)
-- **Key points identified:** ${artifact.claims.filter(c => (c.support_count ?? 0) >= 2).length} consensus claims
-- **Tensions found:** ${analysis.tensions.length} areas where models diverged
+  return `I drew from ${landscape.modelCount} expert perspectives to form this view.
 
-The "${analysis.shape.pattern}" structure means ${analysis.shape.implication.toLowerCase()}
+• **Pattern:** ${shape.primaryPattern} (${Math.round(shape.confidence * 100)}%)
+• **Strong positions:** ${highSupportCount}
+• **Tensions:** ${tensionCount}
+• **Gaps:** ${ghostAnalysis.count}
 
-Would you like me to show you the full structural map, or would you prefer to continue the conversation?`;
+${shape.implications.understand}
+
+Want the full map, or shall we continue?`;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// EXPORT THE COMPLETE SERVICE
+// THE HANDLER
+// ═══════════════════════════════════════════════════════════════════════════
+
+export async function handleTurn(
+  userMessage: string,
+  analysis: StructuralAnalysis,
+  callLLM: (prompt: string) => Promise<string>
+): Promise<string> {
+
+  if (isMetaQuery(userMessage)) {
+    return buildMetaResponse(analysis);
+  }
+
+  const prompt = buildConciergePrompt(userMessage, analysis);
+  const raw = await callLLM(prompt);
+
+  return postProcess(raw);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// LEAKAGE DETECTION
+// ═══════════════════════════════════════════════════════════════════════════
+
+export function detectMachineryLeakage(text: string): { leaked: boolean; violations: string[] } {
+  const violations: string[] = [];
+  const lower = text.toLowerCase();
+
+  // Check for raw artifacts/IDs
+  if (/claim_\d+/.test(text)) violations.push("raw_claim_id");
+  if (/clustering_coefficient/.test(lower)) violations.push("raw_metric_name");
+
+  // Check for forbidden terms from SWAPS that shouldn't appear even after swapping if the model outputs them directly
+  // (We check the original text, but some might be valid in other contexts. 
+  // Here we focus on things that clearly break the immersion)
+  const FORBIDDEN_PHRASES = [
+    "structural analysis",
+    "graph topology",
+    "according to the model",
+    "based on the analysis",
+    "high-support claim",
+    "low-support claim"
+  ];
+
+  FORBIDDEN_PHRASES.forEach(phrase => {
+    if (lower.includes(phrase)) {
+      violations.push(`phrase: ${phrase}`);
+    }
+  });
+
+  return {
+    leaked: violations.length > 0,
+    violations
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// EXPORTS
 // ═══════════════════════════════════════════════════════════════════════════
 
 export const ConciergeService = {
   buildConciergePrompt,
+  postProcess,
   detectMachineryLeakage,
-  updateShapeFromContext,
   isMetaQuery,
   buildMetaResponse,
+  handleTurn,
 };

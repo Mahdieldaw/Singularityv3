@@ -14,7 +14,7 @@ export class CognitivePipelineHandler {
    * Checks if the workflow should halt for cognitive decision-making.
    * If yes, executes Singularity step, persists state, emits halt message, and returns true.
    */
-  async handleCognitiveHalt(request, context, steps, stepResults, resolvedContext, currentUserMessage, stepExecutor, streamingManager) {
+  async handleCognitiveHalt(request, context, steps, stepResults, _resolvedContext, currentUserMessage, stepExecutor, streamingManager) {
     try {
       const mappingResult = Array.from(stepResults.entries()).find(([_, v]) =>
         v.status === "completed" && v.result?.mapperArtifact,

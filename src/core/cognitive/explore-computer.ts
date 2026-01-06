@@ -14,7 +14,7 @@ import {
 /**
  * Main entry point: compute Explore analysis from query and MapperArtifact
  */
-export function computeExplore(query: string, artifact: MapperArtifact): ExploreAnalysis {
+export function computeExplore(_query: string, artifact: MapperArtifact): ExploreAnalysis {
     const claims = artifact.claims || [];
     const edges = artifact.edges || [];
 

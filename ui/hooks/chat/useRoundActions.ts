@@ -583,6 +583,89 @@ export function useRoundActions() {
     runGauntletForAiTurn,
     runRefinerForAiTurn,
     runAntagonistForAiTurn,
+    runSingularityForAiTurn: useCallback(
+      async (aiTurnId: string, providerIdOverride?: string) => {
+        if (!currentSessionId) return;
+
+        const ai = turnsMap.get(aiTurnId) as AiTurn | undefined;
+        if (!ai || ai.type !== "ai") {
+          console.warn(`[RoundActions] AI turn ${aiTurnId} not found`);
+          return;
+        }
+
+        const effectiveProviderId = providerIdOverride || "gemini";
+
+        // Initialize optimistic state
+        setTurnsMap((draft: Map<string, TurnMessage>) => {
+          const existing = draft.get(ai.id);
+          if (!existing || existing.type !== "ai") return;
+          const aiTurn = existing as AiTurn;
+
+          const prev = aiTurn.singularityResponses || {};
+          const next: Record<string, ProviderResponse[]> = { ...prev };
+
+          const arr = Array.isArray(next[effectiveProviderId]) ? [...next[effectiveProviderId]] : [];
+          const initialStatus = PRIMARY_STREAMING_PROVIDER_IDS.includes(effectiveProviderId)
+            ? "streaming"
+            : "pending";
+
+          arr.push({
+            providerId: effectiveProviderId as ProviderKey,
+            text: "",
+            status: initialStatus,
+            createdAt: Date.now(),
+          });
+          next[effectiveProviderId] = arr;
+          aiTurn.singularityResponses = next;
+        });
+
+        // Set Loading
+        setActiveAiTurnId(ai.id);
+        setIsLoading(true);
+        setUiPhase("streaming");
+
+        try {
+          setActiveRecomputeState({
+            aiTurnId: ai.id,
+            stepType: "singularity" as any,
+            providerId: effectiveProviderId,
+          });
+
+          await api.sendPortMessage({
+            type: "CONTINUE_COGNITIVE_WORKFLOW",
+            payload: {
+              sessionId: currentSessionId,
+              aiTurnId: ai.id,
+              mode: "singularity",
+              providerId: effectiveProviderId,
+              isRecompute: true,
+              sourceTurnId: ai.id,
+            },
+          });
+        } catch (err) {
+          console.error("[RoundActions] Singularity run failed:", err);
+          setAlertText("Singularity request failed. Please try again.");
+
+          setTurnsMap((draft) => {
+            const turn = draft.get(ai.id) as AiTurn | undefined;
+            if (!turn || turn.type !== "ai" || !turn.singularityResponses) return;
+            const arr = turn.singularityResponses[effectiveProviderId];
+            if (Array.isArray(arr) && arr.length > 0) {
+              const last = arr[arr.length - 1];
+              if (last.status === "streaming" || last.status === "pending") {
+                last.status = "error";
+                last.text = "Request failed";
+              }
+            }
+          });
+          setIsLoading(false);
+          setUiPhase("awaiting_action");
+          setActiveAiTurnId(null);
+          setActiveRecomputeState(null);
+        }
+      },
+      [currentSessionId, turnsMap, setTurnsMap, setActiveAiTurnId, setIsLoading, setUiPhase, setActiveRecomputeState, setAlertText]
+    ),
 
     selectMappingForRound,
   };

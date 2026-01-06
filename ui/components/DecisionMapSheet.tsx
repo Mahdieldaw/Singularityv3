@@ -1,6 +1,6 @@
 import React, { useMemo, useCallback, useEffect, useRef, useState, Suspense } from "react";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
-import { isDecisionMapOpenAtom, turnByIdAtom, mappingProviderAtom, activeSplitPanelAtom, providerAuthStatusAtom, refinerProviderAtom, antagonistProviderAtom } from "../state/atoms";
+import { isDecisionMapOpenAtom, turnByIdAtom, mappingProviderAtom, activeSplitPanelAtom, providerAuthStatusAtom, refinerProviderAtom, antagonistProviderAtom, singularityProviderAtom } from "../state/atoms";
 import { useClipActions } from "../hooks/useClipActions";
 import { m, AnimatePresence, LazyMotion, domAnimation } from "framer-motion";
 import { safeLazy } from "../utils/safeLazy";
@@ -23,13 +23,14 @@ import {
   parseUnifiedMapperOutput,
   cleanOptionsText,
 } from "../../shared/parsing-utils";
-import { computeProblemStructureFromArtifact } from "../../src/core/PromptService";
+import { computeProblemStructureFromArtifact } from "../../src/core/PromptMethods";
 import { normalizeProviderId } from "../utils/provider-id-mapper";
 
 import { useRefinerOutput } from "../hooks/useRefinerOutput";
 import { useAntagonistOutput } from "../hooks/useAntagonistOutput";
+import { useSingularityOutput } from "../hooks/useSingularityOutput";
 import { RefinerEpistemicAudit } from "./refinerui/RefinerCardsSection";
-import { MetricsRibbon } from "./cognitive/MetricsRibbon";
+
 import { StructuralInsight } from "./StructuralInsight";
 
 const DEBUG_DECISION_MAP_SHEET = false;
@@ -854,6 +855,96 @@ const AntagonistSelector: React.FC<{ aiTurn: AiTurn, activeProviderId?: string, 
   );
 };
 
+const SingularitySelector: React.FC<{ aiTurn: AiTurn, activeProviderId?: string, onSelect: (pid: string) => void }> = ({ aiTurn, activeProviderId, onSelect }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const { handleClipClick } = useClipActions();
+  const authStatus = useAtomValue(providerAuthStatusAtom);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    };
+    if (isOpen) document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [isOpen]);
+
+  const activeProvider = activeProviderId ? getProviderConfig(activeProviderId) : null;
+  const providers = useMemo(() => LLM_PROVIDERS_CONFIG.filter(p => p.id !== 'system'), []);
+
+  return (
+    <div className="relative" ref={menuRef}>
+      <button
+        type="button"
+        onClick={() => setIsOpen(!isOpen)}
+        className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 transition-all text-sm font-medium text-text-primary"
+      >
+        <span className="text-base">🕳️</span>
+        <span className="opacity-70 text-xs uppercase tracking-wide">Concierge</span>
+        <span className="w-px h-3 bg-white/20 mx-1" />
+        <span className={clsx(!activeProvider && "text-text-muted italic")}>
+          {activeProvider?.name || "Select Model"}
+        </span>
+        <svg
+          className={clsx("w-3 h-3 text-text-muted transition-transform", isOpen && "rotate-180")}
+          fill="none" viewBox="0 0 24 24" stroke="currentColor"
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+
+      {isOpen && (
+        <div className="absolute top-full left-0 mt-2 w-64 bg-surface-raised border border-border-subtle rounded-xl shadow-elevated overflow-hidden z-[3600] animate-in fade-in slide-in-from-top-2 duration-200">
+          <div className="p-2 grid gap-1">
+            {providers.map(p => {
+              const pid = String(p.id);
+              const isActive = pid === activeProviderId;
+              const isUnauthorized = authStatus && authStatus[pid] === false;
+              const latestResp = getLatestResponse(aiTurn.singularityResponses?.[pid]);
+              const hasError = latestResp?.status === 'error';
+              const errorMessage = hasError ? (latestResp?.meta?._rawError || "Failed") : null;
+              const isDisabled = isUnauthorized;
+
+              return (
+                <button
+                  key={pid}
+                  onClick={() => { if (!isDisabled) { onSelect(pid); handleClipClick(aiTurn.id, "singularity", pid); setIsOpen(false); } }}
+                  disabled={isDisabled}
+                  className={clsx(
+                    "w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left transition-colors relative group",
+                    isActive ? "bg-brand-500/10 text-brand-500" : "hover:bg-surface-highlight text-text-secondary",
+                    (isDisabled || hasError) && "opacity-60",
+                    isDisabled && "cursor-not-allowed",
+                  )}
+                  title={errorMessage && typeof errorMessage === 'string' ? errorMessage : undefined}
+                >
+                  <div
+                    className="w-2 h-2 rounded-full shadow-sm"
+                    style={{ backgroundColor: getProviderColor(pid) }}
+                  />
+                  <div className="flex-1 flex flex-col">
+                    <span className="text-xs font-medium">{p.name}</span>
+                  </div>
+                  {hasError && (
+                    <div className="absolute left-full ml-2 top-1/2 -translate-y-1/2 hidden group-hover:block z-50 w-48 bg-black/90 text-white text-[10px] p-2 rounded shadow-lg pointer-events-none">
+                      {typeof errorMessage === 'string' ? errorMessage : "Previous generation failed"}
+                    </div>
+                  )}
+                  {isActive && <span>✓</span>}
+                  {isUnauthorized && <span>🔒</span>}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+
 // ============================================================================
 // MAIN COMPONENT
 // ============================================================================
@@ -864,14 +955,18 @@ export const DecisionMapSheet = React.memo(() => {
   const mappingProvider = useAtomValue(mappingProviderAtom);
   const refinerProvider = useAtomValue(refinerProviderAtom);
   const antagonistProvider = useAtomValue(antagonistProviderAtom); // Added
+  const singularityProvider = useAtomValue(singularityProviderAtom); // Added
+  const setAntagonistProvider = useSetAtom(antagonistProviderAtom);
+  const setSingularityProvider = useSetAtom(singularityProviderAtom);
   const setActiveSplitPanel = useSetAtom(activeSplitPanelAtom);
 
-  const [activeTab, setActiveTab] = useState<'graph' | 'narrative' | 'options' | 'audit' | 'antagonist'>('graph');
+  const [activeTab, setActiveTab] = useState<'graph' | 'narrative' | 'options' | 'audit' | 'antagonist' | 'singularity'>('graph');
   const [selectedNode, setSelectedNode] = useState<{ id: string; label: string; supporters: (string | number)[]; theme?: string } | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [dims, setDims] = useState<{ w: number; h: number }>({ w: window.innerWidth, h: 400 });
   const [activeRefinerPid, setActiveRefinerPid] = useState<string | null>(null);
   const activeAntagonistPid = antagonistProvider; // Uses current atom value
+  const activeSingularityPid = singularityProvider; // Added
   const [sheetHeightRatio, setSheetHeightRatio] = useState(0.5);
   const resizeRef = useRef<{ active: boolean; startY: number; startRatio: number; moved: boolean }>({
     active: false,
@@ -959,15 +1054,16 @@ export const DecisionMapSheet = React.memo(() => {
     }
   }, [aiTurn, activeRefinerPid, refinerProvider]);
 
-  const { output: refinerOutput, rawText: refinerRawText, providerId: currentRefinerPid } = useRefinerOutput(aiTurn?.id || null, activeRefinerPid);
-  const { output: antagonistOutput } = useAntagonistOutput(aiTurn?.id || null, activeAntagonistPid);
+  const refinerState = useRefinerOutput(aiTurn?.id || null, activeRefinerPid);
+  const antagonistState = useAntagonistOutput(aiTurn?.id || null);
+  const singularityState = useSingularityOutput(aiTurn?.id || null);
 
   // Sync refiner selection
   useEffect(() => {
-    if (currentRefinerPid && currentRefinerPid !== activeRefinerPid) {
-      setActiveRefinerPid(currentRefinerPid);
+    if (refinerState.providerId && refinerState.providerId !== activeRefinerPid) {
+      setActiveRefinerPid(refinerState.providerId);
     }
-  }, [currentRefinerPid]);
+  }, [refinerState.providerId]);
 
   const mappingResponses = useMemo(() => {
     const out: Record<string, ProviderResponse[]> = {};
@@ -1095,8 +1191,8 @@ export const DecisionMapSheet = React.memo(() => {
     const themes = parseOptionsIntoThemes(optionsText || '');
 
     // Merge in antagonist-found unlisted options from Antagonist Audit
-    if (antagonistOutput?.the_audit?.missed?.length) {
-      const missedOptions = antagonistOutput.the_audit.missed.map((item) => ({
+    if (antagonistState.output?.the_audit?.missed?.length) {
+      const missedOptions = antagonistState.output.the_audit.missed.map((item) => ({
         title: item.approach,
         description: `Source: ${item.source}`,
         citations: [item.source]
@@ -1106,9 +1202,9 @@ export const DecisionMapSheet = React.memo(() => {
         name: "🔍 Found by Context Audit",
         options: missedOptions
       });
-    } else if (refinerOutput?.unlistedOptions?.length) {
+    } else if (refinerState.output?.unlistedOptions?.length) {
       // Fallback to refiner (legacy) if antagonist not providing
-      const refinerOptions = refinerOutput.unlistedOptions.map((opt: { title: string; description: string; source?: string }) => ({
+      const refinerOptions = refinerState.output.unlistedOptions.map((opt: { title: string; description: string; source?: string }) => ({
         title: opt.title,
         description: opt.description,
         citations: opt.source ? [opt.source] : []
@@ -1121,7 +1217,7 @@ export const DecisionMapSheet = React.memo(() => {
     }
 
     return themes;
-  }, [optionsText, refinerOutput, antagonistOutput]);
+  }, [optionsText, refinerState.output, antagonistState.output]);
 
   // Extract citation source order from mapping metadata for correct citation-to-model mapping
   const citationSourceOrder = useMemo(() => {
@@ -1232,7 +1328,8 @@ export const DecisionMapSheet = React.memo(() => {
     { key: 'narrative' as const, label: 'Narrative', activeClass: 'decision-tab-active-narrative' },
     { key: 'options' as const, label: 'Options', activeClass: 'decision-tab-active-options' },
     { key: 'audit' as const, label: 'Epistemic Audit', activeClass: 'decision-tab-active-audit' },
-    { key: 'antagonist' as const, label: 'Antagonist', activeClass: 'decision-tab-active-antagonist' }
+    { key: 'antagonist' as const, label: 'Antagonist', activeClass: 'decision-tab-active-antagonist' },
+    { key: 'singularity' as const, label: 'Singularity', activeClass: 'decision-tab-active-singularity' }
   ];
 
   const sheetHeightPx = Math.max(260, Math.round(window.innerHeight * sheetHeightRatio));
@@ -1263,7 +1360,7 @@ export const DecisionMapSheet = React.memo(() => {
 
               {/* Left: Provider Selector (Mapper or Refiner based on tab) */}
               <div className="w-1/3 flex justify-start">
-                {aiTurn && activeTab !== 'audit' && activeTab !== 'antagonist' && (
+                {aiTurn && activeTab !== 'audit' && activeTab !== 'antagonist' && activeTab !== 'singularity' && (
                   <MapperSelector
                     aiTurn={aiTurn}
                     activeProviderId={activeMappingPid}
@@ -1282,7 +1379,14 @@ export const DecisionMapSheet = React.memo(() => {
                   <AntagonistSelector
                     aiTurn={aiTurn}
                     activeProviderId={activeAntagonistPid || undefined}
-                    onSelect={() => { }}
+                    onSelect={(pid) => setAntagonistProvider(pid as any)}
+                  />
+                )}
+                {aiTurn && activeTab === 'singularity' && (
+                  <SingularitySelector
+                    aiTurn={aiTurn}
+                    activeProviderId={activeSingularityPid || undefined}
+                    onSelect={(pid) => setSingularityProvider(pid as any)}
                   />
                 )}
               </div>
@@ -1463,8 +1567,8 @@ export const DecisionMapSheet = React.memo(() => {
                     exit={{ opacity: 0 }}
                     className="h-full overflow-y-auto relative custom-scrollbar"
                   >
-                    {refinerOutput ? (
-                      <RefinerEpistemicAudit output={refinerOutput!} rawText={refinerRawText} />
+                    {refinerState.output ? (
+                      <RefinerEpistemicAudit output={refinerState.output!} rawText={refinerState.rawText} />
                     ) : (
                       <div className="flex flex-col items-center justify-center h-full text-text-muted text-sm gap-2 opacity-60">
                         <span>🔒</span>
@@ -1482,7 +1586,7 @@ export const DecisionMapSheet = React.memo(() => {
                     exit={{ opacity: 0 }}
                     className="h-full overflow-y-auto relative custom-scrollbar p-6"
                   >
-                    {antagonistOutput ? (
+                    {antagonistState.output ? (
                       <div className="max-w-4xl mx-auto space-y-8 animate-in fade-in duration-500">
                         {/* Critique Section */}
                         <div className="bg-surface border border-border-subtle rounded-2xl p-6 shadow-sm">
@@ -1491,32 +1595,32 @@ export const DecisionMapSheet = React.memo(() => {
                             <span>Critique & Refinement</span>
                           </div>
 
-                          {antagonistOutput.the_prompt.grounding && (
+                          {antagonistState.output.the_prompt.grounding && (
                             <div className="text-text-secondary text-sm italic mb-4 border-l-2 border-brand-500/30 pl-4 py-1 bg-brand-500/5 rounded-r-lg">
-                              {antagonistOutput.the_prompt.grounding}
+                              {antagonistState.output.the_prompt.grounding}
                             </div>
                           )}
 
                           <div className="text-text-primary text-base leading-relaxed bg-surface-raised p-5 rounded-xl border border-border-subtle/50 mb-4">
-                            <MarkdownDisplay content={antagonistOutput.the_prompt.text || "No prompt generated."} />
+                            <MarkdownDisplay content={antagonistState.output.the_prompt.text || "No prompt generated."} />
                           </div>
 
-                          {antagonistOutput.the_prompt.payoff && (
+                          {antagonistState.output.the_prompt.payoff && (
                             <div className="flex items-start gap-2 text-brand-300 text-sm font-medium bg-brand-500/10 p-3 rounded-lg border border-brand-500/20">
                               <span className="text-lg mt-[-2px]">→</span>
-                              <span>{antagonistOutput.the_prompt.payoff}</span>
+                              <span>{antagonistState.output.the_prompt.payoff}</span>
                             </div>
                           )}
 
                           {/* Dimensions Educational Section */}
-                          {antagonistOutput.the_prompt.dimensions.length > 0 && (
+                          {antagonistState.output.the_prompt.dimensions.length > 0 && (
                             <div className="mt-6 border-t border-border-subtle pt-4">
                               <div className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-4 flex items-center gap-2">
                                 <span>📖</span>
                                 <span>Dimension definitions</span>
                               </div>
                               <div className="grid gap-4">
-                                {antagonistOutput.the_prompt.dimensions.map((dim, i) => (
+                                {antagonistState.output.the_prompt.dimensions.map((dim, i) => (
                                   <div key={i} className="flex flex-col gap-1.5 p-3 rounded-lg bg-surface-raised/50 border border-border-subtle/30">
                                     <div className="flex items-center justify-between">
                                       <span className="font-mono text-xs font-bold text-brand-400">{dim.variable}</span>
@@ -1531,7 +1635,7 @@ export const DecisionMapSheet = React.memo(() => {
                         </div>
 
                         {/* Audit Section */}
-                        {antagonistOutput.the_audit.missed.length > 0 && (
+                        {antagonistState.output.the_audit.missed.length > 0 && (
                           <div className="bg-surface-raised border border-border-subtle/60 rounded-2xl p-6">
                             <div className="flex items-center gap-2 mb-4 text-text-muted font-semibold uppercase tracking-wider text-xs">
                               <span className="text-brand-400">🔍</span>
@@ -1539,7 +1643,7 @@ export const DecisionMapSheet = React.memo(() => {
                             </div>
 
                             <div className="grid gap-3">
-                              {antagonistOutput.the_audit.missed.map((m, idx) => (
+                              {antagonistState.output.the_audit.missed.map((m, idx) => (
                                 <div key={idx} className="flex flex-col gap-1 p-3 bg-surface border border-border-subtle/40 rounded-xl hover:border-brand-500/30 transition-colors">
                                   <div className="text-sm font-medium text-text-primary">{m.approach}</div>
                                   <div className="text-xs text-text-muted flex items-center gap-1.5">
@@ -1558,6 +1662,62 @@ export const DecisionMapSheet = React.memo(() => {
                         <span>No Antagonist output available. Run Antagonist to generate.</span>
                       </div>
                     )}
+                  </m.div>
+                )}
+
+                {activeTab === 'singularity' && (
+                  <m.div
+                    key="singularity"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    className="h-full overflow-y-auto relative custom-scrollbar p-6"
+                  >
+                    <div className="max-w-4xl mx-auto space-y-8 animate-in fade-in duration-500">
+                      {singularityState.output ? (
+                        <div className="bg-surface border border-border-subtle rounded-2xl p-8 shadow-sm relative overflow-hidden">
+                          <div className="absolute top-0 right-0 w-64 h-64 bg-brand-500/5 rounded-full blur-3xl -translate-y-1/2 translate-x-1/3 pointer-events-none" />
+
+                          <div className="flex items-center gap-2 mb-6 text-brand-400 font-semibold uppercase tracking-wider text-xs">
+                            <span className="text-xl">🕳️</span>
+                            <span>The Singularity</span>
+                          </div>
+
+                          <div className="prose prose-lg dark:prose-invert max-w-none">
+                            <MarkdownDisplay content={singularityState.output.text} />
+                          </div>
+
+                          {singularityState.output.leakageDetected && (
+                            <div className="mt-8 pt-6 border-t border-border-subtle">
+                              <div className="flex items-center gap-2 text-amber-500 text-[10px] font-bold uppercase tracking-widest mb-3">
+                                <span>⚠️ Machinery Leakage</span>
+                              </div>
+                              <div className="flex flex-wrap gap-2">
+                                {singularityState.output.leakageViolations?.map((v, i) => (
+                                  <span key={i} className="px-2 py-0.5 rounded-md bg-amber-500/10 border border-amber-500/20 text-[10px] text-amber-400 font-mono">
+                                    {v}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="flex flex-col items-center justify-center py-32 text-text-muted italic gap-4 opacity-60">
+                          {singularityState.isLoading ? (
+                            <>
+                              <div className="w-12 h-12 rounded-full border-2 border-brand-500/30 border-t-brand-500 animate-spin" />
+                              <span>The Singularity is converging...</span>
+                            </>
+                          ) : (
+                            <>
+                              <span className="text-4xl filter grayscale">🕳️</span>
+                              <span>No Singularity response available for this turn.</span>
+                            </>
+                          )}
+                        </div>
+                      )}
+                    </div>
                   </m.div>
                 )}
               </AnimatePresence>

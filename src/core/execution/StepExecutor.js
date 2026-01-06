@@ -8,7 +8,7 @@ import {
   isProviderAuthError,
   createMultiProviderAuthError
 } from '../../utils/ErrorHandler.js';
-import { computeExplore } from '../cognitive/explore-computer';
+// computeExplore import removed (unused)
 import { classifyClaimsWithSignals, buildUnderstandSignalInjection, buildDecideSignalInjection, buildRefinerSignalInjection, buildAntagonistSignalInjection } from '../../utils/signal-router';
 
 const WORKFLOW_DEBUG = false;
@@ -440,7 +440,7 @@ Answer the user's message directly. Use context only to disambiguate.
                   turn: context.turn || 0,
                   timestamp: new Date().toISOString(),
                   model_count: citationOrder.length,
-                  souvenir: base.souvenir || ""
+                  souvenir: /** @type {any} */ (base).souvenir || ""
                 };
               }
 
@@ -1025,9 +1025,7 @@ Answer the user's message directly. Use context only to disambiguate.
         })
         : null);
 
-    const exploreAnalysis =
-      payload.exploreAnalysis ||
-      (mapperArtifact ? computeExplore(payload.originalPrompt, mapperArtifact) : null);
+    // exploreAnalysis removed (unused)
 
     if (!mapperArtifact) {
       throw new Error("Understand mode requires a MapperArtifact.");
@@ -1160,9 +1158,7 @@ Answer the user's message directly. Use context only to disambiguate.
       throw new Error("Singularity mode requires a MapperArtifact.");
     }
 
-    const exploreAnalysis =
-      payload.exploreAnalysis ||
-      (mapperArtifact ? computeExplore(payload.originalPrompt, mapperArtifact) : null);
+    // exploreAnalysis removed (unused)
 
     // Import ConciergeService dynamically to avoid circular dependencies
     let ConciergeService;
@@ -1186,22 +1182,55 @@ Answer the user's message directly. Use context only to disambiguate.
         console.warn("[StepExecutor] computeStructuralAnalysis failed:", e);
         // Use a minimal fallback analysis
         analysis = {
-          shape: { pattern: 'exploratory', confidence: 0.5, implication: 'Limited structural signal' },
-          tensions: [],
-          claims: mapperArtifact.claims || [],
-          leverageInversions: [],
-          graph: { hubClaimId: null, articulationPoints: [], longestChain: [] },
-          ghosts: { count: (mapperArtifact.ghosts || []).length, mayExtendChallenger: false, challengerIds: [] }
+          shape: { primaryPattern: /** @type {'exploratory'} */ ('exploratory'), confidence: 0.5, evidence: [], implications: { understand: '', gauntlet: '' } },
+          claimsWithLeverage: mapperArtifact.claims || [],
+          patterns: {
+            conflicts: [],
+            tradeoffs: [],
+            leverageInversions: [],
+            cascadeRisks: [],
+            convergencePoints: [],
+            isolatedClaims: []
+          },
+          graph: {
+            hubClaim: null,
+            articulationPoints: [],
+            longestChain: [],
+            componentCount: 0,
+            components: [],
+            chainCount: 0,
+            hubDominance: 0,
+            clusterCohesion: 0,
+            localCoherence: 0
+          },
+          ratios: {
+            concentration: 0,
+            alignment: 0,
+            tension: 0,
+            fragmentation: 0,
+            depth: 0
+          },
+          ghostAnalysis: {
+            count: (mapperArtifact.ghosts || []).length,
+            mayExtendChallenger: false,
+            challengerIds: []
+          },
+          landscape: {
+            claimCount: (mapperArtifact.claims || []).length,
+            modelCount: 0,
+            dominantType: 'unknown',
+            typeDistribution: {},
+            dominantRole: 'anchor',
+            roleDistribution: {},
+            convergenceRatio: 0
+          },
+          edges: mapperArtifact.edges || []
         };
       }
 
       singularityPrompt = ConciergeService.buildConciergePrompt(
         payload.originalPrompt,
-        mapperArtifact,
-        analysis,
-        [], // conversation turns (first turn)
-        payload.originalPrompt,
-        undefined // context
+        analysis
       );
     } else {
       // Fallback prompt if ConciergeService unavailable

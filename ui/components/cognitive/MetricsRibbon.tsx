@@ -13,17 +13,19 @@ interface MetricsRibbonProps {
     graphAnalysis?: GraphAnalysis;
     enrichedClaims?: EnrichedClaim[];
     ratios?: CoreRatios;
+    ghosts?: string[];
 }
 
 export const MetricsRibbon: React.FC<MetricsRibbonProps> = ({
-    analysis,
-    artifact,
+    // analysis,
+    // artifact,
     claimsCount,
     ghostCount,
     problemStructure,
     graphAnalysis,
     enrichedClaims,
-    ratios
+    ratios,
+    ghosts,
 }) => {
     const [isAdvancedOpen, setIsAdvancedOpen] = useState(false);
     const [showGuidance, setShowGuidance] = useState(false);
@@ -39,7 +41,8 @@ export const MetricsRibbon: React.FC<MetricsRibbonProps> = ({
     const leverageInversionCount = enrichedClaims?.filter(c => c.isLeverageInversion).length || 0;
     const evidenceGapCount = enrichedClaims?.filter(c => c.isEvidenceGap).length || 0;
     const conflictCount = enrichedClaims?.filter(c => c.isContested).length || 0;
-    const modelCount = ratios ? Math.round(ratios.concentration > 0 ? (1 / ratios.concentration) : 0) : ((artifact as any)?.model_count || 0);
+    const effectiveGhostCount = ghosts?.length || ghostCount || 0;
+    // const modelCount = ratios ? Math.round(ratios.concentration > 0 ? (1 / ratios.concentration) : 0) : ((artifact as any)?.model_count || 0);
 
     useEffect(() => {
         if (!isAdvancedOpen) return;
@@ -101,6 +104,15 @@ export const MetricsRibbon: React.FC<MetricsRibbonProps> = ({
                     <span className="text-xs">🎯</span>
                     <span className="text-xs font-medium text-amber-400">
                         {evidenceGapCount} Evidence Gaps
+                    </span>
+                </div>
+            )}
+
+            {effectiveGhostCount > 0 && (
+                <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-slate-500/10 border border-slate-500/30" title="Missing perspectives or unaddressed territory">
+                    <span className="text-xs">👻</span>
+                    <span className="text-xs font-medium text-slate-400">
+                        {effectiveGhostCount} Ghosts
                     </span>
                 </div>
             )}
@@ -200,8 +212,8 @@ export const MetricsRibbon: React.FC<MetricsRibbonProps> = ({
                                 </div>
                             </div>
 
-                            {/* Scrollable Insights List */}
-                            <div className="px-4 pb-4 max-h-[300px] overflow-y-auto custom-scrollbar space-y-3">
+                            {/* Scrollable Insights & Ghosts List */}
+                            <div className="px-4 pb-4 max-h-[350px] overflow-y-auto custom-scrollbar space-y-4">
                                 <div className="border border-border-subtle rounded-lg overflow-hidden">
                                     <div className="px-3 py-2 bg-surface-highlight/10 text-[11px] text-text-secondary flex items-center justify-between">
                                         <span>Key Insights</span>
@@ -220,11 +232,27 @@ export const MetricsRibbon: React.FC<MetricsRibbonProps> = ({
                                             ))}
                                         </div>
                                     ) : (
-                                        <div className="px-3 py-2 text-text-muted italic">
+                                        <div className="px-3 py-2 text-text-muted italic text-[11px]">
                                             No critical structural anomalies detected.
                                         </div>
                                     )}
                                 </div>
+
+                                {ghosts && ghosts.length > 0 && (
+                                    <div className="border border-border-subtle rounded-lg overflow-hidden">
+                                        <div className="px-3 py-2 bg-surface-highlight/10 text-[11px] text-text-secondary flex items-center justify-between">
+                                            <span>Ghosts (Epistemic Gaps)</span>
+                                            <span className="opacity-70">{ghosts.length}</span>
+                                        </div>
+                                        <div className="px-3 py-2 space-y-2 bg-surface/50">
+                                            {ghosts.map((ghost, idx) => (
+                                                <div key={idx} className="text-[11px] text-text-muted italic border-l-2 border-slate-500/30 pl-2 py-0.5">
+                                                    "{ghost}"
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                         </div>
                     )}

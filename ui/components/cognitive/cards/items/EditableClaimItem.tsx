@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { MapperArtifact, Claim } from "../../../../../shared/contract";
+import { Claim } from "../../../../../shared/contract";
 
 interface EditableClaimItemProps {
     claim: Claim;

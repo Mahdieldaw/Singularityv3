@@ -1,14 +1,10 @@
 import {
     MapperArtifact,
-    ExploreAnalysis,
     GraphTopology,
     GraphEdge
 } from "../../../shared/contract";
 
-const MODEL_NAMES = ["gpt", "claude", "gemini", "qwen", "deepseek", "perplexity"];
 
-const getModelNames = (indices: number[]): string[] =>
-    indices.map((i) => MODEL_NAMES[i] || `model-${i}`);
 
 export type ShowcaseItemType = "consensus" | "supplemental" | "frame_challenger";
 
@@ -94,16 +90,7 @@ const normalizeForMatch = (text: string): string =>
         .replace(/\s+/g, " ")
         .trim();
 
-const splitTitleDesc = (text: string): { title: string; desc?: string } => {
-    const t = String(text || "").trim();
-    const m = t.match(/^\s*([^:]{3,}?)\s*:\s*(.+)$/);
-    if (m) {
-        const title = m[1].trim();
-        const desc = m[2].trim();
-        return { title, desc: desc || undefined };
-    }
-    return { title: t || "", desc: undefined };
-};
+
 
 const tokens = (text: string): string[] => {
     const t = normalizeForMatch(text);

@@ -1,4 +1,4 @@
-import { computeProblemStructureFromArtifact } from "./PromptService";
+import { computeProblemStructureFromArtifact } from "./PromptMethods";
 import { MapperArtifact, Claim, Edge } from "../../shared/contract";
 
 // Mock helper

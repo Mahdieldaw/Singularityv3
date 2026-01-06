@@ -36,7 +36,7 @@ export const RatiosPanel: React.FC<RatiosPanelProps> = ({
     ratios,
     graph,
     pattern,
-    claimCount
+    // claimCount
 }) => {
     const { concentration, alignment, tension, fragmentation, depth } = ratios;
 
@@ -45,10 +45,10 @@ export const RatiosPanel: React.FC<RatiosPanelProps> = ({
             <div className="flex items-center justify-between mb-4">
                 <h3 className="text-sm font-semibold text-white">Structural Ratios</h3>
                 <span className={`text-xs px-2 py-0.5 rounded-full ${pattern.primaryPattern === 'settled' ? 'bg-green-500/20 text-green-400' :
-                        pattern.primaryPattern === 'contested' ? 'bg-red-500/20 text-red-400' :
-                            pattern.primaryPattern === 'keystone' ? 'bg-purple-500/20 text-purple-400' :
-                                pattern.primaryPattern === 'linear' ? 'bg-blue-500/20 text-blue-400' :
-                                    'bg-gray-500/20 text-gray-400'
+                    pattern.primaryPattern === 'contested' ? 'bg-red-500/20 text-red-400' :
+                        pattern.primaryPattern === 'keystone' ? 'bg-purple-500/20 text-purple-400' :
+                            pattern.primaryPattern === 'linear' ? 'bg-blue-500/20 text-blue-400' :
+                                'bg-gray-500/20 text-gray-400'
                     }`}>
                     {pattern.primaryPattern.toUpperCase()}
                 </span>

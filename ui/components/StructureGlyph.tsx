@@ -22,7 +22,8 @@ const StructureGlyph: React.FC<StructureGlyphProps> = ({
 
     const renderPattern = () => {
         switch (pattern) {
-            case "settled": {
+            case "settled":
+            case "contextual": {
                 // High convergence ring
                 const nodes = Math.min(claimCount, 6);
                 const radius = Math.min(width, height) * 0.3;

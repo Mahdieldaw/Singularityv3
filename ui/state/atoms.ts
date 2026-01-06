@@ -311,7 +311,8 @@ export const activeRecomputeStateAtom = atom<{
   | "refiner"
   | "antagonist"
   | "understand"
-  | "gauntlet";
+  | "gauntlet"
+  | "singularity";
   providerId: string;
 } | null>(null);
 

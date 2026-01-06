@@ -9,11 +9,14 @@ import { PipelineErrorBanner } from '../PipelineErrorBanner';
 import { AntagonistOutputState } from '../../hooks/useAntagonistOutput';
 import { RefinerOutputState } from '../../hooks/useRefinerOutput';
 import { useProviderActions } from '../../hooks/providers/useProviderActions';
+import SingularityOutputView from './SingularityOutputView';
+import { SingularityOutputState } from '../../hooks/useSingularityOutput';
 
 interface CognitiveOutputRendererProps {
     aiTurn: AiTurn;
     refinerState: RefinerOutputState;
     antagonistState: AntagonistOutputState;
+    singularityState: SingularityOutputState;
 }
 
 /**
@@ -24,7 +27,8 @@ interface CognitiveOutputRendererProps {
 export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = ({
     aiTurn,
     refinerState,
-    antagonistState
+    antagonistState,
+    singularityState
 }) => {
     const {
         activeMode,
@@ -40,8 +44,9 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
         const modes: CognitiveViewMode[] = ['artifact'];
         if (aiTurn.understandOutput) modes.push('understand');
         if (aiTurn.gauntletOutput) modes.push('gauntlet');
+        if (aiTurn.singularityOutput || (aiTurn.singularityResponses && Object.keys(aiTurn.singularityResponses).length > 0)) modes.push('singularity');
         return modes;
-    }, [aiTurn.understandOutput, aiTurn.gauntletOutput, aiTurn.understandResponses, aiTurn.gauntletResponses]);
+    }, [aiTurn.understandOutput, aiTurn.gauntletOutput, aiTurn.singularityOutput, aiTurn.singularityResponses]);
 
     // Check for errors in specialized modes
     const understandErrorResponse = useMemo(() => {
@@ -138,15 +143,27 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
                 )}
 
                 {/* Loading state for specialized modes without data yet and NO error */}
-                {isTransitioning && activeMode !== 'artifact' && !aiTurn.understandOutput && !aiTurn.gauntletOutput && !understandErrorResponse && !gauntletErrorResponse && (
+                {isTransitioning && activeMode !== 'artifact' && !aiTurn.understandOutput && !aiTurn.gauntletOutput && !singularityState.output && !understandErrorResponse && !gauntletErrorResponse && (
                     <div className="flex flex-col items-center justify-center p-12 bg-surface-highlight/10 rounded-xl border border-dashed border-border-subtle animate-pulse">
                         <div className="text-3xl mb-4">
-                            {activeMode === 'understand' ? '🧠' : '⚖️'}
+                            {activeMode === 'understand' ? '🧠' : activeMode === 'gauntlet' ? '⚖️' : '✨'}
                         </div>
                         <div className="text-text-secondary font-medium">
-                            {activeMode === 'understand' ? 'Synthesizing Perspective...' : 'Running the Gauntlet...'}
+                            {activeMode === 'understand' ? 'Synthesizing Perspective...' : activeMode === 'gauntlet' ? 'Running the Gauntlet...' : 'Converging the Singularity...'}
                         </div>
                     </div>
+                )}
+
+                {activeMode === 'singularity' && (
+                    <SingularityOutputView
+                        aiTurn={aiTurn}
+                        singularityState={singularityState}
+                        antagonistState={antagonistState}
+                        refinerState={refinerState}
+                        onRecompute={(options) => triggerAndSwitch('singularity', options)}
+                        onDecide={(options) => triggerAndSwitch('gauntlet', options)}
+                        isLoading={isTransitioning}
+                    />
                 )}
             </div>
         </div>

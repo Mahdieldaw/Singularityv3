@@ -108,7 +108,7 @@ const DecisionMapGraph: React.FC<Props> = ({
         );
 
         const nodeIds = inputClaims.map((c) => c.id);
-        const hasPrereqs = inputEdges.some((e) => e.type === 'prerequisite');
+        // const hasPrereqs = inputEdges.some((e) => e.type === 'prerequisite');
         const targets = new Map<string, { x: number; y: number }>();
 
         const padding = 60;
@@ -118,10 +118,10 @@ const DecisionMapGraph: React.FC<Props> = ({
         if (problemStructure?.primaryPattern === 'linear' && graphAnalysis?.longestChain && graphAnalysis.longestChain.length > 0) {
             const longestChain = graphAnalysis.longestChain;
             const chainPositions = new Map<string, number>();
-            longestChain.forEach((id, idx) => chainPositions.set(id, idx));
+            longestChain.forEach((id: string, idx: number) => chainPositions.set(id, idx));
             const maxPos = longestChain.length - 1;
 
-            longestChain.forEach((id, idx) => {
+            longestChain.forEach((id: string, idx: number) => {
                 const y = padding + (maxPos === 0 ? usableH / 2 : (idx / maxPos) * usableH);
                 targets.set(id, { x: width / 2, y });
             });
@@ -151,7 +151,7 @@ const DecisionMapGraph: React.FC<Props> = ({
                     });
                 });
             }
-        } else if (problemStructure?.primaryPattern === 'settled') {
+        } else if (problemStructure?.primaryPattern === 'settled' || (problemStructure as any)?.primaryPattern === 'contextual') {
             const centerX = width / 2;
             const centerY = height / 2;
             const radius = Math.min(usableW, usableH) * 0.25;
@@ -215,7 +215,7 @@ const DecisionMapGraph: React.FC<Props> = ({
 
         const isLinear = problemStructure?.primaryPattern === 'linear' && targets.size > 0;
         const isKeystone = problemStructure?.primaryPattern === 'keystone' && targets.size > 0;
-        const isSettled = problemStructure?.primaryPattern === 'settled';
+        // const isSettled = problemStructure?.primaryPattern === 'settled' || (problemStructure as any)?.primaryPattern === 'contextual';
 
         const simulation = d3.forceSimulation<GraphNode>(simNodes)
             .force('charge', d3.forceManyBody().strength(isLinear ? -700 : -1000))
@@ -349,7 +349,7 @@ const DecisionMapGraph: React.FC<Props> = ({
             'rgba(139, 92, 246, 0.1)',   // Purple
         ];
 
-        const componentIdx = graphAnalysis.components.findIndex(c => c.includes(claimId));
+        const componentIdx = graphAnalysis.components.findIndex((c: string[]) => c.includes(claimId));
         return componentColors[componentIdx % componentColors.length];
     }, [graphAnalysis]);
 

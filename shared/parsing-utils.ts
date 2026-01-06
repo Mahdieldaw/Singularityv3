@@ -1161,7 +1161,7 @@ export function parseUnifiedMapperOutput(text: string): ParsedMapperOutput {
             // Clean up if the JSON was found elsewhere
             if (foundV3Map && mapMatches.length === 0) {
                 // Try to strip the JSON block if we found it without tags
-                const jsonStr = JSON.stringify(map);
+                // jsonStr removed (unused)
                 // This is a naive strip, but safe enough for now. 
                 // Better to leave it than aggressively delete wrong things.
             }

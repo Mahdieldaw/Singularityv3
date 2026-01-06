@@ -9,9 +9,10 @@ import {
 } from "../../state/atoms";
 import api from "../../services/extension-api";
 
+
 import { MapperArtifact } from "../../../shared/contract";
 
-export type CognitiveMode = 'understand' | 'gauntlet' | 'refine' | 'antagonist';
+export type CognitiveMode = 'understand' | 'gauntlet' | 'refine' | 'antagonist' | 'singularity';
 
 export type SelectedArtifact = {
     id: string;
@@ -67,7 +68,7 @@ export function useCognitiveMode(trackedAiTurnId?: string) {
                     mode === "refine" ? "refiner" : mode;
                 setActiveRecomputeState({
                     aiTurnId,
-                    stepType: stepTypeForUi,
+                    stepType: stepTypeForUi as any,
                     providerId: options.providerId,
                 });
             }

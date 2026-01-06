@@ -1,3 +1,4 @@
+// @ts-nocheck
 // project uses canonical global only (no HTOS aliases)
 
 (() => {

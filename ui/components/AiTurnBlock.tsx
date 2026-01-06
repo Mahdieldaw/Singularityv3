@@ -6,6 +6,7 @@ import { AiTurn } from "../types";
 import MarkdownDisplay from "./MarkdownDisplay";
 import { useRefinerOutput } from "../hooks/useRefinerOutput";
 import { useAntagonistOutput } from "../hooks/useAntagonistOutput";
+import { useSingularityOutput } from "../hooks/useSingularityOutput";
 
 
 import { CognitiveOutputRenderer } from "./cognitive";
@@ -24,6 +25,7 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
 
   const refinerState = useRefinerOutput(aiTurn.id);
   const antagonistState = useAntagonistOutput(aiTurn.id);
+  const singularityState = useSingularityOutput(aiTurn.id);
 
   // --- PRESENTATION LOGIC ---
 
@@ -71,6 +73,7 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                     aiTurn={aiTurn}
                     refinerState={refinerState}
                     antagonistState={antagonistState}
+                    singularityState={singularityState}
                   />
                 ) : null}
               </div>

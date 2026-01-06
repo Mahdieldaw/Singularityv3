@@ -1,5 +1,4 @@
 import React from "react";
-import { ExploreAnalysis } from "../../../shared/contract";
 import { SelectableShowcaseItem } from "./content-builders";
 
 export const DimensionBadge: React.FC<{ dimension?: string }> = ({ dimension }) => {
@@ -58,9 +57,9 @@ export const UnifiedMetaBadges: React.FC<{ item: SelectableShowcaseItem }> = ({ 
     );
 };
 
-export const SupportMeta: React.FC<{ supportCount?: number; modelCount?: number }> = ({ supportCount, modelCount }) => {
+export const SupportMeta: React.FC<{ supportCount?: number }> = ({ supportCount }) => {
     if (typeof supportCount !== "number" || supportCount <= 0) return null;
-    const denom = typeof modelCount === "number" && modelCount > 0 ? modelCount : null;
+    // const denom = typeof modelCount === "number" && modelCount > 0 ? modelCount : null;
     return (
         <span className="text-[10px] px-1.5 py-0.5 rounded bg-surface-highlight/30 border border-border-subtle text-text-muted tabular-nums">
             {supportCount}
@@ -72,11 +71,11 @@ export const SelectableCard: React.FC<{
     item: SelectableShowcaseItem;
     isSelected: boolean;
     onToggle: () => void;
-    modelCount?: number;
+    // modelCount?: number;
     className?: string;
     headerRight?: React.ReactNode;
     subtitle?: React.ReactNode;
-}> = ({ item, isSelected, onToggle, modelCount, className, headerRight, subtitle }) => {
+}> = ({ item, isSelected, onToggle, className, headerRight, subtitle }) => {
     return (
         <div
             onClick={onToggle}
@@ -99,7 +98,7 @@ export const SelectableCard: React.FC<{
                         <div className="flex items-center gap-2">
                             <UnifiedMetaBadges item={item} />
                             <DimensionBadge dimension={item.dimension} />
-                            <SupportMeta supportCount={item.graphSupportCount} modelCount={modelCount} />
+                            <SupportMeta supportCount={item.graphSupportCount} />
                             {item.source && (
                                 <span className="text-[10px] text-text-muted font-mono px-1.5 py-0.5 rounded bg-surface-highlight/30 border border-border-subtle">
                                     {item.source}
@@ -171,8 +170,8 @@ export const BifurcationSlot: React.FC<{
     axis?: string;
     selectedIds: Set<string>;
     onToggle: (id: string) => void;
-    modelCount?: number;
-}> = ({ left, right, axis, selectedIds, onToggle, modelCount }) => {
+    // modelCount?: number;
+}> = ({ left, right, axis, selectedIds, onToggle }) => {
     const leftSelected = selectedIds.has(left.id);
     const rightSelected = selectedIds.has(right.id);
     const dimLeft = leftSelected && !rightSelected;
@@ -191,7 +190,7 @@ export const BifurcationSlot: React.FC<{
                         item={left}
                         isSelected={leftSelected}
                         onToggle={() => onToggle(left.id)}
-                        modelCount={modelCount}
+                        // modelCount={modelCount}
                         className="rounded-none border-0"
                         subtitle={
                             left.detail ? (
@@ -205,7 +204,7 @@ export const BifurcationSlot: React.FC<{
                         item={right}
                         isSelected={rightSelected}
                         onToggle={() => onToggle(right.id)}
-                        modelCount={modelCount}
+                        // modelCount={modelCount}
                         className="rounded-none border-0"
                         subtitle={
                             right.detail ? (
@@ -242,8 +241,8 @@ export const RelationshipBundle: React.FC<{
     edges: Array<{ source: string; target: string; type: string }>;
     selectedIds: Set<string>;
     onToggle: (id: string) => void;
-    modelCount?: number;
-}> = ({ items, edges, selectedIds, onToggle, modelCount }) => {
+    // modelCount?: number;
+}> = ({ items, edges, selectedIds, onToggle }) => {
     const scrollable = items.length >= 5;
     return (
         <div className="bg-emerald-500/5 border border-emerald-500/20 rounded-xl overflow-hidden">
@@ -265,7 +264,7 @@ export const RelationshipBundle: React.FC<{
                                 item={item}
                                 isSelected={selectedIds.has(item.id)}
                                 onToggle={() => onToggle(item.id)}
-                                modelCount={modelCount}
+                                // modelCount={modelCount}
                                 className="bg-transparent border-border-subtle/60 hover:bg-surface-highlight/30"
                                 subtitle={
                                     item.detail ? (
@@ -285,9 +284,9 @@ export const FrameChallengerCard: React.FC<{
     item: SelectableShowcaseItem;
     isSelected: boolean;
     onToggle: () => void;
-    modelCount?: number;
+    // modelCount?: number;
     relatedEdgesCount?: number;
-}> = ({ item, isSelected, onToggle, modelCount, relatedEdgesCount }) => {
+}> = ({ item, isSelected, onToggle, relatedEdgesCount }) => {
     return (
         <div className="bg-gradient-to-br from-amber-500/10 to-orange-500/5 border border-amber-500/25 rounded-xl overflow-hidden">
             <div className="px-4 py-3 flex items-center justify-between border-b border-amber-500/15">
@@ -298,7 +297,7 @@ export const FrameChallengerCard: React.FC<{
                             {relatedEdgesCount} links
                         </span>
                     )}
-                    <SupportMeta supportCount={item.graphSupportCount} modelCount={modelCount} />
+                    <SupportMeta supportCount={item.graphSupportCount} />
                 </div>
             </div>
             <div className="p-4 space-y-3">
@@ -306,7 +305,7 @@ export const FrameChallengerCard: React.FC<{
                     item={item}
                     isSelected={isSelected}
                     onToggle={onToggle}
-                    modelCount={modelCount}
+                    // modelCount={modelCount}
                     className="bg-transparent border-amber-500/20 hover:border-amber-400/40"
                     subtitle={
                         <div className="mt-2 space-y-2">

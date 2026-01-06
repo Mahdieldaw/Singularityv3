@@ -21,7 +21,7 @@ export function GutterOrbIndicator({ turnId }: { turnId: string }) {
 
     const aiTurn = turn as AiTurn;
     const batchKeys = Object.keys(aiTurn.batchResponses || {});
-    const meta = (aiTurn as any)?.meta || null;
+    // const meta = (aiTurn as any)?.meta || null;
 
     const providerMeta = batchKeys.map((pid) => {
       const arr: any[] = Array.isArray((aiTurn.batchResponses as any)?.[pid])
@@ -94,19 +94,19 @@ export function GutterOrbIndicator({ turnId }: { turnId: string }) {
           />
         </div>
       ) : (
-      <button
-        type="button"
-        className={clsx(
-          "orb-collapsed w-2.5 h-2.5 rounded-full transition-all duration-200",
-          isAutoExpanded ? "bg-intent-warning animate-pulse" : "bg-text-secondary/50 hover:bg-text-secondary/70",
-        )}
-        aria-label="Show model responses"
-        onClick={(e) => {
-          e.stopPropagation();
-          const first = effectiveProviderIds[0];
-          if (first) setActiveSplitPanel({ turnId, providerId: first });
-        }}
-      />
+        <button
+          type="button"
+          className={clsx(
+            "orb-collapsed w-2.5 h-2.5 rounded-full transition-all duration-200",
+            isAutoExpanded ? "bg-intent-warning animate-pulse" : "bg-text-secondary/50 hover:bg-text-secondary/70",
+          )}
+          aria-label="Show model responses"
+          onClick={(e) => {
+            e.stopPropagation();
+            const first = effectiveProviderIds[0];
+            if (first) setActiveSplitPanel({ turnId, providerId: first });
+          }}
+        />
       )}
 
       {!isWorkflowActive && isExpanded && (
