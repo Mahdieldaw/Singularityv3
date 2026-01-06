@@ -77,6 +77,86 @@ export const MetricsRibbon: React.FC<MetricsRibbonProps> = ({
         return data as TradeoffShapeData;
     }, [problemStructure]);
 
+    const structuralStats = useMemo(() => {
+        if (!problemStructure || !problemStructure.data) return [];
+        const data: any = problemStructure.data;
+        const stats: { label: string; value: string }[] = [];
+
+        if (problemStructure.primaryPattern === "settled" && data.pattern === "settled") {
+            stats.push(
+                { label: "Floor strength", value: String(data.floorStrength).toUpperCase() },
+                { label: "Floor claims", value: String((data.floor || []).length) },
+                { label: "Challengers", value: String((data.challengers || []).length) }
+            );
+        }
+
+        if (problemStructure.primaryPattern === "tradeoff" && data.pattern === "tradeoff") {
+            stats.push(
+                { label: "Tradeoffs", value: String((data.tradeoffs || []).length) },
+                { label: "Dominated options", value: String((data.dominatedOptions || []).length) },
+                { label: "Agreed floor", value: String((data.floor || []).length) }
+            );
+        }
+
+        if (problemStructure.primaryPattern === "contested" && data.pattern === "contested") {
+            const secondaryCount = (data.secondaryConflicts || []).length;
+            const conflictTotal = secondaryCount > 0 ? secondaryCount + 1 : 1;
+            stats.push(
+                { label: "Conflicts", value: String(conflictTotal) },
+                { label: "Floor strength", value: data.floor ? String(data.floor.strength).toUpperCase() : "N/A" }
+            );
+        }
+
+        if (problemStructure.primaryPattern === "linear" && data.pattern === "linear") {
+            stats.push(
+                { label: "Chain length", value: String(data.chainLength) },
+                { label: "Weak links", value: String((data.weakLinks || []).length) },
+                { label: "Alternative chains", value: String((data.alternativeChains || []).length) }
+            );
+        }
+
+        if (problemStructure.primaryPattern === "keystone" && data.pattern === "keystone") {
+            stats.push(
+                { label: "Keystone dominance", value: `${data.keystone?.dominance?.toFixed ? data.keystone.dominance.toFixed(1) : String(data.keystone?.dominance || 0)}x` },
+                { label: "Cascade size", value: String(data.cascadeSize || 0) },
+                { label: "Dependencies", value: String((data.dependencies || []).length) }
+            );
+        }
+
+        if (problemStructure.primaryPattern === "dimensional" && data.pattern === "dimensional") {
+            stats.push(
+                { label: "Dimensions", value: String((data.dimensions || []).length) },
+                { label: "Components", value: graphAnalysis ? String(graphAnalysis.componentCount) : "-" },
+                { label: "Governing conditions", value: String((data.governingConditions || []).length) }
+            );
+        }
+
+        if (problemStructure.primaryPattern === "exploratory" && data.pattern === "exploratory") {
+            stats.push(
+                { label: "Signal strength", value: `${Math.round((data.signalStrength || 0) * 100)}%` },
+                { label: "Claims this round", value: String(claimsCount) },
+                { label: "Isolated claims", value: String((data.isolatedClaims || []).length) }
+            );
+        }
+
+        if (problemStructure.primaryPattern === "contextual" && data.pattern === "contextual") {
+            stats.push(
+                { label: "Branches", value: String((data.branches || []).length) },
+                { label: "Default path", value: data.defaultPath && data.defaultPath.exists ? "Yes" : "No" },
+                { label: "Missing context items", value: String((data.missingContext || []).length) }
+            );
+        }
+
+        return stats;
+    }, [problemStructure, graphAnalysis, claimsCount]);
+
+    const confidencePct = problemStructure && typeof problemStructure.confidence === "number"
+        ? Math.round(problemStructure.confidence * 100)
+        : null;
+    const isLowConfidence = !!problemStructure && typeof problemStructure.confidence === "number"
+        ? problemStructure.confidence < 0.7
+        : false;
+
     useEffect(() => {
         if (!isAdvancedOpen) return;
         const onDown = (evt: MouseEvent) => {
@@ -105,9 +185,21 @@ export const MetricsRibbon: React.FC<MetricsRibbonProps> = ({
                     <span className="font-semibold text-brand-400 capitalize">
                         {problemStructure.primaryPattern}
                     </span>
-                    {problemStructure.confidence < 0.7 && (
-                        <span className="text-amber-400 text-xs" title="Low confidence">
-                            ?
+                    {typeof confidencePct === "number" && (
+                        <span
+                            className={
+                                "ml-1 inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] border " +
+                                (isLowConfidence
+                                    ? "border-amber-500/40 text-amber-400 bg-amber-500/10"
+                                    : "border-emerald-500/30 text-emerald-400 bg-emerald-500/5")
+                            }
+                            title={
+                                isLowConfidence
+                                    ? `Low confidence (${confidencePct}%). This terrain may shift as you add or edit claims.`
+                                    : `High confidence (${confidencePct}%). This terrain is relatively stable across the sampled models.`
+                            }
+                        >
+                            {isLowConfidence ? `Low · ${confidencePct}%` : `Confident · ${confidencePct}%`}
                         </span>
                     )}
                 </div>
@@ -391,6 +483,36 @@ export const MetricsRibbon: React.FC<MetricsRibbonProps> = ({
                             {problemStructure.primaryPattern === "contextual" && (
                                 <span>
                                     The best path depends on conditions (branches). Clarify your context before committing.
+                                </span>
+                            )}
+                        </div>
+
+                        {structuralStats.length > 0 && (
+                            <>
+                                <div className="font-medium text-text-secondary mt-2 mb-1">This round&apos;s structure</div>
+                                <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+                                    {structuralStats.map((stat, idx) => (
+                                        <div key={idx} className="flex items-center justify-between">
+                                            <span className="text-text-muted">{stat.label}</span>
+                                            <span className="text-text-primary font-medium">{stat.value}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            </>
+                        )}
+
+                        <div className="font-medium text-text-secondary mt-2 mb-1">Confidence:</div>
+                        <div>
+                            {typeof problemStructure.confidence === "number" ? (
+                                <span>
+                                    {Math.round(problemStructure.confidence * 100)}% confidence in this terrain.{" "}
+                                    {problemStructure.confidence < 0.7
+                                        ? "Treat this as a working hypothesis; adding or editing claims can change the shape."
+                                        : "This pattern is fairly stable across the current claims and models."}
+                                </span>
+                            ) : (
+                                <span>
+                                    Confidence for this structure has not been estimated yet.
                                 </span>
                             )}
                         </div>
