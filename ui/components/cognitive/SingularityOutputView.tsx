@@ -10,6 +10,7 @@ interface SingularityOutputViewProps {
     singularityState: SingularityOutputState;
     onRecompute: (options?: any) => void;
     isLoading?: boolean;
+    onViewAnalysis?: () => void;
 }
 
 /**
@@ -20,7 +21,8 @@ const SingularityOutputView: React.FC<SingularityOutputViewProps> = ({
     aiTurn,
     singularityState,
     onRecompute,
-    isLoading
+    isLoading,
+    onViewAnalysis
 }) => {
     const { output, isError, error, providerId } = singularityState;
 
@@ -65,8 +67,8 @@ const SingularityOutputView: React.FC<SingularityOutputViewProps> = ({
                 <div className="text-text-secondary font-medium mt-6">
                     Synthesizing response...
                 </div>
-                <div className="text-xs text-text-muted mt-2">
-                    Converging insights from the council
+                <div className="text-xs text-text-muted mt-2 text-center">
+                    Converging insights from the council.
                 </div>
             </div>
         );
@@ -80,6 +82,17 @@ const SingularityOutputView: React.FC<SingularityOutputViewProps> = ({
 
     return (
         <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+            {/* Top Toggle (only visible when we have a response) */}
+            <div className="flex justify-center mb-6">
+                <button
+                    onClick={onViewAnalysis}
+                    className="flex items-center gap-2 px-4 py-2 rounded-full bg-surface-raised border border-border-subtle hover:bg-surface-highlight text-sm font-medium text-text-secondary transition-all"
+                >
+                    <span>🗺️</span>
+                    <span>See Analysis</span>
+                </button>
+            </div>
+
             {/* Main Response Container - Clean and readable */}
             <div className="bg-surface border border-border-subtle rounded-2xl overflow-hidden shadow-sm relative">
                 {/* Subtle gradient accent */}

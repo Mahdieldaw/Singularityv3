@@ -523,21 +523,6 @@ export const selectedModeAtom = atomWithStorage<CognitiveMode>(
 
 
 // -----------------------------
-// Artifact Selection
-// -----------------------------
-export const selectedArtifactsAtom = atomWithImmer<Set<string>>(new Set());
-
-/**
- * Derived atom to estimate token count of selected artifacts.
- * Assume ~4 chars per token average plus some overhead.
- */
-export const selectedArtifactTokenCountAtom = atom((get) => {
-  const selected = get(selectedArtifactsAtom);
-  // Rough estimation: each selected item is ~200 chars (~50 tokens) on average
-  // In a real impl, we would lookup the actual text content length
-  return selected.size * 50;
-});
-// -----------------------------
 // Cognitive Pipeline UI State
 // -----------------------------
 import { CognitiveViewMode } from "../types";

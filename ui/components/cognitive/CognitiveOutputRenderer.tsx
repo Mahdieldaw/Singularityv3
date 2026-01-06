@@ -11,7 +11,8 @@ import { parseMappingResponse } from '../../../shared/parsing-utils';
 import { getLatestResponse } from '../../utils/turn-helpers';
 import { getProviderName } from '../../utils/provider-helpers';
 import MarkdownDisplay from '../MarkdownDisplay';
-import { MapperMetricsPanel } from './MapperMetricsPanel';
+import { MetricsRibbon } from './MetricsRibbon';
+import StructureGlyph from '../StructureGlyph';
 import { computeProblemStructureFromArtifact, computeStructuralAnalysis } from '../../../src/core/PromptMethods';
 import { MapperArtifact } from '../../../shared/contract';
 
@@ -21,12 +22,10 @@ interface CognitiveOutputRendererProps {
 }
 
 /**
- * Simplified Chat-like Cognitive Output Renderer
- * 
- * Flow:
- * 1. During batch streaming: Show council orbs loading + mapper narrative + metrics panel
- * 2. When singularity is ready: Automatically shift to singularity response (front and center)
- * 3. Toggle for power users to access mapper layer
+ * Orchestrates the Singularity Response Flow:
+ * 1. Batch Streaming: Orbs showing progress
+ * 2. Mapper Ready: MetricsRibbon + StructureGlyph + Landscape Narrative appear
+ * 3. Concierge Ready: Singularity response crowns the view
  */
 export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = ({
     aiTurn,
@@ -39,7 +38,6 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
         isTransitioning
     } = useModeSwitching(aiTurn.id);
 
-    // removed unused handleRetryProvider
     const selectedModels = useAtomValue(selectedModelsAtom);
     const workflowProgress = useAtomValue(workflowProgressForTurnFamily(aiTurn.id));
     const setActiveSplitPanel = useSetAtom(activeSplitPanelAtom);
@@ -60,7 +58,7 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
         }
     }, [hasSingularityOutput, hasAutoSwitched, activeMode, setActiveMode]);
 
-    // Get mapper data for the interim view
+    // Get mapper data
     const activeMapperPid = useMemo(() => {
         if (aiTurn.meta?.mapper) return aiTurn.meta.mapper;
         const keys = Object.keys(aiTurn.mappingResponses || {});
@@ -89,13 +87,12 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
         return LLM_PROVIDERS_CONFIG.filter(p => !!selectedModels?.[p.id]).map(p => p.id);
     }, [aiTurn, selectedModels]);
 
-    // Compute structural analysis for metrics panel
+    // Compute structural analysis
     const structuralAnalysis = useMemo(() => {
         if (!aiTurn.mapperArtifact) return undefined;
         try {
             return computeStructuralAnalysis(aiTurn.mapperArtifact as MapperArtifact);
         } catch (e) {
-            console.warn("[CognitiveOutputRenderer] structural analysis failed:", e);
             return undefined;
         }
     }, [aiTurn.mapperArtifact]);
@@ -109,59 +106,40 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
         }
     }, [aiTurn.mapperArtifact]);
 
-    // Determine current state
     const isStreaming = Object.values(workflowProgress).some(
         p => p.stage === 'thinking' || p.stage === 'streaming'
     );
+
     const showSingularity = hasSingularityOutput && activeMode === 'singularity';
-    // removed unused showMapperLayer
 
     return (
         <div className="w-full max-w-3xl mx-auto animate-in fade-in duration-500">
-            {/* Toggle between Singularity and Mapper layer */}
-            {hasSingularityOutput && (
-                <div className="flex items-center justify-center gap-1 p-1 mb-6 bg-surface-highlight/20 rounded-xl border border-border-subtle/50 w-fit mx-auto">
-                    <button
-                        onClick={() => setActiveMode('singularity')}
-                        className={`
-                            relative flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all
-                            ${activeMode === 'singularity'
-                                ? 'bg-surface-base text-text-primary shadow-sm border border-border-subtle'
-                                : 'text-text-tertiary hover:text-text-secondary hover:bg-surface-highlight/50'}
-                        `}
-                    >
-                        <span>✨</span>
-                        <span>Response</span>
-                    </button>
-                    <button
-                        onClick={() => setActiveMode('artifact')}
-                        className={`
-                            relative flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all
-                            ${activeMode === 'artifact'
-                                ? 'bg-surface-base text-text-primary shadow-sm border border-border-subtle'
-                                : 'text-text-tertiary hover:text-text-secondary hover:bg-surface-highlight/50'}
-                        `}
-                    >
-                        <span>🗺️</span>
-                        <span>Analysis</span>
-                    </button>
-                </div>
-            )}
-
             {/* === SINGULARITY VIEW (Front and Center) === */}
-            {showSingularity && (
+            {showSingularity ? (
                 <SingularityOutputView
                     aiTurn={aiTurn}
                     singularityState={singularityState}
                     onRecompute={(options) => triggerAndSwitch('singularity', options)}
                     isLoading={isTransitioning}
+                    onViewAnalysis={() => setActiveMode('artifact')}
                 />
-            )}
-
-            {/* === STREAMING/INTERIM VIEW: Council Orbs + Mapper Narrative + Metrics === */}
-            {!showSingularity && (
+            ) : (
+                /* === INTERIM / ANALYSIS VIEW === */
                 <div className="space-y-6">
-                    {/* Council Orbs - Shows provider progress */}
+                    {/* Header: Toggle back to response if available */}
+                    {hasSingularityOutput && (
+                        <div className="flex justify-center mb-4">
+                            <button
+                                onClick={() => setActiveMode('singularity')}
+                                className="flex items-center gap-2 px-4 py-2 rounded-full bg-surface-raised border border-border-subtle hover:bg-surface-highlight text-sm font-medium text-text-secondary transition-all"
+                            >
+                                <span>✨</span>
+                                <span>Back to Response</span>
+                            </button>
+                        </div>
+                    )}
+
+                    {/* Council Orbs - Always visible during processing/analysis */}
                     <div className="flex justify-center">
                         <CouncilOrbs
                             providers={LLM_PROVIDERS_CONFIG}
@@ -174,19 +152,46 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
                         />
                     </div>
 
-                    {/* Mapper Metrics Panel (new component) */}
+                    {/* Structural Summary: Ribbon + Glyph */}
                     {structuralAnalysis && (
-                        <MapperMetricsPanel
-                            structuralAnalysis={structuralAnalysis}
-                            problemStructure={problemStructure}
-                            claimCount={aiTurn.mapperArtifact?.claims?.length || 0}
-                            ghostCount={aiTurn.mapperArtifact?.ghosts?.length || 0}
-                        />
+                        <div className="space-y-4">
+                            <MetricsRibbon
+                                claimsCount={aiTurn.mapperArtifact?.claims?.length || 0}
+                                ghostCount={aiTurn.mapperArtifact?.ghosts?.length || 0}
+                                problemStructure={problemStructure}
+                                graphAnalysis={structuralAnalysis.graph}
+                                enrichedClaims={structuralAnalysis.claimsWithLeverage}
+                                ratios={structuralAnalysis.ratios}
+                                ghosts={aiTurn.mapperArtifact?.ghosts || []}
+                            />
+                            
+                            {problemStructure && (
+                                <div className="flex justify-center p-4 bg-surface-raised/30 rounded-xl border border-border-subtle/50">
+                                    <div className="flex flex-col items-center gap-2">
+                                        <div className="text-[10px] uppercase tracking-widest text-text-muted font-bold">
+                                            Structural Topology
+                                        </div>
+                                        <StructureGlyph
+                                            pattern={problemStructure.primaryPattern}
+                                            claimCount={aiTurn.mapperArtifact?.claims?.length || 0}
+                                            width={320}
+                                            height={140}
+                                            onClick={() => setIsDecisionMapOpen({ turnId: aiTurn.id })}
+                                        />
+                                        <div className="text-[11px] text-text-muted italic">
+                                            {problemStructure.confidence > 0.7 
+                                                ? `High confidence ${problemStructure.primaryPattern} pattern detected`
+                                                : `Emerging ${problemStructure.primaryPattern} structure`}
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
                     )}
 
-                    {/* Mapper Narrative */}
+                    {/* Mapper Narrative Card */}
                     {mapperNarrative ? (
-                        <div className="bg-surface-raised border border-border-subtle rounded-xl overflow-hidden">
+                        <div className="bg-surface border border-border-subtle rounded-2xl overflow-hidden shadow-sm">
                             <div className="px-4 py-3 border-b border-border-subtle bg-surface-highlight/10 flex items-center justify-between">
                                 <div className="flex items-center gap-2">
                                     <span className="text-lg">📖</span>
@@ -212,7 +217,7 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
                                     <span>Map</span>
                                 </button>
                             </div>
-                            <div className="px-5 py-5 text-sm text-text-muted leading-relaxed">
+                            <div className="px-6 py-6 md:px-8 text-sm text-text-muted leading-relaxed font-serif">
                                 <MarkdownDisplay content={mapperNarrative} />
                             </div>
                         </div>
@@ -222,18 +227,11 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
                             <div className="text-text-secondary font-medium">
                                 Gathering perspectives...
                             </div>
-                            <div className="text-xs text-text-muted mt-2">
-                                The council is deliberating
+                            <div className="text-xs text-text-muted mt-2 text-center">
+                                Experts are deliberating. Analysis will appear shortly.
                             </div>
                         </div>
-                    ) : (
-                        <div className="flex flex-col items-center justify-center p-12 bg-surface-highlight/10 rounded-xl border border-dashed border-border-subtle">
-                            <div className="text-3xl mb-4">🕳️</div>
-                            <div className="text-text-secondary font-medium">
-                                No analysis available
-                            </div>
-                        </div>
-                    )}
+                    ) : null}
                 </div>
             )}
         </div>

@@ -20,13 +20,11 @@ import {
   isHistoryPanelOpenAtom,
   selectedModeAtom,
   activeProviderTargetAtom,
-  selectedArtifactsAtom, // Added
 } from "../../state/atoms";
 // Optimistic AI turn creation is now handled upon TURN_CREATED from backend
 import type {
   ProviderKey,
   PrimitiveWorkflowRequest,
-  ArtifactCurationPayload,
 } from "../../../shared/contract";
 import { LLM_PROVIDERS_CONFIG } from "../../constants";
 import { computeThinkFlag } from "../../../src/think/computeThinkFlag.js";
@@ -51,7 +49,6 @@ export function useChat() {
   const turnIds = useAtomValue(turnIdsAtom);
   const singularityProvider = useAtomValue(singularityProviderAtom);
   const selectedMode = useAtomValue(selectedModeAtom);
-  const activeAiTurnId = useAtomValue(activeAiTurnIdAtom);
 
 
 
@@ -66,11 +63,6 @@ export function useChat() {
   const setUiPhase = useSetAtom(uiPhaseAtom);
   const setIsHistoryPanelOpen = useSetAtom(isHistoryPanelOpenAtom);
   const setActiveTarget = useSetAtom(activeProviderTargetAtom);
-
-
-  // Artifact Selection
-  const selectedArtifacts = useAtomValue(selectedArtifactsAtom); // READ
-  const setSelectedArtifacts = useSetAtom(selectedArtifactsAtom); // WRITE
 
 
   const sendMessage = useCallback(
@@ -88,23 +80,10 @@ export function useChat() {
       const ts = Date.now();
       const userTurnId = `user-${ts}-${Math.random().toString(36).slice(2, 8)}`;
 
-      // Check for selected artifacts to inject
-      let finalUserMessage = prompt;
-
-      const selectedArtifactIds = Array.from(selectedArtifacts);
-
-      if (selectedArtifactIds.length > 0) {
-        const injectionBlock = `\n\n<context_injection>\n<!-- ${selectedArtifactIds.length} artifacts selected by user -->\n</context_injection>`;
-        finalUserMessage += injectionBlock;
-
-        // Clear selection after sending
-        setSelectedArtifacts((draft) => { draft.clear(); });
-      }
-
       const userTurn: UserTurn = {
         type: "user",
         id: userTurnId,
-        text: finalUserMessage,
+        text: prompt,
         createdAt: ts,
         sessionId: currentSessionId || null,
       };
@@ -128,17 +107,6 @@ export function useChat() {
 
         const isInitialize =
           mode === "new" && (!currentSessionId || turnIds.length === 0);
-
-        // Artifact curation with selected artifacts but no edits (edit system removed)
-        const artifactCuration: ArtifactCurationPayload | undefined =
-          isInitialize
-            ? undefined
-            : {
-              turnId: activeAiTurnId || null,
-              timestamp: ts,
-              selectedArtifactIds,
-              edits: null,
-            };
 
         // Validate continuation has a sessionId and bind the port before sending
         if (!isInitialize) {
@@ -166,7 +134,7 @@ export function useChat() {
           ? {
             type: "initialize",
             sessionId: null, // backend is authoritative; do not generate in UI
-            userMessage: finalUserMessage,
+            userMessage: prompt,
             providers: activeProviders,
             includeMapping: shouldUseMapping,
             mapper: shouldUseMapping
@@ -186,7 +154,7 @@ export function useChat() {
           : {
             type: "extend",
             sessionId: currentSessionId as string,
-            userMessage: finalUserMessage,
+            userMessage: prompt,
             providers: activeProviders,
             includeMapping: shouldUseMapping,
             mapper: shouldUseMapping
@@ -202,7 +170,6 @@ export function useChat() {
             providerMeta: {},
             clientUserTurnId: userTurnId,
             mode: selectedMode as any,
-            artifactCuration,
           };
 
         // AI turn will be created upon TURN_CREATED from backend
@@ -229,8 +196,6 @@ export function useChat() {
       thinkOnChatGPT,
       powerUserMode,
       turnIds.length,
-      selectedArtifacts,
-      setSelectedArtifacts,
     ],
   );
 
