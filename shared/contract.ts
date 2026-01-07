@@ -13,8 +13,22 @@ export type WorkflowStepType =
   | "mapping"
   | "singularity";
 
-export type CognitiveMode = "auto" | "decide";
+export type CognitiveMode = "auto";
 
+
+export interface SingularityPipelineSnapshot {
+  userMessage?: string;
+  prompt?: string;
+  stance?: string;
+  stanceReason?: string;
+  stanceConfidence?: number;
+  structuralShape?: {
+    primaryPattern?: string;
+    confidence?: number;
+  } | null;
+  leakageDetected?: boolean;
+  leakageViolations?: string[];
+}
 
 export interface SingularityOutput {
   text: string;
@@ -22,6 +36,7 @@ export interface SingularityOutput {
   timestamp: number;
   leakageDetected?: boolean;
   leakageViolations?: string[];
+  pipeline?: SingularityPipelineSnapshot | null;
 }
 
 export interface Claim {
@@ -81,8 +96,26 @@ export interface ProblemStructure {
   implications: {
     action: string;
   };
-  // Layer 8 Data (Optional/Dynamic based on pattern)
   data?: ContestedShapeData | SettledShapeData | KeystoneShapeData | LinearShapeData | TradeoffShapeData | DimensionalShapeData | ExploratoryShapeData | ContextualShapeData;
+  scores?: {
+    settled: number;
+    linear: number;
+    keystone: number;
+    contested: number;
+    tradeoff: number;
+    dimensional: number;
+    exploratory: number;
+  };
+  baseConfidence?: number;
+  signalPenalty?: number;
+  fragilityPenalty?: {
+    total: number;
+    lowSupportArticulations: number;
+    conditionalConflicts: number;
+    disconnectedConsensus: boolean;
+  };
+  signalStrength?: number;
+  runnerUpPattern?: ProblemStructure["primaryPattern"];
 }
 
 export type ClaimRole = 'anchor' | 'branch' | 'challenger' | 'supplement';
@@ -255,6 +288,20 @@ export interface SettledShapeData {
   challengers: ChallengerInfo[];
   blindSpots: string[];
   confidence: number;
+  strongestOutlier: {
+    claim: {
+      id: string;
+      label: string;
+      text: string;
+      supportCount: number;
+      supportRatio: number;
+    };
+    reason: 'leverage_inversion' | 'explicit_challenger' | 'minority_voice';
+    structuralRole: string;
+    whatItQuestions: string;
+  } | null;
+  floorAssumptions: string[];
+  transferQuestion: string;
 }
 
 export interface LinearShapeData {
@@ -267,6 +314,19 @@ export interface LinearShapeData {
   }>;
   alternativeChains: ChainStep[][];
   terminalClaim: ChainStep | null;
+  shortcuts: Array<{
+    from: ChainStep;
+    to: ChainStep;
+    skips: string[];
+    supportEvidence: string;
+  }>;
+  chainFragility: {
+    weakLinkCount: number;
+    totalSteps: number;
+    fragilityRatio: number;
+    mostVulnerableStep: { step: ChainStep; cascadeSize: number } | null;
+  };
+  transferQuestion: string;
 }
 
 export interface KeystoneShapeData {
@@ -287,6 +347,19 @@ export interface KeystoneShapeData {
   }>;
   cascadeSize: number;
   challengers: ChallengerInfo[];
+  decoupledClaims: Array<{
+    id: string;
+    label: string;
+    text: string;
+    supportCount: number;
+    independenceReason: string;
+  }>;
+  cascadeConsequences: {
+    directlyAffected: number;
+    transitivelyAffected: number;
+    survives: number;
+  };
+  transferQuestion: string;
 }
 
 export interface ContestedShapeData {
@@ -333,6 +406,10 @@ export interface DimensionalShapeData {
   }>;
   gaps: string[];
   governingConditions: string[];
+  dominantDimension: DimensionCluster | null;
+  hiddenDimension: DimensionCluster | null;
+  dominantBlindSpots: string[];
+  transferQuestion: string;
 }
 
 export interface ExploratoryShapeData {
@@ -352,6 +429,15 @@ export interface ExploratoryShapeData {
   }>;
   clarifyingQuestions: string[];
   signalStrength: number;
+  outerBoundary: {
+    id: string;
+    label: string;
+    text: string;
+    supportCount: number;
+    distanceReason: string;
+  } | null;
+  sparsityReasons: string[];
+  transferQuestion: string;
 }
 
 export interface ContextualShapeData {
@@ -577,7 +663,6 @@ export interface MappingStepPayload {
   sourceHistorical?: {
     turnId: string;
     mapperArtifact?: MapperArtifact;
-    useCognitivePipeline?: boolean;
   }
 
 }

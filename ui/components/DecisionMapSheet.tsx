@@ -23,16 +23,684 @@ import {
   parseUnifiedMapperOutput,
   cleanOptionsText,
 } from "../../shared/parsing-utils";
-import { computeProblemStructureFromArtifact } from "../../src/core/PromptMethods";
+import { computeProblemStructureFromArtifact, computeStructuralAnalysis } from "../../src/core/PromptMethods";
+import type { StructuralAnalysis } from "../../shared/contract";
+import { ConciergeService } from "../../src/core/ConciergeService";
 import { normalizeProviderId } from "../utils/provider-id-mapper";
 
 import { useSingularityOutput } from "../hooks/useSingularityOutput";
+import type { SingularityOutputState } from "../hooks/useSingularityOutput";
 
 import { StructuralInsight } from "./StructuralInsight";
 
 const DEBUG_DECISION_MAP_SHEET = false;
 const decisionMapSheetDbg = (...args: any[]) => {
   if (DEBUG_DECISION_MAP_SHEET) console.debug("[DecisionMapSheet]", ...args);
+};
+
+interface StructuralDebugPanelProps {
+  analysis: StructuralAnalysis;
+}
+
+const StructuralDebugPanel: React.FC<StructuralDebugPanelProps> = ({ analysis }) => {
+  const [showRaw, setShowRaw] = useState(false);
+
+  const signal = useMemo(() => {
+    const claimCount = analysis.claimsWithLeverage.length;
+    const edgeCount = analysis.edges.length;
+    const modelCount = analysis.landscape.modelCount || 1;
+    const supporters = analysis.claimsWithLeverage.map(c => c.supporters);
+    if (claimCount === 0) {
+      return {
+        edgeSignal: 0,
+        supportSignal: 0,
+        coverageSignal: 0,
+        final: 0,
+      };
+    }
+    const clamp01 = (n: number) => Math.max(0, Math.min(1, n));
+    const minEdgesForPattern = Math.max(3, claimCount * 0.15);
+    const edgeSignal = clamp01(edgeCount / minEdgesForPattern);
+    const supportCounts = supporters.map(s => s.length);
+    const maxSupport = Math.max(...supportCounts, 1);
+    const normalized = supportCounts.map(c => c / maxSupport);
+    const mean = normalized.reduce((a, b) => a + b, 0) / normalized.length;
+    const variance = normalized.reduce((sum, v) => sum + Math.pow(v - mean, 2), 0) / normalized.length;
+    const supportSignal = clamp01(variance * 5);
+    const uniqueModelCount = new Set(supporters.flat()).size;
+    const coverageSignal = modelCount > 0 ? uniqueModelCount / modelCount : 0;
+    const final = edgeSignal * 0.4 + supportSignal * 0.3 + coverageSignal * 0.3;
+    return { edgeSignal, supportSignal, coverageSignal, final };
+  }, [analysis]);
+
+  const ratioBadge = (value: number | undefined) => {
+    if (value == null || Number.isNaN(value)) return "";
+    if (value > 0.7) return "🟢";
+    if (value >= 0.3) return "🟡";
+    return "🔴";
+  };
+
+  const patternScores = analysis.shape.scores || undefined;
+
+  return (
+    <div className="h-full overflow-y-auto relative custom-scrollbar p-6">
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-3">
+          <span className="text-2xl">🔬</span>
+          <div>
+            <div className="text-sm font-semibold">Structural Analysis Debug</div>
+            <div className="text-xs text-text-muted">Current turn structural pipeline</div>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={() => setShowRaw((v) => !v)}
+          className="text-xs px-3 py-1.5 rounded-full border border-border-subtle hover:bg-surface-highlight/10"
+        >
+          {showRaw ? "Hide Raw Data" : "Show Raw Data"}
+        </button>
+      </div>
+
+      {analysis.landscape.claimCount > 50 && (
+        <div className="mb-4 text-xs text-text-muted">
+          Large graph detected ({analysis.landscape.claimCount} claims); debug metrics may take longer to compute.
+        </div>
+      )}
+
+      {showRaw ? (
+        <pre className="text-[11px] leading-snug bg-surface border border-border-subtle rounded-lg p-3 overflow-x-auto">
+          {JSON.stringify(analysis, null, 2)}
+        </pre>
+      ) : (
+        <div className="space-y-4">
+          <details open>
+            <summary className="cursor-pointer text-sm font-semibold flex items-center gap-2">
+              <span>📊 Phase 1: Graph Topology</span>
+              <span className="text-[10px] text-text-muted uppercase tracking-wide">computeConnectedComponents, computeLongestChain, analyzeGraph, computeSignalStrength</span>
+            </summary>
+            <div className="mt-2 text-xs space-y-2">
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                <div>
+                  <div className="text-text-muted">Components</div>
+                  <div className="font-mono">{analysis.graph.componentCount}</div>
+                </div>
+                <div>
+                  <div className="text-text-muted">Longest chain</div>
+                  <div className="font-mono">
+                    {analysis.graph.longestChain.length} claims
+                  </div>
+                </div>
+                <div>
+                  <div className="text-text-muted">Chain roots</div>
+                  <div className="font-mono">{analysis.graph.chainCount}</div>
+                </div>
+                <div>
+                  <div className="text-text-muted">Hub claim</div>
+                  <div className="font-mono">
+                    {analysis.graph.hubClaim || "–"}{" "}
+                    {analysis.graph.hubClaim && `(${analysis.graph.hubDominance.toFixed(1)}x)`}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-text-muted">Cluster cohesion</div>
+                  <div className="font-mono">
+                    {analysis.graph.clusterCohesion.toFixed(2)} {ratioBadge(analysis.graph.clusterCohesion)}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-text-muted">Local coherence</div>
+                  <div className="font-mono">
+                    {analysis.graph.localCoherence.toFixed(2)} {ratioBadge(analysis.graph.localCoherence)}
+                  </div>
+                </div>
+              </div>
+              <div>
+                <div className="text-text-muted">Articulation points</div>
+                <div className="font-mono break-words">
+                  {analysis.graph.articulationPoints.length === 0
+                    ? "None"
+                    : analysis.graph.articulationPoints.join(", ")}
+                </div>
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2 pt-2 border-t border-border-subtle/60 mt-2">
+                <div>
+                  <div className="text-text-muted text-[11px]">Edge signal</div>
+                  <div className="font-mono">
+                    {signal.edgeSignal.toFixed(2)} {ratioBadge(signal.edgeSignal)}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-text-muted text-[11px]">Support signal</div>
+                  <div className="font-mono">
+                    {signal.supportSignal.toFixed(2)} {ratioBadge(signal.supportSignal)}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-text-muted text-[11px]">Coverage signal</div>
+                  <div className="font-mono">
+                    {signal.coverageSignal.toFixed(2)} {ratioBadge(signal.coverageSignal)}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-text-muted text-[11px]">Final signal strength</div>
+                  <div className="font-mono">
+                    {signal.final.toFixed(2)} {ratioBadge(signal.final)}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </details>
+
+          <details>
+            <summary className="cursor-pointer text-sm font-semibold flex items-center gap-2">
+              <span>🌐 Phase 2: Landscape Metrics</span>
+              <span className="text-[10px] text-text-muted uppercase tracking-wide">computeLandscapeMetrics</span>
+            </summary>
+            <div className="mt-2 text-xs space-y-2">
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                <div>
+                  <div className="text-text-muted">Dominant type</div>
+                  <div className="font-mono">{analysis.landscape.dominantType}</div>
+                </div>
+                <div>
+                  <div className="text-text-muted">Dominant role</div>
+                  <div className="font-mono">{analysis.landscape.dominantRole}</div>
+                </div>
+                <div>
+                  <div className="text-text-muted">Claim count</div>
+                  <div className="font-mono">{analysis.landscape.claimCount}</div>
+                </div>
+                <div>
+                  <div className="text-text-muted">Model count</div>
+                  <div className="font-mono">{analysis.landscape.modelCount}</div>
+                </div>
+                <div>
+                  <div className="text-text-muted">Convergence ratio</div>
+                  <div className="font-mono">
+                    {analysis.landscape.convergenceRatio.toFixed(2)} {ratioBadge(analysis.landscape.convergenceRatio)}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </details>
+
+          <details>
+            <summary className="cursor-pointer text-sm font-semibold flex items-center gap-2">
+              <span>📌 Phase 3: Claim Enrichment</span>
+              <span className="text-[10px] text-text-muted uppercase tracking-wide">computeClaimRatios, assignPercentileFlags</span>
+            </summary>
+            <div className="mt-2 text-xs space-y-2">
+              <div className="text-[11px] text-text-muted">
+                Flags use percentile thresholds (high support: top 30%, leverage inversion: bottom 30% support and top 25% leverage, keystone: top 20% keystone score and structurally load-bearing).
+              </div>
+              <div className="max-h-72 overflow-auto border border-border-subtle rounded-md">
+                <table className="min-w-full text-[11px]">
+                  <thead className="bg-surface-highlight/20">
+                    <tr>
+                      <th className="px-2 py-1 text-left">Claim</th>
+                      <th className="px-2 py-1 text-right">Support</th>
+                      <th className="px-2 py-1 text-right">Leverage</th>
+                      <th className="px-2 py-1 text-right">Keystone</th>
+                      <th className="px-2 py-1 text-right">Gap</th>
+                      <th className="px-2 py-1 text-right">Skew</th>
+                      <th className="px-2 py-1 text-center">Flags</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {analysis.claimsWithLeverage.map((c) => (
+                      <tr key={c.id} className="border-t border-border-subtle/60">
+                        <td className="px-2 py-1">
+                          <div className="font-mono truncate max-w-[140px]">{c.id}</div>
+                          <div className="text-[10px] text-text-muted truncate max-w-[140px]">{c.label}</div>
+                        </td>
+                        <td className="px-2 py-1 text-right font-mono">
+                          {c.supportRatio.toFixed(2)} {ratioBadge(c.supportRatio)}
+                        </td>
+                        <td className="px-2 py-1 text-right font-mono">
+                          {c.leverage.toFixed(1)}
+                        </td>
+                        <td className="px-2 py-1 text-right font-mono">
+                          {c.keystoneScore.toFixed(1)}
+                        </td>
+                        <td className="px-2 py-1 text-right font-mono">
+                          {c.evidenceGapScore.toFixed(2)}
+                        </td>
+                        <td className="px-2 py-1 text-right font-mono">
+                          {c.supportSkew.toFixed(2)}
+                        </td>
+                        <td className="px-2 py-1 text-center">
+                          <div className="flex flex-wrap gap-1 justify-center">
+                            {c.isHighSupport && (
+                              <span className="px-1 rounded-full bg-emerald-500/15 text-emerald-400">High</span>
+                            )}
+                            {c.isLeverageInversion && (
+                              <span className="px-1 rounded-full bg-purple-500/15 text-purple-400">Inv</span>
+                            )}
+                            {c.isKeystone && (
+                              <span className="px-1 rounded-full bg-sky-500/15 text-sky-400">Key</span>
+                            )}
+                            {c.isEvidenceGap && (
+                              <span className="px-1 rounded-full bg-amber-500/15 text-amber-400">Gap</span>
+                            )}
+                            {c.isOutlier && (
+                              <span className="px-1 rounded-full bg-rose-500/15 text-rose-400">Out</span>
+                            )}
+                            {c.isContested && (
+                              <span className="px-1 rounded-full bg-red-500/15 text-red-400">Con</span>
+                            )}
+                            {c.isConditional && (
+                              <span className="px-1 rounded-full bg-indigo-500/15 text-indigo-400">Cond</span>
+                            )}
+                            {c.isChallenger && (
+                              <span className="px-1 rounded-full bg-fuchsia-500/15 text-fuchsia-400">Chal</span>
+                            )}
+                            {c.isIsolated && (
+                              <span className="px-1 rounded-full bg-slate-500/20 text-slate-300">Iso</span>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </details>
+
+          <details>
+            <summary className="cursor-pointer text-sm font-semibold flex items-center gap-2">
+              <span>⚖️ Phase 4: Core Ratios</span>
+              <span className="text-[10px] text-text-muted uppercase tracking-wide">computeCoreRatios</span>
+            </summary>
+            <div className="mt-2 text-xs grid grid-cols-2 md:grid-cols-3 gap-2">
+              <div>
+                <div className="text-text-muted">Concentration</div>
+                <div className="font-mono">
+                  {analysis.ratios.concentration.toFixed(2)} {ratioBadge(analysis.ratios.concentration)}
+                </div>
+              </div>
+              <div>
+                <div className="text-text-muted">Alignment</div>
+                <div className="font-mono">
+                  {analysis.ratios.alignment.toFixed(2)} {ratioBadge(analysis.ratios.alignment)}
+                </div>
+              </div>
+              <div>
+                <div className="text-text-muted">Tension</div>
+                <div className="font-mono">
+                  {analysis.ratios.tension.toFixed(2)} {ratioBadge(analysis.ratios.tension)}
+                </div>
+              </div>
+              <div>
+                <div className="text-text-muted">Fragmentation</div>
+                <div className="font-mono">
+                  {analysis.ratios.fragmentation.toFixed(2)} {ratioBadge(analysis.ratios.fragmentation)}
+                </div>
+              </div>
+              <div>
+                <div className="text-text-muted">Depth</div>
+                <div className="font-mono">
+                  {analysis.ratios.depth.toFixed(2)} {ratioBadge(analysis.ratios.depth)}
+                </div>
+              </div>
+            </div>
+          </details>
+
+          <details>
+            <summary className="cursor-pointer text-sm font-semibold flex items-center gap-2">
+              <span>🧩 Phase 5: Pattern Detection</span>
+              <span className="text-[10px] text-text-muted uppercase tracking-wide">leverage inversions, cascades, conflicts, clusters, tradeoffs, convergence, isolation, ghosts</span>
+            </summary>
+            <div className="mt-2 text-xs space-y-2">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                <div>
+                  <div className="text-text-muted">Leverage inversions</div>
+                  <div className="font-mono">
+                    {analysis.patterns.leverageInversions.length}{" "}
+                    {analysis.patterns.leverageInversions.length > 0 && "⚠️"}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-text-muted">Cascade risks</div>
+                  <div className="font-mono">{analysis.patterns.cascadeRisks.length}</div>
+                </div>
+                <div>
+                  <div className="text-text-muted">Conflicts</div>
+                  <div className="font-mono">{analysis.patterns.conflicts.length}</div>
+                </div>
+                <div>
+                  <div className="text-text-muted">Conflict clusters</div>
+                  <div className="font-mono">{analysis.patterns.conflictClusters?.length ?? 0}</div>
+                </div>
+                <div>
+                  <div className="text-text-muted">Tradeoffs</div>
+                  <div className="font-mono">{analysis.patterns.tradeoffs.length}</div>
+                </div>
+                <div>
+                  <div className="text-text-muted">Convergence points</div>
+                  <div className="font-mono">{analysis.patterns.convergencePoints.length}</div>
+                </div>
+                <div>
+                  <div className="text-text-muted">Isolated claims</div>
+                  <div className="font-mono">{analysis.patterns.isolatedClaims.length}</div>
+                </div>
+                <div>
+                  <div className="text-text-muted">Ghosts</div>
+                  <div className="font-mono">
+                    {analysis.ghostAnalysis.count}{" "}
+                    {analysis.ghostAnalysis.count > 0 && "👻"}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </details>
+
+          <details>
+            <summary className="cursor-pointer text-sm font-semibold flex items-center gap-2">
+              <span>🧱 Phase 6: Shape Classification</span>
+              <span className="text-[10px] text-text-muted uppercase tracking-wide">determineShapeSparseAware, generateEvidenceSparseAware</span>
+            </summary>
+            <div className="mt-2 text-xs space-y-2">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                {patternScores && Object.entries(patternScores).map(([k, v]) => (
+                  <div key={k}>
+                    <div className="text-text-muted capitalize">{k}</div>
+                    <div className="font-mono">
+                      {v.toFixed(2)}{" "}
+                      {analysis.shape.primaryPattern === k && "← winner"}
+                      {analysis.shape.runnerUpPattern === k && analysis.shape.primaryPattern !== k && "· runner-up"}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-2 pt-2 border-t border-border-subtle/60">
+                <div>
+                  <div className="text-text-muted">Primary pattern</div>
+                  <div className="font-mono capitalize">{analysis.shape.primaryPattern}</div>
+                </div>
+                <div>
+                  <div className="text-text-muted">Base confidence</div>
+                  <div className="font-mono">
+                    {analysis.shape.baseConfidence != null ? analysis.shape.baseConfidence.toFixed(2) : "–"}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-text-muted">Final confidence</div>
+                  <div className="font-mono">
+                    {analysis.shape.confidence.toFixed(2)} {ratioBadge(analysis.shape.confidence)}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-text-muted">Signal penalty</div>
+                  <div className="font-mono">
+                    {analysis.shape.signalPenalty != null ? (-analysis.shape.signalPenalty).toFixed(2) : "–"}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-text-muted">Fragility penalty</div>
+                  <div className="font-mono">
+                    {analysis.shape.fragilityPenalty?.total != null ? (-analysis.shape.fragilityPenalty.total).toFixed(2) : "–"}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-text-muted">Signal strength</div>
+                  <div className="font-mono">
+                    {analysis.shape.signalStrength != null ? analysis.shape.signalStrength.toFixed(2) : signal.final.toFixed(2)}
+                  </div>
+                </div>
+              </div>
+              {analysis.shape.fragilityPenalty && (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                  <div className="text-[11px]">
+                    Low-support articulation points:{" "}
+                    <span className="font-mono">
+                      {analysis.shape.fragilityPenalty.lowSupportArticulations}
+                    </span>
+                  </div>
+                  <div className="text-[11px]">
+                    Conditional conflicts:{" "}
+                    <span className="font-mono">
+                      {analysis.shape.fragilityPenalty.conditionalConflicts}
+                    </span>
+                  </div>
+                  <div className="text-[11px]">
+                    Disconnected consensus:{" "}
+                    <span className="font-mono">
+                      {analysis.shape.fragilityPenalty.disconnectedConsensus ? "Yes" : "No"}
+                    </span>
+                  </div>
+                </div>
+              )}
+              <div className="pt-2 border-t border-border-subtle/60">
+                <div className="text-[11px] text-text-muted mb-1">Evidence list</div>
+                <ul className="list-disc list-inside space-y-1">
+                  {analysis.shape.evidence.map((e, idx) => (
+                    <li key={idx}>{e}</li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          </details>
+
+          <details>
+            <summary className="cursor-pointer text-sm font-semibold flex items-center gap-2">
+              <span>🧱 Phase 7: Shape-Specific Data</span>
+              <span className="text-[10px] text-text-muted uppercase tracking-wide">pattern-specific builders</span>
+            </summary>
+            <div className="mt-2 text-xs space-y-2">
+              {analysis.shape.data ? (
+                <>
+                  <div className="text-[11px] text-text-muted">
+                    Pattern data type: {(analysis.shape.data as any).pattern}
+                  </div>
+                  <pre className="text-[11px] leading-snug bg-surface border border-border-subtle rounded-lg p-3 overflow-x-auto">
+                    {JSON.stringify(analysis.shape.data, null, 2)}
+                  </pre>
+                </>
+              ) : (
+                <div className="text-[11px] text-text-muted">
+                  No shape-specific data available for this pattern.
+                </div>
+              )}
+            </div>
+          </details>
+        </div>
+      )}
+    </div>
+  );
+};
+
+interface ConciergePipelinePanelProps {
+  state: SingularityOutputState;
+  analysis: StructuralAnalysis | null;
+  userMessage: string | null;
+}
+
+const ConciergePipelinePanel: React.FC<ConciergePipelinePanelProps> = ({ state, analysis, userMessage }) => {
+  const [showPrompt, setShowPrompt] = useState(false);
+
+  const pipeline: any = useMemo(() => {
+    if (state.output?.pipeline) return state.output.pipeline;
+    if (!analysis || !userMessage || !state.output) return null;
+
+    try {
+      const selection = ConciergeService.selectStance(userMessage, analysis.shape);
+      const prompt = ConciergeService.buildConciergePrompt(userMessage, analysis, selection.stance);
+
+      let leakageDetected = !!state.output.leakageDetected;
+      let leakageViolations = state.output.leakageViolations || [];
+
+      if ((!leakageViolations || leakageViolations.length === 0) && ConciergeService.detectMachineryLeakage && state.output.text) {
+        const leak = ConciergeService.detectMachineryLeakage(state.output.text);
+        leakageDetected = leak.leaked;
+        leakageViolations = leak.violations || [];
+      }
+
+      return {
+        userMessage,
+        prompt,
+        stance: selection.stance,
+        stanceReason: selection.reason,
+        stanceConfidence: selection.confidence,
+        structuralShape: {
+          primaryPattern: analysis.shape.primaryPattern,
+          confidence: analysis.shape.confidence,
+        },
+        leakageDetected,
+        leakageViolations,
+      };
+    } catch {
+      return null;
+    }
+  }, [state.output, analysis, userMessage]);
+
+  if (!state.output && !state.isLoading) {
+    return (
+      <div className="w-full h-full flex items-center justify-center opacity-70 text-xs text-text-muted">
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-8 h-8 rounded-full border-2 border-brand-500 border-t-transparent animate-spin" />
+          <div>No Singularity pipeline captured for this turn.</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (state.isLoading && !state.output) {
+    return (
+      <div className="w-full h-full flex items-center justify-center opacity-70 text-xs text-text-muted">
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-8 h-8 rounded-full border-2 border-brand-500 border-t-transparent animate-spin" />
+          <div>Running Concierge pipeline…</div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="h-full overflow-y-auto relative custom-scrollbar p-6">
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-3">
+          <span className="text-2xl">🕳️</span>
+          <div>
+            <div className="text-sm font-semibold">Concierge Pipeline</div>
+            <div className="text-xs text-text-muted">Stance, prompt, response, leakage for this turn</div>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={() => setShowPrompt((v) => !v)}
+          className="text-xs px-3 py-1.5 rounded-full border border-border-subtle hover:bg-surface-highlight/10"
+        >
+          {showPrompt ? "Hide Prompt" : "Show Prompt"}
+        </button>
+      </div>
+
+      <div className="space-y-4 text-xs">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-2">
+          <div>
+            <div className="text-text-muted">Provider</div>
+            <div className="font-mono text-[11px] truncate">
+              {state.providerId || state.output?.providerId || "unknown"}
+            </div>
+          </div>
+          <div>
+            <div className="text-text-muted">Timestamp</div>
+            <div className="font-mono text-[11px]">
+              {new Date(state.output?.timestamp || Date.now()).toLocaleTimeString()}
+            </div>
+          </div>
+          <div>
+            <div className="text-text-muted">Leakage</div>
+            <div className="font-mono text-[11px]">
+              {state.output?.leakageDetected ? "Detected" : "None"}
+            </div>
+          </div>
+          <div>
+            <div className="text-text-muted">Shape</div>
+            <div className="font-mono text-[11px]">
+              {pipeline?.structuralShape?.primaryPattern || "—"}
+            </div>
+          </div>
+        </div>
+
+        <details open className="bg-surface border border-border-subtle rounded-lg p-3">
+          <summary className="cursor-pointer text-sm font-semibold flex items-center gap-2">
+            <span>Stance Selection</span>
+          </summary>
+          <div className="mt-2 grid grid-cols-2 md:grid-cols-4 gap-2 text-[11px]">
+            <div>
+              <div className="text-text-muted">Stance</div>
+              <div className="font-mono">
+                {pipeline?.stance || "default"}
+              </div>
+            </div>
+            <div>
+              <div className="text-text-muted">Reason</div>
+              <div className="font-mono">
+                {pipeline?.stanceReason || "n/a"}
+              </div>
+            </div>
+            <div>
+              <div className="text-text-muted">Confidence</div>
+              <div className="font-mono">
+                {pipeline?.stanceConfidence != null ? pipeline.stanceConfidence.toFixed(2) : "—"}
+              </div>
+            </div>
+            <div>
+              <div className="text-text-muted">Shape pattern</div>
+              <div className="font-mono">
+                {pipeline?.structuralShape?.primaryPattern || "—"}
+              </div>
+            </div>
+          </div>
+        </details>
+
+        {showPrompt && (
+          <details open className="bg-surface border border-border-subtle rounded-lg p-3">
+            <summary className="cursor-pointer text-sm font-semibold flex items-center gap-2">
+              <span>Concierge Prompt</span>
+            </summary>
+            <div className="mt-2">
+              <pre className="text-[11px] leading-snug bg-surface-highlight/40 rounded-md p-3 overflow-x-auto">
+                {pipeline?.prompt || "Prompt not captured for this turn."}
+              </pre>
+            </div>
+          </details>
+        )}
+
+        <details className="bg-surface border border-border-subtle rounded-lg p-3">
+          <summary className="cursor-pointer text-sm font-semibold flex items-center gap-2">
+            <span>Response & Leakage</span>
+          </summary>
+          <div className="mt-2 space-y-2 text-[11px]">
+            <div>
+              <div className="text-text-muted mb-1">Response snippet</div>
+              <div className="font-mono whitespace-pre-wrap max-h-40 overflow-y-auto border border-border-subtle/60 rounded-md p-2">
+                {(state.output?.text || "").slice(0, 800) || "No response text available."}
+              </div>
+            </div>
+            <div>
+              <div className="text-text-muted mb-1">Machinery leakage violations</div>
+              {state.output?.leakageDetected && (state.output.leakageViolations || []).length > 0 ? (
+                <div className="flex flex-wrap gap-2">
+                  {(state.output.leakageViolations || []).map((v, i) => (
+                    <span
+                      key={i}
+                      className="px-2 py-0.5 rounded-md bg-amber-500/10 border border-amber-500/20 text-[10px] text-amber-400 font-mono"
+                    >
+                      {v}
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-text-muted">No violations detected.</div>
+              )}
+            </div>
+          </div>
+        </details>
+      </div>
+    </div>
+  );
 };
 
 // ============================================================================
@@ -822,12 +1490,15 @@ export const DecisionMapSheet = React.memo(() => {
   const setSingularityProvider = useSetAtom(singularityProviderAtom);
   const setActiveSplitPanel = useSetAtom(activeSplitPanelAtom);
 
-  const [activeTab, setActiveTab] = useState<'graph' | 'narrative' | 'options' | 'singularity'>('graph');
+  const [activeTab, setActiveTab] = useState<'graph' | 'narrative' | 'options' | 'debug' | 'concierge'>('graph');
   const [selectedNode, setSelectedNode] = useState<{ id: string; label: string; supporters: (string | number)[]; theme?: string } | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [dims, setDims] = useState<{ w: number; h: number }>({ w: window.innerWidth, h: 400 });
   const activeSingularityPid = singularityProvider; // Added
   const [sheetHeightRatio, setSheetHeightRatio] = useState(0.5);
+  const [structuralAnalysis, setStructuralAnalysis] = useState<StructuralAnalysis | null>(null);
+  const [structuralTurnId, setStructuralTurnId] = useState<string | null>(null);
+  const [structuralLoading, setStructuralLoading] = useState(false);
   const resizeRef = useRef<{ active: boolean; startY: number; startRatio: number; moved: boolean }>({
     active: false,
     startY: 0,
@@ -843,6 +1514,20 @@ export const DecisionMapSheet = React.memo(() => {
       setSheetHeightRatio(0.5);
     }
   }, [openState?.turnId]);
+
+  useEffect(() => {
+    if (!openState?.turnId) {
+      setStructuralAnalysis(null);
+      setStructuralTurnId(null);
+      setStructuralLoading(false);
+      return;
+    }
+    if (structuralTurnId && structuralTurnId !== openState.turnId) {
+      setStructuralAnalysis(null);
+      setStructuralTurnId(null);
+      setStructuralLoading(false);
+    }
+  }, [openState?.turnId, structuralTurnId]);
 
   const handleResizePointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     e.preventDefault();
@@ -903,6 +1588,13 @@ export const DecisionMapSheet = React.memo(() => {
   }, [openState, turnGetter]);
 
   const singularityState = useSingularityOutput(aiTurn?.id || null);
+
+  const userMessage = useMemo(() => {
+    if (!aiTurn?.userTurnId) return null;
+    const t = turnGetter(aiTurn.userTurnId);
+    if (!t || (t as any).type !== 'user') return null;
+    return (t as any).text || "";
+  }, [aiTurn?.userTurnId, turnGetter]);
 
 
   const mappingResponses = useMemo(() => {
@@ -1000,6 +1692,34 @@ export const DecisionMapSheet = React.memo(() => {
     if (!artifact || !Array.isArray((artifact as any).claims) || (artifact as any).claims.length === 0) return null;
     return artifact;
   }, [aiTurn, parsedMapping, graphData, latestMapping]);
+
+  useEffect(() => {
+    if (activeTab !== 'debug') return;
+    if (!artifactForStructure || !openState?.turnId) return;
+    if (structuralTurnId === openState.turnId && structuralAnalysis) return;
+    let cancelled = false;
+    setStructuralLoading(true);
+    try {
+      const analysis = computeStructuralAnalysis(artifactForStructure as any);
+      if (!cancelled) {
+        setStructuralAnalysis(analysis);
+        setStructuralTurnId(openState.turnId);
+      }
+    } catch (e) {
+      console.warn("[DecisionMapSheet] structuralAnalysis compute failed", e);
+      if (!cancelled) {
+        setStructuralAnalysis(null);
+        setStructuralTurnId(openState.turnId);
+      }
+    } finally {
+      if (!cancelled) {
+        setStructuralLoading(false);
+      }
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, artifactForStructure, openState?.turnId, structuralTurnId, structuralAnalysis]);
 
   const problemStructure = useMemo(() => {
     if (!artifactForStructure) return null;
@@ -1145,7 +1865,8 @@ export const DecisionMapSheet = React.memo(() => {
     { key: 'graph' as const, label: 'Graph', activeClass: 'decision-tab-active-graph' },
     { key: 'narrative' as const, label: 'Narrative', activeClass: 'decision-tab-active-narrative' },
     { key: 'options' as const, label: 'Options', activeClass: 'decision-tab-active-options' },
-    { key: 'singularity' as const, label: 'Singularity', activeClass: 'decision-tab-active-singularity' }
+    { key: 'debug' as const, label: '🔬 Structural Analysis Debug', activeClass: 'decision-tab-active-options' },
+    { key: 'concierge' as const, label: 'Concierge Pipeline', activeClass: 'decision-tab-active-singularity' }
   ];
 
   const sheetHeightPx = Math.max(260, Math.round(window.innerHeight * sheetHeightRatio));
@@ -1176,13 +1897,13 @@ export const DecisionMapSheet = React.memo(() => {
 
               {/* Left: Provider Selector (Mapper or Refiner based on tab) */}
               <div className="w-1/3 flex justify-start">
-                {aiTurn && activeTab !== 'singularity' && (
+                {aiTurn && activeTab !== 'concierge' && (
                   <MapperSelector
                     aiTurn={aiTurn}
                     activeProviderId={activeMappingPid}
                   />
                 )}
-                {aiTurn && activeTab === 'singularity' && (
+                {aiTurn && activeTab === 'concierge' && (
                   <SingularitySelector
                     aiTurn={aiTurn}
                     activeProviderId={activeSingularityPid || undefined}
@@ -1294,7 +2015,7 @@ export const DecisionMapSheet = React.memo(() => {
                       citationSourceOrder={citationSourceOrder}
                       onBack={() => setSelectedNode(null)}
                       onOrbClick={handleDetailOrbClick}
-                      structural={artifactForStructure ? (null as any) : null}
+                      structural={structuralAnalysis}
                     />
                   </m.div>
                 )}
@@ -1357,61 +2078,44 @@ export const DecisionMapSheet = React.memo(() => {
                   </m.div>
                 )}
 
-                {activeTab === 'singularity' && (
+                {activeTab === 'debug' && (
                   <m.div
-                    key="singularity"
+                    key="debug"
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
                     exit={{ opacity: 0 }}
-                    className="h-full overflow-y-auto relative custom-scrollbar p-6"
+                    className="h-full"
                   >
-                    <div className="max-w-4xl mx-auto space-y-8 animate-in fade-in duration-500">
-                      {singularityState.output ? (
-                        <div className="bg-surface border border-border-subtle rounded-2xl p-8 shadow-sm relative overflow-hidden">
-                          <div className="absolute top-0 right-0 w-64 h-64 bg-brand-500/5 rounded-full blur-3xl -translate-y-1/2 translate-x-1/3 pointer-events-none" />
-
-                          <div className="flex items-center gap-2 mb-6 text-brand-400 font-semibold uppercase tracking-wider text-xs">
-                            <span className="text-xl">🕳️</span>
-                            <span>The Singularity</span>
-                          </div>
-
-                          <div className="prose prose-lg dark:prose-invert max-w-none">
-                            <MarkdownDisplay content={singularityState.output.text} />
-                          </div>
-
-                          {singularityState.output.leakageDetected && (
-                            <div className="mt-8 pt-6 border-t border-border-subtle">
-                              <div className="flex items-center gap-2 text-amber-500 text-[10px] font-bold uppercase tracking-widest mb-3">
-                                <span>⚠️ Machinery Leakage</span>
-                              </div>
-                              <div className="flex flex-wrap gap-2">
-                                {singularityState.output.leakageViolations?.map((v, i) => (
-                                  <span key={i} className="px-2 py-0.5 rounded-md bg-amber-500/10 border border-amber-500/20 text-[10px] text-amber-400 font-mono">
-                                    {v}
-                                  </span>
-                                ))}
-                              </div>
-                            </div>
-                          )}
+                    {structuralLoading || !structuralAnalysis ? (
+                      <div className="w-full h-full flex items-center justify-center opacity-70 text-xs text-text-muted">
+                        <div className="flex flex-col items-center gap-3">
+                          <div className="w-8 h-8 rounded-full border-2 border-brand-500 border-t-transparent animate-spin" />
+                          <div>Computing structural analysis for this turn…</div>
                         </div>
-                      ) : (
-                        <div className="flex flex-col items-center justify-center py-32 text-text-muted italic gap-4 opacity-60">
-                          {singularityState.isLoading ? (
-                            <>
-                              <div className="w-12 h-12 rounded-full border-2 border-brand-500/30 border-t-brand-500 animate-spin" />
-                              <span>The Singularity is converging...</span>
-                            </>
-                          ) : (
-                            <>
-                              <span className="text-4xl filter grayscale">🕳️</span>
-                              <span>No Singularity response available for this turn.</span>
-                            </>
-                          )}
-                        </div>
-                      )}
-                    </div>
+                      </div>
+                    ) : (
+                      <StructuralDebugPanel analysis={structuralAnalysis} />
+                    )}
                   </m.div>
                 )}
+
+                {activeTab === 'concierge' && (
+                  <m.div
+                    key="concierge"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    className="h-full"
+                  >
+                    <ConciergePipelinePanel
+                      state={singularityState}
+                      analysis={structuralAnalysis || null}
+                      userMessage={userMessage}
+                    />
+                  </m.div>
+                )}
+
+
               </AnimatePresence>
             </div>
           </m.div>

@@ -115,9 +115,9 @@ export function usePortMessageHandler() {
   const activeRecomputeRef = useRef<{
     aiTurnId: string;
     stepType:
-      | "mapping"
-      | "batch"
-      | "singularity";
+    | "mapping"
+    | "batch"
+    | "singularity";
     providerId: string;
   } | null>(null);
   // Track whether we've already logged the first PARTIAL_RESULT for a given
@@ -462,6 +462,7 @@ export function usePortMessageHandler() {
             chunk.text,
             "streaming",
             stepType,
+            chunk.isReplace
           );
           setLastActivityAt(Date.now());
 

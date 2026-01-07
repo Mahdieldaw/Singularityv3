@@ -386,11 +386,21 @@ export class ConnectionHandler {
       );
 
       if (executeRequest.type === "recompute") {
-        // Only handle valid recompute types if any remain, otherwise this block might be empty or removed.
-        // Assuming singularity/concierge recompute might use this or handleContinueCognitiveRequest logic is different.
-        // If 'singularity' is handled here, keep it. If not, remove the block.
-        // The previous code only checked for ["understand", "gauntlet", "refiner", "antagonist"].
-        // If singularity uses a different path or is not in this list, we can remove the block.
+        if (executeRequest.stepType === "singularity") {
+          if (this.workflowEngine && typeof this.workflowEngine.handleContinueCognitiveRequest === "function") {
+            await this.workflowEngine.handleContinueCognitiveRequest({
+              sessionId: executeRequest.sessionId,
+              aiTurnId: executeRequest.sourceTurnId,
+              providerId: executeRequest.targetProvider,
+              isRecompute: true,
+              sourceTurnId: executeRequest.sourceTurnId,
+              useThinking: !!executeRequest.useThinking,
+            });
+          } else {
+            console.warn("[ConnectionHandler] Singularity recompute requested but workflowEngine is not ready");
+          }
+          return;
+        }
       }
 
       // Step 1: Resolve context

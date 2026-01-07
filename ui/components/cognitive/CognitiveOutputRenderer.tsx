@@ -33,7 +33,7 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
 }) => {
     const {
         activeMode,
-        setActiveMode,
+        setActiveMode: setActiveModeInternal,
         triggerAndSwitch,
         isTransitioning
     } = useModeSwitching(aiTurn.id);
@@ -43,20 +43,26 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
     const setActiveSplitPanel = useSetAtom(activeSplitPanelAtom);
     const setIsDecisionMapOpen = useSetAtom(isDecisionMapOpenAtom);
 
-    // Determine if singularity is ready
     const hasSingularityOutput = !!(
         aiTurn.singularityOutput ||
         (aiTurn.singularityResponses && Object.keys(aiTurn.singularityResponses).length > 0)
     );
 
-    // Auto-switch to singularity when it becomes ready
     const [hasAutoSwitched, setHasAutoSwitched] = useState(false);
+    const [hasUserOverride, setHasUserOverride] = useState(false);
+
+    const setActiveMode = (mode: any) => {
+        setHasUserOverride(true);
+        setActiveModeInternal(mode);
+    };
+
     useEffect(() => {
-        if (hasSingularityOutput && !hasAutoSwitched && activeMode !== 'singularity') {
-            setActiveMode('singularity');
-            setHasAutoSwitched(true);
+        if (!hasSingularityOutput || hasAutoSwitched || hasUserOverride) return;
+        if (activeMode !== 'singularity') {
+            setActiveModeInternal('singularity');
         }
-    }, [hasSingularityOutput, hasAutoSwitched, activeMode, setActiveMode]);
+        setHasAutoSwitched(true);
+    }, [hasSingularityOutput, hasAutoSwitched, hasUserOverride, activeMode, setActiveModeInternal]);
 
     // Get mapper data
     const activeMapperPid = useMemo(() => {
@@ -119,7 +125,7 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
                 <SingularityOutputView
                     aiTurn={aiTurn}
                     singularityState={singularityState}
-                    onRecompute={(options) => triggerAndSwitch('singularity', options)}
+                    onRecompute={triggerAndSwitch}
                     isLoading={isTransitioning}
                     onViewAnalysis={() => setActiveMode('artifact')}
                 />

@@ -1,7 +1,7 @@
 import { useAtom } from "jotai";
 import { turnCognitiveModeFamily } from "../../state/atoms";
 import { CognitiveViewMode } from "../../types";
-import { CognitiveTransitionOptions, useCognitiveMode } from "./useCognitiveMode";
+import { SingularityTransitionOptions, useSingularityMode } from "./useCognitiveMode";
 import { useCallback } from "react";
 
 /**
@@ -10,7 +10,7 @@ import { useCallback } from "react";
  */
 export function useModeSwitching(aiTurnId: string) {
     const [activeMode, setActiveMode] = useAtom(turnCognitiveModeFamily(aiTurnId));
-    const { transitionToMode, isTransitioning, error } = useCognitiveMode(aiTurnId);
+    const { runSingularity, isTransitioning, error } = useSingularityMode(aiTurnId);
 
     /**
      * Simply flips the UI tab (e.g. from 'artifact' to 'singularity')
@@ -24,15 +24,11 @@ export function useModeSwitching(aiTurnId: string) {
      * and switches the view.
      */
     const triggerAndSwitch = useCallback(async (
-        mode: 'singularity',
-        options: CognitiveTransitionOptions = {},
+        options: SingularityTransitionOptions = {},
     ) => {
-        // Change UI mode immediately to show loading
-        setActiveMode(mode);
-        
-        // Trigger backend execution via useCognitiveMode
-        await transitionToMode(aiTurnId, mode, options);
-    }, [aiTurnId, setActiveMode, transitionToMode]);
+        setActiveMode('singularity');
+        await runSingularity(aiTurnId, options);
+    }, [aiTurnId, setActiveMode, runSingularity]);
 
     return {
         activeMode,

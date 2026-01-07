@@ -117,16 +117,17 @@ export function applyStreamingUpdates(
     text: string;
     status: string;
     responseType:
-      | "batch"
-      | "mapping"
-      | "singularity";
+    | "batch"
+    | "mapping"
+    | "singularity";
+    isReplace?: boolean;
   }>,
 ) {
   let batchChanged = false;
   let mappingChanged = false;
   let singularityChanged = false;
 
-  updates.forEach(({ providerId, text: delta, status, responseType }) => {
+  updates.forEach(({ providerId, text: delta, status, responseType, isReplace }) => {
     if (responseType === "batch") {
       batchChanged = true;
       if (!aiTurn.batchResponses) aiTurn.batchResponses = {};
@@ -139,14 +140,14 @@ export function applyStreamingUpdates(
       if (latest && !isLatestTerminal) {
         arr[arr.length - 1] = {
           ...latest,
-          text: (latest.text || "") + delta,
+          text: isReplace ? delta : (latest.text || "") + delta,
           status: status as any,
           updatedAt: Date.now(),
         };
       } else if (isLatestTerminal && !isNewStream) {
         arr[arr.length - 1] = {
           ...latest,
-          text: (latest.text || "") + delta,
+          text: isReplace ? delta : (latest.text || "") + delta,
           status: status as any,
           updatedAt: Date.now(),
         };
@@ -173,7 +174,7 @@ export function applyStreamingUpdates(
       if (latest && !isLatestTerminal) {
         arr[arr.length - 1] = {
           ...latest,
-          text: (latest.text || "") + delta,
+          text: isReplace ? delta : (latest.text || "") + delta,
           status: status as any,
           updatedAt: Date.now(),
         };
@@ -198,7 +199,7 @@ export function applyStreamingUpdates(
       if (latest && !isLatestTerminal) {
         arr[arr.length - 1] = {
           ...latest,
-          text: (latest.text || "") + delta,
+          text: isReplace ? delta : (latest.text || "") + delta,
           status: status as any,
           updatedAt: Date.now(),
         };

@@ -130,6 +130,8 @@ export class StreamingManager {
     try {
       let delta;
 
+      let isReplace = false;
+
       // For final emissions, bypass makeDelta regression detection
       // This is critical when we strip sections (like GRAPH_TOPOLOGY) from the text
       if (isFinal) {
@@ -137,15 +139,18 @@ export class StreamingManager {
         const key = `${sessionId}:${stepId}:${providerId}`;
         this.lastStreamState.set(key, text);
         delta = text; // Send complete final text
+        isReplace = true;
         logger.stream("Final emission (force-replace):", { stepId, providerId, len: text?.length || 0 });
       } else {
         delta = this.makeDelta(sessionId, stepId, providerId, text);
       }
 
-      if (delta && delta.length > 0) {
-        const chunk = isFinal
-          ? { text: delta, isFinal: true }
-          : { text: delta };
+      if ((delta && delta.length > 0) || (isFinal && isReplace)) {
+        const chunk = {
+          text: delta,
+          isFinal: !!isFinal,
+          isReplace: !!isReplace
+        };
         this.port.postMessage({
           type: "PARTIAL_RESULT",
           sessionId,

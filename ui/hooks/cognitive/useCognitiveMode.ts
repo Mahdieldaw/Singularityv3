@@ -12,8 +12,6 @@ import api from "../../services/extension-api";
 
 import { MapperArtifact } from "../../../shared/contract";
 
-export type CognitiveMode = 'singularity';
-
 export type SelectedArtifact = {
     id: string;
     kind: string;
@@ -23,7 +21,7 @@ export type SelectedArtifact = {
     meta?: any;
 };
 
-export type CognitiveTransitionOptions = {
+export type SingularityTransitionOptions = {
     providerId?: string;
     selectedArtifacts?: SelectedArtifact[];
     mapperArtifact?: MapperArtifact;
@@ -32,7 +30,7 @@ export type CognitiveTransitionOptions = {
     sourceTurnId?: string;
 };
 
-export function useCognitiveMode(trackedAiTurnId?: string) {
+export function useSingularityMode(trackedAiTurnId?: string) {
     const sessionId = useAtomValue(currentSessionIdAtom);
     const globalIsLoading = useAtomValue(isLoadingAtom);
     const activeAiTurnId = useAtomValue(activeAiTurnIdAtom);
@@ -45,10 +43,9 @@ export function useCognitiveMode(trackedAiTurnId?: string) {
 
     const isTransitioning = !!trackedAiTurnId && globalIsLoading && activeAiTurnId === trackedAiTurnId;
 
-    const transitionToMode = useCallback(async (
+    const runSingularity = useCallback(async (
         aiTurnId: string,
-        mode: CognitiveMode,
-        options: CognitiveTransitionOptions = {},
+        options: SingularityTransitionOptions = {},
     ) => {
         if (!sessionId) {
             setError("No active session found.");
@@ -64,10 +61,9 @@ export function useCognitiveMode(trackedAiTurnId?: string) {
             setGlobalIsLoading(true);
 
             if (options.isRecompute && options.providerId) {
-                const stepTypeForUi = mode;
                 setActiveRecomputeState({
                     aiTurnId,
-                    stepType: stepTypeForUi as any,
+                    stepType: 'singularity' as any,
                     providerId: options.providerId,
                 });
             }
@@ -76,10 +72,7 @@ export function useCognitiveMode(trackedAiTurnId?: string) {
             try {
                 await api.ensurePort({ sessionId });
             } catch (e) {
-                console.warn(
-                    "[useCognitiveMode] ensurePort failed prior to transition; proceeding with sendPortMessage",
-                    e,
-                );
+                console.warn("[useSingularityMode] ensurePort failed prior to transition; proceeding with sendPortMessage", e);
             }
 
             await api.sendPortMessage({
@@ -87,7 +80,6 @@ export function useCognitiveMode(trackedAiTurnId?: string) {
                 payload: {
                     sessionId,
                     aiTurnId,
-                    mode,
                     providerId: options.providerId,
                     selectedArtifacts: options.selectedArtifacts || [],
                     mapperArtifact: options.mapperArtifact,
@@ -98,7 +90,7 @@ export function useCognitiveMode(trackedAiTurnId?: string) {
             });
 
         } catch (err: any) {
-            console.error(`[useCognitiveMode] Transition failed:`, err);
+            console.error(`[useSingularityMode] Transition failed:`, err);
             setError(err.message || String(err));
             setLocalIsTransitioning(false);
             setGlobalIsLoading(false);
@@ -115,7 +107,7 @@ export function useCognitiveMode(trackedAiTurnId?: string) {
     ]);
 
     return {
-        transitionToMode,
+        runSingularity,
         isTransitioning,
         setLocalIsTransitioning, // Allow resetting if needed
         error

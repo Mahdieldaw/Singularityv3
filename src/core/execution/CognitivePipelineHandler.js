@@ -134,6 +134,7 @@ export class CognitivePipelineHandler {
               timestamp: Date.now(),
               leakageDetected: singularityResult.output?.leakageDetected || false,
               leakageViolations: singularityResult.output?.leakageViolations || [],
+              pipeline: singularityResult.output?.pipeline || null,
             };
 
             context.singularityOutput = singularityOutput;

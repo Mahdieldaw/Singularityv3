@@ -74,8 +74,6 @@ export class WorkflowEngine {  constructor(orchestrator, sessionManager, port, o
 
     try {
       const mode = request.mode || "auto";
-      const useCognitivePipeline = ["auto", "understand", "decide"].includes(mode);
-      context.useCognitivePipeline = useCognitivePipeline;
       context.mode = mode;
 
       // VALIDATION: Ensure only foundation steps are present in the main loop
@@ -96,7 +94,7 @@ export class WorkflowEngine {  constructor(orchestrator, sessionManager, port, o
 
         // Check for halt conditions
         const haltReason = await this._checkHaltConditions(
-          step, result, request, context, steps, stepResults, resolvedContext, useCognitivePipeline
+          step, result, request, context, steps, stepResults, resolvedContext
         );
 
         if (haltReason) {
@@ -206,7 +204,7 @@ export class WorkflowEngine {  constructor(orchestrator, sessionManager, port, o
   // CONTROL FLOW
   // ═══════════════════════════════════════════════════════════════════════════
 
-  async _checkHaltConditions(step, result, request, context, steps, stepResults, resolvedContext, useCognitivePipeline) {
+  async _checkHaltConditions(step, result, request, context, steps, stepResults, resolvedContext) {
     if (step.type === 'prompt') {
       const resultsObj = result?.results || {};
       const successfulCount = Object.values(resultsObj).filter(r => r.status === 'completed').length;
@@ -215,7 +213,7 @@ export class WorkflowEngine {  constructor(orchestrator, sessionManager, port, o
       }
     }
 
-    if (step.type === 'mapping' && useCognitivePipeline) {
+    if (step.type === 'mapping') {
       const shouldHalt = await this.cognitiveHandler.orchestrateSingularityPhase(
         request,
         context,
@@ -292,7 +290,7 @@ export class WorkflowEngine {  constructor(orchestrator, sessionManager, port, o
   }
 
   _hydrateV1Artifacts(context, resolvedContext) {
-    if (!context.mapperArtifact && ["understand", "decide"].includes(context.mode)) {
+    if (!context.mapperArtifact) {
       try {
         const previousOutputs = resolvedContext?.providerContexts || {};
         const v1MappingText = Object.values(previousOutputs)
@@ -300,7 +298,6 @@ export class WorkflowEngine {  constructor(orchestrator, sessionManager, port, o
           .find(text => text.includes("<mapping_output>") || text.includes("<decision_map>"));
 
         if (v1MappingText) {
-          console.log("[WorkflowEngine] Hydrating V2 MapperArtifact from V1 output tags for cross-version compatibility...");
           context.mapperArtifact = parseV1MapperToArtifact(v1MappingText, {
             query: context.userMessage || ""
           });

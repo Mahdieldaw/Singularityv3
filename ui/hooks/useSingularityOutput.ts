@@ -42,17 +42,31 @@ export function useSingularityOutput(aiTurnId: string | null, forcedProviderId?:
 
         const latestResponse = responses[responses.length - 1];
 
-        // Check if streaming/pending or error
         const isLoading = latestResponse.status === "streaming" || latestResponse.status === "pending";
         const isError = latestResponse.status === "error";
 
-        const output: SingularityOutput = {
-            text: latestResponse.text,
-            providerId,
-            timestamp: latestResponse.createdAt || Date.now(),
-            leakageDetected: (latestResponse.meta as any)?.leakageDetected,
-            leakageViolations: (latestResponse.meta as any)?.leakageViolations
-        };
+        const meta: any = (latestResponse as any).meta || {};
+        const metaOutput = meta.singularityOutput as SingularityOutput | undefined;
+
+        let output: SingularityOutput;
+        if (metaOutput && typeof metaOutput === "object") {
+            output = {
+                ...metaOutput,
+                text: metaOutput.text || latestResponse.text,
+                providerId: metaOutput.providerId || providerId,
+                timestamp: metaOutput.timestamp || latestResponse.createdAt || Date.now(),
+                leakageDetected: metaOutput.leakageDetected ?? meta.leakageDetected,
+                leakageViolations: metaOutput.leakageViolations ?? meta.leakageViolations
+            };
+        } else {
+            output = {
+                text: latestResponse.text,
+                providerId,
+                timestamp: latestResponse.createdAt || Date.now(),
+                leakageDetected: meta?.leakageDetected,
+                leakageViolations: meta?.leakageViolations
+            };
+        }
 
         return {
             output,

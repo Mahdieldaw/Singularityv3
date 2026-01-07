@@ -7,7 +7,7 @@ import MarkdownDisplay from "./MarkdownDisplay";
 import { useSingularityOutput } from "../hooks/useSingularityOutput";
 
 
-import { CognitiveOutputRenderer } from "./cognitive";
+import { CognitiveOutputRenderer } from "./cognitive/CognitiveOutputRenderer";
 
 // --- Helper Functions ---
 

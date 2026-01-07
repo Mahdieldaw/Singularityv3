@@ -915,7 +915,15 @@ function determineShapeSparseAware(
     const hubScore = hubOutDegree >= minEdgesForKeystone ? clamp01((graph.hubDominance - 1) / 2) : 0;
 
     // Calculate scores with sparse-aware adjustments
-    const scores: Record<string, number> = {
+    const scores: {
+        settled: number;
+        linear: number;
+        keystone: number;
+        contested: number;
+        tradeoff: number;
+        dimensional: number;
+        exploratory: number;
+    } = {
         settled: clamp01(
             concentration * 0.40 +
             alignment * 0.30 +
@@ -967,6 +975,7 @@ function determineShapeSparseAware(
     const sorted = Object.entries(scores).sort((a, b) => b[1] - a[1]);
     const [pattern, score] = sorted[0];
     const secondScore = sorted[1]?.[1] || 0;
+    const runnerUp = sorted[1]?.[0] as ProblemStructure["primaryPattern"] | undefined;
 
     // Base confidence calculation
     let baseConfidence: number;
@@ -1003,7 +1012,8 @@ function determineShapeSparseAware(
     }
 
     // 3. Disconnected high-support claims (only penalize in denser graphs)
-    if (graph.clusterCohesion < 0.2 && concentration > 0.5 && edgeCount >= minEdgesForLinear) {
+    const disconnectedConsensus = graph.clusterCohesion < 0.2 && concentration > 0.5 && edgeCount >= minEdgesForLinear;
+    if (disconnectedConsensus) {
         fragilityPenalty += 0.15;
         warnings.push(`Disconnected consensus(${Math.round(graph.clusterCohesion * 100)} % cohesion)`);
     }
@@ -1023,6 +1033,17 @@ function determineShapeSparseAware(
         confidence: finalConfidence,
         evidence,
         implications: SHAPE_IMPLICATIONS[pattern as ProblemStructure["primaryPattern"]],
+        scores,
+        baseConfidence,
+        signalPenalty,
+        fragilityPenalty: {
+            total: fragilityPenalty,
+            lowSupportArticulations: lowSupportArticulations.length,
+            conditionalConflicts: conditionalConflicts.length,
+            disconnectedConsensus,
+        },
+        signalStrength,
+        runnerUpPattern: runnerUp,
     };
 }
 
@@ -1239,23 +1260,86 @@ const detectConflictClusters = (
 // LAYER 8: SHAPE DATA BUILDERS (Complete)
 // ═══════════════════════════════════════════════════════════════════════════
 
+type SettledShapeDataExtended = SettledShapeData & {
+    strongestOutlier: {
+        claim: {
+            id: string;
+            label: string;
+            text: string;
+            supportCount: number;
+            supportRatio: number;
+        };
+        reason: "leverage_inversion" | "explicit_challenger" | "minority_voice";
+        structuralRole: string;
+        whatItQuestions: string;
+    } | null;
+    floorAssumptions: string[];
+    transferQuestion: string;
+};
+
+type KeystoneShapeDataExtended = KeystoneShapeData & {
+    decoupledClaims: Array<{
+        id: string;
+        label: string;
+        text: string;
+        supportCount: number;
+        independenceReason: string;
+    }>;
+    cascadeConsequences: {
+        directlyAffected: number;
+        transitivelyAffected: number;
+        survives: number;
+    };
+    transferQuestion: string;
+};
+
+type LinearShapeDataExtended = LinearShapeData & {
+    shortcuts: Array<{
+        from: ChainStep;
+        to: ChainStep;
+        skips: string[];
+        supportEvidence: string;
+    }>;
+    chainFragility: {
+        weakLinkCount: number;
+        totalSteps: number;
+        fragilityRatio: number;
+        mostVulnerableStep: { step: ChainStep; cascadeSize: number } | null;
+    };
+    transferQuestion: string;
+};
+
+type DimensionalShapeDataExtended = DimensionalShapeData & {
+    dominantDimension: DimensionCluster | null;
+    hiddenDimension: DimensionCluster | null;
+    dominantBlindSpots: string[];
+    transferQuestion: string;
+};
+
+type ExploratoryShapeDataExtended = ExploratoryShapeData & {
+    outerBoundary: {
+        id: string;
+        label: string;
+        text: string;
+        supportCount: number;
+        distanceReason: string;
+    } | null;
+    sparsityReasons: string[];
+    transferQuestion: string;
+};
+
 const buildSettledShapeData = (
     claims: EnrichedClaim[],
     edges: Edge[],
     ghosts: string[]
-): SettledShapeData => {
-
+): SettledShapeDataExtended => {
     const floorClaims = claims.filter(c => c.isHighSupport);
-    const challengers = claims.filter(c => c.role === 'challenger' || c.isChallenger);
-
-    // Check if floor claims are contested
-    const conflictEdges = edges.filter(e => e.type === 'conflicts');
-
+    const floorIds = new Set(floorClaims.map(c => c.id));
+    const conflictEdges = edges.filter(e => e.type === "conflicts");
     const floor: FloorClaim[] = floorClaims.map(c => {
         const contestedBy = conflictEdges
             .filter(e => e.from === c.id || e.to === c.id)
-            .map(e => e.from === c.id ? e.to : e.from);
-
+            .map(e => (e.from === c.id ? e.to : e.from));
         return {
             id: c.id,
             label: c.label,
@@ -1266,56 +1350,131 @@ const buildSettledShapeData = (
             contestedBy
         };
     });
-
-    // Determine floor strength
     const avgSupport = floor.length > 0
         ? floor.reduce((sum, c) => sum + c.supportRatio, 0) / floor.length
         : 0;
-    const floorStrength: 'strong' | 'moderate' | 'weak' =
-        avgSupport > 0.6 ? 'strong' : avgSupport > 0.4 ? 'moderate' : 'weak';
-
+    const floorStrength: "strong" | "moderate" | "weak" =
+        avgSupport > 0.6 ? "strong" : avgSupport > 0.4 ? "moderate" : "weak";
+    const challengers = claims.filter(c => c.role === "challenger" || c.isChallenger);
     const challengerInfos: ChallengerInfo[] = challengers.map(c => ({
         id: c.id,
         label: c.label,
         text: c.text,
         supportCount: c.supporters.length,
         challenges: c.challenges,
-        targetsClaim: c.challenges // Could be enhanced to resolve to actual claim ID
+        targetsClaim: c.challenges
     }));
-
+    const outsideClaims = claims.filter(c => !floorIds.has(c.id));
+    let strongestOutlier: SettledShapeDataExtended["strongestOutlier"] = null;
+    if (outsideClaims.length > 0) {
+        const leverageInversion = (claims as EnrichedClaim[]).find(c => c.isLeverageInversion);
+        if (leverageInversion) {
+            strongestOutlier = {
+                claim: {
+                    id: leverageInversion.id,
+                    label: leverageInversion.label,
+                    text: leverageInversion.text,
+                    supportCount: leverageInversion.supporters.length,
+                    supportRatio: leverageInversion.supportRatio
+                },
+                reason: "leverage_inversion",
+                structuralRole: "Leverage inversion claim with high structural importance and low support",
+                whatItQuestions: inferWhatOutlierQuestions(leverageInversion, floorClaims)
+            };
+        }
+        if (!strongestOutlier && challengerInfos.length > 0) {
+            const topChallenger = [...challengerInfos].sort((a, b) => b.supportCount - a.supportCount)[0];
+            const challengerClaim = claims.find(c => c.id === topChallenger.id);
+            if (challengerClaim) {
+                strongestOutlier = {
+                    claim: {
+                        id: challengerClaim.id,
+                        label: challengerClaim.label,
+                        text: challengerClaim.text,
+                        supportCount: challengerClaim.supporters.length,
+                        supportRatio: challengerClaim.supportRatio
+                    },
+                    reason: "explicit_challenger",
+                    structuralRole: "Direct challenger to the floor",
+                    whatItQuestions: topChallenger.challenges || "the consensus position"
+                };
+            }
+        }
+        if (!strongestOutlier) {
+            const topOutside = [...outsideClaims].sort((a, b) => b.supporters.length - a.supporters.length)[0];
+            strongestOutlier = {
+                claim: {
+                    id: topOutside.id,
+                    label: topOutside.label,
+                    text: topOutside.text,
+                    supportCount: topOutside.supporters.length,
+                    supportRatio: topOutside.supportRatio
+                },
+                reason: "minority_voice",
+                structuralRole: "Strongest claim outside consensus",
+                whatItQuestions: inferWhatOutlierQuestions(topOutside, floorClaims)
+            };
+        }
+    }
+    const floorAssumptions: string[] = [];
+    const floorSupporters = new Set(floorClaims.flatMap(c => c.supporters));
+    if (floorSupporters.size < (claims[0]?.supporters?.length || 0) * 0.5) {
+        floorAssumptions.push("Relies on a subset of model perspectives");
+    }
+    const hasConditional = floorClaims.some(c => c.type === "conditional");
+    if (!hasConditional) {
+        floorAssumptions.push("Assumes context-independence");
+    }
+    const contestedFloor = floor.filter(c => c.isContested);
+    if (contestedFloor.length > 0) {
+        floorAssumptions.push(`${contestedFloor.length} floor claim(s) are under active challenge`);
+    }
+    const transferQuestion = strongestOutlier
+        ? `For the consensus to hold, ${strongestOutlier.whatItQuestions} must be wrong. Is it?`
+        : "For the consensus to hold, what assumption must be true? Is it true in your situation?";
     return {
-        pattern: 'settled',
+        pattern: "settled",
         floor,
         floorStrength,
         challengers: challengerInfos,
         blindSpots: ghosts,
-        confidence: avgSupport
+        confidence: avgSupport,
+        strongestOutlier,
+        floorAssumptions,
+        transferQuestion
     };
 };
+
+function inferWhatOutlierQuestions(
+    outlier: EnrichedClaim,
+    floorClaims: EnrichedClaim[]
+): string {
+    if (outlier.challenges) {
+        return outlier.challenges;
+    }
+    if (outlier.role === "challenger") {
+        const mostSupported = [...floorClaims].sort((a, b) => b.supporters.length - a.supporters.length)[0];
+        return mostSupported ? `the validity of "${mostSupported.label}"` : "the floor consensus";
+    }
+    return "assumptions underlying the consensus";
+}
 
 const buildLinearShapeData = (
     claims: EnrichedClaim[],
     edges: Edge[],
     graph: GraphAnalysis,
     cascadeRisks: CascadeRisk[]
-): LinearShapeData => {
-
-    const prereqEdges = edges.filter(e => e.type === 'prerequisite');
+): LinearShapeDataExtended => {
+    const prereqEdges = edges.filter(e => e.type === "prerequisite");
     const chainIds = graph.longestChain;
-
-    // Build chain with position info
     const chain: ChainStep[] = chainIds.map((id, idx) => {
         const claim = claims.find(c => c.id === id);
         if (!claim) return null;
-
         const enables = prereqEdges
             .filter(e => e.from === id)
             .map(e => e.to);
-
-        // Determine if weak link
         const isWeakLink = claim.supporters.length === 1;
         const cascade = cascadeRisks.find(r => r.sourceId === id);
-
         return {
             id: claim.id,
             label: claim.label,
@@ -1325,11 +1484,11 @@ const buildLinearShapeData = (
             position: idx,
             enables,
             isWeakLink,
-            weakReason: isWeakLink ? `Only 1 supporter - cascade affects ${cascade?.dependentIds.length || 0} claims` : null
+            weakReason: isWeakLink
+                ? `Only 1 supporter - cascade affects ${cascade?.dependentIds.length || 0} claims`
+                : null
         };
     }).filter(Boolean) as ChainStep[];
-
-    // Identify weak links with cascade info
     const weakLinks = chain
         .filter(step => step.isWeakLink)
         .map(step => {
@@ -1339,17 +1498,77 @@ const buildLinearShapeData = (
                 cascadeSize: cascade?.dependentIds.length || 0
             };
         });
-
-    // Terminal claim
     const terminalClaim = chain.length > 0 ? chain[chain.length - 1] : null;
-
+    const chainIdSet = new Set(chainIds);
+    const chainPositions = new Map(chainIds.map((id, idx) => [id, idx]));
+    const shortcuts: LinearShapeDataExtended["shortcuts"] = [];
+    for (const edge of prereqEdges) {
+        const fromPos = chainPositions.get(edge.from);
+        const toPos = chainPositions.get(edge.to);
+        if (fromPos !== undefined && toPos !== undefined && toPos - fromPos > 1) {
+            const fromStep = chain.find(s => s.id === edge.from);
+            const toStep = chain.find(s => s.id === edge.to);
+            const skippedIds = chainIds.slice(fromPos + 1, toPos);
+            if (fromStep && toStep && skippedIds.length > 0) {
+                shortcuts.push({
+                    from: fromStep,
+                    to: toStep,
+                    skips: skippedIds,
+                    supportEvidence: `Direct edge exists from step ${fromPos + 1} to step ${toPos + 1}`
+                });
+            }
+        }
+    }
+    const outsideChain = claims.filter(c => !chainIdSet.has(c.id));
+    for (const outside of outsideChain) {
+        const connectsTo = prereqEdges
+            .filter(e => e.from === outside.id && chainIdSet.has(e.to))
+            .map(e => chainPositions.get(e.to)!)
+            .filter(pos => pos !== undefined);
+        if (connectsTo.length > 0) {
+            const minPos = Math.min(...connectsTo);
+            if (minPos > 0) {
+                const toStep = chain[minPos];
+                shortcuts.push({
+                    from: {
+                        id: outside.id,
+                        label: outside.label,
+                        text: outside.text,
+                        supportCount: outside.supporters.length,
+                        supportRatio: outside.supportRatio,
+                        position: -1,
+                        enables: [],
+                        isWeakLink: false,
+                        weakReason: null
+                    },
+                    to: toStep,
+                    skips: chainIds.slice(0, minPos),
+                    supportEvidence: `"${outside.label}" may bypass early steps`
+                });
+            }
+        }
+    }
+    const chainFragility = {
+        weakLinkCount: weakLinks.length,
+        totalSteps: chain.length,
+        fragilityRatio: chain.length > 0 ? weakLinks.length / chain.length : 0,
+        mostVulnerableStep: weakLinks.length > 0
+            ? [...weakLinks].sort((a, b) => b.cascadeSize - a.cascadeSize)[0]
+            : null
+    };
+    const transferQuestion = weakLinks.length > 0
+        ? `Step "${weakLinks[0].step.label}" is a weak link. Is it actually required?`
+        : "Where are you in this sequence? Have you validated the early steps?";
     return {
-        pattern: 'linear',
+        pattern: "linear",
         chain,
         chainLength: chain.length,
         weakLinks,
-        alternativeChains: [], // Could be computed if multiple roots exist
-        terminalClaim
+        alternativeChains: [],
+        terminalClaim,
+        shortcuts,
+        chainFragility,
+        transferQuestion
     };
 };
 
@@ -1357,35 +1576,29 @@ const buildKeystoneShapeData = (
     claims: EnrichedClaim[],
     edges: Edge[],
     graph: GraphAnalysis,
-    patterns: StructuralAnalysis['patterns']
-): KeystoneShapeData => {
-
+    patterns: StructuralAnalysis["patterns"]
+): KeystoneShapeDataExtended => {
     const keystoneId = graph.hubClaim;
     const keystoneClaim = claims.find(c => c.id === keystoneId);
-
     if (!keystoneClaim) {
         throw new Error("Keystone shape requires a hub claim");
     }
-
-    // Find dependencies
     const dependencies = edges
-        .filter(e => e.from === keystoneId && (e.type === 'prerequisite' || e.type === 'supports'))
+        .filter(e => e.from === keystoneId && (e.type === "prerequisite" || e.type === "supports"))
         .map(e => {
             const dep = claims.find(c => c.id === e.to);
             return {
                 id: e.to,
                 label: dep?.label || e.to,
-                relationship: e.type as 'prerequisite' | 'supports'
+                relationship: e.type as "prerequisite" | "supports"
             };
         });
-
-    // Find challengers targeting keystone
+    const cascade = patterns.cascadeRisks.find(r => r.sourceId === keystoneId);
     const challengers = claims
-        .filter(c => c.role === 'challenger')
+        .filter(c => c.role === "challenger")
         .filter(c => {
-            // Check if this challenger conflicts with keystone
             return edges.some(e =>
-                e.type === 'conflicts' &&
+                e.type === "conflicts" &&
                 ((e.from === c.id && e.to === keystoneId) || (e.to === c.id && e.from === keystoneId))
             );
         })
@@ -1395,14 +1608,32 @@ const buildKeystoneShapeData = (
             text: c.text,
             supportCount: c.supporters.length,
             challenges: c.challenges,
-            targetsClaim: keystoneId
+            targetsClaim: keystoneId || null
         }));
-
-    // Cascade from keystone
-    const cascade = patterns.cascadeRisks.find(r => r.sourceId === keystoneId);
-
+    const dependentIds = new Set(dependencies.map(d => d.id));
+    const keystoneConnectedIds = new Set<string>([keystoneId!, ...dependentIds]);
+    const decoupledClaims = claims
+        .filter(c => !keystoneConnectedIds.has(c.id))
+        .filter(c => c.supporters.length > 0)
+        .sort((a, b) => b.supporters.length - a.supporters.length)
+        .slice(0, 3)
+        .map(c => ({
+            id: c.id,
+            label: c.label,
+            text: c.text,
+            supportCount: c.supporters.length,
+            independenceReason: "Not connected to hub in graph structure"
+        }));
+    const cascadeConsequences = {
+        directlyAffected: dependencies.length,
+        transitivelyAffected: cascade?.dependentIds.length || dependencies.length,
+        survives: decoupledClaims.length
+    };
+    const transferQuestion = keystoneClaim.supporters.length <= 1
+        ? `The keystone has only ${keystoneClaim.supporters.length} supporter(s). Is "${keystoneClaim.label}" actually true in your situation?`
+        : `Everything flows from "${keystoneClaim.label}". Have you validated this foundation?`;
     return {
-        pattern: 'keystone',
+        pattern: "keystone",
         keystone: {
             id: keystoneClaim.id,
             label: keystoneClaim.label,
@@ -1414,7 +1645,10 @@ const buildKeystoneShapeData = (
         },
         dependencies,
         cascadeSize: cascade?.dependentIds.length || dependencies.length,
-        challengers
+        challengers,
+        decoupledClaims,
+        cascadeConsequences,
+        transferQuestion
     };
 };
 
@@ -1623,29 +1857,20 @@ const buildDimensionalShapeData = (
     edges: Edge[],
     graph: GraphAnalysis,
     ghosts: string[]
-): DimensionalShapeData => {
-
-    // Use graph components as dimensions
-    const dimensions: DimensionCluster[] = graph.components
-        .filter(comp => comp.length >= 2) // Only meaningful clusters
+): DimensionalShapeDataExtended => {
+    const dimensions: Array<DimensionCluster & { claimCount: number }> = graph.components
+        .filter(comp => comp.length >= 2)
         .map((componentIds, idx) => {
             const componentClaims = claims.filter(c => componentIds.includes(c.id));
-
-            // Infer theme from claim labels (simple heuristic)
-            const theme = `Dimension ${idx + 1}`; // Could use NLP to extract common theme
-
             const avgSupport = componentClaims.reduce((sum, c) => sum + c.supportRatio, 0) / componentClaims.length;
-
-            // Compute cohesion (internal edge density)
             const internalEdges = edges.filter(e =>
                 componentIds.includes(e.from) && componentIds.includes(e.to)
             ).length;
             const possibleEdges = componentClaims.length * (componentClaims.length - 1);
             const cohesion = possibleEdges > 0 ? internalEdges / possibleEdges : 0;
-
             return {
                 id: `dim_${idx}`,
-                theme,
+                theme: inferDimensionTheme(componentClaims),
                 claims: componentClaims.map(c => ({
                     id: c.id,
                     label: c.label,
@@ -1653,110 +1878,122 @@ const buildDimensionalShapeData = (
                     supportCount: c.supporters.length
                 })),
                 cohesion,
-                avgSupport
+                avgSupport,
+                claimCount: componentClaims.length
             };
-        });
-
-    // Detect interactions between dimensions
-    const interactions: Array<{
-        dimensionA: string;
-        dimensionB: string;
-        relationship: 'independent' | 'overlapping' | 'conflicting';
-    }> = [];
-
+        })
+        .sort((a, b) => b.claimCount - a.claimCount);
+    const interactions: DimensionalShapeDataExtended["interactions"] = [];
     for (let i = 0; i < dimensions.length; i++) {
         for (let j = i + 1; j < dimensions.length; j++) {
             const dimA = dimensions[i];
             const dimB = dimensions[j];
-
-            // Check for edges between dimensions
             const crossEdges = edges.filter(e =>
                 (dimA.claims.some(c => c.id === e.from) && dimB.claims.some(c => c.id === e.to)) ||
                 (dimB.claims.some(c => c.id === e.from) && dimA.claims.some(c => c.id === e.to))
             );
-
-            const hasConflict = crossEdges.some(e => e.type === 'conflicts');
-            const hasSupport = crossEdges.some(e => e.type === 'supports' || e.type === 'prerequisite');
-
-            let relationship: 'independent' | 'overlapping' | 'conflicting';
-            if (hasConflict) {
-                relationship = 'conflicting';
-            } else if (hasSupport) {
-                relationship = 'overlapping';
-            } else {
-                relationship = 'independent';
-            }
-
+            const hasConflict = crossEdges.some(e => e.type === "conflicts");
+            const hasSupport = crossEdges.some(e => e.type === "supports" || e.type === "prerequisite");
             interactions.push({
                 dimensionA: dimA.id,
                 dimensionB: dimB.id,
-                relationship
+                relationship: hasConflict ? "conflicting" : hasSupport ? "overlapping" : "independent"
             });
         }
     }
-
-    // Governing conditions (extracted from conditional claims)
+    const dominantDimension = dimensions[0] || null;
+    const hiddenDimension = dimensions.length > 1 ? dimensions[dimensions.length - 1] : null;
+    const dominantBlindSpots: string[] = [];
+    if (hiddenDimension) {
+        dominantBlindSpots.push(
+            `"${hiddenDimension.theme}" perspective with ${hiddenDimension.claimCount} claim(s)`
+        );
+    }
+    const conflictingDims = interactions
+        .filter(i => i.relationship === "conflicting")
+        .map(i => {
+            const other = i.dimensionA === dominantDimension?.id
+                ? dimensions.find(d => d.id === i.dimensionB)
+                : dimensions.find(d => d.id === i.dimensionA);
+            return other?.theme;
+        })
+        .filter((t): t is string => Boolean(t));
+    if (conflictingDims.length > 0) {
+        dominantBlindSpots.push(`Conflicts with: ${conflictingDims.join(", ")}`);
+    }
     const governingConditions = claims
-        .filter(c => c.type === 'conditional')
+        .filter(c => c.type === "conditional")
         .map(c => c.text);
-
+    const transferQuestion = dimensions.length > 1
+        ? `Which dimension is most relevant: "${dominantDimension?.theme}" or "${hiddenDimension?.theme}"?`
+        : "Are there perspectives not represented in these dimensions?";
     return {
-        pattern: 'dimensional',
+        pattern: "dimensional",
         dimensions,
         interactions,
         gaps: ghosts,
-        governingConditions
+        governingConditions,
+        dominantDimension,
+        hiddenDimension,
+        dominantBlindSpots,
+        transferQuestion
     };
 };
+
+function inferDimensionTheme(claims: EnrichedClaim[]): string {
+    const types = claims.map(c => c.type);
+    const dominantType = mode(types);
+    const typeThemes: Record<string, string> = {
+        factual: "Evidence",
+        prescriptive: "Recommendations",
+        conditional: "Conditions",
+        contested: "Debates",
+        speculative: "Possibilities"
+    };
+    return typeThemes[dominantType] || `Cluster (${claims.length} claims)`;
+}
+
+function mode<T>(arr: T[]): T {
+    const counts = new Map<T, number>();
+    arr.forEach(v => counts.set(v, (counts.get(v) || 0) + 1));
+    const sorted = [...counts.entries()].sort((a, b) => b[1] - a[1]);
+    return sorted[0]?.[0] ?? arr[0];
+}
 
 const buildExploratoryShapeData = (
     claims: EnrichedClaim[],
     graph: GraphAnalysis,
     ghosts: string[],
     signalStrength: number
-): ExploratoryShapeData => {
-
-    // Strongest signals: highest support + most connected
+): ExploratoryShapeDataExtended => {
     const sortedBySupport = [...claims].sort((a, b) => b.supporters.length - a.supporters.length);
-    const sortedByDegree = [...claims].sort((a, b) => (b.inDegree + b.outDegree) - (a.inDegree + a.outDegree));
-
-    const strongestSignals: Array<{
-        id: string;
-        label: string;
-        text: string;
-        supportCount: number;
-        reason: string;
-    }> = [];
-
-    // Top by support
+    const sortedByDegree = [...claims].sort(
+        (a, b) => (b.inDegree + b.outDegree) - (a.inDegree + a.outDegree)
+    );
+    const strongestSignals: ExploratoryShapeDataExtended["strongestSignals"] = [];
     if (sortedBySupport[0]) {
         strongestSignals.push({
             id: sortedBySupport[0].id,
             label: sortedBySupport[0].label,
             text: sortedBySupport[0].text,
             supportCount: sortedBySupport[0].supporters.length,
-            reason: 'Highest support'
+            reason: "Highest support"
         });
     }
-
-    // Top by connectivity (if different)
     if (sortedByDegree[0] && sortedByDegree[0].id !== sortedBySupport[0]?.id) {
         strongestSignals.push({
             id: sortedByDegree[0].id,
             label: sortedByDegree[0].label,
             text: sortedByDegree[0].text,
             supportCount: sortedByDegree[0].supporters.length,
-            reason: 'Most connected'
+            reason: "Most connected"
         });
     }
-
-    // Loose clusters (small components)
     const looseClusters: DimensionCluster[] = graph.components
         .filter(comp => comp.length >= 2 && comp.length <= 4)
         .map((componentIds, idx) => {
             const componentClaims = claims.filter(c => componentIds.includes(c.id));
             const avgSupport = componentClaims.reduce((sum, c) => sum + c.supportRatio, 0) / componentClaims.length;
-
             return {
                 id: `cluster_${idx}`,
                 theme: `Cluster ${idx + 1}`,
@@ -1770,8 +2007,6 @@ const buildExploratoryShapeData = (
                 avgSupport
             };
         });
-
-    // Isolated claims
     const isolatedClaims = claims
         .filter(c => c.isIsolated)
         .map(c => ({
@@ -1779,33 +2014,62 @@ const buildExploratoryShapeData = (
             label: c.label,
             text: c.text
         }));
-
-    // Generate clarifying questions based on gaps
+    const outerBoundaryClaim = claims
+        .filter(c => c.supporters.length > 0)
+        .sort((a, b) => {
+            const aScore = a.supportRatio + (a.inDegree + a.outDegree) / 10;
+            const bScore = b.supportRatio + (b.inDegree + b.outDegree) / 10;
+            return aScore - bScore;
+        })[0] || null;
+    const sparsityReasons: string[] = [];
+    if (graph.componentCount > claims.length * 0.5) {
+        sparsityReasons.push("Claims form many disconnected islands");
+    }
+    const avgSupport = claims.length > 0
+        ? claims.reduce((sum, c) => sum + c.supportRatio, 0) / claims.length
+        : 0;
+    if (avgSupport < 0.3) {
+        sparsityReasons.push("Low support concentration (models diverge)");
+    }
+    if (ghosts.length > claims.length * 0.3) {
+        sparsityReasons.push("Many gaps identified (unexplored territory)");
+    }
+    if (claims.every(c => c.inDegree + c.outDegree < 2)) {
+        sparsityReasons.push("No claims strongly connected (flat structure)");
+    }
     const clarifyingQuestions: string[] = [];
-
     if (ghosts.length > 0) {
         clarifyingQuestions.push(`What about: ${ghosts[0]}?`);
     }
-
     if (isolatedClaims.length > 0) {
-        clarifyingQuestions.push(`How does "${isolatedClaims[0].label}" relate to the other perspectives?`);
+        clarifyingQuestions.push(
+            `How does "${isolatedClaims[0].label}" relate to your situation?`
+        );
     }
-
-    if (claims.some(c => c.type === 'conditional')) {
-        clarifyingQuestions.push(`What is your specific context or constraints?`);
+    if (claims.some(c => c.type === "conditional")) {
+        clarifyingQuestions.push("What is your specific context or constraints?");
     }
-
     if (clarifyingQuestions.length === 0) {
-        clarifyingQuestions.push(`What outcome are you optimizing for?`);
+        clarifyingQuestions.push("What outcome are you optimizing for?");
     }
-
     return {
-        pattern: 'exploratory',
+        pattern: "exploratory",
         strongestSignals,
         looseClusters,
         isolatedClaims,
         clarifyingQuestions,
-        signalStrength
+        signalStrength,
+        outerBoundary: outerBoundaryClaim
+            ? {
+                id: outerBoundaryClaim.id,
+                label: outerBoundaryClaim.label,
+                text: outerBoundaryClaim.text,
+                supportCount: outerBoundaryClaim.supporters.length,
+                distanceReason: "Lowest combined support and connectivity"
+            }
+            : null,
+        sparsityReasons,
+        transferQuestion: "What specific question would help collapse this ambiguity?"
     };
 };
 

@@ -9,6 +9,7 @@ interface BatchUpdate {
   status: string;
   responseType: ResponseType;
   createdAt: number;
+  isReplace?: boolean; // New flag
 }
 
 export class StreamingBuffer {
@@ -18,6 +19,7 @@ export class StreamingBuffer {
       deltas: { text: string; ts: number }[];
       status: string;
       responseType: ResponseType;
+      isReplace?: boolean; // New flag
     }
   > = new Map();
 
@@ -33,6 +35,7 @@ export class StreamingBuffer {
     delta: string,
     status: string,
     responseType: ResponseType,
+    isReplace?: boolean // New flag
   ) {
     const key = `${responseType}:${providerId}`;
     if (!this.pendingDeltas.has(key)) {
@@ -44,7 +47,18 @@ export class StreamingBuffer {
     }
 
     const entry = this.pendingDeltas.get(key)!;
-    entry.deltas.push({ text: delta, ts: Date.now() });
+
+    // If this is a replace operation, drop previous deltas and treat this as authoritative
+    if (isReplace) {
+      entry.deltas = [{ text: delta, ts: Date.now() }];
+      entry.isReplace = true;
+    } else {
+      // If we previously had a replace pending, we continue appending to it? 
+      // Actually, if a replace happens, it typically resets the stream. 
+      // Subsequent deltas should append to the replaced text.
+      entry.deltas.push({ text: delta, ts: Date.now() });
+    }
+
     entry.status = status;
     entry.responseType = responseType;
 
@@ -82,6 +96,7 @@ export class StreamingBuffer {
         status: entry.status,
         responseType: entry.responseType,
         createdAt: lastTs,
+        isReplace: entry.isReplace, // Propagate flag
       });
     });
 

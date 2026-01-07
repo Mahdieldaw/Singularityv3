@@ -835,9 +835,10 @@ Answer the user's message directly. Use context only to disambiguate.
     }
 
     let singularityPrompt;
+    let stanceSelection = null;
+    let analysis = null;
     if (ConciergeService && ConciergeService.buildConciergePrompt) {
       // Compute structural analysis for shape-guided prompting
-      let analysis = null;
       try {
         const { computeStructuralAnalysis } = await import('../PromptMethods');
         console.log('[StepExecutor] Calling computeStructuralAnalysis...');
@@ -854,6 +855,17 @@ Answer the user's message directly. Use context only to disambiguate.
         throw new Error(`Structural Analysis Failed: ${e.message || String(e)}`);
       }
 
+      if (ConciergeService.selectStance && analysis?.shape) {
+        try {
+          stanceSelection = ConciergeService.selectStance(
+            payload.originalPrompt,
+            analysis.shape
+          );
+        } catch (e) {
+          console.warn("[StepExecutor] selectStance failed:", e);
+        }
+      }
+
       singularityPrompt = ConciergeService.buildConciergePrompt(
         payload.originalPrompt,
         analysis
@@ -864,25 +876,40 @@ Answer the user's message directly. Use context only to disambiguate.
 
     // Custom parse function that detects machinery leakage
     const parseSingularityOutput = (text) => {
-      const output = {
-        text: text,
-        providerId: payload.singularityProvider,
-        timestamp: Date.now(),
-        leakageDetected: false,
-        leakageViolations: []
-      };
+      let leakageDetected = false;
+      let leakageViolations = [];
 
-      // Check for machinery leakage if ConciergeService is available
       if (ConciergeService && ConciergeService.detectMachineryLeakage) {
         const leakCheck = ConciergeService.detectMachineryLeakage(text);
-        output.leakageDetected = leakCheck.leaked;
-        output.leakageViolations = leakCheck.violations;
+        leakageDetected = !!leakCheck.leaked;
+        leakageViolations = leakCheck.violations || [];
         if (leakCheck.leaked) {
           console.warn("[StepExecutor] Singularity response leaked machinery:", leakCheck.violations);
         }
       }
 
-      return output;
+      const pipeline = {
+        userMessage: payload.originalPrompt,
+        prompt: singularityPrompt,
+        stance: stanceSelection?.stance || null,
+        stanceReason: stanceSelection?.reason || null,
+        stanceConfidence: stanceSelection?.confidence ?? null,
+        structuralShape: analysis && analysis.shape ? {
+          primaryPattern: analysis.shape.primaryPattern,
+          confidence: analysis.shape.confidence,
+        } : null,
+        leakageDetected,
+        leakageViolations,
+      };
+
+      return {
+        text,
+        providerId: payload.singularityProvider,
+        timestamp: Date.now(),
+        leakageDetected,
+        leakageViolations,
+        pipeline,
+      };
     };
 
     return this._executeGenericSingleStep(

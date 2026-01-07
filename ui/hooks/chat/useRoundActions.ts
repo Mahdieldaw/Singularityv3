@@ -258,17 +258,16 @@ export function useRoundActions() {
           providerId: effectiveProviderId,
         });
 
-        await api.sendPortMessage({
-          type: "CONTINUE_COGNITIVE_WORKFLOW",
-          payload: {
-            sessionId: currentSessionId,
-            aiTurnId: ai.id,
-            mode: "singularity",
-            providerId: effectiveProviderId,
-            isRecompute: true,
-            sourceTurnId: ai.id,
-          },
-        });
+        const primitive: PrimitiveWorkflowRequest = {
+          type: "recompute",
+          sessionId: currentSessionId as string,
+          sourceTurnId: ai.id,
+          stepType: "singularity",
+          targetProvider: effectiveProviderId as ProviderKey,
+          useThinking: false,
+        };
+
+        await api.executeWorkflow(primitive);
       } catch (err) {
         console.error("[RoundActions] Singularity run failed:", err);
         setAlertText("Singularity request failed. Please try again.");
