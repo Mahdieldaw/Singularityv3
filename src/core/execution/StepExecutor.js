@@ -426,6 +426,8 @@ Answer the user's message directly. Use context only to disambiguate.
             let allOptions = null;
             let mapperArtifact = null;
 
+            const rawText = finalResult?.text || "";
+
             if (finalResult?.text) {
               const unifiedResult = parseUnifiedMapperOutput(finalResult.text);
 
@@ -482,6 +484,7 @@ Answer the user's message directly. Use context only to disambiguate.
               meta: {
                 ...(finalResult?.meta || {}),
                 citationSourceOrder,
+                rawMappingText: rawText,
                 ...(allOptions ? { allAvailableOptions: allOptions } : {}),
                 ...(graphTopology ? { graphTopology } : {}),
               },

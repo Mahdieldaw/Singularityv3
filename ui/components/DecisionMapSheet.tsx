@@ -1630,7 +1630,10 @@ export const DecisionMapSheet = React.memo(() => {
   }, [activeMappingPid, mappingResponses]);
 
   const parsedMapping = useMemo(() => {
-    const rawText = latestMapping?.text || '';
+    const rawText =
+      (latestMapping?.meta as any)?.rawMappingText ||
+      latestMapping?.text ||
+      '';
     return parseUnifiedMapperOutput(String(rawText));
   }, [latestMapping]);
 

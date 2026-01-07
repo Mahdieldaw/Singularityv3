@@ -77,7 +77,11 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
     }, [aiTurn.mappingResponses, activeMapperPid]);
 
     const mapperNarrative = useMemo(() => {
-        const raw = String(latestMapping?.text || "");
+        const raw = String(
+            latestMapping?.meta?.rawMappingText ||
+            latestMapping?.text ||
+            ""
+        );
         const parsed = parseMappingResponse(raw);
         return parsed.narrative || "";
     }, [latestMapping]);

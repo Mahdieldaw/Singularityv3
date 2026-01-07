@@ -878,7 +878,9 @@ export function parseUnifiedMapperOutput(text: string): ParsedMapperOutput {
         const headerLineEnd = src.indexOf('\n', headerStart);
         const contentStart = headerLineEnd === -1 ? src.length : headerLineEnd + 1;
         const rest = src.slice(contentStart);
-        const nextHeadingOffset = rest.search(/\n#{1,6}\s+/);
+        // Treat only H1–H3 as section delimiters so narrative can contain
+        // nested H4+ subsections without being truncated.
+        const nextHeadingOffset = rest.search(/\n#{1,3}\s+/);
         const contentEnd = nextHeadingOffset === -1 ? src.length : contentStart + nextHeadingOffset;
         const content = src.slice(contentStart, contentEnd).trim();
         return { content, start: headerStart, end: contentEnd };

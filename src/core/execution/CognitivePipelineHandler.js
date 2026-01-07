@@ -33,8 +33,12 @@ export class CognitivePipelineHandler {
           for (const step of mappingSteps) {
             const take = stepResults.get(step.stepId);
             const result = take?.status === "completed" ? take.result : null;
-            if (!result?.text) continue;
-            const text = String(result.text || "");
+            if (!result) continue;
+            const text = String(
+              (result.meta && result.meta.rawMappingText) ||
+              result.text ||
+              "",
+            );
 
             // Allow V3 <map> or legacy tags
             const hasStructuralTags =
