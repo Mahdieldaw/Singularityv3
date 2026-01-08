@@ -236,6 +236,8 @@ export function useChat() {
           return;
         }
 
+        const providerContexts = (fullSession as any).providerContexts || {};
+
         /**
          * CRITICAL FIX: Transform backend "rounds" format
          * Backend sends: { userTurnId, aiTurnId, user: {...}, providers: {...}, mappingResponses }
@@ -291,11 +293,37 @@ export function useChat() {
             ): Record<string, ProviderResponse[]> => {
               if (!raw) return {};
               const result: Record<string, ProviderResponse[]> = {};
+              const hydrateTextFromMeta = (
+                resp: any,
+                pid: string,
+              ): ProviderResponse => {
+                const baseMeta = resp?.meta || {};
+                const ctxEntry = (providerContexts as any)?.[pid];
+                const ctxMeta =
+                  ctxEntry && typeof ctxEntry === "object"
+                    ? (ctxEntry as any).meta || {}
+                    : {};
+                const mergedMeta = { ...ctxMeta, ...baseMeta };
+                const fromMeta =
+                  typeof mergedMeta?.rawMappingText === "string"
+                    ? mergedMeta.rawMappingText
+                    : "";
+                const fromText = typeof resp?.text === "string" ? resp.text : "";
+                const text =
+                  fromMeta && fromMeta.length >= fromText.length ? fromMeta : fromText;
+                return {
+                  ...(resp || {}),
+                  text,
+                  meta: mergedMeta,
+                } as ProviderResponse;
+              };
               Object.entries(raw).forEach(([pid, val]: [string, any]) => {
                 if (Array.isArray(val)) {
-                  result[pid] = val;
+                  result[pid] = val.map((resp: any) =>
+                    hydrateTextFromMeta(resp, pid),
+                  );
                 } else {
-                  result[pid] = [val];
+                  result[pid] = [hydrateTextFromMeta(val, pid)];
                 }
               });
               return result;

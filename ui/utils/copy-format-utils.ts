@@ -212,10 +212,13 @@ export function formatSessionForMarkdown(fullSession: { title: string, turns: Tu
             if (targetMapPid && mapResponses[targetMapPid]) {
                 const resps = mapResponses[targetMapPid];
                 const latest = Array.isArray(resps) ? resps[resps.length - 1] : resps;
-                if (latest && latest.text) {
+                if (latest && (latest.text || (latest as any)?.meta?.rawMappingText)) {
                     const meta = (latest as any).meta || {};
+                    const fromMeta = typeof meta.rawMappingText === "string" ? meta.rawMappingText : "";
+                    const fromText = typeof latest.text === "string" ? latest.text : "";
+                    const narrative = fromMeta && fromMeta.length >= fromText.length ? fromMeta : fromText;
                     decisionMap = {
-                        narrative: latest.text,
+                        narrative,
                         options: meta.allAvailableOptions || null,
                         topology: meta.graphTopology || null
                     };

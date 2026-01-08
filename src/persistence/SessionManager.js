@@ -18,7 +18,7 @@ export class SessionManager {
   _toJsonSafe(value, opts = {}, _seen = new WeakSet(), _depth = 0) {
     const maxDepth = typeof opts.maxDepth === "number" ? opts.maxDepth : 6;
     const maxStringLength =
-      typeof opts.maxStringLength === "number" ? opts.maxStringLength : 20000;
+      typeof opts.maxStringLength === "number" ? opts.maxStringLength : 250000;
 
     if (value === null || value === undefined) return value;
 
@@ -69,7 +69,7 @@ export class SessionManager {
   }
 
   _safeMeta(meta) {
-    const safe = this._toJsonSafe(meta);
+    const safe = this._toJsonSafe(meta, { maxDepth: 8, maxStringLength: 250000 });
     if (safe && typeof safe === "object") return safe;
     if (safe === null || safe === undefined) return {};
     return { value: safe };

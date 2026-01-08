@@ -15,6 +15,12 @@ import {
     ExploratoryShapeData,
     ContextualShapeData,
 } from "../../shared/contract";
+import {
+    parseConciergeOutput,
+    validateBatchPrompt,
+    ConciergeSignal,
+    ConciergeOutput,
+} from "../../shared/parsing-utils";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // TYPES
@@ -32,6 +38,40 @@ interface StanceSelection {
     stance: ConciergeStance;
     reason: 'query_signal' | 'shape_default';
     confidence: number;
+}
+
+/**
+ * Active workflow state for multi-turn workflows
+ */
+export interface ActiveWorkflow {
+    goal: string;
+    steps: WorkflowStep[];
+    currentStepIndex: number;
+}
+
+export interface WorkflowStep {
+    id: string;
+    title: string;
+    description: string;
+    doneWhen: string;
+    status: 'pending' | 'active' | 'complete';
+}
+
+/**
+ * Options for building the concierge prompt
+ */
+export interface ConciergePromptOptions {
+    stance?: ConciergeStance;
+    conversationHistory?: string;
+    activeWorkflow?: ActiveWorkflow;
+    isFirstTurn?: boolean;
+}
+
+export interface HandleTurnResult {
+    response: string;
+    stance: ConciergeStance;
+    stanceReason: string;
+    signal: ConciergeSignal;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1507,14 +1547,88 @@ function pct(n: number): string {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// BATCH REQUEST CAPABILITIES (Added from turn 2 onwards)
+// ═══════════════════════════════════════════════════════════════════════════
+
+function buildCapabilitiesSection(activeWorkflow?: ActiveWorkflow): string {
+    const workflowStatus = activeWorkflow
+        ? `\n\n**Active Workflow:** "${activeWorkflow.goal}" — Step ${activeWorkflow.currentStepIndex + 1}/${activeWorkflow.steps.length}`
+        : '';
+
+    return `## Capabilities
+
+You can trigger multi-perspective batch queries:
+
+**WORKFLOW** — Generate an action plan from multiple expert perspectives
+- Trigger when: exploration complete, user ready for action, sufficient context gathered
+- Don't trigger when: still clarifying, missing critical info, task is simple
+
+**STEP_HELP** — Get synthesized guidance for a specific blocker
+- Trigger when: user stuck on complex step with multiple valid approaches
+- Don't trigger when: answer is straightforward (just answer directly)
+${workflowStatus}`;
+}
+
+function buildSignalInstructions(): string {
+    return `## Signal Format
+
+To trigger a batch request, end your response with:
+
+\`\`\`
+<<<SINGULARITY_BATCH_REQUEST>>>
+TYPE: WORKFLOW | STEP_HELP
+GOAL: [outcome user wants]
+STEP: [for STEP_HELP: current step]
+BLOCKER: [for STEP_HELP: what's blocking]
+CONTEXT: [constraints, situation, priorities]
+
+PROMPT:
+[the prompt to send to expert models]
+<<<END_BATCH_REQUEST>>>
+\`\`\`
+
+Everything before \`<<<SINGULARITY_BATCH_REQUEST>>>\` is shown to user. The signal is parsed and executed.
+
+## Batch Prompt Requirements
+
+The prompt you write will be sent to multiple AI models in parallel. Their responses get synthesized.
+
+**Structure:**
+1. **Role** — First line must define the expert. Be maximally specific to this task.
+2. **Task** — State exactly what you need in 1-2 sentences
+3. **Context** — Bullet the user's situation, constraints, priorities
+4. **Output spec** — What to produce, what format
+5. **Quality anchors** — Specific over generic, actionable over conceptual`;
+}
+
+function formatActiveWorkflow(workflow: ActiveWorkflow): string {
+    let output = `**Goal:** ${workflow.goal}\n\n`;
+    output += `**Progress:** Step ${workflow.currentStepIndex + 1} of ${workflow.steps.length}\n\n`;
+
+    workflow.steps.forEach((step, idx) => {
+        const statusIcon = step.status === 'complete' ? '✓' : step.status === 'active' ? '→' : '○';
+        const current = idx === workflow.currentStepIndex ? ' **(current)**' : '';
+        output += `${statusIcon} **${step.title}**${current}\n`;
+        if (idx === workflow.currentStepIndex) {
+            output += `   ${step.description}\n`;
+            output += `   *Done when: ${step.doneWhen}*\n`;
+        }
+        output += '\n';
+    });
+
+    return output;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // THE PROMPT BUILDER
 // ═══════════════════════════════════════════════════════════════════════════
 
 export function buildConciergePrompt(
     userMessage: string,
     analysis: StructuralAnalysis,
-    stance: ConciergeStance = 'default'
+    options?: ConciergePromptOptions
 ): string {
+    const stance = options?.stance ?? 'default';
     const structuralBrief = buildStructuralBrief(analysis);
     const shapeGuidance = getShapeGuidance(analysis.shape);
     const stanceGuidance = getStanceGuidance(stance);
@@ -1523,17 +1637,30 @@ export function buildConciergePrompt(
         ? `\n${stanceGuidance.framing}\n`
         : '';
 
+    const historySection = options?.conversationHistory
+        ? `## Conversation\n${options.conversationHistory}\n\n`
+        : '';
+
+    const workflowSection = options?.activeWorkflow
+        ? `## Active Workflow\n${formatActiveWorkflow(options.activeWorkflow)}\n`
+        : '';
+
+    // Only include capabilities and signal instructions from turn 2 onwards
+    const capabilitiesSection = options?.isFirstTurn
+        ? ''
+        : `${buildCapabilitiesSection(options?.activeWorkflow)}\n\n${buildSignalInstructions()}\n\n`;
+
     return `You are Singularity—an intelligence that has drawn from multiple expert perspectives.${framingLine}
 
 ## The Query
 
 "${userMessage}"
 
-## What You Know
+${historySection}## What You Know
 
 ${structuralBrief}
 
-## How To Respond
+${workflowSection}${capabilitiesSection}## How To Respond
 
 ${shapeGuidance}
 
@@ -1663,39 +1790,64 @@ export async function handleTurn(
     userMessage: string,
     analysis: StructuralAnalysis,
     callLLM: (prompt: string) => Promise<string>,
-    stanceOverride?: ConciergeStance
-): Promise<{ response: string; stance: ConciergeStance; stanceReason: string }> {
+    options?: {
+        stanceOverride?: ConciergeStance;
+        conversationHistory?: string;
+        activeWorkflow?: ActiveWorkflow;
+        isFirstTurn?: boolean;
+    }
+): Promise<HandleTurnResult> {
 
     // Handle meta queries
     if (isMetaQuery(userMessage)) {
         return {
             response: buildMetaResponse(analysis),
             stance: 'default',
-            stanceReason: 'meta_query'
+            stanceReason: 'meta_query',
+            signal: null
         };
     }
 
     // Select stance
-    const selection = stanceOverride
-        ? { stance: stanceOverride, reason: 'user_override' as const, confidence: 1.0 }
+    const selection = options?.stanceOverride
+        ? { stance: options.stanceOverride, reason: 'user_override' as const, confidence: 1.0 }
         : selectStance(userMessage, analysis.shape);
 
     // Build and execute prompt
-    const prompt = buildConciergePrompt(userMessage, analysis, selection.stance);
+    const prompt = buildConciergePrompt(userMessage, analysis, {
+        stance: selection.stance,
+        conversationHistory: options?.conversationHistory,
+        activeWorkflow: options?.activeWorkflow,
+        isFirstTurn: options?.isFirstTurn,
+    });
     const raw = await callLLM(prompt);
 
-    // Post-process and check for leakage
-    const processed = postProcess(raw);
-    const leakage = detectMachineryLeakage(processed);
+    // Parse output for signals
+    const parsed = parseConciergeOutput(raw);
 
+    // Post-process user-facing response
+    const processed = postProcess(parsed.userResponse);
+
+    // Check for leakage
+    const leakage = detectMachineryLeakage(processed);
     if (leakage.leaked) {
         console.warn('[ConciergeService] Machinery leakage detected:', leakage.violations);
+    }
+
+    // Log signal and validate batch prompt if present
+    if (parsed.signal) {
+        console.log('[ConciergeService] Signal detected:', parsed.signal.type);
+        const validation = validateBatchPrompt(parsed.signal.batchPrompt);
+        if (!validation.valid) {
+            console.warn('[ConciergeService] Batch prompt quality issues:', validation.issues);
+        }
     }
 
     return {
         response: processed,
         stance: selection.stance,
-        stanceReason: selection.reason
+        stanceReason: selection.reason,
+        signal: parsed.signal
     };
 }
 
@@ -1711,4 +1863,7 @@ export const ConciergeService = {
     isMetaQuery,
     buildMetaResponse,
     handleTurn,
+    // Re-export signal parsing for convenience
+    parseConciergeOutput,
+    validateBatchPrompt,
 };

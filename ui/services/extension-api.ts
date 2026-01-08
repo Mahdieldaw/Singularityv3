@@ -107,7 +107,7 @@ class ExtensionAPI {
       this.port = this.portHealthManager.connect(
         this.portMessageHandler,
         () => {
-          console.warn("[ExtensionAPI] Port disconnected via callback");
+          console.log("[ExtensionAPI] Port disconnected via callback");
           this.port = null;
         },
       );
@@ -123,7 +123,7 @@ class ExtensionAPI {
     this.port = chrome.runtime.connect(EXTENSION_ID, { name: "htos-popup" });
     this.port.onMessage.addListener((msg) => this.portMessageHandler?.(msg));
     this.port.onDisconnect.addListener(() => {
-      console.warn("[ExtensionAPI] Port disconnected (fallback)");
+      console.log("[ExtensionAPI] Port disconnected (fallback)");
       this.port = null;
     });
     // Fallback doesn't have PortHealthManager to wait on, but it's rarely used
@@ -136,7 +136,6 @@ class ExtensionAPI {
   }
 
   async reconnect(): Promise<void> {
-    console.log("[ExtensionAPI] Manual reconnect triggered");
     this.disconnectAll();
     await this.ensurePort({ force: true });
   }

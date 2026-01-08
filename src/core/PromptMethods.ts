@@ -1015,7 +1015,7 @@ function determineShapeSparseAware(
     const disconnectedConsensus = graph.clusterCohesion < 0.2 && concentration > 0.5 && edgeCount >= minEdgesForLinear;
     if (disconnectedConsensus) {
         fragilityPenalty += 0.15;
-        warnings.push(`Disconnected consensus(${Math.round(graph.clusterCohesion * 100)} % cohesion)`);
+        warnings.push(`Disconnected consensus with low internal cohesion`);
     }
 
     const totalPenalty = signalPenalty + fragilityPenalty;
@@ -1025,7 +1025,6 @@ function determineShapeSparseAware(
     const evidence = [
         ...generateEvidenceSparseAware(pattern, ratios, tensions, graph, edgeCount, localCoherence, claimCount),
         ...warnings,
-        `Signal strength: ${Math.round(signalStrength * 100)}% `
     ];
 
     return {
@@ -1056,57 +1055,64 @@ function generateEvidenceSparseAware(
     localCoherence: number,
     claimCount: number
 ): string[] {
-    const pct = (n: number) => `${Math.round(n * 100)}% `;
+    const describeLevel = (val: number) => {
+        if (val > 0.8) return "Very high";
+        if (val > 0.6) return "High";
+        if (val > 0.4) return "Substantial";
+        if (val > 0.2) return "Moderate";
+        return "Low";
+    };
 
     switch (pattern) {
         case 'settled':
             return [
-                `Concentration: ${pct(ratios.concentration)} `,
-                `Alignment: ${pct(ratios.alignment)} `,
-                `Tension: ${pct(ratios.tension)} `,
-                `Local coherence: ${pct(localCoherence)} `
+                `High convergence on core claims`,
+                `Strong alignment across viewpoints`,
+                `${describeLevel(ratios.tension)} level of internal tension`,
+                `Consistent local logic between related claims`
             ];
 
         case 'linear':
             return [
-                `Chain depth: ${graph.longestChain.length} claims`,
-                `${edgeCount} edges form sequential structure`,
-                `Fragmentation: ${pct(ratios.fragmentation)} `
+                `Sequential reasoning chain identified`,
+                `Strong logical flow between steps`,
+                `Low structural fragmentation`
             ];
 
         case 'keystone':
             return [
-                `Hub: ${graph.hubClaim} (${graph.hubDominance.toFixed(1)}x dominance)`,
-                `Concentration: ${pct(ratios.concentration)} `,
-                `${edgeCount} edges radiate from hub`
+                `Central hub claim discovered`,
+                `High concentration of influence in the hub`,
+                `Reasoning radiates from a single foundation`
             ];
 
         case 'contested':
+            const highStakes = tensions.filter(t => t.isBothHighSupport && !t.isConditional).length;
             return [
-                `${tensions.filter(t => t.edgeType === 'conflicts' && !t.isConditional).length} conflict(s)`,
-                `${tensions.filter(t => t.isBothHighSupport && !t.isConditional).length} high - support conflict(s)`,
-                `Tension: ${pct(ratios.tension)} `
+                `Active disagreement between viewpoints`,
+                highStakes > 0 ? `High-stakes structural conflict` : `Significant tension identified`,
+                `Tension level: ${describeLevel(ratios.tension)}`
             ];
 
         case 'tradeoff':
             return [
-                `${tensions.filter(t => t.edgeType === 'tradeoff').length} tradeoff(s)`,
-                `Tension: ${pct(ratios.tension)} `,
-                `Distributed support: ${pct(1 - ratios.concentration)} `
+                `Direct tradeoffs between options`,
+                `Structural tension from competing priorities`,
+                `Support is distributed across alternatives`
             ];
 
         case 'dimensional':
             return [
-                `${graph.componentCount} distinct cluster(s)`,
-                `Local coherence: ${pct(localCoherence)} `,
-                `Alignment within clusters: ${pct(ratios.alignment)} `
+                `Multiple independent dimensions detected`,
+                `Distinct viewpoint clusters`,
+                `Solid alignment within each cluster`
             ];
 
         case 'exploratory':
             return [
-                `${edgeCount} edges across ${claimCount} claims`,
-                `Local coherence: ${pct(localCoherence)} `,
-                `Distributed support: ${pct(1 - ratios.concentration)} `
+                `Sparse, distributed evidence`,
+                `Early-stage logical connections`,
+                `Diverse viewpoints without a dominant lead`
             ];
 
         default:

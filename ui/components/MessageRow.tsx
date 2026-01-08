@@ -1,10 +1,9 @@
 import React, { useMemo } from "react";
 import { useAtomValue } from "jotai";
 import { selectAtom } from "jotai/utils";
-import { activeSplitPanelAtom, isSplitOpenAtom, turnsMapAtom } from "../state/atoms";
+import { activeSplitPanelAtom, turnsMapAtom } from "../state/atoms";
 import UserTurnBlock from "./UserTurnBlock";
 import AiTurnBlock from "./AiTurnBlock";
-import GutterOrbIndicator from "./GutterOrbIndicator";
 import clsx from "clsx";
 
 function MessageRow({ turnId }: { turnId: string }) {
@@ -13,7 +12,6 @@ function MessageRow({ turnId }: { turnId: string }) {
     [turnId],
   );
   const message = useAtomValue(turnAtom);
-  const isSplitOpen = useAtomValue(isSplitOpenAtom);
   const isActiveTurn = useAtomValue(
     useMemo(
       () => selectAtom(activeSplitPanelAtom, (p) => p?.turnId === turnId),
@@ -48,9 +46,6 @@ function MessageRow({ turnId }: { turnId: string }) {
       id={`turn-${turnId}`}
     >
       {content}
-      {(message as any).type === "ai" && !isSplitOpen && (
-        <GutterOrbIndicator turnId={turnId} />
-      )}
     </div>
   );
 }

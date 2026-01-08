@@ -1579,19 +1579,6 @@
     transition: background-color 0.3s ease, border-color 0.3s ease;
 }
 
-.gutter-orb-indicator {
-    z-index: 50;
-    filter: drop-shadow(0 0 8px rgba(0, 0, 0, 0.3));
-}
-
-.gutter-orb-indicator .orb-collapsed {
-    box-shadow: 0 0 10px rgba(99, 102, 241, 0.3);
-}
-
-.gutter-orb-indicator:hover .orb-collapsed {
-    box-shadow: 0 0 15px rgba(99, 102, 241, 0.5);
-}
-
 .custom-scrollbar::-webkit-scrollbar {
     width: 6px;
     height: 6px;
@@ -1610,6 +1597,3 @@
     background: rgba(148, 163, 184, 0.4);
 }
 
-.message-row {
-    padding-right: 24px !important;
-}

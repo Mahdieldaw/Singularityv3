@@ -871,31 +871,50 @@ export function parseUnifiedMapperOutput(text: string): ParsedMapperOutput {
 
     const normalizedText = text.replace(/\\</g, '<').replace(/\\>/g, '>');
 
-    const extractSectionByHeading = (src: string, headingRe: RegExp): { content: string; start: number; end: number } | null => {
-        const m = headingRe.exec(src);
-        if (!m || typeof m.index !== 'number') return null;
-        const headerStart = m.index;
-        const headerLineEnd = src.indexOf('\n', headerStart);
-        const contentStart = headerLineEnd === -1 ? src.length : headerLineEnd + 1;
-        const rest = src.slice(contentStart);
-        // Treat only H1–H3 as section delimiters so narrative can contain
-        // nested H4+ subsections without being truncated.
-        const nextHeadingOffset = rest.search(/\n#{1,3}\s+/);
-        const contentEnd = nextHeadingOffset === -1 ? src.length : contentStart + nextHeadingOffset;
-        const content = src.slice(contentStart, contentEnd).trim();
-        return { content, start: headerStart, end: contentEnd };
+    type HeadingBlock = {
+        kind: 'map' | 'narrative';
+        headerStart: number;
+        contentStart: number;
     };
 
-    const mapSection = extractSectionByHeading(normalizedText, /^#{1,6}\s*THE\s*MAP\b.*$/im);
-    const narrativeSection = extractSectionByHeading(normalizedText, /^#{1,6}\s*THE\s*NARRATIVE\b.*$/im);
+    const headingBlocks: HeadingBlock[] = [];
+    const headingRe = /^#{1,6}\s*THE\s*(MAP|NARRATIVE)\b.*$/gim;
+    let hm: RegExpExecArray | null;
+    while ((hm = headingRe.exec(normalizedText)) !== null) {
+        const headerStart = typeof hm.index === 'number' ? hm.index : -1;
+        if (headerStart < 0) continue;
+        const headerLineEnd = normalizedText.indexOf('\n', headerStart);
+        const contentStart = headerLineEnd === -1 ? normalizedText.length : headerLineEnd + 1;
+        const kind = String(hm[1] || '').toLowerCase() === 'map' ? 'map' : 'narrative';
+        headingBlocks.push({ kind, headerStart, contentStart });
+    }
+
+    headingBlocks.sort((a, b) => a.headerStart - b.headerStart);
+
+    const getHeadingBlockContent = (kind: HeadingBlock['kind']): { content: string; start: number; end: number } | null => {
+        const idx = [...headingBlocks].reverse().findIndex(b => b.kind === kind);
+        if (idx === -1) return null;
+        const blockIndex = headingBlocks.length - 1 - idx;
+        const block = headingBlocks[blockIndex];
+        const next = headingBlocks.find((b, i) => i > blockIndex && b.headerStart > block.headerStart);
+        const end = next ? next.headerStart : normalizedText.length;
+        const content = normalizedText.slice(block.contentStart, end).trim();
+        return { content, start: block.headerStart, end };
+    };
+
+    const mapSection = getHeadingBlockContent('map');
+    const narrativeSection = getHeadingBlockContent('narrative');
 
     // 1. Try V3 Extraction (<map> and <narrative>)
     const mapTagPattern = /<map\b[^>]*>([\s\S]*?)<\/map\s*>/gi;
     const narrativeTagPattern = /<narrative\b[^>]*>([\s\S]*?)<\/narrative\s*>/gi;
+    const rawNarrativeTagPattern = /<raw_narrative\b[^>]*>([\s\S]*?)<\/raw_narrative\s*>/gi;
 
     const mapMatches = Array.from(normalizedText.matchAll(mapTagPattern));
     const narrativeMatches = Array.from(normalizedText.matchAll(narrativeTagPattern));
+    const rawNarrativeMatches = Array.from(normalizedText.matchAll(rawNarrativeTagPattern));
     const narrativeMatch = narrativeMatches.length > 0 ? narrativeMatches[narrativeMatches.length - 1] : null;
+    const rawNarrativeMatch = rawNarrativeMatches.length > 0 ? rawNarrativeMatches[rawNarrativeMatches.length - 1] : null;
 
     let map: any = { claims: [], edges: [], ghosts: [] };
     let foundV3Map = false;
@@ -949,22 +968,27 @@ export function parseUnifiedMapperOutput(text: string): ParsedMapperOutput {
         } catch { }
     }
 
-    if (foundV3Map || narrativeMatch || narrativeFromHeading) {
+    if (foundV3Map || narrativeMatch || rawNarrativeMatch || narrativeFromHeading) {
         let narrative = "";
+        const candidates: string[] = [];
+        if (narrativeMatch && narrativeMatch[1]) candidates.push(String(narrativeMatch[1]).trim());
+        if (rawNarrativeMatch && rawNarrativeMatch[1]) candidates.push(String(rawNarrativeMatch[1]).trim());
         if (narrativeFromHeading) {
-            narrative = narrativeFromHeading.trim();
-        } else if (narrativeMatch && narrativeMatch[1]) {
-            narrative = narrativeMatch[1].trim();
-        } else {
+            candidates.push(
+                narrativeFromHeading
+                    .replace(/<narrative\b[^>]*>/i, '')
+                    .replace(/<\/narrative\s*>/i, '')
+                    .replace(/<raw_narrative\b[^>]*>/i, '')
+                    .replace(/<\/raw_narrative\s*>/i, '')
+                    .trim()
+            );
+        }
+        candidates.sort((a, b) => b.length - a.length);
+        narrative = candidates.find((c) => c && c.trim()) || "";
+
+        if (!narrative) {
             // Fallback: if map is found but no narrative tag, assume rest is narrative
             narrative = normalizedText.replace(/<map\b[^>]*>[\s\S]*?<\/map\s*>/i, '').trim();
-            // Clean up if the JSON was found elsewhere
-            if (foundV3Map && mapMatches.length === 0) {
-                // Try to strip the JSON block if we found it without tags
-                // jsonStr removed (unused)
-                // This is a naive strip, but safe enough for now. 
-                // Better to leave it than aggressively delete wrong things.
-            }
             if (mapSection) {
                 narrative = (normalizedText.slice(0, mapSection.start) + normalizedText.slice(mapSection.end)).trim();
             }
@@ -1118,6 +1142,51 @@ export function parseUnifiedMapperOutput(text: string): ParsedMapperOutput {
         topology = parseProseGraphTopology(text);
     }
 
+    const stripNonNarrativeSections = (src: string): string => {
+        let out = src;
+        out = out.replace(/<mapper_artifact\b[^>]*>[\s\S]*?<\/mapper_artifact\s*>/gi, '');
+        out = out.replace(/\\<mapper_artifact\\>[\s\S]*?\\<\/mapper_artifact\\>/gi, '');
+        out = out.replace(/<options_inventory\b[^>]*>[\s\S]*?<\/options_inventory\s*>/gi, '');
+        out = out.replace(/\\<options_inventory\\>[\s\S]*?\\<\/options_inventory\\>/gi, '');
+        out = out.replace(/<graph_topology\b[^>]*>[\s\S]*?<\/graph_topology\s*>/gi, '');
+        out = out.replace(/\\<graph_topology\\>[\s\S]*?\\<\/graph_topology\\>/gi, '');
+
+        out = out.replace(
+            /^[ \t]*#{1,6}\s*(?:\d+\.)?\s*(?:mapper[_\s]*artifact|graph[_\s]*topology|options[_\s]*inventory)\b[\s\S]*?(?=^[ \t]*#{1,6}\s|$)/gim,
+            '',
+        );
+
+        out = out.replace(
+            /^\*\*(?:mapper[_\s]*artifact|graph[_\s]*topology|options[_\s]*inventory)\*\*[:\s]*\n[\s\S]*?(?=^\*\*|^[ \t]*#{1,6}\s|$)/gim,
+            '',
+        );
+
+        return out.trim();
+    };
+
+    const strippedBase = stripNonNarrativeSections(normalizedText);
+    const { text: strippedNoTopology, topology: strippedTopology } = extractGraphTopologyAndStrip(strippedBase);
+    const { text: strippedNarrativeText, options: strippedOptions } = extractOptionsAndStrip(strippedNoTopology);
+    const cleanedStrippedNarrative = cleanNarrativeText(strippedNarrativeText);
+    const cleanedNarrativeSummary = narrativeSummary ? cleanNarrativeText(narrativeSummary) : "";
+
+    const pickedNarrative =
+        [cleanedStrippedNarrative, cleanedNarrativeSummary]
+            .filter((s) => s && s.trim().length > 0)
+            .sort((a, b) => b.length - a.length)[0] || "";
+
+    const pickedOptionsRaw =
+        (optionsInventory ? optionsInventory : null) ||
+        (strippedOptions ? strippedOptions : null) ||
+        null;
+    const pickedOptions = pickedOptionsRaw ? cleanOptionsText(pickedOptionsRaw) : null;
+
+    if (!topology && strippedTopology) {
+        topology = strippedTopology;
+    }
+
+    const pickedAnchors = pickedNarrative ? extractAnchorPositions(pickedNarrative) : [];
+
     // If absolutely nothing structural found, treat as raw narrative
     if (!narrativeSummary && !optionsInventory && !mapperArtifactRaw && !graphTopologyRaw) {
         const { text: textWithoutTopology, topology: legacyTopology } = extractGraphTopologyAndStrip(text);
@@ -1131,7 +1200,7 @@ export function parseUnifiedMapperOutput(text: string): ParsedMapperOutput {
             artifact: null,
             topology: legacyTopology || topology,
             map: null,
-            anchors: []
+            anchors: extractAnchorPositions(cleanNarrativeText(narrative))
         };
     }
 
@@ -1140,12 +1209,12 @@ export function parseUnifiedMapperOutput(text: string): ParsedMapperOutput {
         claims: artifact?.claims || [],
         edges: artifact?.edges || [],
         ghosts: artifact?.ghosts || [],
-        narrative: narrativeSummary || "",
-        options: null,
+        narrative: pickedNarrative,
+        options: pickedOptions,
         artifact: artifact,
         topology: (topology as any) || null, // Cast to avoid deep mismatch if any fields slightly differ
         map: null,
-        anchors: []
+        anchors: pickedAnchors
     };
 }
 
@@ -1264,19 +1333,19 @@ export function parseMapperArtifact(text: string): MapperArtifact {
     // Parse Outliers
     if (outliersText) {
         const outlierBlocks = outliersText.split(/\n\s*[-*•]\s+/).filter(Boolean);
-                    outlierBlocks.forEach((block, idx) => {
-                        const parts = block.split('\n');
-                        if (parts.length > 0) {
-                            newClaims.push({
-                                id: `o_${idx}`,
-                                label: parts[0].split(' ').slice(0, 3).join(' '),
-                                text: parts[0].trim(),
-                                supporters: [],
-                                type: 'speculative',
-                                role: 'supplement'
-                            });
-                        }
-                    });
+        outlierBlocks.forEach((block, idx) => {
+            const parts = block.split('\n');
+            if (parts.length > 0) {
+                newClaims.push({
+                    id: `o_${idx}`,
+                    label: parts[0].split(' ').slice(0, 3).join(' '),
+                    text: parts[0].trim(),
+                    supporters: [],
+                    type: 'speculative',
+                    role: 'supplement'
+                });
+            }
+        });
     }
 
     if (newClaims.length > 0) artifact.claims = newClaims;
@@ -1517,7 +1586,166 @@ function extractLabeledValue(text: string, label: string): string | null {
     return null;
 }
 
+// ============================================================================
+// CONCIERGE BATCH REQUEST PARSING
+// ============================================================================
 
+/**
+ * Signal types for concierge-triggered batch requests
+ */
+export interface WorkflowSignal {
+    type: 'GENERATE_WORKFLOW';
+    goal: string;
+    context: string;
+    batchPrompt: string;
+}
+
+export interface StepHelpSignal {
+    type: 'STEP_HELP_NEEDED';
+    step: string;
+    blocker: string;
+    constraint: string;
+    batchPrompt: string;
+}
+
+export type ConciergeSignal = WorkflowSignal | StepHelpSignal | null;
+
+export interface ConciergeOutput {
+    userResponse: string;
+    signal: ConciergeSignal;
+}
+
+/**
+ * Parse concierge output to extract user-facing response and any batch request signals.
+ * The signal is delimited by <<<SINGULARITY_BATCH_REQUEST>>> ... <<<END_BATCH_REQUEST>>>
+ */
+export function parseConciergeOutput(rawResponse: string): ConciergeOutput {
+    if (!rawResponse) {
+        return { userResponse: '', signal: null };
+    }
+
+    // Look for the signal delimiter
+    const signalMatch = rawResponse.match(
+        /<<<SINGULARITY_BATCH_REQUEST>>>([\s\S]*?)<<<END_BATCH_REQUEST>>>/
+    );
+
+    if (!signalMatch) {
+        return {
+            userResponse: rawResponse.trim(),
+            signal: null
+        };
+    }
+
+    // Extract user-facing response (everything before the signal)
+    const userResponse = rawResponse
+        .substring(0, rawResponse.indexOf('<<<SINGULARITY_BATCH_REQUEST>>>'))
+        .trim();
+
+    // Parse the signal content
+    const signalContent = signalMatch[1];
+    const signal = parseSignalContent(signalContent);
+
+    return {
+        userResponse,
+        signal
+    };
+}
+
+/**
+ * Parse the content inside the batch request delimiters
+ */
+function parseSignalContent(content: string): ConciergeSignal {
+    if (!content) return null;
+
+    // Extract TYPE
+    const typeMatch = content.match(/TYPE:\s*(\w+)/i);
+    const type = typeMatch?.[1]?.toUpperCase();
+
+    // Extract PROMPT (everything after "PROMPT:")
+    const promptMatch = content.match(/PROMPT:\s*([\s\S]*?)$/);
+    const batchPrompt = promptMatch?.[1]?.trim() || '';
+
+    if (!batchPrompt) {
+        console.warn('[parsing-utils] Signal detected but no batch prompt found');
+        return null;
+    }
+
+    if (type === 'WORKFLOW') {
+        const goalMatch = content.match(/GOAL:\s*(.+?)(?=\n(?:STEP:|BLOCKER:|CONTEXT:|PROMPT:)|$)/s);
+        const contextMatch = content.match(/CONTEXT:\s*(.+?)(?=\n(?:PROMPT:)|$)/s);
+
+        return {
+            type: 'GENERATE_WORKFLOW',
+            goal: goalMatch?.[1]?.trim() || '',
+            context: contextMatch?.[1]?.trim() || '',
+            batchPrompt
+        };
+    }
+
+    if (type === 'STEP_HELP') {
+        const stepMatch = content.match(/STEP:\s*(.+?)(?=\n(?:BLOCKER:|CONTEXT:|PROMPT:)|$)/s);
+        const blockerMatch = content.match(/BLOCKER:\s*(.+?)(?=\n(?:CONTEXT:|PROMPT:)|$)/s);
+        const contextMatch = content.match(/CONTEXT:\s*(.+?)(?=\n(?:PROMPT:)|$)/s);
+
+        return {
+            type: 'STEP_HELP_NEEDED',
+            step: stepMatch?.[1]?.trim() || '',
+            blocker: blockerMatch?.[1]?.trim() || '',
+            constraint: contextMatch?.[1]?.trim() || '',
+            batchPrompt
+        };
+    }
+
+    console.warn(`[parsing-utils] Unknown signal type: ${type}`);
+    return null;
+}
+
+/**
+ * Validate a batch prompt for quality
+ */
+export function validateBatchPrompt(prompt: string): { valid: boolean; issues: string[] } {
+    const issues: string[] = [];
+
+    if (!prompt) {
+        issues.push('Prompt is empty');
+        return { valid: false, issues };
+    }
+
+    // Check for expert role at start
+    const startsWithRole = /^You are (a |an |the )/i.test(prompt.trim());
+    if (!startsWithRole) {
+        issues.push('Prompt should start with an expert role definition ("You are a...")');
+    }
+
+    // Check for specificity
+    if (prompt.length < 200) {
+        issues.push('Prompt seems too short—may lack necessary context');
+    }
+
+    // Check for generic role
+    const genericRoles = [
+        /You are an? (expert|assistant|helper|AI)/i,
+        /You are an? (software engineer|developer|marketer)\.?\s/i, // Too generic if no qualifiers
+    ];
+    if (genericRoles.some(p => p.test(prompt))) {
+        issues.push('Expert role may be too generic—add specific credentials and experience');
+    }
+
+    // Check for context section
+    if (!/context|situation|background/i.test(prompt)) {
+        issues.push('Prompt may be missing context section');
+    }
+
+    // Check for output specification
+    if (!/provide|create|generate|output|deliverable/i.test(prompt)) {
+        issues.push('Prompt may be missing clear output specification');
+    }
+
+    return {
+        valid: issues.length === 0,
+        issues
+    };
+}
 
 
 

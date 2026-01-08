@@ -250,7 +250,9 @@ const StructuralDebugPanel: React.FC<StructuralDebugPanelProps> = ({ analysis })
                     {analysis.claimsWithLeverage.map((c) => (
                       <tr key={c.id} className="border-t border-border-subtle/60">
                         <td className="px-2 py-1">
-                          <div className="font-mono truncate max-w-[140px]">{c.id}</div>
+                          <div className="font-mono truncate max-w-[140px]">
+                            #{c.id.replace(/^claim_?/i, "")}
+                          </div>
                           <div className="text-[10px] text-text-muted truncate max-w-[140px]">{c.label}</div>
                         </td>
                         <td className="px-2 py-1 text-right font-mono">
@@ -525,7 +527,7 @@ const ConciergePipelinePanel: React.FC<ConciergePipelinePanelProps> = ({ state, 
 
     try {
       const selection = ConciergeService.selectStance(userMessage, analysis.shape);
-      const prompt = ConciergeService.buildConciergePrompt(userMessage, analysis, selection.stance);
+      const prompt = ConciergeService.buildConciergePrompt(userMessage, analysis, { stance: selection.stance });
 
       let leakageDetected = !!state.output.leakageDetected;
       let leakageViolations = state.output.leakageViolations || [];
@@ -741,12 +743,14 @@ function buildThemesFromClaims(claims: any[]): ParsedTheme[] {
     const theme = themesByName.get(themeName)!;
 
     const rawId = claim.id != null ? String(claim.id) : '';
+    const cleanId = rawId.replace(/^claim_?/i, "").trim();
+    const formattedId = cleanId ? `#${cleanId}` : "";
     const rawLabel = typeof claim.label === 'string' ? claim.label : '';
 
     const titleParts: string[] = [];
-    if (rawId.trim()) titleParts.push(rawId.trim());
+    if (formattedId) titleParts.push(formattedId);
     if (rawLabel.trim()) titleParts.push(rawLabel.trim());
-    const title = titleParts.length > 0 ? titleParts.join(' · ') : 'Claim';
+    const title = titleParts.length > 0 ? titleParts.join(' ') : 'Claim';
 
     const description = typeof claim.text === 'string' ? claim.text : '';
     const supporters = Array.isArray(claim.supporters) ? claim.supporters : [];
@@ -1630,10 +1634,10 @@ export const DecisionMapSheet = React.memo(() => {
   }, [activeMappingPid, mappingResponses]);
 
   const parsedMapping = useMemo(() => {
+    const fromMeta = String((latestMapping?.meta as any)?.rawMappingText || '');
+    const fromText = String(latestMapping?.text || '');
     const rawText =
-      (latestMapping?.meta as any)?.rawMappingText ||
-      latestMapping?.text ||
-      '';
+      fromMeta && fromMeta.length >= fromText.length ? fromMeta : fromText;
     return parseUnifiedMapperOutput(String(rawText));
   }, [latestMapping]);
 

@@ -227,7 +227,8 @@ export function applyStreamingUpdates(
  */
 export function normalizeBackendRoundsToTurns(
   rawTurns: any[],
-  sessionId: string
+  sessionId: string,
+  providerContexts?: Record<string, any>
 ): Array<UserTurn | AiTurn> {
   if (!rawTurns) return [];
   const normalized: Array<UserTurn | AiTurn> = [];
@@ -276,11 +277,35 @@ export function normalizeBackendRoundsToTurns(
       ): Record<string, ProviderResponse[]> => {
         if (!raw) return {};
         const result: Record<string, ProviderResponse[]> = {};
+        const hydrateTextFromMeta = (resp: any): ProviderResponse => {
+          const baseMeta = resp?.meta || {};
+          const ctxEntry =
+            providerContexts && typeof providerContexts === "object"
+              ? (providerContexts as any)[resp?.providerId]
+              : undefined;
+          const ctxMeta =
+            ctxEntry && typeof ctxEntry === "object"
+              ? (ctxEntry as any).meta || {}
+              : {};
+          const mergedMeta = { ...ctxMeta, ...baseMeta };
+          const fromMeta =
+            typeof mergedMeta?.rawMappingText === "string"
+              ? mergedMeta.rawMappingText
+              : "";
+          const fromText = typeof resp?.text === "string" ? resp.text : "";
+          const text =
+            fromMeta && fromMeta.length >= fromText.length ? fromMeta : fromText;
+          return {
+            ...(resp || {}),
+            text,
+            meta: mergedMeta,
+          } as ProviderResponse;
+        };
         Object.entries(raw).forEach(([pid, val]: [string, any]) => {
           if (Array.isArray(val)) {
-            result[pid] = val;
+            result[pid] = val.map(hydrateTextFromMeta);
           } else {
-            result[pid] = [val];
+            result[pid] = [hydrateTextFromMeta(val)];
           }
         });
         return result;

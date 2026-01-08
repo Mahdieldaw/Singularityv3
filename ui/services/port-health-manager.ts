@@ -155,7 +155,7 @@ export class PortHealthManager {
   }
 
   private handleDisconnect() {
-    console.warn("[PortHealthManager] Port disconnected");
+    console.log("[PortHealthManager] Port disconnected (idle or closed)");
     this.isConnected = false;
     this.stopHealthCheck();
 
@@ -168,7 +168,7 @@ export class PortHealthManager {
   private handleUnhealthyPort() {
     if (!this.isConnected) return;
 
-    console.warn("[PortHealthManager] Port unhealthy, attempting reconnect");
+    console.log("[PortHealthManager] Port unhealthy, attempting reconnect");
     this.isConnected = false;
     this.options.onUnhealthy?.();
 
@@ -182,9 +182,9 @@ export class PortHealthManager {
     const base = this.RECONNECT_DELAY + jitter;
     const delay = base * Math.pow(2, this.reconnectAttempts - 1);
 
-    console.log(
+    /* console.log(
       `[PortHealthManager] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts})`,
-    );
+    ); */
 
     this.reconnectTimeout = window.setTimeout(() => {
       if (this.messageHandler) {

@@ -38,6 +38,7 @@ import { persistenceMonitor } from "./core/PersistenceMonitor.js";
 import { services } from "./core/service-registry.js";
 import { MapperService } from "./core/MapperService";
 import { ResponseProcessor } from "./core/ResponseProcessor";
+import { parseUnifiedMapperOutput } from "../shared/parsing-utils";
 
 // ============================================================================
 // FEATURE FLAGS (Source of Truth)
@@ -627,6 +628,51 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
               else if (r.responseType === "singularity") (singularityResponses[r.providerId] ||= []).push(base);
             }
 
+            const hasUsableMapperArtifact = (artifact) => {
+              if (!artifact || typeof artifact !== "object") return false;
+              const claims = artifact.claims;
+              const edges = artifact.edges;
+              if (!Array.isArray(claims) || !Array.isArray(edges)) return false;
+              if (claims.length === 0 && edges.length === 0) return false;
+              return true;
+            };
+
+            const pickRawMappingText = (resp) => {
+              const meta = resp?.meta || {};
+              const fromMeta = typeof meta.rawMappingText === "string" ? meta.rawMappingText : "";
+              const fromText = typeof resp?.text === "string" ? resp.text : "";
+              if (fromMeta && fromMeta.length >= fromText.length) return fromMeta;
+              return fromText;
+            };
+
+            let hydratedMapperArtifact = primaryAi.mapperArtifact || null;
+            if (!hasUsableMapperArtifact(hydratedMapperArtifact)) {
+              try {
+                const mappingPids = Object.keys(mappingResponses || {});
+                const firstMapping = mappingPids.map(pid => {
+                  const arr = mappingResponses[pid];
+                  return Array.isArray(arr) && arr.length > 0 ? arr[arr.length - 1] : null;
+                }).find(Boolean);
+
+                const rawText = pickRawMappingText(firstMapping);
+                if (rawText && rawText.trim().length > 0) {
+                  const parsed = parseUnifiedMapperOutput(rawText);
+                  hydratedMapperArtifact =
+                    parsed?.artifact ||
+                    (parsed?.map
+                      ? {
+                        ...parsed.map,
+                        query: primaryAi?.meta?.originalPrompt || "",
+                        turn: 0,
+                        timestamp: new Date().toISOString(),
+                        model_count: 0,
+                        souvenir: parsed?.map?.souvenir || "",
+                      }
+                      : null);
+                }
+              } catch (_) { }
+            }
+
             // Extract singularity output from response meta if available
             let extractedSingularityOutput = primaryAi.singularityOutput || null;
 
@@ -642,7 +688,7 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
               user: { id: user.id, text: user.text || user.content || "", createdAt: user.createdAt || 0 },
               providers, mappingResponses, singularityResponses,
               // Include cognitive pipeline data for proper restoration
-              mapperArtifact: primaryAi.mapperArtifact || null,
+              mapperArtifact: hydratedMapperArtifact,
               singularityOutput: extractedSingularityOutput,
               createdAt: user.createdAt || 0, completedAt: primaryAi.updatedAt || 0
             });

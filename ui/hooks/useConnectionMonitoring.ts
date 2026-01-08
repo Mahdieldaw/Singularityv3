@@ -10,38 +10,43 @@ export function useConnectionMonitoring() {
   const setConnectionStatus = useSetAtom(connectionStatusAtom);
 
   useEffect(() => {
-    // The api object already contains an instance of PortHealthManager.
-    // We just need to subscribe to its state changes.
+    let disconnectionTimeout: NodeJS.Timeout | null = null;
+
     const unsubscribe = api.onConnectionStateChange((isConnected) => {
-      console.log(
-        `[useConnectionMonitoring] Connection state updated: ${isConnected}`,
-      );
-      setConnectionStatus((prev) => {
-        const prevState =
-          prev || { isConnected: false, isReconnecting: false, hasEverConnected: false };
-        if (isConnected) {
-          return {
-            isConnected: true,
-            isReconnecting: false,
-            hasEverConnected: true,
-          };
-        }
-        const hasEverConnected = prevState.hasEverConnected;
-        return {
-          isConnected: false,
-          isReconnecting: hasEverConnected,
-          hasEverConnected,
-        };
-      });
+      // Clear any pending disconnection confirmation
+      if (disconnectionTimeout) {
+        clearTimeout(disconnectionTimeout);
+        disconnectionTimeout = null;
+      }
+
+      if (isConnected) {
+        setConnectionStatus({
+          isConnected: true,
+          isReconnecting: false,
+          hasEverConnected: true,
+        });
+      } else {
+        // Delay the "Disconnected" state by 3 seconds.
+        // This gives PortHealthManager time to reconnect silently if it was just an idle timeout.
+        disconnectionTimeout = setTimeout(() => {
+          setConnectionStatus((prev) => {
+            const hasEverConnected = prev?.hasEverConnected ?? false;
+            return {
+              isConnected: false,
+              isReconnecting: hasEverConnected,
+              hasEverConnected,
+            };
+          });
+          disconnectionTimeout = null;
+        }, 3000); // 3s grace period for routine SW churn
+      }
     });
 
-    // Perform an initial check on mount.
     api.checkHealth();
 
-    // The PortHealthManager handles its own intervals. We just need to
-    // clean up our subscription when the component unmounts.
     return () => {
       unsubscribe();
+      if (disconnectionTimeout) clearTimeout(disconnectionTimeout);
     };
   }, [setConnectionStatus]);
 

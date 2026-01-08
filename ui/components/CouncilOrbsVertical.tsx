@@ -3,7 +3,6 @@ import { useAtomValue, useSetAtom } from "jotai";
 import { activeSplitPanelAtom, providerEffectiveStateFamily, turnsMapAtom } from "../state/atoms";
 import { LLM_PROVIDERS_CONFIG } from "../constants";
 import type { AiTurn } from "../types";
-import { useSingularityOutput } from "../hooks/useSingularityOutput";
 import clsx from "clsx";
 
 interface CouncilOrbsVerticalProps {
@@ -24,7 +23,6 @@ export const CouncilOrbsVertical: React.FC<CouncilOrbsVerticalProps> = React.mem
 
     const { turnId, providerId: activeProviderId } = activePanel;
     const turn = turnsMap.get(turnId);
-    const { output: singularityOutput } = useSingularityOutput(turnId);
 
     useEffect(() => {
         if (prevTurnIdRef.current && prevTurnIdRef.current !== turnId) {
@@ -56,7 +54,7 @@ export const CouncilOrbsVertical: React.FC<CouncilOrbsVerticalProps> = React.mem
 
     return (
         <div className={clsx("flex flex-col items-center gap-3 py-4 w-full transition-opacity duration-150", isTransitioning && "opacity-60")}>
-            {displayProviders.map((p, idx) => {
+            {displayProviders.map((p) => {
                 const pid = String(p.id);
                 const isActive = pid === activeProviderId;
 

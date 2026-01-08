@@ -7,10 +7,11 @@ import { CouncilOrbs } from '../CouncilOrbs';
 import { LLM_PROVIDERS_CONFIG } from '../../constants';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { selectedModelsAtom, workflowProgressForTurnFamily, activeSplitPanelAtom, isDecisionMapOpenAtom } from '../../state/atoms';
-import { parseMappingResponse } from '../../../shared/parsing-utils';
+import { parseUnifiedMapperOutput } from '../../../shared/parsing-utils';
 import { getLatestResponse } from '../../utils/turn-helpers';
 import { getProviderName } from '../../utils/provider-helpers';
 import MarkdownDisplay from '../MarkdownDisplay';
+import { CopyButton } from '../CopyButton';
 import { MetricsRibbon } from './MetricsRibbon';
 import StructureGlyph from '../StructureGlyph';
 import { computeProblemStructureFromArtifact, computeStructuralAnalysis } from '../../../src/core/PromptMethods';
@@ -50,6 +51,7 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
 
     const [hasAutoSwitched, setHasAutoSwitched] = useState(false);
     const [hasUserOverride, setHasUserOverride] = useState(false);
+    const [isOrbTrayExpanded, setIsOrbTrayExpanded] = useState(false);
 
     const setActiveMode = (mode: any) => {
         setHasUserOverride(true);
@@ -77,12 +79,10 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
     }, [aiTurn.mappingResponses, activeMapperPid]);
 
     const mapperNarrative = useMemo(() => {
-        const raw = String(
-            latestMapping?.meta?.rawMappingText ||
-            latestMapping?.text ||
-            ""
-        );
-        const parsed = parseMappingResponse(raw);
+        const fromMeta = String((latestMapping?.meta as any)?.rawMappingText || "");
+        const fromText = String(latestMapping?.text || "");
+        const raw = fromMeta && fromMeta.length >= fromText.length ? fromMeta : fromText;
+        const parsed = parseUnifiedMapperOutput(raw);
         return parsed.narrative || "";
     }, [latestMapping]);
 
@@ -96,6 +96,31 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
         if (keys.length > 0) return keys;
         return LLM_PROVIDERS_CONFIG.filter(p => !!selectedModels?.[p.id]).map(p => p.id);
     }, [aiTurn, selectedModels]);
+
+    const orbProviderIds = useMemo(() => {
+        const ids = [
+            ...visibleProviderIds,
+            ...(activeMapperPid ? [String(activeMapperPid)] : []),
+        ].filter(Boolean).map(String);
+        return Array.from(new Set(ids));
+    }, [activeMapperPid, visibleProviderIds]);
+
+    const orbVoiceProviderId = useMemo(() => {
+        const fromMeta = activeMapperPid ? String(activeMapperPid) : null;
+        if (fromMeta) return fromMeta;
+        const fromMapping = Object.keys(aiTurn.mappingResponses || {})[0];
+        if (fromMapping) return String(fromMapping);
+        return orbProviderIds[0] ? String(orbProviderIds[0]) : null;
+    }, [activeMapperPid, aiTurn.mappingResponses, orbProviderIds]);
+
+    const isWorkflowSettled = useMemo(() => {
+        const states = Object.values(workflowProgress || {});
+        if (states.length === 0) return false;
+        return states.every((p: any) => {
+            const stage = String(p?.stage || 'idle');
+            return stage === 'idle' || stage === 'complete';
+        });
+    }, [workflowProgress]);
 
     // Compute structural analysis
     const structuralAnalysis = useMemo(() => {
@@ -124,82 +149,89 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
 
     return (
         <div className="w-full max-w-3xl mx-auto animate-in fade-in duration-500">
-            {/* === SINGULARITY VIEW (Front and Center) === */}
+            {/* === UNIFIED HEADER (Toggle + Orbs + Metrics) === */}
+            <div className="flex flex-col gap-6 mb-8">
+                {/* View Toggle */}
+                {hasSingularityOutput && (
+                    <div className="flex justify-center">
+                        <button
+                            onClick={() => setActiveMode(showSingularity ? 'artifact' : 'singularity')}
+                            className="flex items-center gap-2 px-4 py-2 rounded-full bg-surface-raised border border-border-subtle hover:bg-surface-highlight text-sm font-medium text-text-secondary transition-all shadow-sm"
+                        >
+                            <span>{showSingularity ? '🗺️' : '✨'}</span>
+                            <span>{showSingularity ? 'See Analysis' : 'Back to Response'}</span>
+                        </button>
+                    </div>
+                )}
+
+                {/* Council Orbs */}
+                <div className="flex justify-center">
+                    <div
+                        onMouseEnter={() => setIsOrbTrayExpanded(true)}
+                        onMouseLeave={() => setIsOrbTrayExpanded(false)}
+                        className="transition-all duration-200"
+                    >
+                        <CouncilOrbs
+                            providers={LLM_PROVIDERS_CONFIG}
+                            turnId={aiTurn.id}
+                            voiceProviderId={orbVoiceProviderId}
+                            visibleProviderIds={
+                                !isStreaming && isWorkflowSettled && !isOrbTrayExpanded
+                                    ? (orbVoiceProviderId ? [String(orbVoiceProviderId)] : [])
+                                    : orbProviderIds
+                            }
+                            variant={isStreaming ? "active" : "historical"}
+                            workflowProgress={workflowProgress}
+                            onOrbClick={(pid) => setActiveSplitPanel({ turnId: aiTurn.id, providerId: pid })}
+                        />
+                    </div>
+                </div>
+
+                {/* Structural Summary (Ribbon + Glyph) */}
+                {structuralAnalysis && (
+                    <div className="space-y-4 animate-in fade-in slide-in-from-top-2 duration-500">
+                        <MetricsRibbon
+                            artifact={aiTurn.mapperArtifact}
+                            analysis={structuralAnalysis}
+                            problemStructure={problemStructure}
+                        />
+
+                        {problemStructure && (
+                            <div className="flex justify-center p-4 bg-surface-raised/30 rounded-xl border border-border-subtle/50">
+                                <div className="flex flex-col items-center gap-2">
+                                    <div className="text-[10px] uppercase tracking-widest text-text-muted font-bold">
+                                        Structural Topology
+                                    </div>
+                                    <StructureGlyph
+                                        pattern={problemStructure.primaryPattern}
+                                        claimCount={aiTurn.mapperArtifact?.claims?.length || 0}
+                                        width={320}
+                                        height={140}
+                                        onClick={() => setIsDecisionMapOpen({ turnId: aiTurn.id })}
+                                    />
+                                    <div className="text-[11px] text-text-muted italic">
+                                        {problemStructure.confidence > 0.7
+                                            ? `High confidence ${problemStructure.primaryPattern} pattern detected`
+                                            : `Emerging ${problemStructure.primaryPattern} structure`}
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                )}
+            </div>
+
+            {/* === MAIN CONTENT AREA === */}
             {showSingularity ? (
                 <SingularityOutputView
                     aiTurn={aiTurn}
                     singularityState={singularityState}
                     onRecompute={triggerAndSwitch}
                     isLoading={isTransitioning}
-                    onViewAnalysis={() => setActiveMode('artifact')}
                 />
             ) : (
-                /* === INTERIM / ANALYSIS VIEW === */
-                <div className="space-y-6">
-                    {/* Header: Toggle back to response if available */}
-                    {hasSingularityOutput && (
-                        <div className="flex justify-center mb-4">
-                            <button
-                                onClick={() => setActiveMode('singularity')}
-                                className="flex items-center gap-2 px-4 py-2 rounded-full bg-surface-raised border border-border-subtle hover:bg-surface-highlight text-sm font-medium text-text-secondary transition-all"
-                            >
-                                <span>✨</span>
-                                <span>Back to Response</span>
-                            </button>
-                        </div>
-                    )}
-
-                    {/* Council Orbs - Always visible during processing/analysis */}
-                    <div className="flex justify-center">
-                        <CouncilOrbs
-                            providers={LLM_PROVIDERS_CONFIG}
-                            turnId={aiTurn.id}
-                            voiceProviderId={activeMapperPid || Object.keys(aiTurn.mappingResponses || {})[0] || null}
-                            visibleProviderIds={visibleProviderIds}
-                            variant={isStreaming ? "active" : "historical"}
-                            workflowProgress={workflowProgress}
-                            onOrbClick={(pid) => setActiveSplitPanel({ turnId: aiTurn.id, providerId: pid })}
-                        />
-                    </div>
-
-                    {/* Structural Summary: Ribbon + Glyph */}
-                    {structuralAnalysis && (
-                        <div className="space-y-4">
-                            <MetricsRibbon
-                                claimsCount={aiTurn.mapperArtifact?.claims?.length || 0}
-                                ghostCount={aiTurn.mapperArtifact?.ghosts?.length || 0}
-                                problemStructure={problemStructure}
-                                graphAnalysis={structuralAnalysis.graph}
-                                enrichedClaims={structuralAnalysis.claimsWithLeverage}
-                                ratios={structuralAnalysis.ratios}
-                                ghosts={aiTurn.mapperArtifact?.ghosts || []}
-                            />
-                            
-                            {problemStructure && (
-                                <div className="flex justify-center p-4 bg-surface-raised/30 rounded-xl border border-border-subtle/50">
-                                    <div className="flex flex-col items-center gap-2">
-                                        <div className="text-[10px] uppercase tracking-widest text-text-muted font-bold">
-                                            Structural Topology
-                                        </div>
-                                        <StructureGlyph
-                                            pattern={problemStructure.primaryPattern}
-                                            claimCount={aiTurn.mapperArtifact?.claims?.length || 0}
-                                            width={320}
-                                            height={140}
-                                            onClick={() => setIsDecisionMapOpen({ turnId: aiTurn.id })}
-                                        />
-                                        <div className="text-[11px] text-text-muted italic">
-                                            {problemStructure.confidence > 0.7 
-                                                ? `High confidence ${problemStructure.primaryPattern} pattern detected`
-                                                : `Emerging ${problemStructure.primaryPattern} structure`}
-                                        </div>
-                                    </div>
-                                </div>
-                            )}
-                        </div>
-                    )}
-
-                    {/* Mapper Narrative Card */}
+                /* === INTERIM / ANALYSIS BUBBLE === */
+                <div className="animate-in fade-in duration-500">
                     {mapperNarrative ? (
                         <div className="bg-surface border border-border-subtle rounded-2xl overflow-hidden shadow-sm">
                             <div className="px-4 py-3 border-b border-border-subtle bg-surface-highlight/10 flex items-center justify-between">
@@ -214,18 +246,25 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
                                         </span>
                                     )}
                                 </div>
-                                <button
-                                    onClick={() => setIsDecisionMapOpen({ turnId: aiTurn.id })}
-                                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-surface-raised hover:bg-surface-highlight border border-border-subtle text-xs text-text-secondary transition-colors"
-                                    title="Open Decision Map"
-                                >
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                        <rect width="18" height="18" x="3" y="3" rx="2" ry="2" />
-                                        <line x1="3" x2="21" y1="9" y2="9" />
-                                        <line x1="9" x2="9" y1="21" y2="9" />
-                                    </svg>
-                                    <span>Map</span>
-                                </button>
+                                <div className="flex items-center gap-2">
+                                    <CopyButton
+                                        text={mapperNarrative}
+                                        label="Copy mapper narrative"
+                                        variant="icon"
+                                    />
+                                    <button
+                                        onClick={() => setIsDecisionMapOpen({ turnId: aiTurn.id })}
+                                        className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-surface-raised hover:bg-surface-highlight border border-border-subtle text-xs text-text-secondary transition-colors"
+                                        title="Open Decision Map"
+                                    >
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                            <rect width="18" height="18" x="3" y="3" rx="2" ry="2" />
+                                            <line x1="3" x2="21" y1="9" y2="9" />
+                                            <line x1="9" x2="9" y1="21" y2="9" />
+                                        </svg>
+                                        <span>Map</span>
+                                    </button>
+                                </div>
                             </div>
                             <div className="px-6 py-6 md:px-8 text-sm text-text-muted leading-relaxed font-serif">
                                 <MarkdownDisplay content={mapperNarrative} />
