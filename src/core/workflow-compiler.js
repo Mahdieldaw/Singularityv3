@@ -161,8 +161,6 @@ export class WorkflowCompiler {
       type: "mapping",
       payload: {
         mappingProvider: mapper,
-        // Explicitly allow mapper to continue thread from the batch step when available
-        continueFromBatchStep: linkIds.batchStepId || undefined,
         sourceStepIds: linkIds.batchStepId ? [linkIds.batchStepId] : undefined,
         providerOrder: Array.isArray(request.providers)
           ? request.providers.slice()

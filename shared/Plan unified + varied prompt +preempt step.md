@@ -7,14 +7,15 @@ Key principle: Full prompt on first turn only. Subsequent turns receive minimal 
 The Flow
 text
 
-STARTER (2 turns)
+STARTER (variable turns)
   Turn 1: Full prompt with structural analysis. Responds.
-  Turn 2: Light wrapper with handover instructions. Writes handover.
+  Turn 2+: Light wrapper with handover capability. Continues naturally.
+  When ready: Writes handover.
   → Transition to Explorer
 
 EXPLORER (variable turns)
   Turn 1: Full prompt with intent handover. Fresh instance.
-  Turn 2+: Light wrapper. Continues exploring.
+  Turn 2+: Light wrapper with workflow capability. Continues naturally.
   When ready: Writes WORKFLOW signal with batch prompt.
   → Transition to Executor
 
@@ -169,21 +170,21 @@ You are Singularity—unified intelligence synthesized from multiple expert pers
 Respond.
 No handover instructions. Clean focus on the structural response.
 
-buildStarterTurn2Wrapper(userMessage)
-Used on Turn 2. Wraps the user message with handover instructions.
+buildStarterContinueWrapper(userMessage)
+Used on Turn 2+ of starter phase. Continues naturally with handover capability.
 
 text
 
-The user has replied. Respond naturally to their message, then write an Intent Handover.
+Continue the conversation naturally.
 
-The handover captures your interpretation—not just what was said, but what it means:
-- What do they actually want?
-- What constraints surfaced?
-- How did they engage with your framing?
-- What did they volunteer unprompted?
-- What remains unclear?
+You may write an Intent Handover when you have sufficient signal:
+- Their goal is understood (not just the question they asked)
+- Some constraints have surfaced (time, resources, skill, stakes)
+- They've engaged with your framing (accepted, resisted, or redirected)
 
-After your response, append:
+If they're still orienting, exploring the analysis, or haven't revealed enough—continue without handover. There's no rush.
+
+To hand over, append after your response:
 
 <<<HANDOVER>>>
 shape: {shape from turn 1}
@@ -192,13 +193,13 @@ tensions: [list]
 gaps: [list]
 user_query: {their original question}
 starter_response: {brief summary of your turn 1 response}
-user_reply: {what they just said}
-goal: {your interpretation of what they want}
+user_reply: {their most recent message}
+goal: {your interpretation of what they actually want}
 constraints: [what limits them]
-accepted_framing: {how they engaged with your framing}
+accepted_framing: {how they engaged}
 resisted_framing: {what they pushed back on, or null}
-unprompted_reveals: [what they volunteered without prompting]
-still_unclear: [what needs further exploration]
+unprompted_reveals: [what they volunteered]
+still_unclear: [what the explorer should probe]
 effective_stance: explore|decide|challenge
 <<<END>>>
 
@@ -309,14 +310,14 @@ Structure:
 
 Continue exploring. Trigger workflow only when commitment crystallizes.
 buildExplorerContinueWrapper(userMessage)
-Used on Turn 2+ of explorer phase. Minimal—context is in thread.
+Used on Turn 2+ of explorer phase. Continues naturally with workflow capability.
 
 text
 
-Continue the exploration.
+Continue the conversation naturally.
 
 "{userMessage}"
-That's it. The explorer already knows its role, the handover, everything. Just keep going.
+You may trigger WORKFLOW when sufficient signal emerges; otherwise continue without triggering.
 
 Part 5: Executor Prompts
 Create src/services/concierge/executor.prompt.ts:
@@ -468,7 +469,7 @@ async function executeConcierge(userMessage, analysis, phaseState) {
       prompt = buildStarterInitialPrompt(userMessage, analysis, stance);
     } else {
       action = 'continue';
-      prompt = buildStarterTurn2Wrapper(userMessage);
+      prompt = buildStarterContinueWrapper(userMessage);
     }
   }
   

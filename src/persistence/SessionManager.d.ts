@@ -70,6 +70,8 @@ export declare class SessionManager {
 
   getProviderContexts(sessionId: string, threadId?: string): any;
 
+  getConciergePhaseState(sessionId: string): Promise<any>;
+  setConciergePhaseState(sessionId: string, phaseState: any): Promise<boolean>;
 
   getPersistenceStatus(): PersistenceStatus;
 }

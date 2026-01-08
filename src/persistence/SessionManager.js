@@ -181,6 +181,7 @@ export class SessionManager {
       updatedAt: now,
       userId: "default-user",
       provider: "multi",
+      conciergePhaseState: this._defaultConciergePhaseState(),
     };
     await this.adapter.put("sessions", sessionRecord);
 
@@ -1236,7 +1237,54 @@ export class SessionManager {
     }
   }
 
+  _defaultConciergePhaseState() {
+    return {
+      currentPhase: "starter",
+      turnInPhase: 0,
+      conciergeContextMeta: null,
+      intentHandover: null,
+      executionHandover: null,
+      activeWorkflow: null,
+      pendingWorkflowAnalysis: null,
+      pendingStepBatchAnalysis: null,
+    };
+  }
 
+  async getConciergePhaseState(sessionId) {
+    try {
+      if (!this.adapter || !this.adapter.isReady || !this.adapter.isReady()) {
+        return this._defaultConciergePhaseState();
+      }
+      const session = await this.adapter.get("sessions", sessionId);
+      const state = session?.conciergePhaseState;
+      if (!state || typeof state !== "object") return this._defaultConciergePhaseState();
+      return {
+        ...this._defaultConciergePhaseState(),
+        ...state,
+      };
+    } catch (_) {
+      return this._defaultConciergePhaseState();
+    }
+  }
+
+  async setConciergePhaseState(sessionId, phaseState) {
+    try {
+      if (!this.adapter) return false;
+      const session = await this.adapter.get("sessions", sessionId);
+      if (!session) return false;
+      const now = Date.now();
+      const updated = {
+        ...session,
+        conciergePhaseState: this._toJsonSafe(phaseState) || this._defaultConciergePhaseState(),
+        lastActivity: now,
+        updatedAt: now,
+      };
+      await this.adapter.put("sessions", updated, sessionId);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
 
   /**
    * Get persistence adapter status

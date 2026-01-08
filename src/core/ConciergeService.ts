@@ -200,7 +200,7 @@ function getShapeDefaultStance(shape: ProblemStructure): { stance: ConciergeStan
 // STANCE GUIDANCE
 // ═══════════════════════════════════════════════════════════════════════════
 
-function getStanceGuidance(stance: ConciergeStance): StanceGuidance {
+export function getStanceGuidance(stance: ConciergeStance): StanceGuidance {
     switch (stance) {
         case 'decide':
             return {
@@ -761,7 +761,7 @@ function buildGenericBrief(analysis: StructuralAnalysis): string {
 // SHAPE GUIDANCE
 // ═══════════════════════════════════════════════════════════════════════════
 
-function getShapeGuidance(shape: ProblemStructure): string {
+export function getShapeGuidance(shape: ProblemStructure): string {
     const guidance: Record<ProblemStructure['primaryPattern'], string> = {
         settled: `**Shape Note: SETTLED**
 The landscape has strong agreement. Speak with confidence—the structure supports it.
@@ -811,7 +811,7 @@ Identify what context would help.`,
 // MAIN BRIEF DISPATCHER
 // ═══════════════════════════════════════════════════════════════════════════
 
-function buildStructuralBrief(analysis: StructuralAnalysis): string {
+export function buildStructuralBrief(analysis: StructuralAnalysis): string {
     const { shape, landscape, ratios, ghostAnalysis } = analysis;
 
     let brief = "";
@@ -1858,6 +1858,7 @@ export async function handleTurn(
 export const ConciergeService = {
     selectStance,
     buildConciergePrompt,
+    buildStructuralBrief,
     postProcess,
     detectMachineryLeakage,
     isMetaQuery,

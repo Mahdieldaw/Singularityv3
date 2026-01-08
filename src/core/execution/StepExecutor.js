@@ -331,7 +331,7 @@ Answer the user's message directly. Use context only to disambiguate.
   }
 
   async executeMappingStep(step, context, stepResults, workflowContexts, resolvedContext, options) {
-    const { streamingManager, contextManager, persistenceCoordinator } = options;
+    const { streamingManager } = options;
     const artifactProcessor = new ArtifactProcessor();
     const payload = step.payload;
     const sourceData = await this._resolveSourceData(
@@ -365,16 +365,6 @@ Answer the user's message directly. Use context only to disambiguate.
       citationOrder,
     );
 
-    const providerContexts = contextManager.resolveProviderContext(
-      payload.mappingProvider,
-      context,
-      payload,
-      workflowContexts,
-      stepResults,
-      resolvedContext,
-      "Mapping",
-    );
-
     const promptLength = mappingPrompt.length;
     console.log(`[StepExecutor] Mapping prompt length for ${payload.mappingProvider}: ${promptLength} chars`);
 
@@ -391,9 +381,6 @@ Answer the user's message directly. Use context only to disambiguate.
         {
           sessionId: context.sessionId,
           useThinking: payload.useThinking,
-          providerContexts: Object.keys(providerContexts).length
-            ? providerContexts
-            : undefined,
           providerMeta: step?.payload?.providerMeta,
           onPartial: (providerId, chunk) => {
             streamingManager.dispatchPartialDelta(
@@ -482,17 +469,12 @@ Answer the user's message directly. Use context only to disambiguate.
             const finalResultWithMeta = {
               ...finalResult,
               meta: {
-                ...(finalResult?.meta || {}),
                 citationSourceOrder,
                 rawMappingText: rawText,
                 ...(allOptions ? { allAvailableOptions: allOptions } : {}),
                 ...(graphTopology ? { graphTopology } : {}),
               },
             };
-
-            persistenceCoordinator.persistProviderContextsAsync(context.sessionId, {
-              [payload.mappingProvider]: finalResultWithMeta,
-            });
 
             try {
               if (finalResultWithMeta?.meta) {
@@ -676,7 +658,7 @@ Answer the user's message directly. Use context only to disambiguate.
   }
 
   async _executeGenericSingleStep(step, context, providerId, prompt, stepType, options, parseOutputFn) {
-    const { streamingManager, persistenceCoordinator } = options;
+    const { streamingManager, persistenceCoordinator, sessionManager } = options;
     const { payload } = step;
 
     console.log(`[StepExecutor] ${stepType} prompt for ${providerId}: ${prompt.length} chars`);
@@ -688,7 +670,25 @@ Answer the user's message directly. Use context only to disambiguate.
       throw new Error(`INPUT_TOO_LONG: Prompt length ${prompt.length} exceeds limit ${limits.maxInputChars} for ${providerId}`);
     }
 
+    const resolveProviderContextsForPid = async (pid) => {
+      const explicit = payload?.providerContexts;
+      if (explicit && typeof explicit === "object" && explicit[pid]) return explicit;
+
+      try {
+        if (!sessionManager?.getProviderContexts) return undefined;
+        const ctxs = await sessionManager.getProviderContexts(context.sessionId);
+        const meta = ctxs?.[pid]?.meta;
+        if (meta && typeof meta === "object" && Object.keys(meta).length > 0) {
+          return { [pid]: { meta, continueThread: true } };
+        }
+      } catch (_) { }
+
+      return undefined;
+    };
+
     const runRequest = async (pid) => {
+      const providerContexts = await resolveProviderContextsForPid(pid);
+
       return new Promise((resolve, reject) => {
         this.orchestrator.executeParallelFanout(
           prompt,
@@ -696,6 +696,7 @@ Answer the user's message directly. Use context only to disambiguate.
           {
             sessionId: context.sessionId,
             useThinking: options.useThinking || payload.useThinking || false,
+            providerContexts,
             onPartial: (id, chunk) => {
               streamingManager.dispatchPartialDelta(
                 context.sessionId,
@@ -731,6 +732,12 @@ Answer the user's message directly. Use context only to disambiguate.
                 let outputData = null;
                 try {
                   outputData = parseOutputFn(finalResult.text);
+                  if (outputData && typeof outputData === "object") {
+                    outputData.providerId = pid;
+                    if (outputData.pipeline && typeof outputData.pipeline === "object") {
+                      outputData.pipeline.providerId = pid;
+                    }
+                  }
                 } catch (parseErr) {
                   console.warn(`[StepExecutor] Output parsing failed for ${stepType}:`, parseErr);
                   // We continue with raw text if parsing fails, but mark it? 
@@ -816,7 +823,6 @@ Answer the user's message directly. Use context only to disambiguate.
       throw new Error("Singularity mode requires a MapperArtifact.");
     }
 
-    // DEBUG: Log what mapperArtifact we received
     console.log('[StepExecutor] executeSingularityStep mapperArtifact:', {
       hasArtifact: !!mapperArtifact,
       claimCount: mapperArtifact?.claims?.length,
@@ -826,64 +832,99 @@ Answer the user's message directly. Use context only to disambiguate.
       query: mapperArtifact?.query?.slice(0, 50),
     });
 
-    // Import ConciergeService dynamically to avoid circular dependencies
     let ConciergeService;
     try {
       const module = await import('../ConciergeService');
       ConciergeService = module.ConciergeService;
     } catch (e) {
       console.warn("[StepExecutor] Failed to import ConciergeService:", e);
-      // Fallback to a simple prompt if ConciergeService unavailable
       ConciergeService = null;
     }
 
     let singularityPrompt;
     let stanceSelection = null;
     let analysis = null;
-    if (ConciergeService && ConciergeService.buildConciergePrompt) {
-      // Compute structural analysis for shape-guided prompting
+
+    let parseIntentHandover = null;
+    let parseBatchSignal = null;
+    try {
+      const mod = await import('../../services/concierge/handover.parser');
+      parseIntentHandover = mod.parseIntentHandover;
+      parseBatchSignal = mod.parseBatchSignal;
+    } catch (_) { }
+
+    if (!ConciergeService) {
+      throw new Error("ConciergeService is not available. Cannot execute Singularity step.");
+    }
+
+    analysis = payload.structuralAnalysis || null;
+    if (!analysis) {
       try {
         const { computeStructuralAnalysis } = await import('../PromptMethods');
-        console.log('[StepExecutor] Calling computeStructuralAnalysis...');
         analysis = computeStructuralAnalysis(mapperArtifact);
-        console.log('[StepExecutor] computeStructuralAnalysis result:', {
-          hasAnalysis: !!analysis,
-          shape: analysis?.shape?.primaryPattern,
-          shapeHasData: !!analysis?.shape?.data,
-          claimCount: analysis?.landscape?.claimCount,
-          modelCount: analysis?.landscape?.modelCount,
-        });
       } catch (e) {
         console.error("[StepExecutor] computeStructuralAnalysis failed:", e);
         throw new Error(`Structural Analysis Failed: ${e.message || String(e)}`);
       }
-
-      if (ConciergeService.selectStance && analysis?.shape) {
-        try {
-          stanceSelection = ConciergeService.selectStance(
-            payload.originalPrompt,
-            analysis.shape
-          );
-        } catch (e) {
-          console.warn("[StepExecutor] selectStance failed:", e);
-        }
-      }
-
-      singularityPrompt = ConciergeService.buildConciergePrompt(
-        payload.originalPrompt,
-        analysis
-      );
-    } else {
-      throw new Error("ConciergeService is not available. Cannot execute Singularity step.");
     }
 
-    // Custom parse function that detects machinery leakage
+    if (payload.stance && typeof payload.stance === "string") {
+      stanceSelection = { stance: payload.stance, reason: 'user_override', confidence: 1.0 };
+    } else if (ConciergeService.selectStance && analysis?.shape) {
+      try {
+        stanceSelection = ConciergeService.selectStance(
+          payload.originalPrompt,
+          analysis.shape
+        );
+      } catch (e) {
+        console.warn("[StepExecutor] selectStance failed:", e);
+      }
+    }
+
+    if (payload.conciergePrompt && typeof payload.conciergePrompt === "string") {
+      singularityPrompt = payload.conciergePrompt;
+    } else if (ConciergeService.buildConciergePrompt) {
+      singularityPrompt = ConciergeService.buildConciergePrompt(
+        payload.originalPrompt,
+        analysis,
+        payload.conciergeOptions || undefined,
+      );
+    } else {
+      throw new Error("ConciergeService.buildConciergePrompt is not available.");
+    }
+
     const parseSingularityOutput = (text) => {
+      const rawText = String(text || "");
+
+      let cleanedText = rawText;
+      let intentHandover = null;
+      let batchSignal = null;
+
+      try {
+        if (typeof parseIntentHandover === "function") {
+          const parsed = parseIntentHandover(rawText);
+          if (parsed?.handover) {
+            intentHandover = parsed.handover;
+            cleanedText = parsed.userResponse || cleanedText;
+          }
+        }
+      } catch (_) { }
+
+      try {
+        if (typeof parseBatchSignal === "function") {
+          const parsed = parseBatchSignal(rawText);
+          if (parsed?.type) {
+            batchSignal = parsed;
+            cleanedText = parsed.userResponse || cleanedText;
+          }
+        }
+      } catch (_) { }
+
       let leakageDetected = false;
       let leakageViolations = [];
 
       if (ConciergeService && ConciergeService.detectMachineryLeakage) {
-        const leakCheck = ConciergeService.detectMachineryLeakage(text);
+        const leakCheck = ConciergeService.detectMachineryLeakage(cleanedText);
         leakageDetected = !!leakCheck.leaked;
         leakageViolations = leakCheck.violations || [];
         if (leakCheck.leaked) {
@@ -906,12 +947,17 @@ Answer the user's message directly. Use context only to disambiguate.
       };
 
       return {
-        text,
+        text: cleanedText,
         providerId: payload.singularityProvider,
         timestamp: Date.now(),
         leakageDetected,
         leakageViolations,
         pipeline,
+        parsed: {
+          intentHandover,
+          batchSignal,
+          rawText,
+        },
       };
     };
 
