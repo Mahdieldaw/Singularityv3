@@ -163,6 +163,11 @@ export class ContextResolver {
     const providerContextsAtSourceTurn = sourceTurn.providerContexts || {};
     const sourceUserMessage = await this._getUserMessageForTurn(sourceTurn);
 
+    // Extract frozen prompt metadata for singularity recomputes
+    const singularityResponse = responses.find(r => r.responseType === 'singularity');
+    const frozenSingularityPromptType = singularityResponse?.meta?.frozenSingularityPromptType;
+    const frozenSingularityPromptSeed = singularityResponse?.meta?.frozenSingularityPromptSeed;
+
     return {
       type: "recompute",
       sessionId,
@@ -173,6 +178,8 @@ export class ContextResolver {
       stepType,
       targetProvider,
       sourceUserMessage,
+      frozenSingularityPromptType,
+      frozenSingularityPromptSeed,
     };
   }
 

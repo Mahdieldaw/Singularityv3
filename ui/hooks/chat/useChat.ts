@@ -20,6 +20,7 @@ import {
   isHistoryPanelOpenAtom,
   selectedModeAtom,
   activeProviderTargetAtom,
+  batchAutoRunEnabledAtom,
 } from "../../state/atoms";
 // Optimistic AI turn creation is now handled upon TURN_CREATED from backend
 import type {
@@ -49,6 +50,7 @@ export function useChat() {
   const turnIds = useAtomValue(turnIdsAtom);
   const singularityProvider = useAtomValue(singularityProviderAtom);
   const selectedMode = useAtomValue(selectedModeAtom);
+  const batchAutoRunEnabled = useAtomValue(batchAutoRunEnabledAtom);
 
 
 
@@ -170,6 +172,7 @@ export function useChat() {
             providerMeta: {},
             clientUserTurnId: userTurnId,
             mode: selectedMode as any,
+            batchAutoRunEnabled, // FEATURE 1: Gate batch after turn 1
           };
 
         // AI turn will be created upon TURN_CREATED from backend

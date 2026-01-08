@@ -8,7 +8,7 @@ export class PersistenceCoordinator {
    * Fire-and-forget persistence helper: batch update provider contexts and save session
    * without blocking the workflow's resolution path.
    */
-  persistProviderContextsAsync(sessionId, updates) {
+  persistProviderContextsAsync(sessionId, updates, contextRole = null) {
     try {
       // Defer to next tick to ensure prompt/mapping resolution proceeds immediately
       setTimeout(() => {
@@ -16,8 +16,7 @@ export class PersistenceCoordinator {
           this.sessionManager.updateProviderContextsBatch(
             sessionId,
             updates,
-            true,
-            { skipSave: true },
+            { skipSave: true, contextRole },
           );
           this.sessionManager.saveSession(sessionId);
         } catch (e) {
@@ -157,11 +156,10 @@ export class PersistenceCoordinator {
     );
   }
 
-  updateProviderContextsBatch(sessionId, updates, continueThread, options) {
+  updateProviderContextsBatch(sessionId, updates, options) {
     return this.sessionManager.updateProviderContextsBatch(
       sessionId,
       updates,
-      continueThread,
       options
     );
   }

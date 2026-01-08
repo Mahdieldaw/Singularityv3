@@ -19,6 +19,7 @@ import {
   mappingProviderAtom,
   singularityProviderAtom,
   providerLocksAtom,
+  batchAutoRunEnabledAtom,
 } from "../state/atoms";
 import { useChat } from "../hooks/chat/useChat";
 import api from "../services/extension-api";
@@ -67,6 +68,11 @@ const ChatInput = ({
   const [mappingProvider, setMappingProvider] = useAtom(mappingProviderAtom);
   const [singularityProvider, setSingularityProvider] = useAtom(singularityProviderAtom);
   const setLocks = useSetAtom(providerLocksAtom);
+  const [batchAutoRunEnabled, setBatchAutoRunEnabled] = useAtom(batchAutoRunEnabledAtom);
+
+  const toggleBatchGating = useCallback(() => {
+    setBatchAutoRunEnabled(prev => !prev);
+  }, [setBatchAutoRunEnabled]);
 
   // Callbacks
   const handleSend = useCallback((prompt: string) => {
@@ -303,17 +309,35 @@ const ChatInput = ({
         </div>
 
         <div
-          className="flex items-center gap-1.5 px-2.5 py-1.5 bg-chip-soft border border-border-subtle rounded-full text-text-secondary text-xs whitespace-nowrap opacity-90 cursor-default"
-          role="status"
+          className={`flex items-center gap-1.5 px-2.5 py-1.5 bg-chip-soft border rounded-full text-text-secondary text-xs whitespace-nowrap opacity-90 cursor-pointer transition-colors ${batchAutoRunEnabled ? 'border-border-subtle hover:bg-surface-highlight' : 'border-intent-danger/30 bg-intent-danger/5 hover:bg-intent-danger/10'}`}
+          role="button"
           aria-live="polite"
-          title={`System: ${isLoading ? "Working…" : "Ready"} • Providers: ${activeProviderCount} • Mode: ${isVisibleMode ? "Visible" : "Headless"}`}
+          title={batchAutoRunEnabled ? "Batch Auto-Run Enabled: Providers will run automatically after turn 1" : "Batch Gating Active: Only Singularity will run after turn 1 unless manually triggered"}
+          onClick={(e) => {
+            e.stopPropagation();
+            toggleBatchGating();
+          }}
         >
-          <span
-            aria-hidden="true"
-            className={`inline-block w-2 h-2 rounded-full ${isLoading ? 'bg-intent-warning animate-pulse' : 'bg-intent-success'} ${!isReducedMotion && !isLoading ? 'animate-pulse' : ''}`}
-          />
-          <span className="text-text-muted">System</span>
-          <span>• {activeProviderCount}</span>
+          {isLoading ? (
+            <span
+              aria-hidden="true"
+              className="inline-block w-2 h-2 rounded-full bg-intent-warning animate-pulse"
+            />
+          ) : batchAutoRunEnabled ? (
+            <span
+              aria-hidden="true"
+              className={`inline-block w-2 h-2 rounded-full bg-intent-success ${!isReducedMotion ? 'animate-pulse' : ''}`}
+            />
+          ) : (
+            <span
+              aria-hidden="true"
+              className="flex items-center justify-center w-3 h-3 text-intent-danger font-bold text-[10px]"
+            >
+              ⊘
+            </span>
+          )}
+          <span className={batchAutoRunEnabled ? "text-text-muted" : "text-intent-danger/80"}>Singularity</span>
+          <span className={batchAutoRunEnabled ? "" : "text-intent-danger font-medium"}>• 1</span>
         </div>
 
         <div className="relative">

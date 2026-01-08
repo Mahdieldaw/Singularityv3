@@ -249,6 +249,16 @@ export const singularityProviderAtom = atomWithStorage<string | null>(
 );
 
 /**
+ * Batch auto-run toggle for Singularity phases.
+ * When OFF (default), batch providers won't run automatically after turn 1.
+ * User must explicitly enable to trigger batch fanout on follow-up messages.
+ */
+export const batchAutoRunEnabledAtom = atomWithStorage<boolean>(
+  "htos_batch_auto_run",
+  false,
+);
+
+/**
  * Provider locks - stored in chrome.storage.local for backend access
  * UI writes, backend reads. Not atomWithStorage because we need chrome.storage.local
  */

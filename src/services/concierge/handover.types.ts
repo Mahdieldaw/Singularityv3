@@ -4,6 +4,8 @@ export interface ConciergePhaseState {
   currentPhase: ConversationPhase;
   turnInPhase: number;
   conciergeContextMeta: Record<string, any> | null;
+  /** Tracks the last Singularity provider used, for context reset on change */
+  lastSingularityProviderId: string | null;
   intentHandover: IntentHandover | null;
   executionHandover: ExecutionHandover | null;
   activeWorkflow: ActiveWorkflow | null;

@@ -623,6 +623,8 @@ export interface ExtendRequest {
   clientUserTurnId?: string;
   mode?: CognitiveMode;
   artifactCuration?: ArtifactCurationPayload;
+  /** When true, batch providers run automatically even after turn 1 */
+  batchAutoRunEnabled?: boolean;
 }
 
 /**
@@ -639,6 +641,10 @@ export interface RecomputeRequest {
   targetProvider: ProviderKey;
   userMessage?: string;
   useThinking?: boolean;
+  /** Type of concierge prompt used (e.g. starter_1, explorer_1) */
+  frozenSingularityPromptType?: string;
+  /** Seed data needed to rebuild the prompt (e.g. handovers, context meta) */
+  frozenSingularityPromptSeed?: any;
 }
 
 // ============================================================================
@@ -729,6 +735,10 @@ export interface RecomputeContext {
   stepType: "mapping" | "batch" | "singularity";
   targetProvider: ProviderKey;
   sourceUserMessage: string;
+  /** Type of concierge prompt used (e.g. starter_1, explorer_1) */
+  frozenSingularityPromptType?: string;
+  /** Seed data needed to rebuild the prompt (e.g. handovers, context meta) */
+  frozenSingularityPromptSeed?: any;
 }
 
 // ============================================================================

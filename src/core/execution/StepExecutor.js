@@ -198,12 +198,11 @@ Answer the user's message directly. Use context only to disambiguate.
           options.persistenceCoordinator.updateProviderContextsBatch(
             context.sessionId,
             batchUpdates,
-            true, // continueThread
-            { skipSave: true },
+            { skipSave: true, contextRole: "batch" },
           );
 
           // Update contexts async
-          options.persistenceCoordinator.persistProviderContextsAsync(context.sessionId, batchUpdates);
+          options.persistenceCoordinator.persistProviderContextsAsync(context.sessionId, batchUpdates, "batch");
 
           const formattedResults = {};
           const authErrors = [];
@@ -671,12 +670,30 @@ Answer the user's message directly. Use context only to disambiguate.
     }
 
     const resolveProviderContextsForPid = async (pid) => {
+      const role = options.contextRole;
+      const effectivePid = role ? `${pid}:${role}` : pid;
       const explicit = payload?.providerContexts;
-      if (explicit && typeof explicit === "object" && explicit[pid]) return explicit;
+
+      // If we have an explicit context for the scoped ID, use it
+      if (explicit && typeof explicit === "object" && explicit[effectivePid]) {
+        const entry = explicit[effectivePid];
+        const meta = (entry && typeof entry === "object" && "meta" in entry) ? entry.meta : entry;
+        const continueThread = (entry && typeof entry === "object" && "continueThread" in entry) ? entry.continueThread : true;
+        return { [pid]: { meta, continueThread } };
+      }
+
+      // Fallback: check for the raw pid (legacy or default)
+      if (explicit && typeof explicit === "object" && explicit[pid]) {
+        const entry = explicit[pid];
+        const meta = (entry && typeof entry === "object" && "meta" in entry) ? entry.meta : entry;
+        const continueThread = (entry && typeof entry === "object" && "continueThread" in entry) ? entry.continueThread : true;
+        return { [pid]: { meta, continueThread } };
+      }
 
       try {
         if (!sessionManager?.getProviderContexts) return undefined;
-        const ctxs = await sessionManager.getProviderContexts(context.sessionId);
+        // isolation: pass contextRole (e.g. "batch") to get only the scoped thread from DB
+        const ctxs = await sessionManager.getProviderContexts(context.sessionId, "default-thread", { contextRole: options.contextRole });
         const meta = ctxs?.[pid]?.meta;
         if (meta && typeof meta === "object" && Object.keys(meta).length > 0) {
           return { [pid]: { meta, continueThread: true } };
@@ -756,7 +773,7 @@ Answer the user's message directly. Use context only to disambiguate.
                 // 4. Persist Context
                 persistenceCoordinator.persistProviderContextsAsync(context.sessionId, {
                   [pid]: finalResult,
-                });
+                }, options.contextRole);
 
                 resolve({
                   providerId: pid,
@@ -881,16 +898,82 @@ Answer the user's message directly. Use context only to disambiguate.
       }
     }
 
-    if (payload.conciergePrompt && typeof payload.conciergePrompt === "string") {
-      singularityPrompt = payload.conciergePrompt;
-    } else if (ConciergeService.buildConciergePrompt) {
-      singularityPrompt = ConciergeService.buildConciergePrompt(
-        payload.originalPrompt,
-        analysis,
-        payload.conciergeOptions || undefined,
-      );
-    } else {
-      throw new Error("ConciergeService.buildConciergePrompt is not available.");
+    // ══════════════════════════════════════════════════════════════════
+    // FEATURE 3: Rebuild historical prompts for recompute (Efficient Storage)
+    // ══════════════════════════════════════════════════════════════════
+    const promptType = options?.frozenSingularityPromptType || payload.conciergePromptType;
+    const promptSeed = options?.frozenSingularityPromptSeed || payload.conciergePromptSeed;
+
+    if (promptType) {
+      const userMessage = payload.originalPrompt;
+      const stance = stanceSelection?.stance || "default";
+
+      try {
+        switch (promptType) {
+          case "starter_1": {
+            const mod = await import('../../services/concierge/starter.prompt');
+            singularityPrompt = mod.buildStarterInitialPrompt(userMessage, analysis, stance);
+            break;
+          }
+          case "starter_2": {
+            const mod = await import('../../services/concierge/starter.prompt');
+            singularityPrompt = mod.buildStarterContinueWrapperWithSeed(userMessage, promptSeed);
+            break;
+          }
+          case "explorer_1": {
+            const mod = await import('../../services/concierge/explorer.prompt');
+            singularityPrompt = mod.buildExplorerInitialPrompt(promptSeed?.intentHandover, userMessage);
+            break;
+          }
+          case "explorer_2": {
+            const mod = await import('../../services/concierge/explorer.prompt');
+            singularityPrompt = mod.buildExplorerContinueWrapper(userMessage);
+            break;
+          }
+          case "executor_1": {
+            const mod = await import('../../services/concierge/executor.prompt');
+            singularityPrompt = mod.buildExecutorSynthesisPrompt(promptSeed?.executionHandover, analysis);
+            break;
+          }
+          case "executor_2": {
+            const mod = await import('../../services/concierge/executor.prompt');
+            singularityPrompt = mod.buildExecutorPresentationPrompt(analysis);
+            break;
+          }
+          case "step_help_response": {
+            const mod = await import('../../services/concierge/executor.prompt');
+            singularityPrompt = mod.buildStepHelpResultWrapper(analysis, promptSeed?.userMessage || userMessage);
+            break;
+          }
+          case "standard":
+          default:
+            if (ConciergeService.buildConciergePrompt) {
+              singularityPrompt = ConciergeService.buildConciergePrompt(userMessage, analysis, promptSeed);
+            }
+            break;
+        }
+      } catch (e) {
+        console.warn(`[StepExecutor] Rebuilding prompt variant '${promptType}' failed, falling back to standard:`, e);
+      }
+    }
+
+    // Final fallback: Use raw string if available, or build standard
+    if (!singularityPrompt) {
+      if (options?.frozenSingularityPrompt) {
+        singularityPrompt = options.frozenSingularityPrompt;
+      } else if (payload.conciergePrompt && typeof payload.conciergePrompt === "string") {
+        singularityPrompt = payload.conciergePrompt;
+      } else if (ConciergeService.buildConciergePrompt) {
+        singularityPrompt = ConciergeService.buildConciergePrompt(
+          payload.originalPrompt,
+          analysis,
+          payload.conciergeOptions || undefined,
+        );
+      }
+    }
+
+    if (!singularityPrompt) {
+      throw new Error("Could not determine or build Singularity prompt.");
     }
 
     const parseSingularityOutput = (text) => {
@@ -962,7 +1045,7 @@ Answer the user's message directly. Use context only to disambiguate.
     };
 
     return this._executeGenericSingleStep(
-      step, context, payload.singularityProvider, singularityPrompt, "Singularity", options,
+      step, context, payload.singularityProvider, singularityPrompt, "Singularity", { ...options, contextRole: "singularity" },
       parseSingularityOutput
     );
   }

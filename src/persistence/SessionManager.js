@@ -554,15 +554,15 @@ export class SessionManager {
     try {
       Object.entries(result?.batchOutputs || {}).forEach(([pid, output]) => {
         if (output?.meta && Object.keys(output.meta).length > 0)
-          contexts[pid] = this._safeMeta(output.meta);
+          contexts[`${pid}:batch`] = this._safeMeta(output.meta);
       });
       Object.entries(result?.mappingOutputs || {}).forEach(([pid, output]) => {
         if (output?.meta && Object.keys(output.meta).length > 0)
-          contexts[pid] = this._safeMeta(output.meta);
+          contexts[`${pid}:mapping`] = this._safeMeta(output.meta);
       });
       Object.entries(result?.singularityOutputs || {}).forEach(([pid, output]) => {
         if (output?.meta && Object.keys(output.meta).length > 0)
-          contexts[pid] = this._safeMeta(output.meta);
+          contexts[`${pid}:singularity`] = this._safeMeta(output.meta);
       });
     } catch (_) { }
     return contexts;
@@ -1029,8 +1029,8 @@ export class SessionManager {
    * Batch update multiple provider contexts in a single pass.
    * updates shape: { [providerId]: { text?: string, meta?: object } }
    */
-  async updateProviderContextsBatch(sessionId, updates = true, options = {}) {
-    const { skipSave: _skipSave = true } = options;
+  async updateProviderContextsBatch(sessionId, updates = {}, options = {}) {
+    const { skipSave: _skipSave = true, contextRole = null } = options;
     if (!sessionId || !updates || typeof updates !== "object") return;
 
     try {
@@ -1060,12 +1060,15 @@ export class SessionManager {
 
       // Apply updates
       for (const [providerId, result] of Object.entries(updates)) {
-        let contextRecord = latestByProvider[providerId]?.record;
+        // Isolation: if role specified, use suffixed key (e.g. "gemini:batch")
+        const effectivePid = contextRole ? `${providerId}:${contextRole}` : providerId;
+
+        let contextRecord = latestByProvider[effectivePid]?.record;
         if (!contextRecord) {
           contextRecord = {
-            id: `ctx-${sessionId}-${providerId}-${now}-${Math.random().toString(36).slice(2, 8)}`,
+            id: `ctx-${sessionId}-${effectivePid}-${now}-${Math.random().toString(36).slice(2, 8)}`,
             sessionId,
-            providerId,
+            providerId: effectivePid,
             threadId: "default-thread",
             contextData: {},
             isActive: true,
@@ -1108,8 +1111,12 @@ export class SessionManager {
   /**
    * Get provider contexts (persistence-backed, backward compatible shape)
    * Returns an object: { [providerId]: { meta: <contextMeta> } }
+   * @param {string} sessionId
+   * @param {string} _threadId
+   * @param {Object} options { contextRole?: "batch" | "singularity" }
    */
-  async getProviderContexts(sessionId, _threadId = "default-thread") {
+  async getProviderContexts(sessionId, _threadId = "default-thread", options = {}) {
+    const { contextRole = null } = options;
     try {
       if (!sessionId) {
         console.warn(
@@ -1130,9 +1137,22 @@ export class SessionManager {
 
       const contexts = {};
       for (const record of contextRecords) {
-        // The goal is to return an object shaped like: { [providerId]: { meta: {...} } }
         if (record.providerId && record.contextData?.meta) {
-          contexts[record.providerId] = { meta: record.contextData.meta };
+          const pid = record.providerId;
+
+          if (contextRole) {
+            // Only include records with the specific role suffix
+            const suffix = `:${contextRole}`;
+            if (pid.endsWith(suffix)) {
+              const baseId = pid.slice(0, -suffix.length);
+              contexts[baseId] = { meta: record.contextData.meta };
+            }
+          } else {
+            // Legacy/Default: only include records WITHOUT a role suffix (the batch base thread)
+            if (!pid.includes(":")) {
+              contexts[pid] = { meta: record.contextData.meta };
+            }
+          }
         }
       }
 
@@ -1242,6 +1262,7 @@ export class SessionManager {
       currentPhase: "starter",
       turnInPhase: 0,
       conciergeContextMeta: null,
+      lastSingularityProviderId: null,
       intentHandover: null,
       executionHandover: null,
       activeWorkflow: null,
@@ -1283,6 +1304,53 @@ export class SessionManager {
       return true;
     } catch (_) {
       return false;
+    }
+  }
+
+  /**
+   * Granular response update for turn-level metadata
+   */
+  async upsertProviderResponse(sessionId, aiTurnId, providerId, responseType, responseIndex, payload) {
+    if (!this.adapter || !aiTurnId) return;
+
+    try {
+      // Find existing record by compound key
+      const results = await this.adapter.getAllByIndex("provider_responses", "byCompoundKey", [
+        aiTurnId,
+        providerId,
+        responseType,
+        responseIndex
+      ]);
+
+      const existing = results?.[0];
+      const now = Date.now();
+
+      if (existing) {
+        const updated = {
+          ...existing,
+          ...payload,
+          meta: {
+            ...this._safeMeta(existing.meta),
+            ...this._safeMeta(payload?.meta)
+          },
+          updatedAt: now
+        };
+        await this.adapter.put("provider_responses", updated);
+      } else {
+        const record = {
+          sessionId,
+          aiTurnId,
+          providerId,
+          responseType,
+          responseIndex,
+          ...payload,
+          createdAt: now,
+          updatedAt: now
+        };
+        await this.adapter.put("provider_responses", record);
+      }
+    } catch (e) {
+      console.warn("[SessionManager] upsertProviderResponse failed:", e);
     }
   }
 

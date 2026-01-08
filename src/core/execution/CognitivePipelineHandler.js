@@ -154,6 +154,8 @@ export class CognitivePipelineHandler {
           originalPrompt: userMessageForSingularity,
           structuralAnalysis,
           conciergePrompt: synthesisPrompt,
+          conciergePromptType: "executor_1",
+          conciergePromptSeed: { executionHandover: batchSignal.handover },
           useThinking: false,
         },
       };
@@ -168,6 +170,25 @@ export class CognitivePipelineHandler {
           sessionManager: this.sessionManager,
         },
       );
+
+      // Persist prompt type and seed for recomputes
+      if (synthesized?.output) {
+        await this.sessionManager.upsertProviderResponse(
+          context.sessionId,
+          context.canonicalAiTurnId,
+          singularityProviderId,
+          'singularity',
+          0,
+          {
+            ...synthesized.output,
+            meta: {
+              ...(synthesized.output.meta || {}),
+              frozenSingularityPromptType: "executor_1",
+              frozenSingularityPromptSeed: { executionHandover: batchSignal.handover },
+            },
+          }
+        );
+      }
 
       const stepHelpSignal = synthesized?.output?.parsed?.batchSignal || null;
       if (stepHelpSignal?.type === "STEP_HELP" && stepHelpSignal?.batchPrompt) {
@@ -191,6 +212,8 @@ export class CognitivePipelineHandler {
             originalPrompt: userMessageForSingularity,
             structuralAnalysis,
             conciergePrompt: presentationPrompt,
+            conciergePromptType: "executor_2",
+            conciergePromptSeed: { analysis: stepHelp.analysis },
             useThinking: false,
           },
         };
@@ -205,6 +228,25 @@ export class CognitivePipelineHandler {
             sessionManager: this.sessionManager,
           },
         );
+
+        // Persist prompt type and seed for recomputes
+        if (presented?.output) {
+          await this.sessionManager.upsertProviderResponse(
+            context.sessionId,
+            context.canonicalAiTurnId,
+            singularityProviderId,
+            'singularity',
+            0,
+            {
+              ...presented.output,
+              meta: {
+                ...(presented.output.meta || {}),
+                frozenSingularityPromptType: "executor_2",
+                frozenSingularityPromptSeed: { analysis: stepHelp.analysis },
+              },
+            }
+          );
+        }
 
         return { finalResult: presented, workflow, synthesized, stepHelp, phasePatch: { currentPhase: "executor", turnInPhase: 0, executionHandover: batchSignal.handover || null } };
       }
@@ -234,6 +276,8 @@ export class CognitivePipelineHandler {
           originalPrompt: userMessageForSingularity,
           structuralAnalysis,
           conciergePrompt: wrapper,
+          conciergePromptType: "step_help_response",
+          conciergePromptSeed: { analysis: stepHelp.analysis, userMessage: userMessageForSingularity },
           useThinking: false,
         },
       };
@@ -248,6 +292,25 @@ export class CognitivePipelineHandler {
           sessionManager: this.sessionManager,
         },
       );
+
+      // Persist prompt type and seed for recomputes
+      if (answered?.output) {
+        await this.sessionManager.upsertProviderResponse(
+          context.sessionId,
+          context.canonicalAiTurnId,
+          singularityProviderId,
+          'singularity',
+          0,
+          {
+            ...answered.output,
+            meta: {
+              ...(answered.output.meta || {}),
+              frozenSingularityPromptType: "step_help_response",
+              frozenSingularityPromptSeed: { analysis: stepHelp.analysis, userMessage: userMessageForSingularity },
+            },
+          }
+        );
+      }
 
       return { finalResult: answered, workflow: null, synthesized: null, stepHelp, phasePatch: { currentPhase: "executor" } };
     }
@@ -370,37 +433,49 @@ export class CognitivePipelineHandler {
           } catch (_) { }
 
           let conciergePrompt = null;
+          let conciergePromptType = "standard";
+          let conciergePromptSeed = null;
+
           try {
             if (phaseState?.currentPhase === "starter" && (phaseState?.turnInPhase || 0) === 0) {
               const mod = await import('../../services/concierge/starter.prompt');
+              conciergePromptType = "starter_1";
+              conciergePromptSeed = { stance: stanceSelection?.stance || "default" };
               conciergePrompt = mod.buildStarterInitialPrompt(
                 userMessageForSingularity,
                 structuralAnalysis,
-                stanceSelection?.stance || "default",
+                conciergePromptSeed.stance,
               );
             } else if (phaseState?.currentPhase === "starter") {
               const mod = await import('../../services/concierge/starter.prompt');
+              conciergePromptType = "starter_2";
+              conciergePromptSeed = {
+                shape: phaseState?.conciergeContextMeta?.shape || structuralAnalysis?.shape?.primaryPattern || "",
+                userQuery: phaseState?.conciergeContextMeta?.userQuery || "",
+                starterResponse: phaseState?.conciergeContextMeta?.starterResponse || "",
+              };
               conciergePrompt = mod.buildStarterContinueWrapperWithSeed(
                 userMessageForSingularity,
-                {
-                  shape: phaseState?.conciergeContextMeta?.shape || structuralAnalysis?.shape?.primaryPattern || "",
-                  userQuery: phaseState?.conciergeContextMeta?.userQuery || "",
-                  starterResponse: phaseState?.conciergeContextMeta?.starterResponse || "",
-                },
+                conciergePromptSeed,
               );
             } else if (phaseState?.currentPhase === "explorer" && (phaseState?.turnInPhase || 0) === 0 && phaseState?.intentHandover) {
               const mod = await import('../../services/concierge/explorer.prompt');
-              conciergePrompt = mod.buildExplorerInitialPrompt(phaseState.intentHandover, userMessageForSingularity);
+              conciergePromptType = "explorer_1";
+              conciergePromptSeed = { intentHandover: phaseState.intentHandover };
+              conciergePrompt = mod.buildExplorerInitialPrompt(conciergePromptSeed.intentHandover, userMessageForSingularity);
             } else if (phaseState?.currentPhase === "explorer") {
               const mod = await import('../../services/concierge/explorer.prompt');
+              conciergePromptType = "explorer_2";
               conciergePrompt = mod.buildExplorerContinueWrapper(userMessageForSingularity);
             } else {
               const mod = await import('../ConciergeService');
               const ConciergeService = mod.ConciergeService;
+              conciergePromptType = "standard";
+              conciergePromptSeed = { isFirstTurn: false, activeWorkflow: phaseState?.activeWorkflow || undefined };
               conciergePrompt = ConciergeService.buildConciergePrompt(
                 userMessageForSingularity,
                 structuralAnalysis,
-                { isFirstTurn: false, activeWorkflow: phaseState?.activeWorkflow || undefined },
+                conciergePromptSeed,
               );
             }
           } catch (e) {
@@ -410,17 +485,31 @@ export class CognitivePipelineHandler {
           if (!conciergePrompt) {
             const mod = await import('../ConciergeService');
             const ConciergeService = mod.ConciergeService;
+            conciergePromptType = "standard";
             conciergePrompt = ConciergeService.buildConciergePrompt(userMessageForSingularity, structuralAnalysis);
           }
 
           const phaseName = String(phaseState?.currentPhase || "starter");
           const phaseTurn = typeof phaseState?.turnInPhase === "number" ? phaseState.turnInPhase : 0;
 
+          // ══════════════════════════════════════════════════════════════════
+          // FEATURE 2: Detect provider change and reset context (preserve batch data)
+          // ══════════════════════════════════════════════════════════════════
+          const lastProvider = phaseState?.lastSingularityProviderId;
+          const providerChanged = lastProvider && lastProvider !== singularityProviderId;
+
           let providerContexts = undefined;
-          const isPhaseInitializeTurn =
+          let isPhaseInitializeTurn =
             (phaseName === "starter" && phaseTurn === 0) ||
             (phaseName === "explorer" && phaseTurn === 0 && !!phaseState?.intentHandover) ||
             (phaseName === "executor" && phaseTurn === 0);
+
+          // Force fresh context when provider changes (preserves handovers)
+          if (providerChanged) {
+            console.log(`[CognitiveHandler] Provider changed ${lastProvider} -> ${singularityProviderId}, resetting context`);
+            isPhaseInitializeTurn = true; // Force re-initialization
+            // Note: intentHandover/executionHandover remain in phaseState (batch data preserved)
+          }
 
           if (isPhaseInitializeTurn && singularityProviderId) {
             providerContexts = {
@@ -443,6 +532,8 @@ export class CognitivePipelineHandler {
               structuralAnalysis,
               stance: stanceSelection?.stance || null,
               conciergePrompt,
+              conciergePromptType,
+              conciergePromptSeed,
               useThinking: request?.useThinking || false,
               providerContexts,
             },
@@ -460,6 +551,28 @@ export class CognitivePipelineHandler {
             new Map(),
             executorOptions
           );
+
+          // ══════════════════════════════════════════════════════════════════
+          // FEATURE 3: Recompute with Historical Singularity Prompts
+          // Logic: Persist the prompt type and seed so recomputes can rebuild it exactly.
+          // ══════════════════════════════════════════════════════════════════
+          if (singularityResult?.output) {
+            await this.sessionManager.upsertProviderResponse(
+              context.sessionId,
+              context.canonicalAiTurnId,
+              singularityProviderId,
+              'singularity',
+              0,
+              {
+                ...singularityResult.output,
+                meta: {
+                  ...(singularityResult.output.meta || {}),
+                  frozenSingularityPromptType: conciergePromptType,
+                  frozenSingularityPromptSeed: conciergePromptSeed,
+                },
+              }
+            );
+          }
 
           if (singularityResult) {
             try {
@@ -503,30 +616,48 @@ export class CognitivePipelineHandler {
               }
 
               let finalSingularityResult = singularityResult;
+
+              // ══════════════════════════════════════════════════════════════════
+              // FEATURE 1: Gate batch execution after turn 1
+              // ══════════════════════════════════════════════════════════════════
+              const isAfterTurn1 = phaseTurn > 0 || (phaseName !== "starter" && phaseTurn >= 0);
+              const batchAutoRunEnabled = request?.batchAutoRunEnabled ?? false;
+
               if (batchSignal?.type && batchSignal?.batchPrompt) {
-                try {
-                  const handled = await this._handleConciergeBatchSignal({
-                    batchSignal,
-                    request,
-                    context,
-                    stepExecutor,
-                    streamingManager,
-                    singularityProviderId,
-                    mapperArtifact,
-                    structuralAnalysis,
-                    userMessageForSingularity,
-                  });
-                  if (handled?.finalResult) {
-                    finalSingularityResult = handled.finalResult;
-                    Object.assign(next, handled.phasePatch || {});
-                    if (handled?.phasePatch?.currentPhase === "executor" && handled?.phasePatch?.executionHandover) {
-                      next.executionHandover = handled.phasePatch.executionHandover;
+                // Gate batch: after turn 1, only run if explicitly enabled
+                if (isAfterTurn1 && !batchAutoRunEnabled) {
+                  console.log("[CognitiveHandler] Batch signal gated (turn > 1, auto-run disabled)");
+                  // Skip batch handling, use Singularity-only response
+                } else {
+                  try {
+                    const handled = await this._handleConciergeBatchSignal({
+                      batchSignal,
+                      request,
+                      context,
+                      stepExecutor,
+                      streamingManager,
+                      singularityProviderId,
+                      mapperArtifact,
+                      structuralAnalysis,
+                      userMessageForSingularity,
+                    });
+                    if (handled?.finalResult) {
+                      finalSingularityResult = handled.finalResult;
+                      Object.assign(next, handled.phasePatch || {});
+                      if (handled?.phasePatch?.currentPhase === "executor" && handled?.phasePatch?.executionHandover) {
+                        next.executionHandover = handled.phasePatch.executionHandover;
+                      }
                     }
+                  } catch (e) {
+                    console.warn("[CognitiveHandler] Failed to handle concierge batch signal:", e);
                   }
-                } catch (e) {
-                  console.warn("[CognitiveHandler] Failed to handle concierge batch signal:", e);
                 }
               }
+
+              // ══════════════════════════════════════════════════════════════════
+              // FEATURE 2: Track last provider for change detection on next turn
+              // ══════════════════════════════════════════════════════════════════
+              next.lastSingularityProviderId = singularityProviderId;
 
               await this.sessionManager.setConciergePhaseState(context.sessionId, next);
               const effectiveProviderId =
@@ -543,13 +674,23 @@ export class CognitivePipelineHandler {
               context.singularityOutput = singularityOutput;
 
               try {
+                // ══════════════════════════════════════════════════════════════════
+                // FEATURE 3: Persist frozen Singularity prompt for historical recompute
+                // ══════════════════════════════════════════════════════════════════
                 await this.sessionManager.upsertProviderResponse(
                   context.sessionId,
                   context.canonicalAiTurnId,
                   effectiveProviderId,
                   'singularity',
                   0,
-                  { text: singularityOutput.text, status: 'completed', meta: { singularityOutput } }
+                  {
+                    text: singularityOutput.text,
+                    status: 'completed',
+                    meta: {
+                      singularityOutput,
+                      frozenSingularityPrompt: conciergePrompt, // FEATURE 3: store for recompute
+                    }
+                  }
                 );
               } catch (persistErr) {
                 console.warn("[CognitiveHandler] Persistence failed:", persistErr);
