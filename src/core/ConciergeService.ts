@@ -1625,59 +1625,8 @@ function getWhatWouldHelp(pattern: string, data: any, analysis: StructuralAnalys
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// BATCH REQUEST CAPABILITIES (Added from turn 2 onwards)
+// WORKFLOW FORMATTING
 // ═══════════════════════════════════════════════════════════════════════════
-
-function buildCapabilitiesSection(activeWorkflow?: ActiveWorkflow): string {
-    const workflowStatus = activeWorkflow
-        ? `\n\n**Active Workflow:** "${activeWorkflow.goal}" — Step ${activeWorkflow.currentStepIndex + 1}/${activeWorkflow.steps.length}`
-        : '';
-
-    return `## Capabilities
-
-You can trigger multi-perspective batch queries:
-
-**WORKFLOW** — Generate an action plan from multiple expert perspectives
-- Trigger when: exploration complete, user ready for action, sufficient context gathered
-- Don't trigger when: still clarifying, missing critical info, task is simple
-
-**STEP_HELP** — Get synthesized guidance for a specific blocker
-- Trigger when: user stuck on complex step with multiple valid approaches
-- Don't trigger when: answer is straightforward (just answer directly)
-${workflowStatus}`;
-}
-
-function buildSignalInstructions(): string {
-    return `## Signal Format
-
-To trigger a batch request, end your response with:
-
-\`\`\`
-<<<SINGULARITY_BATCH_REQUEST>>>
-TYPE: WORKFLOW | STEP_HELP
-GOAL: [outcome user wants]
-STEP: [for STEP_HELP: current step]
-BLOCKER: [for STEP_HELP: what's blocking]
-CONTEXT: [constraints, situation, priorities]
-
-PROMPT:
-[the prompt to send to expert models]
-<<<END_BATCH_REQUEST>>>
-\`\`\`
-
-Everything before \`<<<SINGULARITY_BATCH_REQUEST>>>\` is shown to user. The signal is parsed and executed.
-
-## Batch Prompt Requirements
-
-The prompt you write will be sent to multiple AI models in parallel. Their responses get synthesized.
-
-**Structure:**
-1. **Role** — First line must define the expert. Be maximally specific to this task.
-2. **Task** — State exactly what you need in 1-2 sentences
-3. **Context** — Bullet the user's situation, constraints, priorities
-4. **Output spec** — What to produce, what format
-5. **Quality anchors** — Specific over generic, actionable over conceptual`;
-}
 
 function formatActiveWorkflow(workflow: ActiveWorkflow): string {
     let output = `**Goal:** ${workflow.goal}\n\n`;
@@ -1723,11 +1672,6 @@ export function buildConciergePrompt(
         ? `## Active Workflow\n${formatActiveWorkflow(options.activeWorkflow)}\n`
         : '';
 
-    // Only include capabilities and signal instructions from turn 2 onwards
-    const capabilitiesSection = options?.isFirstTurn
-        ? ''
-        : `${buildCapabilitiesSection(options?.activeWorkflow)}\n\n${buildSignalInstructions()}\n\n`;
-
     return `You are Singularity—an intelligence that has drawn from multiple expert perspectives.${framingLine}
 
 ## The Query
@@ -1738,7 +1682,7 @@ ${historySection}## What You Know
 
 ${structuralBrief}
 
-${workflowSection}${capabilitiesSection}## How To Respond
+${workflowSection}## How To Respond
 
 ${shapeGuidance}
 
