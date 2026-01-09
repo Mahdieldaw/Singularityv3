@@ -862,14 +862,6 @@ Answer the user's message directly. Use context only to disambiguate.
     let stanceSelection = null;
     let analysis = null;
 
-    let parseIntentHandover = null;
-    let parseBatchSignal = null;
-    try {
-      const mod = await import('../../services/concierge/handover.parser');
-      parseIntentHandover = mod.parseIntentHandover;
-      parseBatchSignal = mod.parseBatchSignal;
-    } catch (_) { }
-
     if (!ConciergeService) {
       throw new Error("ConciergeService is not available. Cannot execute Singularity step.");
     }
@@ -904,72 +896,13 @@ Answer the user's message directly. Use context only to disambiguate.
     const promptType = options?.frozenSingularityPromptType || payload.conciergePromptType;
     const promptSeed = options?.frozenSingularityPromptSeed || payload.conciergePromptSeed;
 
-    if (promptType) {
+    if (options?.frozenSingularityPrompt) {
+      singularityPrompt = options.frozenSingularityPrompt;
+    } else if (payload.conciergePrompt && typeof payload.conciergePrompt === "string") {
+      singularityPrompt = payload.conciergePrompt;
+    } else if (ConciergeService.buildConciergePrompt) {
       const userMessage = payload.originalPrompt;
-      const stance = stanceSelection?.stance || "default";
-
-      try {
-        switch (promptType) {
-          case "starter_1": {
-            const mod = await import('../../services/concierge/starter.prompt');
-            singularityPrompt = mod.buildStarterInitialPrompt(userMessage, analysis, stance);
-            break;
-          }
-          case "starter_2": {
-            const mod = await import('../../services/concierge/starter.prompt');
-            singularityPrompt = mod.buildStarterContinueWrapperWithSeed(userMessage, promptSeed);
-            break;
-          }
-          case "explorer_1": {
-            const mod = await import('../../services/concierge/explorer.prompt');
-            singularityPrompt = mod.buildExplorerInitialPrompt(promptSeed?.intentHandover, userMessage);
-            break;
-          }
-          case "explorer_2": {
-            const mod = await import('../../services/concierge/explorer.prompt');
-            singularityPrompt = mod.buildExplorerContinueWrapper(userMessage);
-            break;
-          }
-          case "executor_1": {
-            const mod = await import('../../services/concierge/executor.prompt');
-            singularityPrompt = mod.buildExecutorSynthesisPrompt(promptSeed?.executionHandover, analysis);
-            break;
-          }
-          case "executor_2": {
-            const mod = await import('../../services/concierge/executor.prompt');
-            singularityPrompt = mod.buildExecutorPresentationPrompt(analysis);
-            break;
-          }
-          case "step_help_response": {
-            const mod = await import('../../services/concierge/executor.prompt');
-            singularityPrompt = mod.buildStepHelpResultWrapper(analysis, promptSeed?.userMessage || userMessage);
-            break;
-          }
-          case "standard":
-          default:
-            if (ConciergeService.buildConciergePrompt) {
-              singularityPrompt = ConciergeService.buildConciergePrompt(userMessage, analysis, promptSeed);
-            }
-            break;
-        }
-      } catch (e) {
-        console.warn(`[StepExecutor] Rebuilding prompt variant '${promptType}' failed, falling back to standard:`, e);
-      }
-    }
-
-    // Final fallback: Use raw string if available, or build standard
-    if (!singularityPrompt) {
-      if (options?.frozenSingularityPrompt) {
-        singularityPrompt = options.frozenSingularityPrompt;
-      } else if (payload.conciergePrompt && typeof payload.conciergePrompt === "string") {
-        singularityPrompt = payload.conciergePrompt;
-      } else if (ConciergeService.buildConciergePrompt) {
-        singularityPrompt = ConciergeService.buildConciergePrompt(
-          payload.originalPrompt,
-          analysis,
-          payload.conciergeOptions || undefined,
-        );
-      }
+      singularityPrompt = ConciergeService.buildConciergePrompt(userMessage, analysis, promptSeed);
     }
 
     if (!singularityPrompt) {
@@ -980,25 +913,14 @@ Answer the user's message directly. Use context only to disambiguate.
       const rawText = String(text || "");
 
       let cleanedText = rawText;
-      let intentHandover = null;
-      let batchSignal = null;
+      let signal = null;
 
       try {
-        if (typeof parseIntentHandover === "function") {
-          const parsed = parseIntentHandover(rawText);
-          if (parsed?.handover) {
-            intentHandover = parsed.handover;
+        if (ConciergeService && typeof ConciergeService.parseConciergeOutput === "function") {
+          const parsed = ConciergeService.parseConciergeOutput(rawText);
+          if (parsed) {
             cleanedText = parsed.userResponse || cleanedText;
-          }
-        }
-      } catch (_) { }
-
-      try {
-        if (typeof parseBatchSignal === "function") {
-          const parsed = parseBatchSignal(rawText);
-          if (parsed?.type) {
-            batchSignal = parsed;
-            cleanedText = parsed.userResponse || cleanedText;
+            signal = parsed.signal || null;
           }
         }
       } catch (_) { }
@@ -1037,8 +959,7 @@ Answer the user's message directly. Use context only to disambiguate.
         leakageViolations,
         pipeline,
         parsed: {
-          intentHandover,
-          batchSignal,
+          signal,
           rawText,
         },
       };

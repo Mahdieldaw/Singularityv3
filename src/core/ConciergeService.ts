@@ -812,20 +812,101 @@ Identify what context would help.`,
 // ═══════════════════════════════════════════════════════════════════════════
 
 export function buildStructuralBrief(analysis: StructuralAnalysis): string {
-    const { shape, landscape, ratios, ghostAnalysis } = analysis;
+    const { shape, landscape, ghostAnalysis, patterns } = analysis;
+    const modelCount = landscape.modelCount || 0;
+    const claimById = new Map<string, { id: string; label?: string; text?: string }>();
+    (analysis.claimsWithLeverage || []).forEach((c) => {
+        if (c?.id) claimById.set(c.id, c);
+    });
+
+    const formatSupport = (supportCount?: number) => {
+        if (typeof supportCount !== "number") return "";
+        return modelCount > 0 ? ` [${supportCount}/${modelCount}]` : ` [${supportCount}]`;
+    };
+
+    const topClaims = (analysis.claimsWithLeverage || [])
+        .slice()
+        .sort((a, b) => (b.support_count || 0) - (a.support_count || 0))
+        .slice(0, 6);
 
     let brief = "";
 
-    brief += `## Structural Metrics\n\n`;
-    brief += `• ${landscape.claimCount} claims extracted from ${landscape.modelCount} sources\n`;
-    brief += `• ${analysis.edges.length} relationships mapped\n`;
-    brief += `• Support concentration: ${pct(ratios.concentration)}\n`;
-    brief += `• Tension level: ${pct(ratios.tension)}\n`;
-    brief += `• Structure density: ${pct(1 - ratios.fragmentation)}\n`;
-    brief += `• Signal strength: ${pct(shape.signalStrength || 0.5)}\n\n`;
-
     brief += `## Topology: ${getTopologyName(shape.primaryPattern)}\n\n`;
     brief += `${getTopologyDescription(shape.primaryPattern)}\n\n`;
+
+    if (topClaims.length > 0) {
+        brief += `## Core Claims\n\n`;
+        topClaims.forEach((c) => {
+            brief += `• **${c.label}**${formatSupport(c.support_count)}\n`;
+            if (c.text) brief += `  ${c.text}\n`;
+        });
+        brief += `\n`;
+    }
+
+    const conflictInfos = Array.isArray(patterns?.conflictInfos) ? patterns.conflictInfos : [];
+    const topConflicts = conflictInfos
+        .slice()
+        .sort((a, b) => (b.significance || 0) - (a.significance || 0))
+        .slice(0, 3);
+    if (topConflicts.length > 0) {
+        brief += `## Key Tensions\n\n`;
+        topConflicts.forEach((c) => {
+            const axis = c?.axis?.resolved ? ` — ${c.axis.resolved}` : "";
+            brief += `• **${c.claimA.label}**${formatSupport(c.claimA.supportCount)} vs **${c.claimB.label}**${formatSupport(c.claimB.supportCount)}${axis}\n`;
+            if (c?.stakes?.choosingA) brief += `  - Stakes (A): ${c.stakes.choosingA}\n`;
+            if (c?.stakes?.choosingB) brief += `  - Stakes (B): ${c.stakes.choosingB}\n`;
+        });
+        brief += `\n`;
+    }
+
+    const tradeoffs = Array.isArray(patterns?.tradeoffs) ? patterns.tradeoffs : [];
+    if (tradeoffs.length > 0 && topConflicts.length === 0) {
+        brief += `## Tradeoffs\n\n`;
+        tradeoffs.slice(0, 3).forEach((t) => {
+            const aSupport = modelCount > 0 ? `${t.claimA.supporterCount}/${modelCount}` : String(t.claimA.supporterCount);
+            const bSupport = modelCount > 0 ? `${t.claimB.supporterCount}/${modelCount}` : String(t.claimB.supporterCount);
+            brief += `• **${t.claimA.label}** [${aSupport}] vs **${t.claimB.label}** [${bSupport}]\n`;
+        });
+        brief += `\n`;
+    }
+
+    const leverageInversions = Array.isArray(patterns?.leverageInversions) ? patterns.leverageInversions : [];
+    const cascadeRisks = Array.isArray(patterns?.cascadeRisks) ? patterns.cascadeRisks : [];
+    if (leverageInversions.length > 0 || cascadeRisks.length > 0) {
+        brief += `## Structural Risks\n\n`;
+        leverageInversions.slice(0, 3).forEach((li) => {
+            const support = typeof li.supporterCount === "number" ? formatSupport(li.supporterCount) : "";
+            const strongClaim = li.strongClaim ? ` — many arguments lean on "${li.strongClaim}"` : "";
+            brief += `• **${li.claimLabel}**${support}${strongClaim}\n`;
+            if (li.reason) brief += `  ${li.reason}\n`;
+        });
+        cascadeRisks.slice(0, 3).forEach((cr) => {
+            const dependents = Array.isArray(cr.dependentLabels) ? cr.dependentLabels.filter(Boolean) : [];
+            const preview = dependents.slice(0, 4).join(", ");
+            const more = dependents.length > 4 ? ` (+${dependents.length - 4} more)` : "";
+            if (preview) {
+                brief += `• If **${cr.sourceLabel}** breaks, it may break: ${preview}${more}\n`;
+            } else {
+                brief += `• If **${cr.sourceLabel}** breaks, downstream claims may fail\n`;
+            }
+        });
+        brief += `\n`;
+    }
+
+    if (ghostAnalysis.count > 0) {
+        brief += `## Gaps\n\n`;
+        brief += `• ${ghostAnalysis.count} area(s) not addressed by any source\n`;
+        if (ghostAnalysis.mayExtendChallenger && Array.isArray(ghostAnalysis.challengerIds)) {
+            const challengerLabels = ghostAnalysis.challengerIds
+                .map((id) => claimById.get(id)?.label)
+                .filter(Boolean)
+                .slice(0, 4);
+            if (challengerLabels.length > 0) {
+                brief += `• These challenger claims may expand if explored: ${challengerLabels.join(", ")}\n`;
+            }
+        }
+        brief += `\n`;
+    }
 
     brief += `## The Flow\n\n`;
     brief += buildFlowSection(analysis);
@@ -842,11 +923,6 @@ export function buildStructuralBrief(analysis: StructuralAnalysis): string {
             brief += `• ${f}\n`;
         });
         brief += `\n`;
-    }
-
-    if (ghostAnalysis.count > 0) {
-        brief += `## Gaps\n\n`;
-        brief += `${ghostAnalysis.count} area(s) not addressed by any source.\n\n`;
     }
 
     brief += `## The Transfer\n\n`;
@@ -1065,8 +1141,13 @@ function buildDimensionalFlow(data: DimensionalShapeData, modelCount: number): s
     let flow = `**Independent Dimensions:** ${data.dimensions.length}\n\n`;
 
     if (data.dominantDimension) {
+        const avgSupporters = modelCount > 0 ? Math.round(data.dominantDimension.avgSupport * modelCount) : null;
         flow += `### Primary Lens: ${data.dominantDimension.theme}\n`;
-        flow += `${data.dominantDimension.claims.length} claims, avg support: ${pct(data.dominantDimension.avgSupport)}\n\n`;
+        flow += `${data.dominantDimension.claims.length} claims`;
+        if (typeof avgSupporters === "number") {
+            flow += `, avg support: ${avgSupporters}/${modelCount}`;
+        }
+        flow += `\n\n`;
 
         data.dominantDimension.claims.slice(0, 3).forEach(c => {
             flow += `• **${c.label}** [${c.supportCount}/${modelCount}]\n`;
@@ -1094,7 +1175,8 @@ function buildDimensionalFlow(data: DimensionalShapeData, modelCount: number): s
 }
 
 function buildExploratoryFlow(data: ExploratoryShapeData, modelCount: number): string {
-    let flow = `**Signal Strength:** ${pct(data.signalStrength)} (sparse)\n\n`;
+    const signalLabel = data.signalStrength < 0.35 ? "low" : data.signalStrength < 0.6 ? "medium" : "high";
+    let flow = `**Signal Strength:** ${signalLabel} (sparse)\n\n`;
 
     if (data.strongestSignals.length > 0) {
         flow += `**Strongest signals:**\n\n`;
@@ -1290,7 +1372,7 @@ function buildLinearFriction(data: LinearShapeData): string {
     }
 
     if (data.chainFragility) {
-        friction += `**Chain fragility:** ${pct(data.chainFragility.fragilityRatio)} of steps are weak links\n\n`;
+        friction += `**Chain fragility:** ${data.chainFragility.weakLinkCount}/${data.chainFragility.totalSteps} steps are weak links\n\n`;
     }
 
     return friction;
@@ -1426,7 +1508,7 @@ function collectFragilities(analysis: StructuralAnalysis): string[] {
 
     if (shape.signalStrength && shape.signalStrength < 0.4) {
         fragilities.push(
-            `Low signal strength (${pct(shape.signalStrength)}) — structure may not be reliable`
+            `Low signal strength — structure may not be reliable`
         );
     }
 
@@ -1540,10 +1622,6 @@ function getWhatWouldHelp(pattern: string, data: any, analysis: StructuralAnalys
     }
 
     return helps;
-}
-
-function pct(n: number): string {
-    return `${Math.round(n * 100)}%`;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

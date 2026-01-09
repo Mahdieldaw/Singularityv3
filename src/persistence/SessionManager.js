@@ -1259,15 +1259,9 @@ export class SessionManager {
 
   _defaultConciergePhaseState() {
     return {
-      currentPhase: "starter",
-      turnInPhase: 0,
-      conciergeContextMeta: null,
+      hasRunConcierge: false,
       lastSingularityProviderId: null,
-      intentHandover: null,
-      executionHandover: null,
       activeWorkflow: null,
-      pendingWorkflowAnalysis: null,
-      pendingStepBatchAnalysis: null,
     };
   }
 
