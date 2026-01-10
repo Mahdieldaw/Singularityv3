@@ -98,14 +98,32 @@ export class CognitivePipelineHandler {
       // Determine Singularity provider from request or context
       singularityProviderId = request?.singularity ||
         context?.singularityProvider ||
-        context?.meta?.singularity ||
-        request?.mapper ||
-        'gemini';
+        context?.meta?.singularity;
+
+      // Only proceed if a provider is requested or inherited.
+      // If request.singularity is explicitly undefined (from ui/hooks/chat/useChat.ts omitting it),
+      // we check if we should skip.
+      if (!singularityProviderId && !request?.singularity) {
+        console.log("[CognitiveHandler] No singularity provider requested - checking history...");
+      }
 
       if (stepExecutor && streamingManager) {
+        let conciergeState = null;
+        try {
+          conciergeState = await this.sessionManager.getConciergePhaseState(context.sessionId);
+        } catch (e) {
+          console.warn("[CognitiveHandler] Failed to fetch concierge state:", e);
+        }
+
+        // Fallback: If no provider requested, try to use the last one used in this session.
+        // If that fails, default to 'gemini'.
+        if (!singularityProviderId) {
+          singularityProviderId = conciergeState?.lastSingularityProviderId || 'gemini';
+        }
+
+        console.log(`[CognitiveHandler] Orchestrating singularity for Turn = ${context.canonicalAiTurnId}, Provider = ${singularityProviderId}`);
         let singularityStep = null;
         try {
-          const conciergeState = await this.sessionManager.getConciergePhaseState(context.sessionId);
           let structuralAnalysis = null;
           try {
             const { computeStructuralAnalysis } = await import('../PromptMethods');
