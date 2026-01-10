@@ -1,5 +1,3 @@
-
-
 /**
  * HTOS Gemini Provider Implementation
  *
@@ -10,6 +8,9 @@
  */
 import { BusController } from "../core/vendor-exports.js";
 import { ArtifactProcessor } from "../../shared/artifact-processor";
+
+// Provider-specific debug flag (off by default)
+const GEMINI_DEBUG = false;
 
 // =============================================================================
 // GEMINI MODELS CONFIGURATION
@@ -31,13 +32,13 @@ export const GeminiModels = {
   },
   "gemini-exp": {
     id: "gemini-exp",
-    name: "Gemini 3.0", // or "Experimental"
+    name: "Gemini 3.0",
     description: "Latest experimental capability",
     maxTokens: 9999,
-    // Signature from your 1st fetch (9d8ca3786ebdfbea)
     header: '[1,null,null,null,"9d8ca3786ebdfbea",null,null,0,[4]]',
   },
 };
+
 // =============================================================================
 // GEMINI ERROR TYPES
 // =============================================================================
@@ -86,7 +87,8 @@ export class GeminiSessionApi {
    * Send prompt to Gemini AI and handle response
    * @param {string} prompt - The prompt text
    * @param {{ token?: {at: string, bl: string} | null, cursor?: any[], model?: string, signal?: AbortSignal }} options - Request options
-   * @param {boolean} retrying - Internal retry flag
+   * @param {boolean} retrying - Token-refresh retry flag (prevents infinite token refresh loops)
+   * @param {number} coldStartRetries - Cold-start retry counter (tracks backend initialization retries)
    */
   async ask(
     prompt,
@@ -97,8 +99,9 @@ export class GeminiSessionApi {
       signal,
     } = {},
     retrying = false,
+    coldStartRetries = 0,
   ) {
-    // ✅ NEW: Use prefetched token if available
+    // Use prefetched token if available
     if (!token && this.sharedState?.prefetchedToken) {
       token = this.sharedState.prefetchedToken;
       delete this.sharedState.prefetchedToken; // Consume once
@@ -107,7 +110,7 @@ export class GeminiSessionApi {
       token = await this._fetchToken();
     }
 
-    // ✅ NEW: Generate collision-resistant request ID
+    // Generate collision-resistant request ID
     const reqId = Date.now() * 1000 + Math.floor(Math.random() * 1000);
     const url =
       "/_/BardChatUi/data/assistant.lamda.BardFrontendService/StreamGenerate";
@@ -115,7 +118,6 @@ export class GeminiSessionApi {
     // Get model configuration
     const modelConfig = GeminiModels[model] || GeminiModels["gemini-flash"];
 
-    // Do not truncate the prompt here — send the full prompt to the provider and let the provider/orchestrator manage any necessary truncation.
     const body = new URLSearchParams({
       at: token.at,
       "f.req": JSON.stringify([null, JSON.stringify([[prompt], null, cursor])]),
@@ -125,7 +127,7 @@ export class GeminiSessionApi {
       method: "POST",
       headers: {
         "content-type": "application/x-www-form-urlencoded;charset=UTF-8",
-        "x-goog-ext-525001261-jspb": modelConfig.header, // Add model selection header
+        "x-goog-ext-525001261-jspb": modelConfig.header,
       },
       signal,
       query: {
@@ -136,17 +138,23 @@ export class GeminiSessionApi {
       body,
     });
 
+    // Token-refresh retry closure (maintains separation from cold-start logic)
     const retry = async (msg = "") => {
       if (retrying) {
         this._throw("badToken", msg);
       }
-      return this.ask(prompt, { token: null, cursor, model, signal }, true);
+      // Preserve cold-start retry count across token refreshes
+      return this.ask(prompt, { token: null, cursor, model, signal }, true, coldStartRetries);
     };
 
     if (response.status !== 200) {
-      const responseText =
-        (await this.utils?.noThrow?.(() => response.text(), null)) ||
-        (await response.text());
+      let responseText = "";
+      if (this.utils?.noThrow) {
+        responseText = await this.utils.noThrow(() => response.text(), null) || "";
+      } else {
+        responseText = await response.text();
+      }
+
       if (response.status === 400) {
         return retry(responseText);
       }
@@ -154,7 +162,7 @@ export class GeminiSessionApi {
     }
 
     let parsedLines = [];
-    let c, u, p;
+    let c, u;
     try {
       // Gemini returns an XSSI prefix like ")]}'" followed by multiple JSON lines.
       const raw = await response.text();
@@ -179,7 +187,7 @@ export class GeminiSessionApi {
     }
 
     // ========================================================================
-    // ✅ NEW: Cold-Start Failure Detection (BEFORE error code check)
+    // Cold-Start Failure Detection (BEFORE error code check)
     // ========================================================================
     const hasColdStartSignature = parsedLines.some(line =>
       line.some(entry =>
@@ -190,12 +198,26 @@ export class GeminiSessionApi {
     );
 
     if (hasColdStartSignature) {
-      console.warn(`[Gemini] Cold start detected: [["e",4,...]] - retrying with fresh token`);
+      const MAX_COLD_START_RETRIES = 3;
+
+      if (coldStartRetries >= MAX_COLD_START_RETRIES) {
+        this._throw("unknown", `Max cold start retries (${MAX_COLD_START_RETRIES}) exceeded`);
+      }
+
+      console.warn(
+        `[Gemini] Cold start detected: [["e",4,...]] - retrying (attempt ${coldStartRetries + 1}/${MAX_COLD_START_RETRIES})`
+      );
 
       // Wait 500ms-2s for backend to stabilize
       await new Promise(resolve => setTimeout(resolve, 500 + Math.random() * 1500));
 
-      return retry("Cold start detected: [['e',4,...]] in response");
+      // Retry with fresh token and incremented cold-start counter
+      return this.ask(
+        prompt,
+        { token: null, cursor, model, signal },
+        false, // Reset token-refresh flag
+        coldStartRetries + 1 // Increment cold-start counter
+      );
     }
     // ========================================================================
 
@@ -266,7 +288,10 @@ export class GeminiSessionApi {
     }
 
     if (!u) {
-      this._throw("failedToReadResponse", { step: "answer", error: p });
+      this._throw("failedToReadResponse", {
+        step: "answer",
+        error: "No valid text payload found in response lines"
+      });
     }
 
     // --- Immersive Content Extraction ---
@@ -288,42 +313,35 @@ export class GeminiSessionApi {
     // Replace Image Placeholders with Markdown Images
     // Use shared ArtifactProcessor for consistent handling
     const processor = new ArtifactProcessor();
-    /** @type {{text: string, cursor: any[]} | undefined} */
-    const u_typed = u;
-    if (images.length > 0 && u_typed?.text) {
-      u_typed.text = processor.injectImages(u_typed.text, images);
+    if (images.length > 0 && u?.text) {
+      u.text = processor.injectImages(u.text, images);
     }
 
     // Append extracted content as Claude-style artifacts
-    if (immersiveContent.length > 0 && u_typed) {
+    if (immersiveContent.length > 0 && u) {
       immersiveContent.forEach((item) => {
         // Avoid duplicates if multiple chunks contain the same item
-        if (u_typed.text && !u_typed.text.includes(`identifier="${item.identifier}"`)) {
-          u_typed.text += processor.formatArtifact(item);
+        if (u.text && !u.text.includes(`identifier="${item.identifier}"`)) {
+          u.text += processor.formatArtifact(item);
         }
       });
     }
 
     if (GEMINI_DEBUG)
       console.info("[Gemini] Response received:", {
-        hasText: !!u_typed?.text,
-        textLength: u_typed?.text?.length || 0,
+        hasText: !!u?.text,
+        textLength: u?.text?.length || 0,
         immersiveItems: immersiveContent.length,
         images: images.length,
         status: response?.status || "unknown",
         model: modelConfig.name,
       });
 
-    if (!u_typed) {
-      this._throw("failedToReadResponse", { step: "answer", error: "No payload extracted" });
-      return { text: "", cursor: [], token: token, modelName: modelConfig.name }; // Should not reach here
-    }
-
     return {
-      text: u_typed.text || "",
-      cursor: u_typed.cursor || [],
+      text: u.text || "",
+      cursor: u.cursor || [],
       token,
-      modelName: modelConfig.name, // Include model name in response
+      modelName: modelConfig.name,
     };
   }
 
@@ -369,7 +387,6 @@ export class GeminiSessionApi {
 
     if (Array.isArray(obj)) {
       // Check signature: [filename, id, title, null, content]
-      // We relax the extension check to allow .txt, .md, etc.
       if (
         obj.length >= 5 &&
         typeof obj[0] === "string" &&
@@ -417,6 +434,9 @@ export class GeminiSessionApi {
         at: this._extractKeyValue(t, "SNlM0e"),
         bl: this._extractKeyValue(t, "cfb2h"),
       };
+      if (!n.at || !n.bl) {
+        throw new Error("Empty token value extracted");
+      }
     } catch (e) {
       this._throw("failedToExtractToken", e);
     }
@@ -425,9 +445,16 @@ export class GeminiSessionApi {
 
   /**
    * Extract key-value pairs from response text
+   * Improved robustness with type guards and safe array access
    */
   _extractKeyValue(str, key) {
-    return str.split(key)[1].split('":"')[1].split('"')[0];
+    if (typeof str !== "string" || typeof key !== "string") return "";
+    const p1 = str.split(key);
+    if (p1.length < 2) return "";
+    const p2 = p1[1].split('":"');
+    if (p2.length < 2) return "";
+    const p3 = p2[1].split('"');
+    return p3[0] || "";
   }
 
   /**
@@ -512,6 +539,7 @@ export class GeminiProviderController {
       payload.prompt,
       payload.options || {},
       payload.retrying || false,
+      payload.coldStartRetries || 0,
     );
   }
 
@@ -553,5 +581,3 @@ if (typeof window !== "undefined") {
   window["HTOS"] = window["HTOS"] || {};
   window["HTOS"]["GeminiProvider"] = GeminiProviderController;
 }
-// Provider-specific debug flag (off by default)
-const GEMINI_DEBUG = false;

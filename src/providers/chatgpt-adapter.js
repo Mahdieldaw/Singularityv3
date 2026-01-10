@@ -249,6 +249,19 @@ export class ChatGPTAdapter {
           },
         });
         if (recovery) return recovery;
+
+        // Fallthrough if recovery is falsy
+        return {
+          providerId: this.id,
+          ok: false,
+          text: aggregated || null,
+          errorCode: "no_recovery",
+          latencyMs: Date.now() - startTime,
+          meta: {
+            error: "no recovery",
+            details: error?.details || error?.message
+          },
+        };
       } catch (handledError) {
         return {
           providerId: this.id,
@@ -393,6 +406,21 @@ export class ChatGPTAdapter {
           },
         });
         if (recovery) return recovery;
+
+        // Fallthrough if recovery is falsy
+        return {
+          providerId: this.id,
+          ok: false,
+          text: aggregated || null,
+          errorCode: "no_recovery",
+          latencyMs: Date.now() - startTime,
+          meta: {
+            error: "no recovery",
+            details: error?.details || error?.message,
+            conversationId: conversationIdIn,
+            parentMessageId: parentMessageIdIn,
+          },
+        };
       } catch (handledError) {
         return {
           providerId: this.id,

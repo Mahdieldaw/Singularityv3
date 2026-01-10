@@ -192,6 +192,19 @@ export class ClaudeAdapter {
         });
         // If recovery produced a result, return it
         if (recovery) return recovery;
+
+        // Fallthrough if recovery is falsy
+        return {
+          providerId: this.id,
+          ok: false,
+          text: aggregatedText || null,
+          errorCode: "no_recovery",
+          latencyMs: Date.now() - startTime,
+          meta: {
+            error: "no recovery",
+            details: error?.details || error?.message
+          },
+        };
       } catch (handledError) {
         // Convert handled error to response format
         return {
@@ -331,6 +344,20 @@ export class ClaudeAdapter {
           },
         });
         if (recovery) return recovery;
+
+        // Fallthrough if recovery is falsy
+        return {
+          providerId: this.id,
+          ok: false,
+          text: aggregatedText || null,
+          errorCode: "no_recovery",
+          latencyMs: Date.now() - startTime,
+          meta: {
+            error: "no recovery",
+            details: error?.details || error?.message,
+            chatId: providerContext?.chatId,
+          },
+        };
       } catch (handledError) {
         return {
           providerId: this.id,

@@ -2,217 +2,196 @@
 
 This document summarizes, for each structural shape, what the mapper hands to the Concierge layer and how that structure changes the way the Concierge responds.
 
-Pipeline in brief:
-- Mapper produces a `StructuralAnalysis` with a primary `shape` and shape-specific `shape.data`.
-- `buildStructuralBrief` turns that into a brief with:
-  - Structural Metrics
-  - Topology (Flow vs Friction framing)
-  - The Flow
-  - The Friction
-  - Fragilities
-  - Gaps
-  - The Transfer (question handed back to the user)
-- `buildConciergePrompt` wraps that brief with:
-  - Shape guidance (how to talk given the topology)
-  - Stance guidance (decide / explore / challenge / default)
+## Pipeline in brief
 
-For each shape below:
-- “What the map sends” describes the key fields present in `shape.data` and the metrics that matter.
-- “How the Concierge responds” describes how the brief and stance are shaped by that data.
+- **Mapper** produces a `StructuralAnalysis` containing:
+    - `landscape`: High-level metrics (claim counts, model counts, dominant roles).
+    - `shape`: Primary `pattern` and shape-specific `data`.
+    - `patterns`: Detected structural features (conflicts, tradeoffs, risks).
+    - `ratios`: Mathematical descriptions of the topology (tension, fragmentation, depth).
+- `buildStructuralBrief` constructs a narrative brief combining topology descriptions and data-driven observations.
+- `buildConciergePrompt` wraps the brief with:
+    - **Shape Guidance**: Tone and strategy notes specific to the topology.
+    - **Stance Guidance**: Directives based on the selected stance (`default`, `decide`, `explore`, or `challenge`).
+
+## Core Concepts & Terminology
+
+To understand the shapes below, you must first understand the fundamental structural units the Mapper uses:
+
+### The "Floor"
+The **Floor** refers to the foundation of the current problem landscape. It consists of the most stable, highly-supported claims that most sources agree upon. It is the "consensus centroid."
+- **Floor Strength**: A quantitative measure of how "settled" the agreement is. A "High" floor strength means there is dominant support for a specific cluster of claims with little significant opposition. A "Weak" floor strength suggests fragmented agreement or high tension.
+- **Floor Assumptions**: The specific technical or logical conditions that *must* hold true for the current consensus to be valid. These are the "hidden foundations" the Concierge often challenges.
+
+### Shape Data (`SettledShapeData`, `ContestedShapeData`, etc.)
+Each topology produces a specific data payload (`shape.data`) that the Concierge uses to build its response:
+- **SettledShapeData**: Focuses on the strength of the consensus and identifies any "Minority Reports" (strong outliers) that disagree with the floor.
+- **ContestedShapeData**: Focuses on the "Fault Line"—the axis where two or more supported positions conflict, and the "Stakes" of choosing one over the other.
+- **KeystoneShapeData**: Identifies the "Hub"—a single claim that carries the weight of the entire structure. If the keystone falls, the "Cascade" breaks everything else.
+- **LinearShapeData**: Tracks the "Chain"—a sequence where steps must be completed in order. It identifies "Weak Links" that risk the terminal outcome.
+
+## Brief Structure
+
+The `StructuralBrief` follows a standardized section hierarchy:
+
+1.  **Topology**: The high-level classification (e.g., CONVERGENT, TENSE).
+2.  **Core Claims**: The most supported claims in the landscape.
+3.  **Key Tensions / Tradeoffs**: Explicit disagreements or optimization boundaries.
+4.  **Structural Risks**: Leverage inversions (low support/high impact) or cascade risks.
+5.  **Gaps**: Areas not addressed by any source.
+6.  **The Flow**: A shape-specific narrative describing the logical path.
+7.  **The Friction**: A shape-specific narrative describing the resistance or uncertainty.
+8.  **Fragilities**: Critical structural weaknesses (e.g., articulation points).
+9.  **The Transfer**: The specific question or context requested from the user.
 
 ---
 
 ## Settled (CONVERGENT)
 
-What the map sends:
+**What the map sends:**
 - High concentration, low tension, strong connected “floor” of high-support claims.
-- `SettledShapeData` including:
-  - `floor` (central claims with support counts and whether they are contested).
-  - `floorStrength` summarizing how strong the agreement is.
-  - `challengers` that explicitly push against the floor.
-  - `blindSpots` capturing unaddressed areas.
-  - `strongestOutlier` (leverage inversion / explicit challenger / minority voice).
-  - `floorAssumptions` and a `transferQuestion`.
+- `SettledShapeData` includes `floorStrength`, `floorAssumptions`, `challengers`, and `strongestOutlier` (minority reports).
 
-How the Concierge responds:
-- Structural brief:
-  - Flow centers on the floor (“centroid”) and what it assumes.
-  - Friction focuses on the strongest outlier or challengers and blind spots.
-  - Fragilities call out leverage inversions or disconnected consensus.
-  - Transfer asks which assumption must hold in the user’s context.
-- Shape guidance:
-  - “Speak with confidence” but explicitly surface blind spots and minority views.
-- Default stance:
-  - `default` stance unless user explicitly asks to explore/decide/challenge.
-  - Response pattern: clear answer based on the floor, followed by the key caveat or question from the transfer section.
+**The Flow:**
+- Centers on **Narrative Gravity**. Describes the "Centroid" (the floor) and its explicit assumptions.
+
+**The Friction:**
+- Highlights the **Minority Report** (strongest outlier) or explicit challengers. If none exist, notes the risk of a shared blind spot.
+
+**Shape Guidance:**
+- Speak with confidence; lead with the answer. Challenge assumptions or explore edge cases only if probed.
+
+**Default Stance:** `default` (unless query signals otherwise).
 
 ---
 
 ## Contested (TENSE)
 
-What the map sends:
+**What the map sends:**
 - Comparable support for opposing positions, elevated tension.
-- `ContestedShapeData` including:
-  - `centralConflict` (either two positions or a target vs many challengers) with stakes.
-  - `secondaryConflicts` around the main axis.
-  - `floor` outside the conflict (shared ground).
-  - `fragilities` and a possible `collapsingQuestion`.
+- `ContestedShapeData` includes a `centralConflict` (axis and positions) and associated `stakes`.
 
-How the Concierge responds:
-- Structural brief:
-  - Flow lays out the fault line: central positions, their support, and stakes of choosing.
-  - Friction emphasizes that the disagreement is the structure, and surfaces possible common ground.
-  - Fragilities highlight hidden conflicts and low-signal regions.
-  - Transfer asks which constraint or priority matters more to the user.
-- Shape guidance:
-  - “Surface tension naturally, present both sides, don’t pick without user context.”
-- Default stance:
-  - Shape default is `default` stance; user language can push it to `decide` or `explore`.
-  - Response pattern: show the fork and conditions under which each path is preferable, end by asking which side of the trade they care about.
+**The Flow:**
+- Lays out the **Fault Line**. Presents the target under siege or the individual fork, including the dynamics (symmetric vs. asymmetric).
+
+**The Friction:**
+- Frames the friction *as* the structure. Identifies common ground outside the conflict and secondary tensions.
+
+**Shape Guidance:**
+- Surface tension naturally. Present both sides as valid depending on priorities. Do not pick a side without user context.
+
+**Default Stance:** `default`.
 
 ---
 
 ## Keystone (HUB-CENTRIC)
 
-What the map sends:
+**What the map sends:**
 - One highly central claim that many others depend on.
-- `KeystoneShapeData` including:
-  - `keystone` (hub claim with support and dominance).
-  - `dependencies` that structurally hang off the hub.
-  - `cascadeSize` and `cascadeConsequences` (what breaks if the hub fails).
-  - `challengers` to the hub.
-  - `decoupledClaims` that survive even if the hub fails.
-  - `transferQuestion`.
+- `KeystoneShapeData` includes `keystone` (dominance and fragility), `dependencies`, and `cascadeConsequences`.
 
-How the Concierge responds:
-- Structural brief:
-  - Flow describes the hub, how dominant it is, and what flows from it.
-  - Friction centers on challengers, decoupled claims, and the cascade if the hub is wrong.
-  - Fragilities focus on hub fragility and dependence.
-  - Transfer asks whether the user accepts the keystone as valid in their setting.
-- Shape guidance:
-  - “Center the response on the keystone; stress-test it if questioned.”
-- Default stance:
-  - Shape default is `default` stance.
-  - Response pattern: explain “if this foundation holds then X follows,” then press the user on whether that foundation actually holds for them.
+**The Flow:**
+- Focuses on **The Hub**. Describes its structural position, dominance ratio, and exactly what claims flow from it.
+
+**The Friction:**
+- Identifies **Challengers to the hub** and **Decoupled Claims** (those that survive hub failure). Details the quantitative consequences if the hub fails.
+
+**Shape Guidance:**
+- Center the response on the keystone. Stress-test it if the user asks "why" or "what if."
+
+**Default Stance:** `default`.
 
 ---
 
 ## Linear (SEQUENTIAL)
 
-What the map sends:
+**What the map sends:**
 - A chain of prerequisite relationships and a notion of depth.
-- `LinearShapeData` including:
-  - `chain` (ordered steps with support and whether each is a weak link).
-  - `weakLinks` with cascade sizes.
-  - `terminalClaim` at the end of the chain.
-  - `shortcuts` that may bypass steps.
-  - `chainFragility` and `transferQuestion`.
+- `LinearShapeData` includes the `chain` (ordered steps) and `weakLinks` with cascade sizes.
 
-How the Concierge responds:
-- Structural brief:
-  - Flow walks the user through the sequence, step by step, highlighting weak links.
-  - Friction focuses on weak steps, possible shortcuts, and the fragility ratio.
-  - Fragilities emphasize how much of the chain depends on fragile steps.
-  - Transfer asks where the user is in the sequence and whether early steps are actually satisfied.
-- Shape guidance:
-  - “Walk through steps in order; emphasize why order and prerequisites matter.”
-- Default stance:
-  - Shape default is `default` stance.
-  - Response pattern: narrative walkthrough (“First… then…”) with explicit attention to where things might break for the user’s actual state.
+**The Flow:**
+- Walks through **The Sequence**. Steps are presented in order, explicitly marking terminal claims and prerequisite steps.
+
+**The Friction:**
+- Highlights **Weak Links** in the chain and potential **Shortcuts** (bypassable steps). Summarizes overall chain fragility.
+
+**Shape Guidance:**
+- Walk through steps in order. Emphasize prerequisites and help the user identify where they are in the sequence.
+
+**Default Stance:** `default`.
 
 ---
 
-## Tradeoff (EITHER‑OR)
+## Tradeoff (EITHER-OR)
 
-What the map sends:
+**What the map sends:**
 - Explicit pairs of options that cannot all be optimized simultaneously.
-- `TradeoffShapeData` including:
-  - `tradeoffs` with option A, option B, symmetry, and governingFactor.
-  - `dominatedOptions` that can be eliminated.
-  - `floor` outside the tradeoff (uncontested ground).
+- `TradeoffShapeData` includes `tradeoffs` (symmetry/governing factors) and `dominatedOptions`.
 
-How the Concierge responds:
-- Structural brief:
-  - Flow enumerates tradeoffs and describes each option with support and symmetry.
-  - Friction frames irreducible cost: choosing one option means giving up what the other provides.
-  - Fragilities focus less on single claims and more on how badly misaligned priorities can hurt.
-  - Transfer asks what the user is actually optimizing for.
-- Shape guidance:
-  - “Map what is sacrificed for what is gained; don’t force a choice; show consequences.”
-- Default stance:
-  - Shape default stance is `explore` (map the space rather than decide).
-  - Response pattern: explicit “If you prioritize X, pick A; if you prioritize Y, pick B” and end with a question about which variable matters most.
+**The Flow:**
+- Maps **Optimization Boundaries**. Enumerates each tradeoff with its balance and governing logic.
+
+**The Friction:**
+- Frames the irreducible cost: choosing one option means accepting the loss of the other. Identifies agreed ground unaffected by the tradeoff.
+
+**Shape Guidance:**
+- Map what is sacrificed for what is gained. Do not force a choice; show the consequences of each path.
+
+**Default Stance:** `explore`.
 
 ---
 
-## Dimensional (MULTI‑FACETED)
+## Dimensional (MULTI-FACETED)
 
-What the map sends:
+**What the map sends:**
 - Claims clustered into multiple relatively independent dimensions.
-- `DimensionalShapeData` including:
-  - `dimensions` (clusters with themes, claims, and cohesion).
-  - `interactions` among dimensions (independent/overlapping/conflicting).
-  - `gaps` and `governingConditions`.
-  - `dominantDimension`, `hiddenDimension`, `dominantBlindSpots`, `transferQuestion`.
+- `DimensionalShapeData` includes `dimensions` (themes/cohesion), `interactions`, and `governingConditions`.
 
-How the Concierge responds:
-- Structural brief:
-  - Flow presents the primary lens and other dimensions, plus key conflicts between them.
-  - Friction emphasizes what the dominant lens misses and what the hidden dimension contains.
-  - Fragilities surface cross-dimensional conflicts and blind spots.
-  - Transfer asks which dimension is most relevant to the user.
-- Shape guidance:
-  - “Ask which dimension matters; do not collapse prematurely.”
-- Default stance:
-  - Shape default stance is `explore` (surface dimensions and branches).
-  - Response pattern: lay out key dimensions and how choices change with each, then ask the user to anchor on one or two.
+**The Flow:**
+- Presents the **Primary Lens** (dominant dimension) and summarizes other detected dimensions and conflicts.
+
+**The Friction:**
+- Surfaces the **Hidden Dimension** and identifies what the primary lens may miss. Lists unaddressed combinations (gaps).
+
+**Shape Guidance:**
+- Ask which dimension matters; do not collapse prematurely. Present options tied to specific conditions.
+
+**Default Stance:** `explore`.
 
 ---
 
 ## Exploratory (UNMAPPED)
 
-What the map sends:
+**What the map sends:**
 - Sparse or fragmented structure with low coherence.
-- `ExploratoryShapeData` including:
-  - `strongestSignals` and loose clusters.
-  - `isolatedClaims` with no connections.
-  - `clarifyingQuestions`.
-  - `signalStrength`, `outerBoundary`, `sparsityReasons`, `transferQuestion`.
+- `ExploratoryShapeData` includes `strongestSignals`, `looseClusters`, and `sparsityReasons`.
 
-How the Concierge responds:
-- Structural brief:
-  - Flow lists strongest signals and coarse clusters, if any.
-  - Friction highlights outer boundaries, isolation, and the reasons structure is sparse.
-  - Fragilities call out low signal strength and any penalties in the shape.
-  - Transfer asks a clarifying question that would collapse ambiguity.
-- Shape guidance:
-  - “Be honest about uncertainty; ask clarifying questions that would collapse ambiguity.”
-- Default stance:
-  - Shape default stance is `explore`.
-  - Response pattern: exploratory mapping of what little is known, heavy emphasis on what is missing, and a pointed clarifying question at the end.
+**The Flow:**
+- Reports **Signal Strength**. Lists the strongest individual signals and any coarse thematic clusters detected.
+
+**The Friction:**
+- Describes the **Outer Boundary** and identifies why the structure is sparse (ambiguity, underexplored domain, etc.).
+
+**Shape Guidance:**
+- Be honest about uncertainty; don't overstate. Ask clarifying questions to collapse ambiguity.
+
+**Default Stance:** `explore`.
 
 ---
 
 ## Contextual (CONDITIONAL)
 
-What the map sends:
+**What the map sends:**
 - Different branches that apply under different conditions.
-- `ContextualShapeData` including:
-  - `governingCondition` describing the fork.
-  - `branches` with conditions and associated floor claims.
-  - `defaultPath` when conditions are not specified.
-  - `missingContext` and `transferQuestion`.
+- `ContextualShapeData` includes `governingCondition`, `branches`, and `missingContext`.
 
-How the Concierge responds:
-- Structural brief:
-  - Flow lays out the governing condition and the branches, plus any default path.
-  - Friction focuses on the risk of picking the wrong branch and what context is missing.
-  - Fragilities emphasize dependence on user-specific conditions.
-  - Transfer asks which situation applies to the user and what context they can provide.
-- Shape guidance:
-  - “Do not guess; ask for missing context and explain why the answer changes with it.”
-- Default stance:
-  - Shape default stance is `explore`.
-  - Response pattern: “If you are in situation A, do X; if in B, do Y,” then request the missing context that disambiguates which branch applies.
+**The Flow:**
+- Defines **The Fork**. Lays out the governing condition and the specific claims activated by each branch.
 
+**The Friction:**
+- Focuses on the **Missing Context** needed to resolve the fork. Identifies exceptions to the highest-support default path.
+
+**Shape Guidance:**
+- Do not guess. Ask for missing context directly and explain how the answer changes based on that context.
+
+**Default Stance:** `explore`.

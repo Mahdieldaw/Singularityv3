@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useAtom } from "jotai";
 import {
   selectedModelsAtom,
@@ -6,6 +6,8 @@ import {
   powerUserModeAtom,
   isReducedMotionAtom,
   isSettingsOpenAtom,
+  mappingProviderAtom,
+  singularityProviderAtom,
 } from "../state/atoms";
 import { LLM_PROVIDERS_CONFIG } from "../constants";
 import { useProviderStatus } from "../hooks/providers/useProviderStatus";
@@ -16,10 +18,19 @@ export default function SettingsPanel() {
   const [isVisibleMode, setIsVisibleMode] = useAtom(isVisibleModeAtom);
   const [powerUserMode, setPowerUserMode] = useAtom(powerUserModeAtom);
   const [isReducedMotion, setIsReducedMotion] = useAtom(isReducedMotionAtom);
+  const [mappingProvider, setMappingProvider] = useAtom(mappingProviderAtom);
+  const [singularityProvider, setSingularityProvider] = useAtom(singularityProviderAtom);
 
   // NEW: Hook for auth status
   const { status: providerStatus, manualRefresh } = useProviderStatus();
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const refreshTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (refreshTimeoutRef.current) clearTimeout(refreshTimeoutRef.current);
+    };
+  }, []);
 
   const handleToggleModel = (providerId: string) => {
     setSelectedModels((prev: any) => ({
@@ -29,9 +40,10 @@ export default function SettingsPanel() {
   };
 
   const handleRefresh = async () => {
+    if (refreshTimeoutRef.current) clearTimeout(refreshTimeoutRef.current);
     setIsRefreshing(true);
     await manualRefresh();
-    setTimeout(() => setIsRefreshing(false), 500);
+    refreshTimeoutRef.current = setTimeout(() => setIsRefreshing(false), 500);
   };
 
   return (
@@ -62,10 +74,55 @@ export default function SettingsPanel() {
       </div>
 
       <div className="model-config">
+        {/* Unified Roles Section */}
+        <h3 className="text-sm font-semibold text-text-brand mb-3 mt-0">
+          Council Roles
+        </h3>
+        <div className="grid grid-cols-1 gap-3 mb-6">
+          {/* Mapper Selection */}
+          <div className="bg-chip border border-border-subtle rounded-lg p-3">
+            <div className="flex items-center gap-2 mb-2 text-xs font-medium text-text-secondary">
+              <span>🧩</span><span>Mapping Strategy</span>
+            </div>
+            <select
+              value={mappingProvider || ""}
+              onChange={(e) => setMappingProvider(e.target.value || null)}
+              className="w-full bg-surface-raised border border-border-strong rounded-md px-2 py-1.5 text-xs text-text-primary outline-none focus:border-brand-500 transition-colors"
+            >
+              <option value="">None (Auto)</option>
+              {LLM_PROVIDERS_CONFIG.map(p => (
+                <option key={`m-${p.id}`} value={p.id} disabled={providerStatus[p.id] === false}>
+                  {p.name} {providerStatus[p.id] === false ? "(Locked)" : ""}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Singularity Selection */}
+          <div className="bg-chip border border-border-subtle rounded-lg p-3">
+            <div className="flex items-center gap-2 mb-2 text-xs font-medium text-text-secondary">
+              <span>🕳️</span><span>Singularity (Synthesis)</span>
+            </div>
+            <select
+              value={singularityProvider || ""}
+              onChange={(e) => setSingularityProvider(e.target.value || null)}
+              className="w-full bg-surface-raised border border-border-strong rounded-md px-2 py-1.5 text-xs text-text-primary outline-none focus:border-brand-500 transition-colors"
+            >
+              <option value="">None (Auto)</option>
+              {LLM_PROVIDERS_CONFIG.map(p => (
+                <option key={`s-${p.id}`} value={p.id} disabled={providerStatus[p.id] === false}>
+                  {p.name} {providerStatus[p.id] === false ? "(Locked)" : ""}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
         <div className="flex justify-between items-center mb-3">
           <h3 className="text-sm font-semibold text-text-brand m-0">
-            Active Models
+            Witness Models
           </h3>
+          <span className="text-[10px] text-text-muted uppercase tracking-wider">Used in System Mode</span>
         </div>
 
         {LLM_PROVIDERS_CONFIG.map((provider) => {
@@ -96,7 +153,17 @@ export default function SettingsPanel() {
                   ? "bg-brand-500"
                   : "bg-border-strong"
                   } ${!isAuth ? "cursor-not-allowed opacity-50" : ""}`}
+                role="switch"
+                aria-checked={!!selectedModels[provider.id]}
+                aria-disabled={!isAuth}
+                tabIndex={isAuth ? 0 : -1}
                 onClick={() => isAuth && handleToggleModel(provider.id)}
+                onKeyDown={(e) => {
+                  if (isAuth && (e.key === 'Enter' || e.key === ' ')) {
+                    e.preventDefault();
+                    handleToggleModel(provider.id);
+                  }
+                }}
               >
                 <div
                   className={`absolute top-0.5 w-4 h-4 bg-white rounded-full transition-all duration-200 ${selectedModels[provider.id] ? "left-[22px]" : "left-0.5"
@@ -116,6 +183,15 @@ export default function SettingsPanel() {
           </span>
           <div
             onClick={() => setIsVisibleMode(!isVisibleMode)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                setIsVisibleMode(!isVisibleMode);
+              }
+            }}
+            role="switch"
+            aria-checked={isVisibleMode}
+            tabIndex={0}
             className={`relative w-10 h-5 rounded-full cursor-pointer transition-all duration-200 ${isVisibleMode ? "bg-brand-500" : "bg-border-strong"
               }`}
           >
@@ -131,14 +207,24 @@ export default function SettingsPanel() {
         </h3>
         <div className="mode-item flex items-center justify-between p-3 bg-chip border border-border-subtle rounded-lg mb-2">
           <div className="flex flex-col">
-                      <span className="text-text-secondary">Power User Mode</span>
-                      <span className="text-xs text-text-muted mt-0.5">
-                        Enable advanced features
-                      </span>
-                    </div>          <div
+            <span className="text-text-secondary">Power User Mode</span>
+            <span className="text-xs text-text-muted mt-0.5">
+              Enable advanced features
+            </span>
+          </div>
+          <div
             className={`mode-toggle relative w-10 h-5 rounded-full cursor-pointer transition-all duration-200 ${powerUserMode ? "bg-brand-500" : "bg-border-strong"
               }`}
+            role="switch"
+            aria-checked={powerUserMode}
+            tabIndex={0}
             onClick={() => setPowerUserMode(!powerUserMode)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                setPowerUserMode(!powerUserMode);
+              }
+            }}
           >
             <div
               className={`absolute top-0.5 w-4 h-4 bg-white rounded-full transition-all duration-200 ${powerUserMode ? "left-[22px]" : "left-0.5"
@@ -155,7 +241,16 @@ export default function SettingsPanel() {
           <div
             className={`mode-toggle relative w-10 h-5 rounded-full cursor-pointer transition-all duration-200 ${isReducedMotion ? "bg-brand-500" : "bg-border-strong"
               }`}
+            role="switch"
+            aria-checked={isReducedMotion}
+            tabIndex={0}
             onClick={() => setIsReducedMotion(!isReducedMotion)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                setIsReducedMotion(!isReducedMotion);
+              }
+            }}
           >
             <div
               className={`absolute top-0.5 w-4 h-4 bg-white rounded-full transition-all duration-200 ${isReducedMotion ? "left-[22px]" : "left-0.5"

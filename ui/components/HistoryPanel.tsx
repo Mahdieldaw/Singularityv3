@@ -701,9 +701,6 @@ export default function HistoryPanel() {
               itemContent={(_, session) => {
                 const sessionId = session.sessionId || session.id;
                 const isActive = currentSessionId === sessionId;
-                const isBatchModeParams = session.title
-                  ?.toLowerCase()
-                  .includes("batch");
                 const isDeleting = !!deletingIds && deletingIds.has(sessionId);
                 const isSelected = selectedIds.has(sessionId);
 
@@ -715,7 +712,7 @@ export default function HistoryPanel() {
                       isBatchMode={isBatchMode}
                       isSelected={isSelected}
                       isDeleting={isDeleting}
-                      showMenu={!isBatchMode && !isBatchModeParams}
+                      showMenu={!isBatchMode}
                       onRowClick={handleSessionRowClick}
                       onToggleSelected={handleToggleSelected}
                       onMenuClick={handleSessionMenuClick}

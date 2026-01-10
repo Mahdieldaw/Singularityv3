@@ -134,8 +134,8 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
                 }
             } else {
                 // Toggling Witness
-                const isSelected = selectedModels[providerId];
-                setSelectedModels({ ...selectedModels, [providerId]: !isSelected });
+                const isSelected = !!selectedModels[providerId];
+                setSelectedModels((prev: Record<string, boolean>) => ({ ...prev, [providerId]: !isSelected }));
             }
         } else {
             // Tray/Historical/etc. without turnId
@@ -475,7 +475,7 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
                                     return (
                                         <button
                                             key={`w-${pid}`}
-                                            onClick={() => !isUnauthorized && setSelectedModels({ ...(selectedModels || {}), [pid]: !checked })}
+                                            onClick={() => !isUnauthorized && setSelectedModels((prev: any) => ({ ...(prev || {}), [pid]: !checked }))}
                                             disabled={isUnauthorized}
                                             className={clsx("px-2 py-1 rounded-md text-xs border transition-colors",
                                                 checked ? "bg-brand-500/15 border-brand-500 text-text-primary" : "bg-chip border-border-subtle text-text-secondary hover:bg-surface-highlight",

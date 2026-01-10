@@ -158,6 +158,18 @@ export class GeminiAdapter {
           },
         });
         if (recovery) return recovery;
+
+        return {
+          providerId: this.id,
+          ok: false,
+          text: null,
+          errorCode: (error && (error.code || error.type)) || "unknown",
+          latencyMs: Date.now() - startTime,
+          meta: {
+            error: error?.toString?.() || String(error),
+            details: error?.details,
+          },
+        };
       } catch (handledError) {
         return {
           providerId: this.id,
@@ -301,6 +313,19 @@ export class GeminiAdapter {
           },
         });
         if (recovery) return recovery;
+
+        return {
+          providerId: this.id,
+          ok: false,
+          text: null,
+          errorCode: (error && (error.code || error.type)) || "unknown",
+          latencyMs: Date.now() - startTime,
+          meta: {
+            error: error?.toString?.() || String(error),
+            details: error?.details,
+            cursor: providerContext?.cursor ?? providerContext?.meta?.cursor,
+          },
+        };
       } catch (handledError) {
         return {
           providerId: this.id,

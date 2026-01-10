@@ -117,6 +117,10 @@ const NetRulesManager = {
     this._cleanupTabRulesPeriodically();
   },
 
+  getNextRuleId() {
+    return this._lastRuleId++;
+  },
+
   // =============================================================================
   // PUBLIC API METHODS
   // =============================================================================
@@ -130,15 +134,14 @@ const NetRulesManager = {
     const isArray = Array.isArray(e);
 
     // Normalize to array and assign IDs
-    e = utils.ensureArray(e).map((e) => {
-      const ruleId = this._lastRuleId;
-      this._lastRuleId += 1;
+    const normalizedRules = utils.ensureArray(e).map((inputRule) => {
+      const ruleId = this.getNextRuleId();
 
       return {
         id: ruleId,
         priority: 1,
-        ...e,
-        key: e.key || String(ruleId),
+        ...inputRule,
+        key: inputRule.key || String(ruleId),
         condition: {
           resourceTypes: [
             "main_frame",
@@ -157,40 +160,40 @@ const NetRulesManager = {
             "webbundle",
             "other",
           ],
-          ...e.condition,
+          ...inputRule.condition,
         },
       };
     });
 
     // Remove duplicates by key (keep last occurrence)
-    e = e.filter(
-      (rule, index) => index === e.findLastIndex((r) => r.key === rule.key),
+    const filteredRules = normalizedRules.filter(
+      (rule, index) => index === normalizedRules.findLastIndex((r) => r.key === rule.key),
     );
 
     // Find existing rules with same keys to replace
     const existingKeys =
-      this._rules.length > 0 ? new Set(e.map((rule) => rule.key)) : null;
+      this._rules.length > 0 ? new Set(filteredRules.map((rule) => rule.key)) : null;
     const rulesToRemove = this._rules
       .filter((rule) => existingKeys && existingKeys.has(rule.key))
       .map((rule) => rule.id);
 
     // Track new rules for cleanup
     this._rules.push(
-      ...e.map((rule) => ({
+      ...filteredRules.map((rule) => ({
         id: rule.id,
         key: rule.key,
         tabIds: rule.condition.tabIds || null,
       })),
     );
 
-    const ruleKeys = e.map((rule) => rule.key);
+    const ruleKeys = filteredRules.map((rule) => rule.key);
 
-    // Remove key from rules before sending to API (not supported by declarativeNetRequest)
-    e.forEach((rule) => delete rule.key);
+    // Build the payload for the DNR API without mutating original objects (remove the HTOS-internal 'key')
+    const addRules = filteredRules.map(({ key, ...r }) => r);
 
     // Update Chrome declarative net request rules
     await chrome.declarativeNetRequest.updateSessionRules({
-      addRules: e,
+      addRules: addRules,
     });
 
     // Remove replaced rules
@@ -262,9 +265,10 @@ const NetRulesManager = {
    */
   async _cleanUpTabRules() {
     const rulesToRemove = [];
+    const rulesSnapshot = [...this._rules];
 
     // Check each rule with tab restrictions
-    for (const rule of this._rules) {
+    for (const rule of rulesSnapshot) {
       if (!rule.tabIds) continue;
 
       let hasValidTab = false;
@@ -330,7 +334,7 @@ const CSPController = {
     const cspRules = [
       {
         condition: {
-          urlFilter: null, // Apply to all URLs
+          urlFilter: "*", // Apply to all URLs
         },
         action: removeCspHeaderAction,
       },
@@ -485,7 +489,7 @@ const ArkoseController = {
     durationMs,
   }) {
     try {
-      const ruleId = NetRulesManager._lastRuleId++;
+      const ruleId = NetRulesManager.getNextRuleId();
       await DNRUtils.registerHeaderRule({
         tabId,
         urlFilter,

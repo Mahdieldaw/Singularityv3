@@ -103,7 +103,7 @@ export function useChat() {
         const effectiveMappingProvider =
           mappingProvider ||
           (activeProviders.length > 0 ? (activeProviders[0] as any) : 'gemini');
-        const shouldUseMapping = true;
+        const shouldUseMapping = mappingEnabled ?? true;
 
         const effectiveSingularityProvider = singularityProvider || (activeProviders.length > 0 ? (activeProviders[0] as any) : 'gemini');
 
@@ -190,15 +190,16 @@ export function useChat() {
       setTurnIds,
       selectedModels,
       currentSessionId,
-      setCurrentSessionId,
       setIsLoading,
+      setUiPhase,
+      setCurrentAppStep,
       setActiveAiTurnId,
-      mappingEnabled,
       mappingProvider,
       singularityProvider,
       thinkOnChatGPT,
-      powerUserMode,
-      turnIds.length,
+      turnIds,
+      selectedMode,
+      batchAutoRunEnabled,
     ],
   );
 

@@ -84,20 +84,27 @@ export class ContextResolver {
     // PERMISSIVE EXTEND LOGIC:
     // 1. Iterate over requested providers
     // 2. If forced reset -> New Joiner
-    // 3. If context exists -> Continue
+    // 3. If context exists (prefer :batch suffix) -> Continue
     // 4. If no context -> New Joiner
     const resolvedContexts = {};
     const forcedResetSet = new Set(request.forcedContextReset || []);
 
     for (const pid of (request.providers || [])) {
+      // ✅ CRITICAL FIX: Look for role-suffixed context (batch) first
+      const batchPid = `${pid}:batch`;
+
       if (forcedResetSet.has(pid)) {
         // Case 1: Forced Reset
         resolvedContexts[pid] = { isNewJoiner: true };
+      } else if (normalized[batchPid]) {
+        // Case 2: Batch Context Exists -> Continue
+        // We map the scoped context back to the raw PID for the step payload
+        resolvedContexts[pid] = normalized[batchPid];
       } else if (normalized[pid]) {
-        // Case 2: Context Exists -> Continue
+        // Case 3: Legacy/Default Context Exists -> Continue
         resolvedContexts[pid] = normalized[pid];
       } else {
-        // Case 3: No Context -> New Joiner
+        // Case 4: No Context -> New Joiner
         resolvedContexts[pid] = { isNewJoiner: true };
       }
     }
@@ -128,7 +135,21 @@ export class ContextResolver {
 
     // NEW: batch recompute - single provider retry using original user message OR custom override
     if (stepType === "batch") {
-      const providerContextsAtSourceTurn = sourceTurn.providerContexts || {};
+      const turnContexts = sourceTurn.providerContexts || {};
+      const batchPid = targetProvider ? `${targetProvider}:batch` : null;
+
+      // Extract specific context for target provider, prioritizing :batch
+      let targetContext = undefined;
+      if (batchPid && turnContexts[batchPid]) {
+        targetContext = turnContexts[batchPid];
+      } else if (targetProvider && turnContexts[targetProvider]) {
+        targetContext = turnContexts[targetProvider];
+      }
+
+      const providerContextsAtSourceTurn = targetProvider && targetContext
+        ? { [targetProvider]: targetContext }
+        : {};
+
       // Prefer custom userMessage from request (targeted refinement), fallback to original turn text
       const sourceUserMessage = request.userMessage || await this._getUserMessageForTurn(sourceTurn);
       return {

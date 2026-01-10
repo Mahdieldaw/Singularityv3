@@ -65,9 +65,7 @@ const ChatInput = ({
   const [activeTarget, setActiveTarget] = useAtom(activeProviderTargetAtom);
   const [currentSessionId] = useAtom(currentSessionIdAtom);
   const setActiveRecomputeState = useSetAtom(activeRecomputeStateAtom);
-  const [mappingProvider, setMappingProvider] = useAtom(mappingProviderAtom);
   const [singularityProvider, setSingularityProvider] = useAtom(singularityProviderAtom);
-  const setLocks = useSetAtom(providerLocksAtom);
   const [batchAutoRunEnabled, setBatchAutoRunEnabled] = useAtom(batchAutoRunEnabledAtom);
 
   const toggleBatchGating = useCallback(() => {
@@ -115,12 +113,18 @@ const ChatInput = ({
   const onHeightChange = setChatInputHeight;
   const onCancelTarget = () => setActiveTarget(null);
 
+  const containerRef = useRef<HTMLDivElement>(null);
+
   // Clear active target when clicking outside
   useEffect(() => {
     if (!activeTarget) return;
-    const handleClickOutside = () => setActiveTarget(null);
-    document.addEventListener("click", handleClickOutside);
-    return () => document.removeEventListener("click", handleClickOutside);
+    const handleClickOutside = (event: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
+        setActiveTarget(null);
+      }
+    };
+    document.body.addEventListener("click", handleClickOutside);
+    return () => document.body.removeEventListener("click", handleClickOutside);
   }, [activeTarget, setActiveTarget]);
 
   // Input Length Validation State
@@ -212,38 +216,31 @@ const ChatInput = ({
   const workflowProgress = useAtomValue(workflowProgressAtom);
 
   return (
-    <div className="flex justify-center flex-col items-center pointer-events-auto">
+    <div ref={containerRef} className="flex justify-center flex-col items-center pointer-events-auto">
 
-      {!isRoundActive && (
-        <div className="relative w-full max-w-[min(900px,calc(100%-24px))] flex justify-center mb-[-8px] z-10 !bg-transparent">
-          <CouncilOrbs
-            providers={LLM_PROVIDERS_CONFIG}
-            voiceProviderId={singularityProvider}
-            variant="active"
-            workflowProgress={workflowProgress as any}
-            onCrownMove={(pid) => {
-              setSingularityProvider(pid);
-              try {
-                chrome?.storage?.local?.set?.({
-                  provider_lock_settings: {
-                    singularity_locked: true,
-                    singularity_provider: pid
-                  }
-                });
-              } catch (e) {
-                console.error("Failed to save singularity selection:", e);
-              }
-            }}
-          />
-        </div>
-      )}
-
-      {isRoundActive && (
-        <div className="flex items-center gap-2 text-xs text-text-muted py-1 text-center opacity-70">
-          <span className="w-2 h-2 rounded-full bg-brand-400 animate-pulse" />
-          Click a glowing orb to see that response
-        </div>
-      )}
+      <div className="relative w-full max-w-[min(900px,calc(100%-24px))] flex justify-center mb-[-8px] z-10 !bg-transparent">
+        <CouncilOrbs
+          providers={LLM_PROVIDERS_CONFIG}
+          voiceProviderId={singularityProvider}
+          variant="active"
+          workflowProgress={workflowProgress as any}
+          isSingularityMode={!batchAutoRunEnabled}
+          collapsed={!isRoundActive} // Collapse when NOT streaming (idle/finished)
+          onCrownMove={(pid) => {
+            setSingularityProvider(pid);
+            try {
+              chrome?.storage?.local?.set?.({
+                provider_lock_settings: {
+                  singularity_locked: true,
+                  singularity_provider: pid
+                }
+              });
+            } catch (e) {
+              console.error("Failed to save singularity selection:", e);
+            }
+          }}
+        />
+      </div>
 
       <div className="flex gap-2 items-center relative w-full max-w-[min(900px,calc(100%-24px))] p-2.5 bg-surface border border-border-subtle/60 rounded-t-2xl rounded-b-2xl flex-wrap z-[100] shadow-elevated">
 
@@ -283,11 +280,6 @@ const ChatInput = ({
               }
             }}
             disabled={isLoading}
-            onFocus={() => {
-              if (activeTarget) {
-                onCancelTarget?.();
-              }
-            }}
           />
 
           {(isWarning || isOverLimit) && (
@@ -336,8 +328,12 @@ const ChatInput = ({
               ⊘
             </span>
           )}
-          <span className={batchAutoRunEnabled ? "text-text-muted" : "text-intent-danger/80"}>Singularity</span>
-          <span className={batchAutoRunEnabled ? "" : "text-intent-danger font-medium"}>• 1</span>
+          <span className={batchAutoRunEnabled ? "text-text-muted" : "text-intent-danger/80"}>
+            {batchAutoRunEnabled ? "System" : "Singularity"}
+          </span>
+          <span className={batchAutoRunEnabled ? "" : "text-intent-danger font-medium"}>
+            • {batchAutoRunEnabled ? activeProviderCount : 1}
+          </span>
         </div>
 
         <div className="relative">

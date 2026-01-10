@@ -6,6 +6,9 @@
  *
  * Build-phase safe: emitted to dist/core/*
  */
+
+import { DNRUtils } from "./dnr-utils.js";
+
 /**
  * DNR Rule Auditor for debugging rule behavior
  */
@@ -237,4 +240,3 @@ DNRRuleAuditor.isEnabled = false;
 DNRRuleAuditor.matches = [];
 DNRRuleAuditor.MAX_STORED_MATCHES = 1000;
 DNRRuleAuditor.listener = null;
-import { DNRUtils } from "./dnr-utils.js";

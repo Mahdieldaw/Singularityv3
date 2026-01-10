@@ -1075,7 +1075,7 @@ const OptionsTab: React.FC<OptionsTabProps> = ({ themes, citationSourceOrder, on
                       <SupporterOrbs
                         supporters={opt.citations}
                         citationSourceOrder={citationSourceOrder}
-                        onOrbClick={() => onCitationClick(opt.citations[0])}
+                        onOrbClick={(providerId) => onCitationClick(providerId)}
                         size="small"
                       />
                     </div>
@@ -1784,22 +1784,26 @@ export const DecisionMapSheet = React.memo(() => {
 
   const handleCitationClick = useCallback((modelNumber: number | string) => {
     try {
-      // If it's a string, it's a direct provider ID from Refiner unlisted options
-      if (typeof modelNumber === 'string') {
-        const targetId = normalizeProviderId(modelNumber.toLowerCase());
-        setActiveSplitPanel({ turnId: aiTurn?.id || '', providerId: targetId });
-        return;
+      let providerId: string | undefined;
+      const metaOrder = latestMapping?.meta?.citationSourceOrder || null;
+
+      // Check if modelNumber is numeric (either a number or a string that's a number)
+      const isNumeric = typeof modelNumber === 'number' || (!isNaN(parseInt(modelNumber, 10)) && /^\d+$/.test(modelNumber));
+
+      if (isNumeric) {
+        const num = typeof modelNumber === 'number' ? modelNumber : parseInt(modelNumber, 10);
+        if (metaOrder && typeof metaOrder === 'object') {
+          providerId = (metaOrder as any)[num];
+        }
+        if (!providerId && aiTurn) {
+          const activeOrdered = LLM_PROVIDERS_CONFIG.map((p) => String(p.id)).filter((pid) => !!(aiTurn.batchResponses || {})[pid]);
+          providerId = activeOrdered[num - 1];
+        }
+      } else if (typeof modelNumber === 'string') {
+        // Direct provider ID
+        providerId = normalizeProviderId(modelNumber.toLowerCase());
       }
 
-      const metaOrder = latestMapping?.meta?.citationSourceOrder || null;
-      let providerId: string | undefined;
-      if (metaOrder && typeof metaOrder === 'object') {
-        providerId = metaOrder[modelNumber];
-      }
-      if (!providerId && aiTurn) {
-        const activeOrdered = LLM_PROVIDERS_CONFIG.map((p) => String(p.id)).filter((pid) => !!(aiTurn.batchResponses || {})[pid]);
-        providerId = activeOrdered[modelNumber - 1];
-      }
       if (!providerId || !aiTurn) return;
       setActiveSplitPanel({ turnId: aiTurn.id, providerId });
     } catch { }

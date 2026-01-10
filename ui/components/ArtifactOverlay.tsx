@@ -40,7 +40,14 @@ export const ArtifactOverlay: React.FC<ArtifactOverlayProps> = ({ artifact, onCl
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = `${artifact.identifier}.md`;
+            
+            const safeName = artifact.identifier
+                .replace(/[\/\\]/g, '_')
+                .replace(/[^a-zA-Z0-9._-]/g, '_')
+                .replace(/^[\.]+/g, '')
+                .slice(0, 200) || 'artifact';
+            
+            a.download = `${safeName}.md`;
             document.body.appendChild(a);
             a.click();
             setTimeout(() => {

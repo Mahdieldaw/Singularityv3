@@ -79,14 +79,7 @@ export class DNRUtils {
         console.warn("DNR: persist after registerTemporary failed", e);
       }
       // Schedule automatic removal
-      setTimeout(() => {
-        this.removeRule(ruleId).catch((err) =>
-          console.warn(
-            `Failed to auto-remove expired DNR rule ${ruleId}:`,
-            err,
-          ),
-        );
-      }, durationMs);
+      chrome.alarms.create(`dnr-expire-${ruleId}`, { when: expiresAt });
       this.dbg(
         `DNR: Registered temporary rule ${ruleId} (expires in ${durationMs}ms)`,
         providerId ? `(${providerId})` : "",
@@ -159,6 +152,13 @@ export class DNRUtils {
     const isTabScoped = !!tabId;
     const isTemporary = !!durationMs;
 
+    const op = operation.toLowerCase();
+    const validOps = ["set", "remove", "append"];
+    const finalOp = validOps.includes(op) ? op : "set";
+    if (!validOps.includes(op)) {
+       // console.warn optional but good
+    }
+
     const rule = {
       id: finalRuleId,
       priority: 1,
@@ -169,7 +169,7 @@ export class DNRUtils {
             header: headerName,
             operation:
               chrome.declarativeNetRequest.HeaderOperation[
-              operation.toUpperCase()
+              finalOp.toUpperCase()
               ],
             value: headerValue,
           },
@@ -454,6 +454,19 @@ export class DNRUtils {
     if (this.initialized) return;
 
     try {
+      if (chrome.alarms && chrome.alarms.onAlarm) {
+        chrome.alarms.onAlarm.addListener((alarm) => {
+          if (alarm.name.startsWith("dnr-expire-")) {
+            const ruleId = parseInt(alarm.name.replace("dnr-expire-", ""), 10);
+            if (!isNaN(ruleId)) {
+              this.removeRule(ruleId).catch((err) =>
+                console.warn(`Failed to auto-remove expired DNR rule ${ruleId}:`, err)
+              );
+            }
+          }
+        });
+      }
+
       // Restore rules from storage
       await this.restorePersistedRules();
 
@@ -500,18 +513,44 @@ export class DNRUtils {
         );
       }
 
-      // Restore scoped rules
-      if (rulesData.scopedRules) {
-        this.scopedRules = new Map(rulesData.scopedRules);
-      }
+      // Load stored maps
+      const storedScopedRules = rulesData.scopedRules ? new Map(rulesData.scopedRules) : new Map();
+      const storedSessionRules = rulesData.sessionRules ? new Map(rulesData.sessionRules) : new Map();
 
-      // Restore session rules
-      if (rulesData.sessionRules) {
-        this.sessionRules = new Map(rulesData.sessionRules);
-      }
+      // Fetch live rules from Chrome to reconcile
+      const [liveDynamic, liveSession] = await Promise.all([
+        chrome.declarativeNetRequest.getDynamicRules().catch(() => []),
+        chrome.declarativeNetRequest.getSessionRules().catch(() => []),
+      ]);
+
+      const liveDynamicIds = new Set(liveDynamic.map(r => r.id));
+      const liveSessionIds = new Set(liveSession.map(r => r.id));
+
+      // Rebuild Maps: Keep only what's actually in Chrome
+      this.scopedRules = new Map();
+      storedScopedRules.forEach((val, key) => {
+        if (liveDynamicIds.has(key)) {
+          this.scopedRules.set(key, val);
+        }
+      });
+
+      this.sessionRules = new Map();
+      storedSessionRules.forEach((val, key) => {
+        if (liveSessionIds.has(key)) {
+          this.sessionRules.set(key, val);
+        }
+      });
 
       // Clean up expired rules immediately
       await this.cleanupExpiredRules();
+
+      // Recreate alarms for remaining temporary dynamic rules
+      const now = Date.now();
+      for (const rule of this.scopedRules.values()) {
+        if (rule.expiresAt && rule.expiresAt > now) {
+          chrome.alarms.create(`dnr-expire-${rule.id}`, { when: rule.expiresAt });
+        }
+      }
 
       this.dbg("DNR: Restored persisted rules");
     } catch (error) {
