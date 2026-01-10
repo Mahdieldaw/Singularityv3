@@ -146,10 +146,15 @@ export class CognitivePipelineHandler {
           }
 
           if (!conciergePrompt) {
-            const mod = await import('../ConciergeService');
-            const ConciergeService = mod.ConciergeService;
-            conciergePromptType = "standard";
-            conciergePrompt = ConciergeService.buildConciergePrompt(userMessageForSingularity, structuralAnalysis);
+            try {
+              const mod = await import('../ConciergeService');
+              const ConciergeService = mod.ConciergeService;
+              conciergePromptType = "standard";
+              conciergePrompt = ConciergeService.buildConciergePrompt(userMessageForSingularity, structuralAnalysis);
+            } catch (e) {
+              console.error("[CognitiveHandler] Fallback concierge prompt build failed:", e);
+              conciergePrompt = null;
+            }
           }
 
           // ══════════════════════════════════════════════════════════════════
@@ -208,28 +213,6 @@ export class CognitivePipelineHandler {
             executorOptions
           );
 
-          // ══════════════════════════════════════════════════════════════════
-          // FEATURE 3: Recompute with Historical Singularity Prompts
-          // Logic: Persist the prompt type and seed so recomputes can rebuild it exactly.
-          // ══════════════════════════════════════════════════════════════════
-          if (singularityResult?.output) {
-            await this.sessionManager.upsertProviderResponse(
-              context.sessionId,
-              context.canonicalAiTurnId,
-              singularityProviderId,
-              'singularity',
-              0,
-              {
-                ...singularityResult.output,
-                meta: {
-                  ...(singularityResult.output.meta || {}),
-                  frozenSingularityPromptType: conciergePromptType,
-                  frozenSingularityPromptSeed: conciergePromptSeed,
-                },
-              }
-            );
-          }
-
           if (singularityResult) {
             try {
               singularityProviderId = singularityResult?.providerId || singularityProviderId;
@@ -258,7 +241,7 @@ export class CognitivePipelineHandler {
 
               try {
                 // ══════════════════════════════════════════════════════════════════
-                // FEATURE 3: Persist frozen Singularity prompt for historical recompute
+                // FEATURE 3: Persist frozen Singularity prompt and metadata
                 // ══════════════════════════════════════════════════════════════════
                 await this.sessionManager.upsertProviderResponse(
                   context.sessionId,
@@ -267,11 +250,15 @@ export class CognitivePipelineHandler {
                   'singularity',
                   0,
                   {
+                    ...(singularityResult.output || {}),
                     text: singularityOutput.text,
                     status: 'completed',
                     meta: {
+                      ...(singularityResult.output?.meta || {}),
                       singularityOutput,
-                      frozenSingularityPrompt: conciergePrompt, // FEATURE 3: store for recompute
+                      frozenSingularityPromptType: conciergePromptType,
+                      frozenSingularityPromptSeed: conciergePromptSeed,
+                      frozenSingularityPrompt: conciergePrompt,
                     }
                   }
                 );

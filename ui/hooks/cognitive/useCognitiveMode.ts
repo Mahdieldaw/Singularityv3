@@ -38,7 +38,6 @@ export function useSingularityMode(trackedAiTurnId?: string) {
     const setUiPhase = useSetAtom(uiPhaseAtom);
     const setActiveAiTurnId = useSetAtom(activeAiTurnIdAtom);
     const setActiveRecomputeState = useSetAtom(activeRecomputeStateAtom);
-    const [, setLocalIsTransitioning] = useState<boolean>(false);
     const [error, setError] = useState<string | null>(null);
 
     const isTransitioning = !!trackedAiTurnId && globalIsLoading && activeAiTurnId === trackedAiTurnId;
@@ -52,7 +51,6 @@ export function useSingularityMode(trackedAiTurnId?: string) {
             return;
         }
 
-        setLocalIsTransitioning(true);
         setError(null);
 
         try {
@@ -92,7 +90,6 @@ export function useSingularityMode(trackedAiTurnId?: string) {
         } catch (err: any) {
             console.error(`[useSingularityMode] Transition failed:`, err);
             setError(err.message || String(err));
-            setLocalIsTransitioning(false);
             setGlobalIsLoading(false);
             setUiPhase("awaiting_action");
             setActiveAiTurnId(null);
@@ -109,7 +106,6 @@ export function useSingularityMode(trackedAiTurnId?: string) {
     return {
         runSingularity,
         isTransitioning,
-        setLocalIsTransitioning, // Allow resetting if needed
         error
     };
 }

@@ -34,15 +34,13 @@ export async function verifySchemaAndRepair(autoRepair: boolean): Promise<{
   );
   try {
     // Best effort close if a DB is open elsewhere; deletion will proceed regardless
-    try {
-      /* no-op: caller should close its own DB if needed */
-    } catch {}
     await deleteDatabase();
     const db = await openDatabase();
     console.log(
       "[SchemaVerification] Auto-repair completed: database recreated",
     );
-    return { repaired: true, db, health };
+    const freshHealth = await checkDatabaseHealth();
+    return { repaired: true, db, health: freshHealth };
   } catch (error) {
     console.error("[SchemaVerification] verifySchemaAndRepair failed:", error);
     throw error instanceof Error ? error : new Error(String(error));

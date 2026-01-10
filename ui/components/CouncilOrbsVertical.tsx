@@ -19,12 +19,12 @@ export const CouncilOrbsVertical: React.FC<CouncilOrbsVerticalProps> = React.mem
     const prevTurnIdRef = useRef<string | null>(null);
     const [isTransitioning, setIsTransitioning] = useState(false);
 
-    if (!activePanel) return null;
-
-    const { turnId, providerId: activeProviderId } = activePanel;
-    const turn = turnsMap.get(turnId);
+    const turnId = activePanel?.turnId;
+    const activeProviderId = activePanel?.providerId;
+    const turn = turnId ? turnsMap.get(turnId) : null;
 
     useEffect(() => {
+        if (!turnId) return;
         if (prevTurnIdRef.current && prevTurnIdRef.current !== turnId) {
             setIsTransitioning(true);
             const t = window.setTimeout(() => setIsTransitioning(false), 160);
@@ -35,7 +35,7 @@ export const CouncilOrbsVertical: React.FC<CouncilOrbsVerticalProps> = React.mem
     }, [turnId]);
 
     // Filter out system provider
-    const allProviders = LLM_PROVIDERS_CONFIG.filter(p => p.id !== 'system');
+    const allProviders = useMemo(() => LLM_PROVIDERS_CONFIG.filter(p => p.id !== 'system'), []);
 
     // Determine contributing providers
     const contributingIds = useMemo(() => {
@@ -48,6 +48,8 @@ export const CouncilOrbsVertical: React.FC<CouncilOrbsVerticalProps> = React.mem
             ...(mapperKey ? [mapperKey] : []),
         ]));
     }, [turn]);
+
+    if (!activePanel || !turnId || !activeProviderId) return null;
 
     // Filter display providers to only those that contributed
     const displayProviders = allProviders.filter(p => contributingIds.includes(String(p.id)));

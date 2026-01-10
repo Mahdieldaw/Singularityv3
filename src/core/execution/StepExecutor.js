@@ -190,8 +190,8 @@ Answer the user's message directly. Use context only to disambiguate.
         },
         onAllComplete: (results, errors) => {
           const batchUpdates = {};
-          results.forEach((res, pid) => {
-            batchUpdates[pid] = res;
+          results.forEach((result, providerId) => {
+            batchUpdates[providerId] = result;
           });
 
           // ✅ CRITICAL: Update in-memory cache SYNCHRONOUSLY
@@ -761,11 +761,14 @@ Answer the user's message directly. Use context only to disambiguate.
                   // For now, allow specific parsers to handle robustness or throw.
                 }
 
+                // Prefer cleaned text from outputData if available
+                const canonicalText = (outputData && typeof outputData === "object" && (outputData.text || outputData.cleanedText)) || finalResult.text;
+
                 streamingManager.dispatchPartialDelta(
                   context.sessionId,
                   step.stepId,
                   pid,
-                  finalResult.text,
+                  canonicalText,
                   stepType,
                   true
                 );

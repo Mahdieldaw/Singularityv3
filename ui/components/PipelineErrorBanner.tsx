@@ -28,7 +28,7 @@ export const PipelineErrorBanner: React.FC<PipelineErrorBannerProps> = ({
     const getTitle = () => {
         switch (type) {
             case 'mapping': return 'Mapping unavailable';
-            case 'singularity': return 'intelligence unavailable';
+            case 'singularity': return 'Intelligence unavailable';
             default: return 'Step unavailable';
         }
     };

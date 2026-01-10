@@ -18,7 +18,12 @@ export function Toast() {
     if (!toast) return null;
 
     return (
-        <div className="fixed bottom-4 right-4 z-[2000] animate-[slideInUp_0.2s_ease-out]">
+        <div 
+            className="fixed bottom-4 right-4 z-[2000] animate-[slideInUp_0.2s_ease-out]"
+            role="status"
+            aria-live="polite"
+            aria-atomic="true"
+        >
             <div className={clsx(
                 "bg-surface-raised border border-border-subtle rounded-lg px-3 py-2 text-sm text-text-primary shadow-card-sm flex items-center gap-2",
                 toast.type === 'success' && "border-intent-success/30",

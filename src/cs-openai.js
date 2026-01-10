@@ -90,7 +90,7 @@
       },
 
       _isArkoseIframe() {
-        return window !== window.top && window.name.startsWith("ae:");
+        return window !== window.top && typeof window.name === "string" && window.name.startsWith("ae:");
       },
 
       _getConfig() {
@@ -159,12 +159,12 @@
           return;
         }
 
-        const enfConfig = JSON.stringify(this._config.enforcement);
+        const enfConfig = encodeURIComponent(JSON.stringify(this._config.enforcement));
 
         this._execute(`
           const _sent_ = Symbol('sent');
           const _isSDK_ = Symbol('isSDK');
-          const enforcement = JSON.parse('${enfConfig}');
+          const enforcement = JSON.parse(decodeURIComponent('${enfConfig}'));
           
           Object.defineProperty(Object.prototype, enforcement.$sent, {
             get() {

@@ -8,6 +8,10 @@
  */
 import { BusController } from "../core/vendor-exports.js";
 import { ProviderDNRGate } from "../core/dnr-utils.js";
+
+// Provider-specific debug flag (off by default)
+const CLAUDE_DEBUG = false;
+
 // =============================================================================
 // CLAUDE MODELS CONFIGURATION
 // =============================================================================
@@ -101,13 +105,13 @@ export class ClaudeSessionApi {
     let data = await response.json();
     // Handle array response - sort by chat capability
     if (Array.isArray(data)) {
-      data = data.sort((a, b) =>
-        (a?.capabilities || []).includes("chat")
-          ? -1
-          : (b?.capabilities || []).includes("chat")
-            ? 1
-            : 0,
-      );
+      data = data.sort((a, b) => {
+        const aHasChat = (a?.capabilities || []).includes("chat");
+        const bHasChat = (b?.capabilities || []).includes("chat");
+        if (aHasChat && !bHasChat) return -1;
+        if (!aHasChat && bHasChat) return 1;
+        return 0;
+      });
       data = data[0];
     }
     // Cache orgId so subsequent calls are fast and avoid race on registry readiness
@@ -326,7 +330,7 @@ export class ClaudeSessionApi {
       const payload = {
         method: "POST",
         headers: {
-          Accept: "text/event-stream, text/event-stream",
+          Accept: "text/event-stream",
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
@@ -451,14 +455,13 @@ export class ClaudeSessionApi {
   _parseChunk(chunk, carry, hasAccumulatedText = false) {
     const lines = new TextDecoder()
       .decode(chunk)
-      .trim()
+      .trim() // ✅ Restore this
       .split("\n")
-      .filter((line) => line.trim().length > 0 && !line.startsWith("event:"));
+      .filter((line) => line.trim().length > 0 && !line.startsWith("event:")); // ✅ Restore this
 
     let accumulatedText = "";
     let error = null;
 
-    // ✅ Use forEach instead of map, build text manually
     lines.forEach((line, idx) => {
       let parsedData;
       let dataPrefix = "";
@@ -468,16 +471,15 @@ export class ClaudeSessionApi {
         carry.carryOver = "";
       }
 
-      const dataString = dataPrefix + line.replace("data: ", "");
+      const dataString = dataPrefix + line.replace(/^data:\s*/, ""); // ✅ Keep improved regex
 
       try {
         parsedData = JSON.parse(dataString);
       } catch (err) {
         carry.carryOver = dataString;
-        return; // Skip this line, continue to next
+        return;
       }
 
-      // Handle error frames
       if (parsedData.type === "error") {
         if (hasAccumulatedText) {
           error = parsedData;
@@ -488,11 +490,9 @@ export class ClaudeSessionApi {
         } else {
           this._throw("failedToReadResponse", parsedData);
         }
-        return; // Don't process text from error frames
+        return;
       }
 
-      // Treat both parsed and unparsed frames as valid streaming text
-      // Some Claude streams label interim frames as "unparsed" but they still carry useful text.
       const segment =
         (typeof parsedData.completion === "string" && parsedData.completion) ||
         (typeof parsedData.completion_delta === "string" &&
@@ -505,7 +505,6 @@ export class ClaudeSessionApi {
       }
     });
 
-    // ✅ ALWAYS return object structure
     return { text: accumulatedText, error };
   }
   async _createChat(orgId, emoji) {
@@ -690,4 +689,4 @@ if (typeof window !== "undefined") {
   window["HTOSClaudeModels"] = ClaudeModels;
 }
 // Provider-specific debug flag (off by default)
-const CLAUDE_DEBUG = false;
+// const CLAUDE_DEBUG = false; // Moved to top

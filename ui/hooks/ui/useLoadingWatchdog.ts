@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
 import {
   isLoadingAtom,
@@ -19,6 +19,11 @@ export function useLoadingWatchdog() {
   const setActiveAiTurnId = useSetAtom(activeAiTurnIdAtom);
   const setAlertText = useSetAtom(alertTextAtom);
 
+  const latestIsLoadingRef = useRef(isLoading);
+  useEffect(() => {
+    latestIsLoadingRef.current = isLoading;
+  }, [isLoading]);
+
   useEffect(() => {
     let timeout: any;
     if (isLoading) {
@@ -28,7 +33,7 @@ export function useLoadingWatchdog() {
       const remaining = Math.max(LOADING_TIMEOUT_MS - (now - baseline), 1000);
       timeout = setTimeout(() => {
         const elapsed = Date.now() - (lastActivityAt || baseline);
-        if (isLoading && elapsed >= LOADING_TIMEOUT_MS) {
+        if (latestIsLoadingRef.current && elapsed >= LOADING_TIMEOUT_MS) {
           setIsLoading(false);
           setUiPhase("awaiting_action");
           setActiveAiTurnId(null);
@@ -67,6 +72,21 @@ export function useResponsiveLoadingGuard(options?: {
   const setAlertText = useSetAtom(alertTextAtom);
   const alertText = useAtomValue(alertTextAtom);
 
+  const isLoadingRef = useRef(isLoading);
+  const lastActivityAtRef = useRef(lastActivityAt);
+  const warnedRef = useRef(false);
+  const escalatedRef = useRef(false);
+
+  useEffect(() => {
+    isLoadingRef.current = isLoading;
+    lastActivityAtRef.current = lastActivityAt;
+    // Reset flags if loading stops
+    if (!isLoading) {
+      warnedRef.current = false;
+      escalatedRef.current = false;
+    }
+  }, [isLoading, lastActivityAt]);
+
   useEffect(() => {
     // Guard only when connected and currently loading
     if (!isLoading || !connection?.isConnected) {
@@ -74,43 +94,43 @@ export function useResponsiveLoadingGuard(options?: {
       return;
     }
 
-    let warned = false;
-    let escalated = false;
     const baseline =
-      lastActivityAt && lastActivityAt > 0 ? lastActivityAt : Date.now();
+      lastActivityAtRef.current && lastActivityAtRef.current > 0
+        ? lastActivityAtRef.current
+        : Date.now();
 
     const interval = setInterval(() => {
       const now = Date.now();
+      const currentLastActivity = lastActivityAtRef.current;
+      const currentIsLoading = isLoadingRef.current;
       const idleFor = now - baseline;
 
       // Clear on fresh activity or when loading finishes
-      if (!isLoading || (lastActivityAt && lastActivityAt > baseline)) {
-        if (alertText) setAlertText(null);
+      if (!currentIsLoading || (currentLastActivity && currentLastActivity > baseline)) {
+        setAlertText(null);
         return;
       }
 
-      if (!warned && idleFor >= idleWarnMs) {
+      if (!warnedRef.current && idleFor >= idleWarnMs) {
         setAlertText(
           "Still processing… you can press Stop to abort and retry if needed.",
         );
-        warned = true;
+        warnedRef.current = true;
       }
 
-      if (!escalated && idleFor >= idleCriticalMs) {
+      if (!escalatedRef.current && idleFor >= idleCriticalMs) {
         setAlertText(
           "Processing is taking longer than expected. Consider pressing Stop, checking provider status, or switching model.",
         );
-        escalated = true;
+        escalatedRef.current = true;
       }
     }, 1000);
 
     return () => clearInterval(interval);
   }, [
     isLoading,
-    lastActivityAt,
     connection?.isConnected,
     setAlertText,
-    alertText,
     idleWarnMs,
     idleCriticalMs,
   ]);

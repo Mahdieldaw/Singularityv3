@@ -61,7 +61,7 @@ export function adaptGraphTopology(topology: GraphTopology | null): {
 
 export interface InsightData {
     type: string;
-    claim: { label: string; supporters: (string | number)[] };
+    claim: { label: string; supporters: number[] };
     metadata: Record<string, any>;
 }
 

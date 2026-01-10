@@ -26,19 +26,32 @@ export const CopyButton: React.FC<CopyButtonProps> = ({
 }) => {
     const setToast = useSetAtom(toastAtom);
     const [copied, setCopied] = useState(false);
+    const copyTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
+
+    React.useEffect(() => {
+        return () => {
+            if (copyTimeoutRef.current) clearTimeout(copyTimeoutRef.current);
+        };
+    }, []);
 
     const handleCopy = useCallback(
         async (e: React.MouseEvent) => {
             e.stopPropagation();
             if (disabled) return;
 
+            if (!text) {
+                setToast({ id: Date.now(), message: 'Nothing to copy', type: 'error' });
+                return;
+            }
+
             try {
-                if (text) {
-                    await navigator.clipboard.writeText(text);
-                }
+                await navigator.clipboard.writeText(text);
                 setCopied(true);
                 setToast({ id: Date.now(), message: 'Copied to clipboard', type: 'info' });
-                setTimeout(() => setCopied(false), 2000);
+                
+                if (copyTimeoutRef.current) clearTimeout(copyTimeoutRef.current);
+                copyTimeoutRef.current = setTimeout(() => setCopied(false), 2000);
+                
                 onCopy?.();
             } catch (error) {
                 console.error("Failed to copy text:", error);

@@ -1,4 +1,4 @@
-// Auto-generated declaration for computeThinkFlag helper
+// Manually authored declaration for computeThinkFlag helper
 export interface ComputeThinkFlagArgs {
   modeThinkButtonOn?: boolean;
   input?: string;

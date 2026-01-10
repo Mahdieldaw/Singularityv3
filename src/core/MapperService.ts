@@ -1,4 +1,4 @@
-﻿const DEBUG_PROMPT_SERVICE = false;
+const DEBUG_PROMPT_SERVICE = false;
 const promptDbg = (...args: any[]) => {
   if (DEBUG_PROMPT_SERVICE) console.debug("[MapperService]", ...args);
 };
@@ -22,11 +22,18 @@ export class MapperService {
       citationOrder.forEach((pid, idx) => providerToNumber.set(pid, idx + 1));
     }
 
+    // Determine next available number
+    let nextNumber = 1;
+    if (providerToNumber.size > 0) {
+      nextNumber = Math.max(...Array.from(providerToNumber.values())) + 1;
+    }
+
     const modelOutputsBlock = sourceResults
-      .map((res, idx) => {
-        const n = providerToNumber.has(res.providerId)
-          ? providerToNumber.get(res.providerId)
-          : idx + 1;
+      .map((res) => {
+        if (!providerToNumber.has(res.providerId)) {
+          providerToNumber.set(res.providerId, nextNumber++);
+        }
+        const n = providerToNumber.get(res.providerId);
         const header = `=== MODEL ${n} ===`;
         return `${header}\n${String(res.text)}`;
       })

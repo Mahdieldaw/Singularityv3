@@ -194,7 +194,8 @@ export async function batchWrite<T>(
         const request = store.put(record);
 
         request.onsuccess = () => resolve();
-        request.onerror = () => {
+        request.onerror = (event) => {
+          event.preventDefault(); // Prevent transaction abort
           const error = new Error(
             `Failed to write record at index ${index}: ${request.error?.message}`,
           );
@@ -236,7 +237,8 @@ export async function batchDelete(
         const request = store.delete(key as IDBValidKey);
 
         request.onsuccess = () => resolve();
-        request.onerror = () => {
+        request.onerror = (event) => {
+          event.preventDefault(); // Prevent transaction abort
           const error = new Error(
             `Failed to delete record at index ${index}: ${request.error?.message}`,
           );
@@ -346,19 +348,24 @@ export function promisifyCursor<T>(
 ): Promise<T[]> {
   return new Promise((resolve, reject) => {
     const results: T[] = [];
+    const promises: Promise<void>[] = [];
 
-    request.onsuccess = async () => {
+    request.onsuccess = () => {
       const cursor = request.result;
       if (cursor) {
         try {
-          const result = await processor(cursor);
-          results.push(result);
+          const p = Promise.resolve(processor(cursor)).then((res) => {
+            results.push(res);
+          });
+          promises.push(p);
           cursor.continue();
         } catch (error) {
           reject(error);
         }
       } else {
-        resolve(results);
+        Promise.all(promises)
+          .then(() => resolve(results))
+          .catch(reject);
       }
     };
 

@@ -77,7 +77,7 @@ const UserTurnBlock = ({
               )}
             </div>
             <div className="mt-auto flex justify-end">
-              <CopyButton text={userTurn.text} label="Copy user prompt" buttonText="Copy" />
+              <CopyButton text={String(userTurn.text || "")} label="Copy user prompt" buttonText="Copy" />
             </div>
           </>
         ) : (

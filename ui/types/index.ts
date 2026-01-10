@@ -1,4 +1,4 @@
-// src/ui/types.ts
+// ui/types/index.ts
 
 /**
  * UI-LAYER TYPES
@@ -111,6 +111,16 @@ export const isAiTurn = (turn: TurnMessage): turn is AiTurn =>
 // HISTORY & SESSION LOADING
 // =============================================================================
 
+/** Represents a raw session object from the backend API. */
+export interface RawHistorySession {
+  sessionId: string;
+  title?: string;
+  startTime?: number;
+  lastActivity?: number;
+  messageCount?: number;
+  firstMessage?: string;
+}
+
 /** Represents a session summary object used for display in the history panel. */
 export interface HistorySessionSummary {
   id: string;
@@ -123,9 +133,14 @@ export interface HistorySessionSummary {
   messages?: TurnMessage[];
 }
 
+/** Fully typed version for useHistoryLoader */
+export interface FormattedHistorySession extends Omit<HistorySessionSummary, 'messages'> {
+  messages: unknown[];
+}
+
 /** The shape of the API response when fetching the list of chat sessions. */
 export interface HistoryApiResponse {
-  sessions: HistorySessionSummary[];
+  sessions: RawHistorySession[];
 }
 
 /** The shape of the API response when fetching a full session to load into the UI. */

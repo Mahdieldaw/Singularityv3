@@ -818,7 +818,7 @@ const detectConvergencePoints = (
     const byTargetType = new Map<string, { targetId: string; sources: string[]; type: "prerequisite" | "supports" }>();
 
     for (const e of relevantEdges) {
-        const key = `${e.to}::${e.type} `;
+        const key = `${e.to}::${e.type}`;
         const existing = byTargetType.get(key);
         if (existing) {
             existing.sources.push(e.from);
@@ -1086,13 +1086,14 @@ function generateEvidenceSparseAware(
                 `Reasoning radiates from a single foundation`
             ];
 
-        case 'contested':
+        case 'contested': {
             const highStakes = tensions.filter(t => t.isBothHighSupport && !t.isConditional).length;
             return [
                 `Active disagreement between viewpoints`,
                 highStakes > 0 ? `High-stakes structural conflict` : `Significant tension identified`,
                 `Tension level: ${describeLevel(ratios.tension)}`
             ];
+        }
 
         case 'tradeoff':
             return [

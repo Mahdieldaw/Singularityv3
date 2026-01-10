@@ -100,8 +100,6 @@ export function createOptimisticAiTurn(
     meta: {
       isOptimistic: true,
       expectedProviders: activeProviders, // ✅ STORE expected providers
-      mapper: mappingProvider,
-      singularity: singularityProvider,
       ...(requestedFeatures ? { requestedFeatures } : {}),
       ...(mappingProvider ? { mapper: mappingProvider } : {}),
       ...(singularityProvider ? { singularity: singularityProvider } : {}),
@@ -184,6 +182,7 @@ export function applyStreamingUpdates(
           text: delta,
           status: status as any,
           createdAt: Date.now(),
+          updatedAt: Date.now(),
         });
       }
 
@@ -209,6 +208,7 @@ export function applyStreamingUpdates(
           text: delta,
           status: status as any,
           createdAt: Date.now(),
+          updatedAt: Date.now(),
         });
       }
       aiTurn.singularityResponses[providerId] = arr;

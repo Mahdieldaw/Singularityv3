@@ -292,6 +292,16 @@ export class PersistenceMonitor {
 
     const operationId = this.startOperation(operationType, details);
 
+    // If already done, handle immediately
+    if (operation.readyState === "done") {
+      if (operation.error) {
+        this.endOperation(operationId, null, operation.error);
+      } else {
+        this.endOperation(operationId, operation.result);
+      }
+      return operation.error ? Promise.reject(operation.error) : Promise.resolve(operation.result);
+    }
+
     return new Promise((resolve, reject) => {
       operation.onsuccess = (event) => {
         this.endOperation(operationId, event.target.result);
@@ -320,15 +330,16 @@ export class PersistenceMonitor {
    * Get system information
    */
   getSystemInfo() {
+    const nav = globalThis.navigator;
     return {
-      userAgent: navigator.userAgent,
-      platform: navigator.platform,
-      language: navigator.language,
-      cookieEnabled: navigator.cookieEnabled,
-      onLine: navigator.onLine,
-      indexedDBSupported: !!window.indexedDB,
-      webWorkersSupported: !!window.Worker,
-      serviceWorkerSupported: !!navigator.serviceWorker,
+      userAgent: nav?.userAgent,
+      platform: nav?.platform,
+      language: nav?.language,
+      cookieEnabled: nav?.cookieEnabled,
+      onLine: nav?.onLine,
+      indexedDBSupported: !!globalThis.indexedDB,
+      webWorkersSupported: !!globalThis.Worker,
+      serviceWorkerSupported: !!nav?.serviceWorker,
       timestamp: Date.now(),
     };
   }

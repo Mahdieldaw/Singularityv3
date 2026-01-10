@@ -382,14 +382,14 @@ export const ModelResponsePanel: React.FC<ModelResponsePanelProps> = React.memo(
                                                             <MarkdownDisplay content={histText || '*Artifact only*'} />
                                                             {histArtifacts.length > 0 && (
                                                                 <div className="mt-2 flex flex-wrap gap-1">
-                                                                    {histArtifacts.map((art, i) => (
-                                                                        <span
+                                                            {histArtifacts.map((art, i) => (
+                                                                        <button
                                                                             key={i}
                                                                             onClick={() => setSelectedArtifact(art)}
-                                                                            className="text-xs bg-brand-500/10 text-brand-500 px-1.5 py-0.5 rounded border border-brand-500/20 cursor-pointer hover:bg-brand-500/20"
+                                                                            className="text-xs bg-brand-500/10 text-brand-500 px-1.5 py-0.5 rounded border border-brand-500/20 cursor-pointer hover:bg-brand-500/20 transition-colors"
                                                                         >
                                                                             📄 {art.title}
-                                                                        </span>
+                                                                        </button>
                                                                     ))}
                                                                 </div>
                                                             )}
@@ -440,15 +440,15 @@ export const ModelResponsePanel: React.FC<ModelResponsePanelProps> = React.memo(
                         <div className="text-xs text-text-muted mt-1.5 px-1">Enter to send • ESC to cancel</div>
                     </div>
                 )}
-
-                {/* Artifact Overlay */}
-                {selectedArtifact && (
-                    <ArtifactOverlay
-                        artifact={selectedArtifact}
-                        onClose={() => setSelectedArtifact(null)}
-                    />
-                )}
             </div>
+
+            {/* Artifact Overlay */}
+            {selectedArtifact && (
+                <ArtifactOverlay
+                    artifact={selectedArtifact}
+                    onClose={() => setSelectedArtifact(null)}
+                />
+            )}
         </div>
     );
 });

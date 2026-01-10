@@ -400,7 +400,9 @@ export class ErrorHandler {
     // Try recovery strategies
     if (htosError.recoverable) {
       try {
-        return await this.attemptRecovery(htosError, context);
+        const result = await this.attemptRecovery(htosError, context);
+        this.updateCircuitBreaker(htosError.code, true);
+        return result;
       } catch (recoveryError) {
         console.error("🚨 Recovery failed:", recoveryError);
         // Fall through to throw original error
@@ -587,6 +589,13 @@ export class ErrorHandler {
    */
   async retryWithBackoff(operation, context, policyName = "STANDARD") {
     const policy = this.retryPolicies.get(policyName);
+    if (!policy) {
+      throw new HTOSError(
+        `Retry policy '${policyName}' not found`,
+        "INVALID_RETRY_POLICY",
+        { policyName }
+      );
+    }
     let lastError;
 
     for (let attempt = 0; attempt < policy.maxRetries; attempt++) {

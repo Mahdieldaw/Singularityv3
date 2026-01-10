@@ -20,6 +20,7 @@ import { MapperArtifact } from '../../../shared/contract';
 interface CognitiveOutputRendererProps {
     aiTurn: AiTurn;
     singularityState: SingularityOutputState;
+    onArtifactSelect?: (artifact: { title: string; identifier: string; content: string }) => void;
 }
 
 /**
@@ -30,7 +31,8 @@ interface CognitiveOutputRendererProps {
  */
 export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = ({
     aiTurn,
-    singularityState
+    singularityState,
+    onArtifactSelect
 }) => {
     const {
         activeMode,
@@ -182,7 +184,10 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
                             }
                             variant={isStreaming ? "active" : "historical"}
                             workflowProgress={workflowProgress}
-                            onOrbClick={(pid) => setActiveSplitPanel({ turnId: aiTurn.id, providerId: pid })}
+                            onOrbClick={(pid) => {
+                                setActiveSplitPanel({ turnId: aiTurn.id, providerId: pid });
+                                singularityState.setPinnedProvider(pid);
+                            }}
                         />
                     </div>
                 </div>
@@ -252,6 +257,20 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
                                         label="Copy mapper narrative"
                                         variant="icon"
                                     />
+                                    {aiTurn.mapperArtifact && onArtifactSelect && (
+                                        <button
+                                            onClick={() => onArtifactSelect({
+                                                title: "Mapper Artifact",
+                                                identifier: `artifact-${aiTurn.id}`,
+                                                content: JSON.stringify(aiTurn.mapperArtifact, null, 2)
+                                            })}
+                                            className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-surface-raised hover:bg-surface-highlight border border-border-subtle text-xs text-text-secondary transition-colors"
+                                            title="View Artifact"
+                                        >
+                                            <span>📄</span>
+                                            <span>Artifact</span>
+                                        </button>
+                                    )}
                                     <button
                                         onClick={() => setIsDecisionMapOpen({ turnId: aiTurn.id })}
                                         className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-surface-raised hover:bg-surface-highlight border border-border-subtle text-xs text-text-secondary transition-colors"

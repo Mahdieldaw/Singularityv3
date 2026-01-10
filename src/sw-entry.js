@@ -462,45 +462,51 @@ async function initializeGlobalServices(injectedPrefs = {}) {
   if (globalServicesPromise) return globalServicesPromise;
 
   globalServicesPromise = (async () => {
-    console.log("[SW] 🚀 Initializing global services...", injectedPrefs);
+    try {
+      console.log("[SW] 🚀 Initializing global services...", injectedPrefs);
 
-    // Ensure auth manager is ready (idempotent)
-    await authManager.initialize();
-    services.register('authManager', authManager);
+      // Ensure auth manager is ready (idempotent)
+      await authManager.initialize();
+      services.register('authManager', authManager);
 
-    await initializeGlobalInfrastructure();
-    const pl = await initializePersistence();
-    const sm = await initializeSessionManager(pl);
-    await initializeProviders();
-    await initializeOrchestrator();
+      await initializeGlobalInfrastructure();
+      const pl = await initializePersistence();
+      const sm = await initializeSessionManager(pl);
+      await initializeProviders();
+      await initializeOrchestrator();
 
-    // Inject prefs into Compiler
-    const compiler = new WorkflowCompiler(sm, injectedPrefs);
-    services.register('compiler', compiler);
+      // Inject prefs into Compiler
+      const compiler = new WorkflowCompiler(sm, injectedPrefs);
+      services.register('compiler', compiler);
 
-    const contextResolver = new ContextResolver(sm);
-    services.register('contextResolver', contextResolver);
+      const contextResolver = new ContextResolver(sm);
+      services.register('contextResolver', contextResolver);
 
-    const mapperService = new MapperService();
-    services.register('mapperService', mapperService);
+      const mapperService = new MapperService();
+      services.register('mapperService', mapperService);
 
-    const responseProcessor = new ResponseProcessor();
-    services.register('responseProcessor', responseProcessor);
+      const responseProcessor = new ResponseProcessor();
+      services.register('responseProcessor', responseProcessor);
 
-    console.log("[SW] ✅ Global services registry ready");
+      console.log("[SW] ✅ Global services registry ready");
 
-    // Return object map for consumers expecting specific structure
-    return {
-      orchestrator: services.get('orchestrator'),
-      sessionManager: sm,
-      compiler,
-      contextResolver,
-      persistenceLayer: pl,
-      mapperService,
-      responseProcessor,
-      authManager,
-      providerRegistry: services.get('providerRegistry')
-    };
+      // Return object map for consumers expecting specific structure
+      return {
+        orchestrator: services.get('orchestrator'),
+        sessionManager: sm,
+        compiler,
+        contextResolver,
+        persistenceLayer: pl,
+        mapperService,
+        responseProcessor,
+        authManager,
+        providerRegistry: services.get('providerRegistry')
+      };
+    } catch (error) {
+      console.error("[SW] ❌ Global services initialization failed:", error);
+      globalServicesPromise = null;
+      throw error;
+    }
   })();
   return globalServicesPromise;
 }
@@ -917,7 +923,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
   if (request?.type === "GET_HEALTH_STATUS") {
     // Return health
-    const health = { serviceWorker: "active", registry: { ...services.services.keys() } };
+    const health = { serviceWorker: "active", registry: Array.from(services.services.keys()) };
     sendResponse({ success: true, status: health });
     return true;
   }

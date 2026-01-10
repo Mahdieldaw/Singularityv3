@@ -39,7 +39,9 @@ export const RenameDialog: React.FC<RenameDialogProps> = ({
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      handleRename();
+      if (!isRenaming) {
+        handleRename();
+      }
     } else if (e.key === "Escape") {
       onClose();
     }

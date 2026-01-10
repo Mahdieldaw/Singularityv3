@@ -15,7 +15,7 @@ export async function loadMathPlugins() {
     const [
         { default: remarkMath },
         { default: rehypeKatex },
-         // Ensure katex is loaded for side effects if needed, though rehype-katex usually handles it
+        _katex // Loaded for side effects
     ] = await Promise.all([
         import('remark-math'),
         import('rehype-katex'),
@@ -61,5 +61,5 @@ export async function renderMathInMarkdown(content: string): Promise<string> {
 export function containsMath(content: string): boolean {
     // Simple heuristic: check for $ delimiters
     // This is a fast check to decide if we should load the heavy math machinery
-    return /\$[^$]+\$/.test(content) || /\$\$[^$]+\$\$/.test(content);
+    return /\$\$[\s\S]+?\$\$/.test(content) || /\$[\s\S]+?\$/.test(content);
 }

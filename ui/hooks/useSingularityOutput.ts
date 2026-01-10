@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
-import { useAtomValue } from "jotai";
-import { turnsMapAtom } from "../state/atoms";
+import { useMemo, useCallback } from "react";
+import { useAtomValue, useSetAtom } from "jotai";
+import { turnsMapAtom, pinnedSingularityProvidersAtom } from "../state/atoms";
 import { AiTurn } from "../types";
 import { SingularityOutput } from "../../shared/contract";
 
@@ -10,35 +10,70 @@ export interface SingularityOutputState {
     isError: boolean;
     providerId?: string | null;
     rawText?: string;
-    error?: any;
+    error?: unknown;
+    setPinnedProvider: (providerId: string) => void;
 }
 
 export function useSingularityOutput(aiTurnId: string | null, forcedProviderId?: string | null): SingularityOutputState {
     const turnsMap = useAtomValue(turnsMapAtom);
-    const [state, setState] = useState<SingularityOutputState | null>(null);
+    const pinnedProviders = useAtomValue(pinnedSingularityProvidersAtom);
+    const setPinnedProviders = useSetAtom(pinnedSingularityProvidersAtom);
 
-    const memoResult = useMemo(() => {
-        if (!aiTurnId) return { output: null, isLoading: false, isError: false };
+    const setPinnedProvider = useCallback((providerId: string) => {
+        if (!aiTurnId) return;
+        setPinnedProviders(prev => ({
+            ...prev,
+            [aiTurnId]: providerId
+        }));
+    }, [aiTurnId, setPinnedProviders]);
+
+    return useMemo(() => {
+        const defaultState = {
+            output: null,
+            isLoading: false,
+            isError: false,
+            setPinnedProvider
+        };
+
+        if (!aiTurnId) return defaultState;
 
         const turn = turnsMap.get(aiTurnId);
-        if (!turn || turn.type !== "ai") return { output: null, isLoading: false, isError: false };
+        if (!turn || turn.type !== "ai") return defaultState;
 
         const aiTurn = turn as AiTurn;
         const singularityResponses = aiTurn.singularityResponses;
 
         if (!singularityResponses || Object.keys(singularityResponses).length === 0) {
-            return { output: null, isLoading: false, isError: false };
+            return defaultState;
         }
 
-        // Use forced provider if valid, otherwise fallback to first available
-        let providerId = forcedProviderId;
-        if (!providerId || !singularityResponses[providerId]) {
+        // Priority: Forced (Prop) > Pinned (User Selection) > Auto (Fallback)
+        const pinnedId = pinnedProviders[aiTurnId];
+        const effectiveProviderId = forcedProviderId || pinnedId;
+
+        let providerId = effectiveProviderId;
+        let responses = providerId ? singularityResponses[providerId] : undefined;
+
+        // If a specific provider is requested (Forced or Pinned)
+        if (effectiveProviderId) {
+            // If requested provider is missing data, show LOADING state for it (Ghost Switching Fix)
+            if (!responses || responses.length === 0) {
+                return {
+                    output: null,
+                    isLoading: true, // Explicitly loading the requested provider
+                    isError: false,
+                    providerId: effectiveProviderId,
+                    setPinnedProvider
+                };
+            }
+        } else {
+            // Auto Mode: Fallback to last available (or first, depending on preference)
             const keys = Object.keys(singularityResponses);
-            providerId = keys[keys.length - 1];
+            providerId = keys[keys.length - 1]; // "Last Write Wins" for auto-mode is usually fine
+            responses = singularityResponses[providerId];
         }
 
-        const responses = singularityResponses[providerId];
-        if (!responses || responses.length === 0) return { output: null, isLoading: false, isError: false };
+        if (!responses || responses.length === 0) return defaultState;
 
         const latestResponse = responses[responses.length - 1];
 
@@ -74,13 +109,8 @@ export function useSingularityOutput(aiTurnId: string | null, forcedProviderId?:
             isError,
             providerId,
             rawText: latestResponse.text,
-            error: (latestResponse.meta as any)?.error
+            error: (latestResponse.meta as any)?.error,
+            setPinnedProvider
         };
-    }, [aiTurnId, turnsMap, forcedProviderId]);
-
-    useEffect(() => {
-        setState(memoResult);
-    }, [memoResult]);
-
-    return state || memoResult;
+    }, [aiTurnId, turnsMap, forcedProviderId, pinnedProviders, setPinnedProvider]);
 }

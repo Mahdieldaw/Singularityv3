@@ -27,12 +27,14 @@ export function selectBestProvider(
     availableProviders?: string[]
 ): string | null {
     const priority = PROVIDER_PRIORITIES[role];
+    const availableLower = availableProviders?.map(p => p.toLowerCase());
 
     for (const providerId of priority) {
+        const providerIdLower = providerId.toLowerCase();
         // Must be explicitly authorized (not undefined, not false)
-        const isAuth = authStatus[providerId] === true;
+        const isAuth = authStatus[providerIdLower] === true;
         // If available list provided, must be in it
-        const isAvailable = !availableProviders || availableProviders.includes(providerId);
+        const isAvailable = !availableLower || availableLower.includes(providerIdLower);
 
         if (isAuth && isAvailable) {
             return providerId;

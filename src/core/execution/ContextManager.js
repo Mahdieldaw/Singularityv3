@@ -61,7 +61,7 @@ export class ContextManager {
     }
 
     // Tier 2: Fallback to batch step context for backwards compatibility
-    if (payload.continueFromBatchStep) {
+    if (payload.continueFromBatchStep && previousResults) {
       const batchResult = previousResults.get(payload.continueFromBatchStep);
       if (batchResult?.status === "completed" && batchResult.result?.results) {
         const providerResult = batchResult.result.results[providerId];
@@ -93,7 +93,7 @@ export class ContextManager {
           continueThread: true,
         };
         try {
-          console.log(
+          wdbg(
             `[ContextManager] ${stepType} using persisted context for ${providerId}: ${Object.keys(
               persistedMeta,
             ).join(",")}`,

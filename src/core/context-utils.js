@@ -52,13 +52,17 @@ export function aggregateBatchOutputs(providerResponses = []) {
             if (!r || r.responseType !== "batch") continue;
             const pid = r.providerId;
             const existing = byProvider.get(pid);
-            // Prefer the latest completed response
+            // Prefer completed responses over streaming, then use latest updatedAt
             const rank = (val) =>
                 val?.status === "completed" ? 2 : val?.status === "streaming" ? 1 : 0;
+            
+            const currentRank = rank(r);
+            const existingRank = rank(existing);
+
             if (
                 !existing ||
-                (r.updatedAt ?? 0) > (existing.updatedAt ?? 0) ||
-                rank(r) > rank(existing)
+                currentRank > existingRank ||
+                (currentRank === existingRank && (r.updatedAt ?? 0) > (existing.updatedAt ?? 0))
             ) {
                 byProvider.set(pid, r);
             }

@@ -60,14 +60,6 @@ export function useInitialization(): boolean {
       setCurrentSessionId(null);
 
 
-      // --- Stage 3: Restore user preferences (best-effort) ---
-      try {
-        const raw = localStorage.getItem("htos_selected_models");
-        if (raw) setSelectedModels(JSON.parse(raw));
-      } catch {
-        /* ignore */
-      }
-
       setIsHistoryPanelOpen(false);
       console.log("[Init] UI state reset to defaults.");
     };

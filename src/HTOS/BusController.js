@@ -107,10 +107,8 @@ const env = {
     if (
       _href === "https://htos.io/oi" ||
       _href === "http://localhost:3000/oi" ||
-      _path.endsWith("/oi.html") ||
-      _path.endsWith("/oi") ||
-      _href.includes("/oi.html") ||
-      _href.includes("/oi")
+      /(^|\/)oi(\/|$)/.test(_path) ||
+      _path.endsWith("/oi.html")
     ) {
       return "oi";
     }
@@ -304,8 +302,7 @@ const BusController = {
   },
 
   _setupBg() {
-    // For blob handling with OS
-    this._channel = new BroadcastChannel("htos-bus-channel");
+    // For blob handling with OS - already initialized in init() as this._channel
 
     chrome.runtime.onMessage.addListener((e, t, n) => {
       if (!this._isBusMsg(e)) return false; // Do NOT keep the channel open for non-bus messages
@@ -838,24 +835,24 @@ const BusController = {
 
     if (i.length === 0) return null;
 
-    return new Promise(async (e) => {
+    const executeHandlers = async () => {
       if (a) {
         n = await this._deserialize(a);
       }
 
-      e(
-        await this._pick(
-          i.map(async (e) => {
-            try {
-              return await e.fn.call(e.this, ...n);
-            } catch (n) {
-              console.error(`Failed to handle "${e.name}":`, n);
-              return n;
-            }
-          }),
-        ),
+      return await this._pick(
+        i.map(async (e) => {
+          try {
+            return await e.fn.call(e.this, ...n);
+          } catch (n) {
+            console.error(`Failed to handle "${e.name}":`, n);
+            return n;
+          }
+        }),
       );
-    });
+    };
+
+    return executeHandlers();
   },
 
   _removeProxyHandlers(e) {

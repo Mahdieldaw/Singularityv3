@@ -4,9 +4,9 @@ import { usePortMessageHandler } from "./hooks/chat/usePortMessageHandler";
 import { useConnectionMonitoring } from "./hooks/useConnectionMonitoring";
 import { useHistoryLoader } from "./hooks/useHistoryLoader";
 import { useResponsiveLoadingGuard } from "./hooks/ui/useLoadingWatchdog";
+import { safeLazy } from "./utils/safeLazy";
 const ChatView = safeLazy(() => import("./views/ChatView"));
 import Header from "./components/Header";
-import { safeLazy } from "./utils/safeLazy";
 const HistoryPanel = safeLazy(() => import("./components/HistoryPanel"));
 import Banner from "./components/Banner";
 import { ReconnectOverlay } from "./components/ReconnectOverlay"; // Import Overlay

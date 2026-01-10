@@ -6,6 +6,7 @@ import {
   isHistoryLoadingAtom,
   historySessionsAtom,
 } from "../state/atoms";
+import { RawHistorySession, FormattedHistorySession } from "../types";
 
 // The hook now accepts the `isInitialized` flag.
 export function useHistoryLoader(isInitialized: boolean) {
@@ -23,8 +24,8 @@ export function useHistoryLoader(isInitialized: boolean) {
       try {
         // This call is now guaranteed to happen AFTER api.setExtensionId() has been called.
         const response = await api.getHistoryList();
-        const sessions = response?.sessions || [];
-        const formatted = sessions.map((s: any) => ({
+        const sessions: RawHistorySession[] = response?.sessions || [];
+        const formatted: FormattedHistorySession[] = sessions.map((s: RawHistorySession) => ({
           id: s.sessionId,
           sessionId: s.sessionId,
           title: s.title || "Untitled",
@@ -34,7 +35,7 @@ export function useHistoryLoader(isInitialized: boolean) {
           firstMessage: s.firstMessage || "",
           messages: [],
         }));
-        if (!cancelled) setHistorySessions(formatted);
+        if (!cancelled) setHistorySessions(formatted as any);
       } catch (e) {
         console.error("Failed to load history", e);
       } finally {

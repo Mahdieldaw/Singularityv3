@@ -283,7 +283,7 @@ class AuthManager {
     }
 
     /**
-     * Qwen: GET /qianwen/
+     * Qwen: GET /
      * Success: 200 + HTML contains csrfToken
      * Failure: No csrfToken = not logged in
      * 
@@ -301,7 +301,8 @@ class AuthManager {
         }
 
         const html = await response.text();
-        return /csrfToken\s*=\s*"[^"]+"/.test(html);
+        // Robust presence check for csrfToken in script tags, JSON blobs, or meta elements
+        return /csrfToken["']?\s*[:=]\s*["']([^"']+)["']/i.test(html) || html.includes('name="csrf-token"');
     }
 
     /**
@@ -310,38 +311,42 @@ class AuthManager {
      */
     _setupCookieListeners() {
         chrome.cookies.onChanged.addListener(async (changeInfo) => {
-            const { cookie, removed } = changeInfo;
+            try {
+                const { cookie, removed } = changeInfo;
 
-            // Find which provider this cookie belongs to
-            const match = AUTH_COOKIES.find(c =>
-                cookie.domain.includes(c.domain) && cookie.name === c.name
-            );
+                // Find which provider this cookie belongs to
+                const match = AUTH_COOKIES.find(c =>
+                    cookie.domain.includes(c.domain) && cookie.name === c.name
+                );
 
-            if (!match) return;
+                if (!match) return;
 
-            const wasAuthed = this._cookieStatus[match.provider];
-            const nowAuthed = !removed;
+                const wasAuthed = this._cookieStatus[match.provider];
+                const nowAuthed = !removed;
 
-            if (wasAuthed !== nowAuthed) {
-                console.log(`[AuthManager] Cookie change: ${match.provider} ${wasAuthed} → ${nowAuthed}`);
+                if (wasAuthed !== nowAuthed) {
+                    console.log(`[AuthManager] Cookie change: ${match.provider} ${wasAuthed} → ${nowAuthed}`);
 
-                // Update status
-                this._cookieStatus[match.provider] = nowAuthed;
+                    // Update status
+                    this._cookieStatus[match.provider] = nowAuthed;
 
-                // Handle Gemini variants
-                if (match.provider === "gemini") {
-                    GEMINI_VARIANTS.forEach(variant => {
-                        this._cookieStatus[variant] = nowAuthed;
+                    // Handle Gemini variants
+                    if (match.provider === "gemini") {
+                        GEMINI_VARIANTS.forEach(variant => {
+                            this._cookieStatus[variant] = nowAuthed;
+                        });
+                    }
+
+                    // Invalidate verification cache
+                    this._verificationCache.delete(match.provider.split('-')[0]);
+
+                    // Persist to storage
+                    await chrome.storage.local.set({
+                        provider_auth_status: this._cookieStatus
                     });
                 }
-
-                // Invalidate verification cache
-                this._verificationCache.delete(match.provider.split('-')[0]);
-
-                // Persist to storage
-                await chrome.storage.local.set({
-                    provider_auth_status: this._cookieStatus
-                });
+            } catch (err) {
+                console.error('[AuthManager] Error in cookie change listener:', err);
             }
         });
     }

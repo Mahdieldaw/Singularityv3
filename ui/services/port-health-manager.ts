@@ -9,6 +9,8 @@ export class PortHealthManager {
   private readonly HEALTH_CHECK_INTERVAL = 10000; // 10s (reduced from 30s)
   private readonly RECONNECT_DELAY = 2000; // base delay
   private readonly RECONNECT_JITTER_MS = 500; // random jitter
+  private readonly RECONNECT_MAX_DELAY_MS = 30000; // 30s cap
+  private readonly MAX_RECONNECT_ATTEMPTS = 5;
 
   // Throttle constants
   private readonly ACTIVITY_THROTTLE_MS = 5000; // Only send activity ping every 5s max
@@ -16,10 +18,13 @@ export class PortHealthManager {
 
   private reconnectAttempts = 0;
   private isConnected = false;
+  private isReconnecting = false;
   private lastPongTimestamp = 0;
 
   private readyResolve: (() => void) | null = null;
+  private readyReject: ((reason?: any) => void) | null = null;
   private readyPromise: Promise<void> | null = null;
+  private readyTimeout: number | null = null;
 
   constructor(
     private portName: string = "htos-popup",
@@ -37,9 +42,16 @@ export class PortHealthManager {
     this.messageHandler = messageHandler;
     this.onDisconnectCallback = onDisconnect;
 
+    // Clear any pending reconnect state when starting a fresh connection
+    if (this.reconnectTimeout) {
+      clearTimeout(this.reconnectTimeout);
+      this.reconnectTimeout = null;
+    }
+    this.isReconnecting = false;
+
     this.port = chrome.runtime.connect({ name: this.portName });
     this.isConnected = false;
-    this.reconnectAttempts = 0;
+    // Note: reconnectAttempts is not reset here to allow backoff to continue across attempts
 
 
     this.port.onMessage.addListener(this.handleMessage.bind(this));
@@ -55,11 +67,29 @@ export class PortHealthManager {
   async waitForReady(): Promise<void> {
     if (this.isConnected) return;
     if (!this.readyPromise) {
-      this.readyPromise = new Promise((resolve) => {
+      this.readyPromise = new Promise((resolve, reject) => {
         this.readyResolve = resolve;
+        this.readyReject = reject;
       });
+
+      this.readyTimeout = window.setTimeout(() => {
+        this.cleanupReadyPromise("Connection timeout after 10s");
+      }, 10000);
     }
     return this.readyPromise;
+  }
+
+  private cleanupReadyPromise(errorMsg?: string) {
+    if (this.readyTimeout) {
+      clearTimeout(this.readyTimeout);
+      this.readyTimeout = null;
+    }
+    if (errorMsg && this.readyReject) {
+      this.readyReject(new Error(errorMsg));
+    }
+    this.readyResolve = null;
+    this.readyReject = null;
+    this.readyPromise = null;
   }
 
   private sendKeepalivePing() {
@@ -104,7 +134,7 @@ export class PortHealthManager {
     this.lastPongTimestamp = Date.now();
 
     // Notify SW of activity so lifecycle manager can record activity (best-effort)
-    // FIX: THROTLED to prevent flooding SW with thousands of messages during streaming
+    // FIX: THROTTLED to prevent flooding SW with thousands of messages during streaming
     const now = Date.now();
     if (now - this.lastActivitySent > this.ACTIVITY_THROTTLE_MS) {
       this.lastActivitySent = now;
@@ -131,6 +161,7 @@ export class PortHealthManager {
     if (message.type === "KEEPALIVE_PONG") {
       if (!this.isConnected) {
         this.isConnected = true;
+        this.reconnectAttempts = 0;
         console.log("[PortHealthManager] Port healthy again");
         this.options.onHealthy?.();
       }
@@ -140,11 +171,11 @@ export class PortHealthManager {
     if (message.type === "HANDLER_READY") {
       console.log("[PortHealthManager] Service worker handler ready");
       this.isConnected = true;
+      this.reconnectAttempts = 0;
       this.options.onHealthy?.();
       if (this.readyResolve) {
         this.readyResolve();
-        this.readyResolve = null;
-        this.readyPromise = null;
+        this.cleanupReadyPromise();
       }
       return;
     }
@@ -157,11 +188,12 @@ export class PortHealthManager {
   private handleDisconnect() {
     console.log("[PortHealthManager] Port disconnected (idle or closed)");
     this.isConnected = false;
-    this.stopHealthCheck();
+    this.cleanupReadyPromise("Port disconnected");
 
     this.options.onUnhealthy?.();
     this.onDisconnectCallback?.();
 
+    this.disconnect({ suppressReconnect: true });
     this.attemptReconnect();
   }
 
@@ -170,23 +202,43 @@ export class PortHealthManager {
 
     console.log("[PortHealthManager] Port unhealthy, attempting reconnect");
     this.isConnected = false;
+    this.cleanupReadyPromise("Port became unhealthy");
     this.options.onUnhealthy?.();
 
-    this.disconnect();
+    this.disconnect({ suppressReconnect: true });
     this.attemptReconnect();
   }
 
   private attemptReconnect() {
+    if (this.isReconnecting) return;
+    
+    if (this.reconnectAttempts >= this.MAX_RECONNECT_ATTEMPTS) {
+      console.error(`[PortHealthManager] Max reconnect attempts (${this.MAX_RECONNECT_ATTEMPTS}) reached. Stopping.`);
+      if (this.reconnectTimeout) {
+        clearTimeout(this.reconnectTimeout);
+        this.reconnectTimeout = null;
+      }
+      this.isReconnecting = false;
+      return;
+    }
+
+    this.isReconnecting = true;
     this.reconnectAttempts++;
     const jitter = Math.floor(Math.random() * this.RECONNECT_JITTER_MS);
     const base = this.RECONNECT_DELAY + jitter;
-    const delay = base * Math.pow(2, this.reconnectAttempts - 1);
+    const rawDelay = base * Math.pow(2, this.reconnectAttempts - 1);
+    const delay = Math.min(rawDelay, this.RECONNECT_MAX_DELAY_MS);
 
-    /* console.log(
-      `[PortHealthManager] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts})`,
-    ); */
+    console.log(
+      `[PortHealthManager] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts}/${this.MAX_RECONNECT_ATTEMPTS})`,
+    );
+
+    if (this.reconnectTimeout) {
+      clearTimeout(this.reconnectTimeout);
+    }
 
     this.reconnectTimeout = window.setTimeout(() => {
+      this.isReconnecting = false;
       if (this.messageHandler) {
         this.connect(this.messageHandler, this.onDisconnectCallback);
         this.options.onReconnect?.();
@@ -194,13 +246,16 @@ export class PortHealthManager {
     }, delay);
   }
 
-  disconnect() {
+  disconnect(options: { suppressReconnect?: boolean } = {}) {
     this.isConnected = false;
     this.stopHealthCheck();
 
-    if (this.reconnectTimeout) {
-      clearTimeout(this.reconnectTimeout);
-      this.reconnectTimeout = null;
+    if (!options.suppressReconnect) {
+      if (this.reconnectTimeout) {
+        clearTimeout(this.reconnectTimeout);
+        this.reconnectTimeout = null;
+      }
+      this.isReconnecting = false;
     }
 
     if (this.port) {

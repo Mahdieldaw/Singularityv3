@@ -10,7 +10,8 @@ import { TurnEmitter } from './execution/TurnEmitter';
 import { CognitivePipelineHandler } from './execution/CognitivePipelineHandler';
 import { formatArtifactAsOptions, parseV1MapperToArtifact } from '../../shared/parsing-utils';
 
-export class WorkflowEngine {  constructor(orchestrator, sessionManager, port, options = {}) {
+export class WorkflowEngine {
+  constructor(orchestrator, sessionManager, port, options = {}) {
     this.orchestrator = orchestrator;
     this.sessionManager = sessionManager;
     this.port = port;

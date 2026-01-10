@@ -113,13 +113,9 @@ export function formatTurnForMd(
         .map(p => ({
             name: p.name,
             id: String(p.id),
-            response: (batchResponses[String(p.id)] as any)?.isArray ? (batchResponses[String(p.id)] as any)[0] : batchResponses[String(p.id)] // Handle simple vs array if needed, but usually we just grab latest logic before calling this
+            response: batchResponses[String(p.id)] as ProviderResponse | undefined
         }))
         .filter(item => {
-            // We expect the caller to pass fully resolved/latest responses, but let's be safe
-            // If batchResponses is directly from AiTurn, it might be an array.
-            // We'll rely on the caller to normalize `batchResponses` to { [pid]: ProviderResponse } (single latest)
-            // OR we handle it here. Let's assume input is Record<string, ProviderResponse>.
             return !!item.response;
         });
 
@@ -157,7 +153,6 @@ export function formatSessionForMarkdown(fullSession: { title: string, turns: Tu
     // Actually formatTurnForMd seems to be designed to render a "Round".
 
     let lastUserTurn: UserTurn | null = null;
-    let decisionMap: { narrative?: string; options?: string | null; topology?: GraphTopology | null } | null = null;
 
     fullSession.turns.forEach(turn => {
         if (isUserTurn(turn)) {
@@ -171,6 +166,7 @@ export function formatSessionForMarkdown(fullSession: { title: string, turns: Tu
         } else if (isAiTurn(turn)) {
             // Found AI turn. Render the pair.
             const aiTurn = turn as AiTurn;
+            let decisionMap: { narrative?: string; options?: string | null; topology?: GraphTopology | null } | null = null;
 
             // Resolve effective user prompt
             // If aiTurn.userTurnId matches lastUserTurn.id, use that.

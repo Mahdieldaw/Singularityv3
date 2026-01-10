@@ -23,8 +23,7 @@ export class ServiceRegistry {
 
     register(name, instance) {
         if (!name || !instance) {
-            console.warn('[ServiceRegistry] Invalid registration:', { name, instance });
-            return;
+            throw new Error(`[ServiceRegistry] Invalid registration: name=${name}`);
         }
         this.services.set(name, instance);
         console.log(`[ServiceRegistry] Registered service: ${name}`);

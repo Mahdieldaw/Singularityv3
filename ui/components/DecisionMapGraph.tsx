@@ -295,7 +295,7 @@ const DecisionMapGraph: React.FC<Props> = ({
         return () => {
             simulation.stop();
         };
-    }, [inputClaims, inputEdges, width, height]);
+    }, [inputClaims, inputEdges, width, height, problemStructure, graphAnalysis]);
 
     // Get edge coordinates
     const getEdgeCoords = useCallback((edge: GraphEdge) => {
@@ -306,9 +306,9 @@ const DecisionMapGraph: React.FC<Props> = ({
             ? edge.target as GraphNode
             : nodes.find(n => n.id === edge.target);
 
-        if (!source?.x || !target?.x) return null;
+        if (source?.x == null || source?.y == null || target?.x == null || target?.y == null) return null;
 
-        return { x1: source.x, y1: source.y!, x2: target.x, y2: target.y! };
+        return { x1: source.x, y1: source.y, x2: target.x, y2: target.y };
     }, [nodes]);
 
     // Drag handlers

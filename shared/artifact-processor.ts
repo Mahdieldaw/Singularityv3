@@ -37,6 +37,8 @@ export class ArtifactProcessor {
         let cleanText = rawText;
         let match: RegExpExecArray | null;
 
+        // Reset regex for document parsing
+        this.artifactRegex.lastIndex = 0;
         while ((match = this.artifactRegex.exec(rawText)) !== null) {
             const [fullMatch, attrString, content] = match;
 
@@ -108,10 +110,24 @@ export class ArtifactProcessor {
     }
 
     /**
+     * Escape XML attribute values
+     */
+    private escapeXmlAttr(str: string): string {
+        return str
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&apos;');
+    }
+
+    /**
      * Format a single artifact into the <document> XML format
      */
     formatArtifact(artifact: { title: string; identifier: string; content: string }): string {
-        return `\n\n<document title="${artifact.title}" identifier="${artifact.identifier}">\n${artifact.content}\n</document>`;
+        const escapedTitle = this.escapeXmlAttr(artifact.title);
+        const escapedId = this.escapeXmlAttr(artifact.identifier);
+        return `\n\n<document title="${escapedTitle}" identifier="${escapedId}">\n${artifact.content}\n</document>`;
     }
 
     /**
@@ -133,6 +149,7 @@ export class ArtifactProcessor {
 
             // If the placeholder exists, replace it
             if (pattern.test(newText)) {
+                pattern.lastIndex = 0; // Reset after test() to avoid missing matches in replace()
                 newText = newText.replace(pattern, markdownImage);
             } else {
                 // If placeholder not found, append to bottom

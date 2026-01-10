@@ -111,6 +111,7 @@ export default function ChatView() {
 
   // Jump-to-turn event listener with optional cross-session loading
   useEffect(() => {
+    let aborted = false;
     const handler = async (evt: Event) => {
       try {
         const detail = (evt as CustomEvent<any>).detail || {};
@@ -118,9 +119,10 @@ export default function ChatView() {
           detail.turnId || detail.aiTurnId || detail.userTurnId;
         const targetProviderId: string | undefined = detail.providerId;
         const targetSessionId: string | undefined = detail.sessionId;
-        if (!targetTurnId) return;
+        if (!targetTurnId || aborted) return;
 
         const doScroll = () => {
+          if (aborted) return;
           try {
             const index = turnIds.findIndex((id) => id === targetTurnId);
             if (index !== -1) {
@@ -147,16 +149,18 @@ export default function ChatView() {
             if (row && row instanceof HTMLElement) {
               row.classList.add('shadow-glow-brand-soft');
               setTimeout(() => {
-                row.classList.remove('shadow-glow-brand-soft');
+                if (!aborted) row.classList.remove('shadow-glow-brand-soft');
               }, 1200);
             }
             // Focus provider card if requested - open split pane directly
             if (targetProviderId) {
               setTimeout(() => {
-                setActiveSplitPanel({
-                  turnId: targetTurnId,
-                  providerId: targetProviderId
-                });
+                if (!aborted) {
+                  setActiveSplitPanel({
+                    turnId: targetTurnId,
+                    providerId: targetProviderId
+                  });
+                }
               }, 120);
             }
           } catch (e) {
@@ -181,6 +185,7 @@ export default function ChatView() {
             messages: [],
           };
           await selectChat(summary as any);
+          if (aborted) return;
           // Wait a tick for state to settle then scroll
           requestAnimationFrame(() => doScroll());
         } else {
@@ -191,9 +196,11 @@ export default function ChatView() {
       }
     };
     document.addEventListener("jump-to-turn", handler as EventListener);
-    return () =>
+    return () => {
+      aborted = true;
       document.removeEventListener("jump-to-turn", handler as EventListener);
-  }, [turnIds, currentSessionId, selectChat]);
+    };
+  }, [turnIds, currentSessionId, selectChat, setActiveSplitPanel]);
 
   return (
     <div className="chat-view flex flex-col h-full w-full flex-1 min-h-0 relative">

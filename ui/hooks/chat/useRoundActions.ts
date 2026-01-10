@@ -67,9 +67,11 @@ export function useRoundActions() {
       }
 
       // ✅ Validate we have enough source data for mapping
-      const outputsFromBatch = Object.values(ai.batchResponses || {}).filter(
-        (r: any) => r.status === "completed" && r.text?.trim(),
-      );
+      const outputsFromBatch = Object.values(ai.batchResponses || {})
+        .flat()
+        .filter(
+          (response: ProviderResponse) => response.status === "completed" && response.text?.trim(),
+        );
 
 
 
@@ -284,6 +286,7 @@ export function useRoundActions() {
             }
           }
         });
+      } finally {
         setIsLoading(false);
         setUiPhase("awaiting_action");
         setActiveAiTurnId(null);

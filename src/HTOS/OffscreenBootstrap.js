@@ -142,10 +142,21 @@ const UtilsController = {
   _localStorageGet(key) {
     try {
       const value = localStorage.getItem(key);
-      return value ? JSON.parse(value) : null;
+      if (value === null) return null;
+      try {
+        return JSON.parse(value);
+      } catch (parseError) {
+        console.warn(
+          "[UtilsController] Failed to parse localStorage value as JSON for key:",
+          key,
+          "Returning raw string instead.",
+          parseError,
+        );
+        return value;
+      }
     } catch (e) {
       console.warn(
-        "[UtilsController] Failed to get/parse localStorage key:",
+        "[UtilsController] Failed to get localStorage key:",
         key,
       );
       return null;

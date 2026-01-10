@@ -18,7 +18,22 @@ import type {
  * This extracts and packages the essential context from the completed turn
  * to inform the next turn's batch responses.
  */
-export function buildContextBridge(turnState: any): ContextBridge {
+interface TurnState {
+  query?: string;
+  turnId?: string | number;
+  mapper?: {
+    artifact?: any;
+  };
+  singularityOutput?: {
+    response?: string;
+    text?: string;
+    brief?: string;
+    narrative?: string;
+  };
+  mapperBrief?: string;
+}
+
+export function buildContextBridge(turnState: TurnState): ContextBridge {
   const bridge: ContextBridge = {
     query: turnState?.query || "",
     established: { positive: [], negative: [] },

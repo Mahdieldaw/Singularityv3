@@ -68,6 +68,7 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                   <CognitiveOutputRenderer
                     aiTurn={aiTurn}
                     singularityState={singularityState}
+                    onArtifactSelect={setSelectedArtifact}
                   />
                 ) : null}
               </div>

@@ -645,7 +645,6 @@ export function usePortMessageHandler() {
                 let providerId: string | null | undefined = result?.providerId;
                 if (
                   (!providerId || typeof providerId !== "string") &&
-                  (!providerId || typeof providerId !== "string") &&
                   (stepType === "mapping" ||
                     stepType === "singularity")
                 ) {
@@ -813,6 +812,7 @@ export function usePortMessageHandler() {
 
               // AUTO-OPEN SPLIT PANE: On first streaming provider (do not override if already open or user-selected)
               const activeId = activeAiTurnIdRef.current;
+              // Allow auto-open for both batch and singularity phases
               if (activeId && hasAutoOpenedPane !== activeId && phase === 'batch') {
                 const firstStreaming = providerStatuses.find(
                   (ps: any) => ps.status === 'streaming' || ps.status === 'active'
@@ -856,8 +856,6 @@ export function usePortMessageHandler() {
         }
 
         case "WORKFLOW_COMPLETE": {
-          const { } = message;
-
           streamingBufferRef.current?.flushImmediate();
           // Fallback finalization is no longer needed.
           // The robust TURN_FINALIZED handler will manage this state change.
@@ -866,7 +864,6 @@ export function usePortMessageHandler() {
           setLastActivityAt(Date.now());
 
           // Reset streaming UX state for next round
-          setHasAutoOpenedPane(null);
           setHasAutoOpenedPane(null);
           // Do NOT clear activeAiTurnId here; wait for TURN_FINALIZED
           break;

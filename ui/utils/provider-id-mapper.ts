@@ -6,7 +6,7 @@
  * but the frontend only recognizes canonical provider IDs.
  */
 export function normalizeProviderId(backendId: string): string {
-    if (!backendId || typeof backendId !== 'string') return backendId;
+    if (!backendId || typeof backendId !== 'string') return String(backendId || '');
 
     // Gemini variants - check exact matches first
     if (backendId === 'gemini-exp' || backendId.startsWith('gemini-exp-')) {

@@ -51,6 +51,13 @@ export class SimpleIndexedDBAdapter {
         await verifySchemaAndRepair(autoRepair);
       if (repaired && repairedDb) {
         // Replace db handle with repaired instance
+        if (this.db) {
+          try {
+            this.db.close();
+          } catch (e) {
+            console.warn("Error closing old DB connection:", e);
+          }
+        }
         this.db = repairedDb;
       }
       if (!repaired) {

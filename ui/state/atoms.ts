@@ -496,15 +496,16 @@ export const workflowDegradedAtom = atom<{
 // Streaming UX State (for Council Orbs visibility control)
 // =============================================================================
 
+export const isRoundActiveAtom = atom((get) => get(isLoadingAtom));
+
 /**
- * Derived atom: true when a round is actively running
- * Used to hide config orbs and show active turn orbs
+ * Maps turnId -> providerId for the "pinned" or preferred singularity provider.
+ * This ensures that if a user selects a specific provider's analysis, it stays selected
+ * even if new data streams in or the component re-renders.
  */
-export const isRoundActiveAtom = atom((get) => {
-  const activeId = get(activeAiTurnIdAtom);
-  const isLoading = get(isLoadingAtom);
-  return activeId !== null && isLoading;
-});
+export const pinnedSingularityProvidersAtom = atom<Record<string, string>>({});
+
+// --- Derived Atoms ---
 
 /**
  * Track if we've auto-opened the split pane for the current turn

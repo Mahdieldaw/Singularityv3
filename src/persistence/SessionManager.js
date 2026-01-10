@@ -569,10 +569,11 @@ export class SessionManager {
   }
 
   /**
-   * Helper: Persist provider responses for a turn
-   */
-  /**
    * Helper: Persist provider responses for a turn (BATCHED)
+   * @param {string} sessionId
+   * @param {string} aiTurnId
+   * @param {Object} result
+   * @param {number} now
    */
   async _persistProviderResponses(sessionId, aiTurnId, result, now) {
     const recordsToSave = [];
@@ -683,16 +684,6 @@ export class SessionManager {
       await this.adapter.batchPut("provider_responses", recordsToSave);
     }
   }
-
-  /**
-   * Append provider responses (mapping/batch) to an existing AI turn
-   * that follows the given historical user turn. Used to persist historical reruns
-   * without creating a new user/ai turn pair.
-   * additions shape: { batchResponses?, mappingResponses? }
-   */
-
-  /**
- 
 
   /**
    * Helper function to count responses in a response bucket
@@ -1301,52 +1292,7 @@ export class SessionManager {
     }
   }
 
-  /**
-   * Granular response update for turn-level metadata
-   */
-  async upsertProviderResponse(sessionId, aiTurnId, providerId, responseType, responseIndex, payload) {
-    if (!this.adapter || !aiTurnId) return;
 
-    try {
-      // Find existing record by compound key
-      const results = await this.adapter.getAllByIndex("provider_responses", "byCompoundKey", [
-        aiTurnId,
-        providerId,
-        responseType,
-        responseIndex
-      ]);
-
-      const existing = results?.[0];
-      const now = Date.now();
-
-      if (existing) {
-        const updated = {
-          ...existing,
-          ...payload,
-          meta: {
-            ...this._safeMeta(existing.meta),
-            ...this._safeMeta(payload?.meta)
-          },
-          updatedAt: now
-        };
-        await this.adapter.put("provider_responses", updated);
-      } else {
-        const record = {
-          sessionId,
-          aiTurnId,
-          providerId,
-          responseType,
-          responseIndex,
-          ...payload,
-          createdAt: now,
-          updatedAt: now
-        };
-        await this.adapter.put("provider_responses", record);
-      }
-    } catch (e) {
-      console.warn("[SessionManager] upsertProviderResponse failed:", e);
-    }
-  }
 
   /**
    * Get persistence adapter status

@@ -19,7 +19,6 @@ import {
     parseConciergeOutput,
     validateBatchPrompt,
     ConciergeSignal,
-    ConciergeOutput,
 } from "../../shared/parsing-utils";
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -71,7 +70,7 @@ export interface HandleTurnResult {
     response: string;
     stance: ConciergeStance;
     stanceReason: string;
-    signal: ConciergeSignal;
+    signal: ConciergeSignal | null;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

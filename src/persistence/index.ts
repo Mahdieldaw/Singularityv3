@@ -47,6 +47,9 @@ export async function initializePersistenceLayer(): Promise<PersistenceLayer> {
     }
   } catch (e) {
     db.close();
+    if (e instanceof Error && e.message && e.message.includes("schema_version mismatch")) {
+      throw e;
+    }
     throw new Error(
       `SchemaError: unable to read metadata schema_version: ${
         e instanceof Error ? e.message : String(e)
@@ -89,25 +92,37 @@ export async function getPersistenceHealth(): Promise<{
 
     const db = await openDatabase();
     let databaseOpen = false;
+    let adapterReady = false;
+    
     try {
-      const tx = db.transaction(["sessions"], "readonly");
-      databaseOpen = tx !== null;
-    } catch (error) {
-      databaseOpen = false;
+      try {
+        const tx = db.transaction(["sessions"], "readonly");
+        databaseOpen = tx !== null;
+      } catch (error) {
+        databaseOpen = false;
+      }
+
+      // Test the SimpleIndexedDBAdapter
+      const adapter = new SimpleIndexedDBAdapter();
+      let initSuccess = false;
+      try {
+        await adapter.init();
+        initSuccess = true;
+        adapterReady = await adapter.isReady();
+      } finally {
+        if (initSuccess) {
+          await adapter.close();
+        }
+      }
+      
+      return {
+        available: true,
+        adapterReady,
+        databaseOpen,
+      };
+    } finally {
+      db.close();
     }
-
-    // Test the SimpleIndexedDBAdapter
-    const adapter = new SimpleIndexedDBAdapter();
-    await adapter.init();
-    const adapterReady = await adapter.isReady();
-    await adapter.close();
-
-    db.close();
-    return {
-      available: true,
-      adapterReady,
-      databaseOpen,
-    };
   } catch (error) {
     return {
       available: false,

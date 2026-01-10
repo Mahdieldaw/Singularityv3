@@ -117,6 +117,19 @@ export class QwenAdapter {
           },
         });
         if (recovery) return recovery;
+        // Fallthrough if recovery is falsy
+        return {
+          providerId: this.id,
+          ok: false,
+          text: aggregatedText || null,
+          errorCode: "no_recovery",
+          latencyMs: Date.now() - startTime,
+          meta: {
+            error: "no recovery",
+            details: error?.details || error?.message,
+            ...meta,
+          },
+        };
       } catch (handledError) {
         return {
           providerId: this.id,
@@ -238,6 +251,20 @@ export class QwenAdapter {
           },
         });
         if (recovery) return recovery;
+        // Fallthrough if recovery is falsy
+        return {
+          providerId: this.id,
+          ok: false,
+          text: aggregatedText || null,
+          errorCode: "no_recovery",
+          latencyMs: Date.now() - startTime,
+          meta: {
+            error: "no recovery",
+            details: error?.details || error?.message,
+            suppressed: error?.suppressed,
+            ...meta,
+          },
+        };
       } catch (handledError) {
         return {
           providerId: this.id,

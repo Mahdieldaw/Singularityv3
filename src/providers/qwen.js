@@ -188,24 +188,44 @@ export class QwenSessionApi {
       },
       topicId: this._generateId(),
     };
-
     let response;
-    try {
-      response = await doConversationPost(requestBody);
-    } catch (e) {
-      // Network error - surface as network Qwen error
-      this._throw("network", `Conversation POST failed: ${e.message}`);
+    const MAX_RETRIES = 3;
+    let retryCount = 0;
+
+    // Initial request with 500-retry logic
+    while (retryCount < MAX_RETRIES) {
+      try {
+        response = await doConversationPost(requestBody);
+
+        if (response.status === 500) {
+          retryCount++;
+          const text = await response.text().catch(() => "");
+          if (retryCount >= MAX_RETRIES) {
+            // Fall through to existing error handling or needAddSession if applicable (though 500 is usually transient)
+            // But we removed 500 from needAddSession, so it will hit the final error throw.
+            break;
+          }
+          const delay = 500 * Math.pow(2, retryCount); // Exponential backoff
+          console.warn(`[QwenProvider] 500 error, retrying (${retryCount}/${MAX_RETRIES}) in ${delay}ms...`);
+          await new Promise(r => setTimeout(r, delay));
+          continue;
+        }
+
+        break; // Success or non-500 error
+      } catch (e) {
+        // Network error - surface as network Qwen error
+        this._throw("network", `Conversation POST failed: ${e.message}`);
+      }
     }
 
     // If server indicates not authorized / requires session (or non-200), create session then retry
     if (!response.ok) {
       const text = await response.text().catch(() => "<no-body>");
-      // If server returned NOT_LOGIN or 401/403/500, try addSession then retry
+      // If server returned NOT_LOGIN or 401/403, try addSession then retry
       const needAddSession =
-        /NOT_LOGIN|401|403|500/.test(text) ||
+        /NOT_LOGIN|401|403/.test(text) ||
         response.status === 401 ||
-        response.status === 403 ||
-        response.status === 500;
+        response.status === 403;
 
       if (needAddSession) {
         console.log("[QwenProvider] Session required, creating...");

@@ -1,5 +1,6 @@
 declare module "jotai/immer" {
   import type { WritableAtom } from "jotai";
+  import type { Draft } from "immer";
   /**
    * Minimal type declaration for atomWithImmer used in this project.
    * This returns an Atom whose value is of the provided type and which
@@ -7,8 +8,5 @@ declare module "jotai/immer" {
    */
   export function atomWithImmer<Value = unknown>(
     initialValue: Value,
-  ): WritableAtom<Value, any, any>;
-  export function atomWithImmer<Value = unknown>(
-    getter: () => Value,
-  ): WritableAtom<Value, any, any>;
+  ): WritableAtom<Value, [Value | ((draft: Draft<Value>) => void)], void>;
 }

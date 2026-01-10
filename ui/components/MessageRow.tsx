@@ -4,6 +4,7 @@ import { selectAtom } from "jotai/utils";
 import { activeSplitPanelAtom, turnsMapAtom } from "../state/atoms";
 import UserTurnBlock from "./UserTurnBlock";
 import AiTurnBlock from "./AiTurnBlock";
+import { TurnMessage } from "../types";
 import clsx from "clsx";
 
 function MessageRow({ turnId }: { turnId: string }) {
@@ -11,7 +12,7 @@ function MessageRow({ turnId }: { turnId: string }) {
     () => selectAtom(turnsMapAtom, (map) => map.get(turnId)),
     [turnId],
   );
-  const message = useAtomValue(turnAtom);
+  const message = useAtomValue(turnAtom) as TurnMessage | undefined;
   const isActiveTurn = useAtomValue(
     useMemo(
       () => selectAtom(activeSplitPanelAtom, (p) => p?.turnId === turnId),
@@ -28,10 +29,10 @@ function MessageRow({ turnId }: { turnId: string }) {
   }
 
   const content =
-    (message as any).type === "user" ? (
-      <UserTurnBlock userTurn={message as any} />
+    message.type === "user" ? (
+      <UserTurnBlock userTurn={message} />
     ) : (
-      <AiTurnBlock aiTurn={message as any} />
+      <AiTurnBlock aiTurn={message} />
     );
 
   // Wrap each row with an anchor for scroll/highlight targeting
@@ -39,10 +40,10 @@ function MessageRow({ turnId }: { turnId: string }) {
     <div
       className={clsx(
         "message-row relative",
-        isActiveTurn && (message as any).type === "ai" && "active-turn",
+        isActiveTurn && message.type === "ai" && "active-turn",
       )}
       data-turn-id={turnId}
-      data-turn-type={(message as any).type}
+      data-turn-type={message.type}
       id={`turn-${turnId}`}
     >
       {content}

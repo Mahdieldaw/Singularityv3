@@ -18,8 +18,11 @@ interface CouncilOrbsProps {
     visibleProviderIds?: string[]; // Optional filter for visible orbs
     variant?: "tray" | "divider" | "welcome" | "historical" | "active";
     isEditMode?: boolean; // When true, auto-open the model selection menu
+    isSingularityMode?: boolean;
     // New: per-provider workflow progress (providerId -> { stage, progress })
     workflowProgress?: Record<string, { stage: WorkflowStage; progress?: number }>;
+    // New: collapsed state (only show active/crown orb, expand on hover)
+    collapsed?: boolean;
 }
 
 // Workflow stage type for progress indicator used by Orbs
@@ -27,7 +30,6 @@ export type WorkflowStage =
     | 'idle'
     | 'thinking'
     | 'streaming'
-    | 'complete'
     | 'complete'
     | 'error';
 
@@ -42,10 +44,15 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
     visibleProviderIds,
     isEditMode = false,
     workflowProgress = {},
+    isSingularityMode = false,
+    collapsed = false, // Default to expanded
 }) => {
     const [hoveredOrb, setHoveredOrb] = useState<string | null>(null);
     const [isCrownMode, setIsCrownMode] = useState(false);
     const [isMenuOpen, setIsMenuOpen] = useState(false);
+
+    // Internal state for hover-expansion when collapsed
+    const [isExpanded, setIsExpanded] = useState(false);
 
     const longPressRef = useRef<any>(null);
     const isSplitOpen = useAtomValue(isSplitOpenAtom);
@@ -226,7 +233,7 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
                         singularity_provider: null
                     }
                 });
-            } catch (e) {}
+            } catch (e) { }
         } else {
             setSingularityProvider(pid);
             try {
@@ -236,7 +243,7 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
                         singularity_provider: pid
                     }
                 });
-            } catch (e) {}
+            } catch (e) { }
         }
     };
 
@@ -255,18 +262,29 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
             )}
             onMouseDown={() => handleLongPressStart(null)}
             onMouseUp={handleLongPressCancel}
-            onMouseLeave={handleLongPressCancel}
+            onMouseLeave={(e) => {
+                handleLongPressCancel();
+                if (collapsed) setIsExpanded(false);
+            }}
+            onMouseEnter={(e) => {
+                if (collapsed) setIsExpanded(true);
+            }}
             ref={containerRef}
             style={variant === "active" ? { pointerEvents: "auto" } : undefined}
         >
             {/* Orb bar with centered voice and fanned others */}
             {/* Active variant gets a glass-morphic container for visual separation */}
             <div className={clsx(
-                "council-orb-bar flex items-center justify-center relative",
-                variant === "active" && "council-orb-bar--active"
+                "council-orb-bar flex items-center justify-center relative transition-all duration-300",
+                variant === "active" && "council-orb-bar--active",
+                // Collapsed state logic: hide left/right groups if collapsed and not hovered
+                collapsed && !isExpanded && "council-orb-bar--collapsed"
             )}>
-                {/* Left side orbs */}
-                <div className={clsx("council-orb-group council-orb-group--left")}>
+                {/* Left side orbs - Hide if collapsed */}
+                <div className={clsx(
+                    "council-orb-group council-orb-group--left transition-all duration-300",
+                    collapsed && !isExpanded && "opacity-0 -translate-x-4 pointer-events-none scale-90"
+                )}>
                     {leftOrbs.map((p) => {
                         const pid = String(p.id);
                         return (
@@ -287,6 +305,7 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
                                 onLongPressCancel={handleLongPressCancel}
                                 workflowStage={workflowProgress[pid]?.stage}
                                 workflowProgress={workflowProgress[pid]?.progress}
+                                isDimmed={isSingularityMode}
                             />
                         );
                     })}
@@ -324,8 +343,11 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
                     )}
                 </div>
 
-                {/* Right side orbs */}
-                <div className={clsx("council-orb-group council-orb-group--right")}>
+                {/* Right side orbs - Hide if collapsed */}
+                <div className={clsx(
+                    "council-orb-group council-orb-group--right transition-all duration-300",
+                    collapsed && !isExpanded && "opacity-0 translate-x-4 pointer-events-none scale-90"
+                )}>
                     {rightOrbs.map((p) => {
                         const pid = String(p.id);
                         return (
@@ -346,6 +368,7 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
                                 onLongPressCancel={handleLongPressCancel}
                                 workflowStage={workflowProgress[pid]?.stage}
                                 workflowProgress={workflowProgress[pid]?.progress}
+                                isDimmed={isSingularityMode}
                             />
                         );
                     })}
@@ -494,6 +517,7 @@ interface OrbProps {
     // Workflow progress (optional)
     workflowStage?: WorkflowStage;
     workflowProgress?: number; // 0-100
+    isDimmed?: boolean;
 }
 
 const Orb: React.FC<OrbProps> = ({
@@ -513,6 +537,7 @@ const Orb: React.FC<OrbProps> = ({
     isSelected,
     workflowStage = 'idle',
     workflowProgress = 0,
+    isDimmed = false,
 }) => {
     const pid = String(provider.id);
     const state = useAtomValue(providerEffectiveStateFamily({ turnId, providerId: pid }));
@@ -573,7 +598,8 @@ const Orb: React.FC<OrbProps> = ({
             className={clsx(
                 "council-orb-wrapper",
                 isVoice && "council-orb-wrapper--voice",
-                isActiveVariant && !showAsActive && !isVoice && "council-orb-wrapper--inactive"
+                isActiveVariant && !showAsActive && !isVoice && "council-orb-wrapper--inactive",
+                isDimmed && "opacity-30 grayscale pointer-events-none"
             )}
         >
             {/* Crown Icon for Voice Provider */}
