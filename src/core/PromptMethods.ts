@@ -531,11 +531,12 @@ const generateWhyItMatters = (
         case 'leverage_inversion':
             return `Low support but high structural importance—if "${voice.label}" is right, it reshapes the entire answer.`;
 
-        case 'explicit_challenger':
+        case 'explicit_challenger': {
             const targetLabels = voice.targets?.map(t => peaks.find(p => p.id === t)?.label).filter(Boolean);
             return targetLabels && targetLabels.length > 0
                 ? `Directly challenges "${targetLabels[0]}"—the consensus may be missing something.`
                 : `Explicitly contests the dominant view.`;
+        }
 
         case 'unique_perspective':
             return `Comes from model(s) that don't support any consensus position—a genuinely different angle.`;

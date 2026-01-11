@@ -32,7 +32,7 @@ export const GeminiModels = {
   },
   "gemini-exp": {
     id: "gemini-exp",
-    name: "Gemini 3.0",
+    name: "gemini-exp-1206",
     description: "Latest experimental capability",
     maxTokens: 9999,
     header: '[1,null,null,null,"9d8ca3786ebdfbea",null,null,0,[4]]',

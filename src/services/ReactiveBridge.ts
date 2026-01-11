@@ -279,7 +279,6 @@ function extractTerms(text: string, isLabel: boolean): string[] {
  * Terms in conflicting claims become "opposing"
  */
 function buildTermRelations(
-  claims: EnrichedClaim[],
   edges: Edge[],
   claimTerms: Map<string, string[]>
 ): TermRelations {
@@ -370,7 +369,7 @@ function buildTermIndex(
   }
 
   // Step 3: Build term relations from edges
-  const relations = buildTermRelations(claims, edges, claimTerms);
+  const relations = buildTermRelations(edges, claimTerms);
 
   return { terms, claimTerms, relations };
 }
@@ -460,8 +459,9 @@ export function buildReactiveBridge(
   userMessage: string,
   previousAnalysis: StoredAnalysis
 ): ReactiveBridge | null {
-  const claims = previousAnalysis.claimsWithLeverage;
-  const edges = previousAnalysis.edges;
+  const claims = previousAnalysis?.claimsWithLeverage;
+  const edges = previousAnalysis?.edges;
+  if (!Array.isArray(claims) || !Array.isArray(edges)) return null;
 
   // Step 1: Build term index WITH relations
   const termIndex = buildTermIndex(claims, edges);
@@ -482,7 +482,8 @@ export function buildReactiveBridge(
   const matchedIds = new Set(sortedClaims.map(([id]) => id));
 
   const matched: MatchedClaim[] = sortedClaims.map(([id, score]) => {
-    const claim = claims.find(c => c.id === id)!;
+    const claim = claims.find(c => c.id === id);
+    if (!claim) return null;
     return {
       id,
       label: claim.label,
@@ -491,7 +492,7 @@ export function buildReactiveBridge(
       supportRatio: claim.supportRatio,
       matchScore: score
     };
-  });
+  }).filter((c): c is MatchedClaim => c !== null);
 
   // Step 5: Get relevant edges (between matched claims or matched → peak)
   const peakIds = new Set(
@@ -566,6 +567,9 @@ export function buildReactiveBridgeCached(
   previousAnalysis: StoredAnalysis,
   turnId: string
 ): ReactiveBridge | null {
+  if (!previousAnalysis || !Array.isArray(previousAnalysis.claimsWithLeverage) || !Array.isArray(previousAnalysis.edges)) {
+    return null;
+  }
   // Check cache
   let termIndex = termIndexCache.get(turnId);
   if (!termIndex) {
@@ -585,9 +589,7 @@ export function buildReactiveBridgeCached(
   if (claimScores.size === 0) {
     return null;
   }
-
-  // Rest of bridge building logic (same as non-cached version)
-  const claims = previousAnalysis.claimsWithLeverage;
+const claims = previousAnalysis.claimsWithLeverage;
   const edges = previousAnalysis.edges;
 
   const sortedClaims = [...claimScores.entries()]
@@ -597,7 +599,8 @@ export function buildReactiveBridgeCached(
   const matchedIds = new Set(sortedClaims.map(([id]) => id));
 
   const matched: MatchedClaim[] = sortedClaims.map(([id, score]) => {
-    const claim = claims.find(c => c.id === id)!;
+    const claim = claims.find(c => c.id === id);
+    if (!claim) return null;
     return {
       id,
       label: claim.label,
@@ -606,7 +609,7 @@ export function buildReactiveBridgeCached(
       supportRatio: claim.supportRatio,
       matchScore: score
     };
-  });
+  }).filter((c): c is MatchedClaim => c !== null);
 
   const peakIds = new Set(claims.filter(c => c.supportRatio > 0.5).map(c => c.id));
 

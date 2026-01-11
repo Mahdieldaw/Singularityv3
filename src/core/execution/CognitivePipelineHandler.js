@@ -131,6 +131,12 @@ export class CognitivePipelineHandler {
           } catch (e) {
             console.warn("[CognitiveHandler] computeStructuralAnalysis failed:", e);
           }
+          if (structuralAnalysis && Array.isArray(structuralAnalysis.claimsWithLeverage) && Array.isArray(structuralAnalysis.edges)) {
+            context.storedAnalysis = {
+              claimsWithLeverage: structuralAnalysis.claimsWithLeverage,
+              edges: structuralAnalysis.edges,
+            };
+          }
 
           let stanceSelection = null;
           try {

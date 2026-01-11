@@ -1112,7 +1112,7 @@ function buildFrictionFromComposite(
 
     for (const pattern of otherPatterns.slice(0, 2)) {
         switch (pattern.type) {
-            case 'fragile':
+            case 'fragile': {
                 const frag = pattern.data as FragilePatternData;
                 frictionParts.push(
                     `**Fragile Foundation:** "${frag.fragilities[0].peak.label}" depends on ` +
@@ -1121,16 +1121,18 @@ function buildFrictionFromComposite(
                     `The consensus rests on contested ground.`
                 );
                 break;
+            }
 
-            case 'keystone':
+            case 'keystone': {
                 const ks = pattern.data as KeystonePatternData;
                 frictionParts.push(
                     `**Keystone Risk:** Everything flows from "${ks.keystone.label}".\n` +
                     `If this breaks, ${ks.cascadeSize} dependent claim(s) fall with it.`
                 );
                 break;
+            }
 
-            case 'challenged':
+            case 'challenged': {
                 if (!dissentPattern) {
                     const ch = pattern.data as ChallengedPatternData;
                     frictionParts.push(
@@ -1138,8 +1140,9 @@ function buildFrictionFromComposite(
                     );
                 }
                 break;
+            }
 
-            case 'chain':
+            case 'chain': {
                 const chain = pattern.data as ChainPatternData;
                 if (chain.weakLinks.length > 0) {
                     frictionParts.push(
@@ -1147,14 +1150,16 @@ function buildFrictionFromComposite(
                     );
                 }
                 break;
+            }
 
-            case 'orphaned':
+            case 'orphaned': {
                 const orphans = pattern.data as OrphanedPatternData;
                 frictionParts.push(
                     `**Disconnected Signal:** "${orphans.orphans[0].label}" has high support ` +
                     `but isn't connected to anything. It may represent a missed dimension.`
                 );
                 break;
+            }
         }
     }
 

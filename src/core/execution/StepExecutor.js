@@ -8,7 +8,7 @@ import {
   isProviderAuthError,
   createMultiProviderAuthError
 } from '../../utils/ErrorHandler.js';
-import { buildReactiveBridge } from '../../../reactive-bridge/ReactiveBridge';
+import { buildReactiveBridge } from '../../services/ReactiveBridge';
 // computeExplore import removed (unused)
 // persona signal injections removed (absorbed by Concierge)
 
@@ -59,15 +59,15 @@ export class StepExecutor {
         previousContext
       ].filter(Boolean).join("\n\n");
 
-      enhancedPrompt = `You are part of the council. Context(backdrop only—do not summarize or re - answer):
+      enhancedPrompt = `You are part of the council. Context (backdrop only—do not summarize or re-answer):
 
 ${contextBlock}
 
 Answer the user's message directly. Use context only to disambiguate.
 
-  < user_prompt >
+<user_prompt>
   ${prompt}
-</user_prompt > `;
+</user_prompt>`;
     } else if (bridgeContext) {
       // Fallback: Bridge exists but no previous context summary
       enhancedPrompt = `${bridgeContext}\n\n${prompt}`;
