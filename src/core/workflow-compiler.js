@@ -122,6 +122,7 @@ export class WorkflowCompiler {
         providerContexts:
           context.type === "extend" ? context.providerContexts : undefined,
         previousContext: context.previousContext || null,
+        previousAnalysis: context.previousAnalysis || null,
         providerMeta: request.providerMeta || {},
         useThinking: !!request.useThinking,
       },

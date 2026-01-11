@@ -115,6 +115,10 @@ export class ContextResolver {
       lastTurnId: lastTurn.id,
       providerContexts: resolvedContexts,
       previousContext: lastTurn.lastContextSummary || null,
+      previousAnalysis: lastTurn.mapperArtifact ? {
+        claimsWithLeverage: lastTurn.mapperArtifact.claimsWithLeverage || [],
+        edges: lastTurn.mapperArtifact.edges || []
+      } : null,
     };
   }
 
