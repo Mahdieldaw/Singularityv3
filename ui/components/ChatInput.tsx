@@ -6,7 +6,6 @@ import {
   isLoadingAtom,
   isContinuationModeAtom,
   activeProviderCountAtom,
-  isVisibleModeAtom,
   isReducedMotionAtom,
   chatInputHeightAtom,
   toastAtom,
@@ -16,9 +15,7 @@ import {
   workflowProgressAtom,
   isRoundActiveAtom,
   selectedModeAtom,
-  mappingProviderAtom,
   singularityProviderAtom,
-  providerLocksAtom,
   batchAutoRunEnabledAtom,
 } from "../state/atoms";
 import { useChat } from "../hooks/chat/useChat";
@@ -46,7 +43,7 @@ const ChatInput = ({
 
   const [isContinuationMode] = useAtom(isContinuationModeAtom as any) as [boolean, any];
   const [activeProviderCount] = useAtom(activeProviderCountAtom as any) as [number, any];
-  const [isVisibleMode] = useAtom(isVisibleModeAtom as any) as [boolean, any];
+
   const [isReducedMotion] = useAtom(isReducedMotionAtom as any) as [boolean, any];
   const [, setChatInputHeight] = useAtom(chatInputHeightAtom);
   const [selectedMode] = useAtom(selectedModeAtom as any) as [string, any];

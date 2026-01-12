@@ -61,8 +61,8 @@ const utils = {
             t.name === a.name &&
               (a.once &&
                 (chrome.alarms.onAlarm.removeListener(a.listener),
-                chrome.alarms.clear(a.name)),
-              e());
+                  chrome.alarms.clear(a.name)),
+                e());
           },
         };
         return (
@@ -166,9 +166,10 @@ const NetRulesManager = {
     });
 
     // Remove duplicates by key (keep last occurrence)
-    const filteredRules = normalizedRules.filter(
-      (rule, index) => index === normalizedRules.findLastIndex((r) => r.key === rule.key),
-    );
+    // Use a Map to keep only the last occurrence by key (ES2021 compatible replacement for findLastIndex)
+    const ruleMap = new Map();
+    normalizedRules.forEach(r => ruleMap.set(r.key, r));
+    const filteredRules = Array.from(ruleMap.values());
 
     // Find existing rules with same keys to replace
     const existingKeys =

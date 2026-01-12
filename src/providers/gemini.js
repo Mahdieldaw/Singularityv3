@@ -162,7 +162,9 @@ export class GeminiSessionApi {
     }
 
     let parsedLines = [];
-    let c, u;
+    let c;
+    /** @type {any} */
+    let u;
     try {
       // Gemini returns an XSSI prefix like ")]}'" followed by multiple JSON lines.
       const raw = await response.text();
@@ -313,7 +315,7 @@ export class GeminiSessionApi {
     // Replace Image Placeholders with Markdown Images
     // Use shared ArtifactProcessor for consistent handling
     const processor = new ArtifactProcessor();
-    if (images.length > 0 && u?.text) {
+    if (images.length > 0 && u && u.text) {
       u.text = processor.injectImages(u.text, images);
     }
 
@@ -329,8 +331,8 @@ export class GeminiSessionApi {
 
     if (GEMINI_DEBUG)
       console.info("[Gemini] Response received:", {
-        hasText: !!u?.text,
-        textLength: u?.text?.length || 0,
+        hasText: !!(u && u.text),
+        textLength: (u && u.text && u.text.length) ? u.text.length : 0,
         immersiveItems: immersiveContent.length,
         images: images.length,
         status: response?.status || "unknown",
@@ -338,8 +340,8 @@ export class GeminiSessionApi {
       });
 
     return {
-      text: u.text || "",
-      cursor: u.cursor || [],
+      text: (u && u.text) ? u.text : "",
+      cursor: (u && u.cursor) ? u.cursor : [],
       token,
       modelName: modelConfig.name,
     };

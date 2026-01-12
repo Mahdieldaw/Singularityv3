@@ -88,7 +88,7 @@ const TECH_TERMS = new Set([
 
 // ✅ FIX: Compile tech term regex once at module level (Performance Fix)
 const TECH_TERM_REGEX = new RegExp(
-  `\\b(${Array.from(TECH_TERMS).join('|')})\\b`,
+  `\\b(${Array.from(TECH_TERMS).map(t => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})\\b`,
   'gi'
 );
 
@@ -115,17 +115,21 @@ function levenshtein(a: string, b: string, maxDistance: number = Infinity): numb
 
   for (let i = 1; i <= a.length; i++) {
     let prev = i;
+    let minInRow = i;
+
     for (let j = 1; j <= b.length; j++) {
       const val = a[i - 1] === b[j - 1]
         ? row[j - 1]
         : Math.min(row[j - 1] + 1, prev + 1, row[j] + 1);
       row[j - 1] = prev;
       prev = val;
+      if (val < minInRow) minInRow = val;
     }
     row[b.length] = prev;
+    if (prev < minInRow) minInRow = prev;
 
     // Early termination: if entire row exceeds threshold, stop
-    if (Math.min(...row) > maxDistance) return maxDistance + 1;
+    if (minInRow > maxDistance) return maxDistance + 1;
   }
 
   return row[b.length];
@@ -151,9 +155,9 @@ function ngramSimilarity(a: string, b: string, n: number = 2): number {
   const ngramsB = getNgrams(b);
 
   let intersection = 0;
-  for (const ng of ngramsA) {
+  ngramsA.forEach(ng => {
     if (ngramsB.has(ng)) intersection++;
-  }
+  });
 
   const union = ngramsA.size + ngramsB.size - intersection;
   return union > 0 ? intersection / union : 0;
@@ -225,7 +229,7 @@ function extractProperNouns(text: string): string[] {
   // Skip first word (might be capitalized as sentence start)
   for (let i = 1; i < words.length; i++) {
     const word = words[i].replace(/[^a-zA-Z0-9]/g, '');
-    if (word.length > 1 && word[0] === word[0].toUpperCase()) {
+    if (word.length > 1 && /^[A-Z]/.test(word)) { // Enforce start with uppercase letter
       properNouns.push(word);
     }
   }
@@ -233,7 +237,7 @@ function extractProperNouns(text: string): string[] {
   // Tech terms - single pass with compiled regex
   const matches = text.match(TECH_TERM_REGEX) || [];
 
-  return [...new Set([...properNouns, ...matches.map(m => m.toLowerCase())])];
+  return Array.from(new Set([...properNouns, ...matches.map(m => m.toLowerCase())]));
 }
 
 /**
@@ -261,12 +265,12 @@ function extractTerms(text: string, isLabel: boolean): string[] {
   }
 
   // Step 5: Combine all term variants (deduped)
-  return [...new Set([
+  return Array.from(new Set([
     ...normalized,                           // Original words
     ...stemmed,                              // Stemmed variants
     ...bigrams,                              // Phrase bigrams
     ...properNouns.map(p => p.toLowerCase()) // Proper nouns
-  ])];
+  ]));
 }
 
 // ============================================================================
@@ -339,7 +343,7 @@ function buildTermIndex(
     const labelTerms = extractTerms(claim.label, true);
     const textTerms = extractTerms(claim.text, false);
 
-    const allTerms = [...new Set([...labelTerms, ...textTerms])];
+    const allTerms = Array.from(new Set([...labelTerms, ...textTerms]));
     claimTerms.set(claim.id, allTerms);
 
     for (const term of allTerms) {
@@ -354,7 +358,7 @@ function buildTermIndex(
   const totalClaims = claims.length;
   const terms = new Map<string, TermEntry>();
 
-  for (const [term, claimIds] of termCounts) {
+  termCounts.forEach((claimIds, term) => {
     const frequency = claimIds.size / totalClaims;
     const weight = frequency < 0.1 ? 0.5 :
       frequency < 0.3 ? 1.0 :
@@ -366,7 +370,7 @@ function buildTermIndex(
       weight,
       isProperNoun: TECH_TERMS.has(term)
     });
-  }
+  });
 
   // Step 3: Build term relations from edges
   const relations = buildTermRelations(edges, claimTerms);
@@ -387,10 +391,10 @@ function addScores(
   scores: Map<string, number>
 ): void {
   const boost = entry.isProperNoun ? 2.0 : 1.0;
-  for (const claimId of entry.claimIds) {
+  entry.claimIds.forEach(claimId => {
     const current = scores.get(claimId) || 0;
     scores.set(claimId, current + entry.weight * multiplier * boost);
-  }
+  });
 }
 
 /**
@@ -416,7 +420,7 @@ function matchUserMessage(
 
     // Priority 2: Fuzzy match (weight: 0.9)
     if (!matched) {
-      for (const [term, entry] of termIndex.terms) {
+      for (const [term, entry] of termIndex.terms.entries()) {
         if (fuzzyMatch(userTerm, term)) {
           addScores(entry, 0.9, claimScores);
           matched = true;
@@ -429,12 +433,12 @@ function matchUserMessage(
     if (!matched) {
       const relatedTerms = termIndex.relations.related.get(userTerm);
       if (relatedTerms) {
-        for (const relatedTerm of relatedTerms) {
+        relatedTerms.forEach(relatedTerm => {
           if (termIndex.terms.has(relatedTerm)) {
             addScores(termIndex.terms.get(relatedTerm)!, 0.5, claimScores);
             // Don't break - accumulate all related matches
           }
-        }
+        });
       }
     }
   }
@@ -450,6 +454,58 @@ function getTier(supportRatio: number): 'peak' | 'hill' | 'floor' {
   if (supportRatio > 0.5) return 'peak';
   if (supportRatio > 0.25) return 'hill';
   return 'floor';
+}
+
+/**
+ * Shared helper to build bridge from matched terms
+ */
+function buildBridgeFromIndex(
+  claimScores: Map<string, number>,
+  claims: EnrichedClaim[],
+  edges: Edge[]
+): ReactiveBridge | null {
+  if (claimScores.size === 0) return null;
+
+  const sortedClaims = Array.from(claimScores.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3);
+
+  const matchedIds = new Set(sortedClaims.map(([id]) => id));
+
+  const matched: MatchedClaim[] = sortedClaims.map(([id, score]) => {
+    const claim = claims.find(c => c.id === id);
+    if (!claim) return null;
+    return {
+      id,
+      label: claim.label,
+      text: claim.text,
+      tier: getTier(claim.supportRatio),
+      supportRatio: claim.supportRatio,
+      matchScore: score
+    };
+  }).filter((c): c is MatchedClaim => c !== null);
+
+  const peakIds = new Set(
+    claims.filter(c => c.supportRatio > 0.5).map(c => c.id)
+  );
+
+  const relevantEdges = edges.filter(e => {
+    const fromMatched = matchedIds.has(e.from);
+    const toMatched = matchedIds.has(e.to);
+    const fromPeak = peakIds.has(e.from);
+    const toPeak = peakIds.has(e.to);
+    return (fromMatched && toMatched) || (fromMatched && toPeak) || (fromPeak && toMatched);
+  }).slice(0, 4);
+
+  const formattedEdges: RelevantEdge[] = relevantEdges.map(e => ({
+    type: e.type,
+    fromLabel: claims.find(c => c.id === e.from)?.label || e.from,
+    toLabel: claims.find(c => c.id === e.to)?.label || e.to
+  }));
+
+  const context = formatBridge(matched, formattedEdges);
+
+  return { matched, edges: formattedEdges, context };
 }
 
 /**
@@ -469,62 +525,8 @@ export function buildReactiveBridge(
   // Step 2: Match user message (now uses relations as fallback)
   const claimScores = matchUserMessage(userMessage, termIndex);
 
-  // Step 3: No matches → no bridge needed
-  if (claimScores.size === 0) {
-    return null;
-  }
-
-  // Step 4: Get top 3 matched claims
-  const sortedClaims = [...claimScores.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 3);
-
-  const matchedIds = new Set(sortedClaims.map(([id]) => id));
-
-  const matched: MatchedClaim[] = sortedClaims.map(([id, score]) => {
-    const claim = claims.find(c => c.id === id);
-    if (!claim) return null;
-    return {
-      id,
-      label: claim.label,
-      text: claim.text,
-      tier: getTier(claim.supportRatio),
-      supportRatio: claim.supportRatio,
-      matchScore: score
-    };
-  }).filter((c): c is MatchedClaim => c !== null);
-
-  // Step 5: Get relevant edges (between matched claims or matched → peak)
-  const peakIds = new Set(
-    claims.filter(c => c.supportRatio > 0.5).map(c => c.id)
-  );
-
-  const relevantEdges = edges.filter(e => {
-    const fromMatched = matchedIds.has(e.from);
-    const toMatched = matchedIds.has(e.to);
-    const fromPeak = peakIds.has(e.from);
-    const toPeak = peakIds.has(e.to);
-
-    // Edge between matched claims
-    if (fromMatched && toMatched) return true;
-    // Edge from matched to peak (context)
-    if (fromMatched && toPeak) return true;
-    // Edge from peak to matched (context)
-    if (fromPeak && toMatched) return true;
-
-    return false;
-  }).slice(0, 4); // Max 4 edges
-
-  const formattedEdges: RelevantEdge[] = relevantEdges.map(e => ({
-    type: e.type,
-    fromLabel: claims.find(c => c.id === e.from)?.label || e.from,
-    toLabel: claims.find(c => c.id === e.to)?.label || e.to
-  }));
-
-  // Step 6: Format context string
-  const context = formatBridge(matched, formattedEdges);
-
-  return { matched, edges: formattedEdges, context };
+  // Step 3-6: Build bridge
+  return buildBridgeFromIndex(claimScores, claims, edges);
 }
 
 /**
@@ -586,48 +588,10 @@ export function buildReactiveBridgeCached(
   // Use cached index for matching
   const claimScores = matchUserMessage(userMessage, termIndex);
 
-  if (claimScores.size === 0) {
-    return null;
-  }
-const claims = previousAnalysis.claimsWithLeverage;
-  const edges = previousAnalysis.edges;
-
-  const sortedClaims = [...claimScores.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 3);
-
-  const matchedIds = new Set(sortedClaims.map(([id]) => id));
-
-  const matched: MatchedClaim[] = sortedClaims.map(([id, score]) => {
-    const claim = claims.find(c => c.id === id);
-    if (!claim) return null;
-    return {
-      id,
-      label: claim.label,
-      text: claim.text,
-      tier: getTier(claim.supportRatio),
-      supportRatio: claim.supportRatio,
-      matchScore: score
-    };
-  }).filter((c): c is MatchedClaim => c !== null);
-
-  const peakIds = new Set(claims.filter(c => c.supportRatio > 0.5).map(c => c.id));
-
-  const relevantEdges = edges.filter(e => {
-    const fromMatched = matchedIds.has(e.from);
-    const toMatched = matchedIds.has(e.to);
-    const fromPeak = peakIds.has(e.from);
-    const toPeak = peakIds.has(e.to);
-    return (fromMatched && toMatched) || (fromMatched && toPeak) || (fromPeak && toMatched);
-  }).slice(0, 4);
-
-  const formattedEdges: RelevantEdge[] = relevantEdges.map(e => ({
-    type: e.type,
-    fromLabel: claims.find(c => c.id === e.from)?.label || e.from,
-    toLabel: claims.find(c => c.id === e.to)?.label || e.to
-  }));
-
-  const context = formatBridge(matched, formattedEdges);
-
-  return { matched, edges: formattedEdges, context };
+  // Build bridge using shared logic
+  return buildBridgeFromIndex(
+    claimScores,
+    previousAnalysis.claimsWithLeverage,
+    previousAnalysis.edges
+  );
 }

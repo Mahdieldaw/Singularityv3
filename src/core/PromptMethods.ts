@@ -415,7 +415,7 @@ const analyzePeaks = (
         peaks,
         hills,
         floor,
-        peakIds,
+        peakIds: Array.from(peakIds),
         peakConflicts,
         peakTradeoffs,
         peakSupports,
@@ -424,8 +424,7 @@ const analyzePeaks = (
 };
 
 const detectPrimaryShape = (
-    peakAnalysis: PeakAnalysis,
-    claims: EnrichedClaim[]
+    peakAnalysis: PeakAnalysis
 ): { primary: PrimaryShape; confidence: number; evidence: string[] } => {
     const { peaks, hills, peakConflicts, peakTradeoffs, peakSupports, peakUnconnected } = peakAnalysis;
 
@@ -442,12 +441,13 @@ const detectPrimaryShape = (
         };
     }
 
-    // Single peak or all peaks support each other → CONVERGENT
-    if (peaks.length <= 1 ||
+    // CONVERGENT: Requires at least one peak
+    if (peaks.length === 1 ||
         (peaks.length > 1 && peakConflicts.length === 0 && peakTradeoffs.length === 0 && peakSupports.length > 0)) {
-        const avgSupport = peaks.length > 0
-            ? peaks.reduce((s, p) => s + p.supportRatio, 0) / peaks.length
-            : 0;
+
+        // Safe to access peaks since we know peaks.length >= 1
+        const avgSupport = peaks.reduce((s, p) => s + p.supportRatio, 0) / peaks.length;
+
         return {
             primary: 'convergent',
             confidence: Math.min(0.9, 0.5 + avgSupport * 0.4),
@@ -457,6 +457,19 @@ const detectPrimaryShape = (
                     : `${peaks.length} aligned peaks with mutual support`,
                 peakSupports.length > 0 ? `${peakSupports.length} reinforcing connection(s) between peaks` : '',
             ].filter(Boolean) as string[]
+        };
+    }
+
+    // Edge case: No peaks but multiple hills - not sparse, not convergent
+    if (peaks.length === 0) {
+        return {
+            primary: 'parallel',  // Unified with parallel for unsettled landscape
+            confidence: 0.5,
+            evidence: [
+                `No dominant positions (0 peaks)`,
+                `${hills.length} claims in contested range`,
+                `Landscape is unsettled`
+            ]
         };
     }
 
@@ -550,24 +563,25 @@ const generateWhyItMatters = (
 };
 
 const detectDissentPattern = (
-    claims: EnrichedClaim[],
+    _claims: EnrichedClaim[],
     edges: Edge[],
-    peakIds: Set<string>,
+    peakIds: string[],
     peaks: EnrichedClaim[]
 ): SecondaryPattern | null => {
+    const peakIdsSet = new Set(peakIds);
 
     const dissentVoices: DissentPatternData['voices'] = [];
 
     // ─────────────────────────────────────────────────────────────────────────
     // 1. LEVERAGE INVERSIONS: Low support, high structural importance
     // ─────────────────────────────────────────────────────────────────────────
-    const leverageInversions = claims.filter(c => c.isLeverageInversion);
+    const leverageInversions = _claims.filter(c => c.isLeverageInversion);
 
     for (const claim of leverageInversions) {
         const targets = edges
             .filter(e => e.from === claim.id && (e.type === 'prerequisite' || e.type === 'supports'))
             .map(e => e.to)
-            .filter(id => peakIds.has(id));
+            .filter(id => peakIdsSet.has(id));
 
         dissentVoices.push({
             id: claim.id,
@@ -583,18 +597,28 @@ const detectDissentPattern = (
     // ─────────────────────────────────────────────────────────────────────────
     // 2. EXPLICIT CHALLENGERS: Role = challenger, attacks peaks
     // ─────────────────────────────────────────────────────────────────────────
-    const challengers = claims.filter(c =>
+    const challengers = _claims.filter(c =>
         c.role === 'challenger' ||
-        (c.challenges && peakIds.has(c.challenges))
+        (c.challenges && peakIdsSet.has(c.challenges))
     );
 
     for (const claim of challengers) {
         if (dissentVoices.some(v => v.id === claim.id)) continue;
 
-        const targets = claim.challenges ? [claim.challenges] :
-            edges
-                .filter(e => e.from === claim.id && e.type === 'conflicts' && peakIds.has(e.to))
+        const targets = claim.challenges && peakIdsSet.has(claim.challenges)
+            ? [claim.challenges]
+            : edges
+                .filter(e => e.from === claim.id && e.type === 'conflicts' && peakIdsSet.has(e.to))
                 .map(e => e.to);
+
+        if (targets.length === 0 && (claim.role === 'challenger' || claim.challenges)) {
+            // If it was explicitly marked as a challenger but has no valid peak targets,
+            // we skip adding it as an 'explicit_challenger' to avoid broken links
+            if (!claim.challenges) continue;
+            // If it has a challenge but it's not a peak, it might still be a unique perspective or leverage inversion
+            // (already handled or will be handled by other blocks)
+            continue;
+        }
 
         dissentVoices.push({
             id: claim.id,
@@ -613,16 +637,16 @@ const detectDissentPattern = (
     const peakSupporters = new Set(peaks.flatMap(p => p.supporters));
     const outsiderModels = new Set<number>();
 
-    claims.forEach(c => {
+    _claims.forEach(c => {
         c.supporters.forEach(s => {
             if (!peakSupporters.has(s)) outsiderModels.add(s);
         });
     });
 
     if (outsiderModels.size > 0) {
-        const outsiderClaims = claims.filter(c => {
+        const outsiderClaims = _claims.filter(c => {
             const outsiderSupport = c.supporters.filter(s => outsiderModels.has(s)).length;
-            return outsiderSupport > c.supporters.length * 0.5 && !peakIds.has(c.id);
+            return outsiderSupport > c.supporters.length * 0.5 && !peakIdsSet.has(c.id);
         });
 
         for (const claim of outsiderClaims) {
@@ -643,7 +667,7 @@ const detectDissentPattern = (
     // ─────────────────────────────────────────────────────────────────────────
     // 4. EDGE CASES: Conditional claims with low support
     // ─────────────────────────────────────────────────────────────────────────
-    const edgeCases = claims.filter(c =>
+    const edgeCases = _claims.filter(c =>
         c.type === 'conditional' &&
         c.supportRatio < 0.4 &&
         !dissentVoices.some(v => v.id === c.id)
@@ -671,13 +695,13 @@ const detectDissentPattern = (
 
     // Identify suppressed dimensions
     const peakTypes = new Set(peaks.map(p => p.type));
-    const minorityOnlyTypes = [...new Set(rankedVoices.map(v => {
-        const claim = claims.find(c => c.id === v.id);
+    const minorityOnlyTypes = Array.from(new Set(rankedVoices.map(v => {
+        const claim = _claims.find(c => c.id === v.id);
         return claim?.type;
-    }))].filter(t => t && !peakTypes.has(t));
+    }))).filter(t => t && !peakTypes.has(t));
 
     const strongestVoice = rankedVoices[0];
-    const strongestClaim = claims.find(c => c.id === strongestVoice.id);
+    const strongestClaim = _claims.find(c => c.id === strongestVoice.id);
 
     return {
         type: 'dissent',
@@ -706,26 +730,33 @@ const detectChallengedPattern = (
     edges: Edge[]
 ): SecondaryPattern | null => {
     const { peakIds, floor } = peakAnalysis;
+    const peakIdsSet = new Set(peakIds);
     const floorIds = new Set(floor.map(f => f.id));
 
     const challengeEdges = edges.filter(e =>
         e.type === 'conflicts' &&
         floorIds.has(e.from) &&
-        peakIds.has(e.to)
+        peakIdsSet.has(e.to)
     );
 
     if (challengeEdges.length === 0) return null;
 
-    const challenges = challengeEdges.map(e => ({
-        challenger: (() => {
-            const c = claims.find(c => c.id === e.from)!;
-            return { id: c.id, label: c.label, supportRatio: c.supportRatio };
-        })(),
-        target: (() => {
-            const c = claims.find(c => c.id === e.to)!;
-            return { id: c.id, label: c.label, supportRatio: c.supportRatio };
-        })()
-    }));
+    const challenges = challengeEdges
+        .map(e => {
+            const challenger = claims.find(c => c.id === e.from);
+            const target = claims.find(c => c.id === e.to);
+
+            // Skip edges where either endpoint is missing
+            if (!challenger || !target) {
+                return null;
+            }
+
+            return {
+                challenger: { id: challenger.id, label: challenger.label, supportRatio: challenger.supportRatio },
+                target: { id: target.id, label: target.label, supportRatio: target.supportRatio }
+            };
+        })
+        .filter((c): c is NonNullable<typeof c> => c !== null);
 
     return {
         type: 'challenged',
@@ -737,7 +768,8 @@ const detectChallengedPattern = (
 const detectKeystonePatternSecondary = (
     peaks: EnrichedClaim[],
     edges: Edge[],
-    cascadeRisks: CascadeRisk[]
+    cascadeRisks: CascadeRisk[],
+    _graph?: GraphAnalysis
 ): SecondaryPattern | null => {
     for (const peak of peaks) {
         const outgoingPrereqs = edges.filter(e =>
@@ -768,7 +800,9 @@ const detectChainPatternSecondary = (
 ): SecondaryPattern | null => {
     if (graph.longestChain.length < MIN_CHAIN_LENGTH) return null;
 
-    const chainClaims = graph.longestChain.map(id => claims.find(c => c.id === id)!).filter(Boolean);
+    const chainClaims = graph.longestChain
+        .map(id => claims.find(c => c.id === id))
+        .filter((c): c is EnrichedClaim => !!c);
     const weakLinks = chainClaims
         .filter(c => c.supportRatio < HILL_THRESHOLD)
         .map(c => c.id);
@@ -921,7 +955,7 @@ const detectSecondaryPatterns = (
 const mapToLegacyPattern = (
     primary: PrimaryShape,
     patterns: SecondaryPattern[],
-    graph: GraphAnalysis
+    _graph: GraphAnalysis
 ): ProblemStructure['primaryPattern'] => {
     switch (primary) {
         case 'sparse':
@@ -997,16 +1031,14 @@ const detectCompositeShape = (
     claims: EnrichedClaim[],
     edges: Edge[],
     graph: GraphAnalysis,
-    cascadeRisks: CascadeRisk[],
-    ratios: CoreRatios,
-    signalStrength: number
+    cascadeRisks: CascadeRisk[]
 ): CompositeShape => {
 
     // Step 1: Analyze peak structure
     const peakAnalysis = analyzePeaks(claims, edges);
 
     // Step 2: Determine primary shape from peaks
-    const { primary, confidence: primaryConfidence, evidence } = detectPrimaryShape(peakAnalysis, claims);
+    const { primary, confidence: primaryConfidence, evidence } = detectPrimaryShape(peakAnalysis);
 
     // Step 3: Detect secondary patterns
     const patterns = detectSecondaryPatterns(
@@ -1759,10 +1791,10 @@ function generateEvidenceSparseAware(
     pattern: string,
     ratios: CoreRatios,
     tensions: { edgeType: string; isConditional: boolean; isBothHighSupport: boolean }[],
-    graph: GraphAnalysis,
-    edgeCount: number,
-    localCoherence: number,
-    claimCount: number
+    _graph: GraphAnalysis,
+    _edgeCount: number,
+    _localCoherence: number,
+    _claimCount: number
 ): string[] {
     const describeLevel = (val: number) => {
         if (val > 0.8) return "Very high";
@@ -2327,7 +2359,7 @@ const buildKeystoneShapeData = (
             targetsClaim: keystoneId || null
         }));
     const dependentIds = new Set(dependencies.map(d => d.id));
-    const keystoneConnectedIds = new Set<string>([keystoneId!, ...dependentIds]);
+    const keystoneConnectedIds = new Set<string>([keystoneId!].concat(Array.from(dependentIds)));
     const decoupledClaims = claims
         .filter(c => !keystoneConnectedIds.has(c.id))
         .filter(c => c.supporters.length > 0)
@@ -2672,7 +2704,7 @@ function inferDimensionTheme(claims: EnrichedClaim[]): string {
 function mode<T>(arr: T[]): T {
     const counts = new Map<T, number>();
     arr.forEach(v => counts.set(v, (counts.get(v) || 0) + 1));
-    const sorted = [...counts.entries()].sort((a, b) => b[1] - a[1]);
+    const sorted = Array.from(counts.entries()).sort((a, b) => b[1] - a[1]);
     return sorted[0]?.[0] ?? arr[0];
 }
 
@@ -2956,9 +2988,7 @@ export const computeStructuralAnalysis = (artifact: MapperArtifact): StructuralA
         claimsWithLeverage,
         edges,
         graph,
-        patterns.cascadeRisks,
-        ratios,
-        signalStrength
+        patterns.cascadeRisks
     );
 
     // Legacy shape determination (still used for backwards compatibility with shape data builders)

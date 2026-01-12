@@ -9,7 +9,6 @@ import {
   activeSplitPanelAtom,
   isDecisionMapOpenAtom,
   chatInputHeightAtom,
-  isRoundActiveAtom,
 } from "../state/atoms";
 import { ResizableSplitLayout } from "../components/ResizableSplitLayout";
 import clsx from "clsx";
@@ -42,7 +41,7 @@ export default function ChatView() {
   const isDecisionMapOpen = useAtomValue(isDecisionMapOpenAtom);
   const setDecisionMapOpen = useSetAtom(isDecisionMapOpenAtom);
   const chatInputHeight = useAtomValue(chatInputHeightAtom);
-  const isRoundActive = useAtomValue(isRoundActiveAtom);
+
 
   // Smart Defaults
   useSmartProviderDefaults();

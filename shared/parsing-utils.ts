@@ -713,7 +713,7 @@ export function createEmptyMapperArtifact(): MapperArtifact {
         turn: 0,
         timestamp: new Date().toISOString(),
         model_count: 0,
-        souvenir: ""
+
     };
 }
 
@@ -1763,7 +1763,7 @@ export function validateBatchPrompt(prompt: string): { valid: boolean; issues: s
  *   >>>COMMIT: decision summary
  *   ---/HANDOFF---
  */
-const HANDOFF_REGEX = /---HANDOFF---\r?\n?([\s\S]*?)---\/HANDOFF---/;
+const HANDOFF_REGEX = /--- ?HANDOFF ?---\r?\n?([\s\S]*?)--- ?\/HANDOFF ?---/i;
 
 /**
  * Regex for COMMIT signal (unique marker to avoid false positives)
@@ -1892,24 +1892,24 @@ function parseHandoffBlock(text: string): ConciergeDelta {
         switch (key) {
             case 'constraints':
             case 'constraint':
-                delta.constraints = items;
+                delta.constraints = [...new Set([...delta.constraints, ...items])];
                 break;
             case 'eliminated':
             case 'eliminate':
             case 'ruled out':
             case 'ruled_out':
-                delta.eliminated = items;
+                delta.eliminated = [...new Set([...delta.eliminated, ...items])];
                 break;
             case 'preferences':
             case 'preference':
             case 'trade-offs':
             case 'tradeoffs':
-                delta.preferences = items;
+                delta.preferences = [...new Set([...delta.preferences, ...items])];
                 break;
             case 'context':
             case 'situation':
             case 'situational':
-                delta.context = items;
+                delta.context = [...new Set([...delta.context, ...items])];
                 break;
             // Silently ignore unknown keys (including 'committed' etc)
         }
@@ -1928,10 +1928,10 @@ function parseHandoffBlock(text: string): ConciergeDelta {
 export function hasHandoffContent(delta: ConciergeDelta | null | undefined): boolean {
     if (!delta) return false;
     return (
-        delta.constraints.length > 0 ||
-        delta.eliminated.length > 0 ||
-        delta.preferences.length > 0 ||
-        delta.context.length > 0 ||
+        (delta.constraints?.length ?? 0) > 0 ||
+        (delta.eliminated?.length ?? 0) > 0 ||
+        (delta.preferences?.length ?? 0) > 0 ||
+        (delta.context?.length ?? 0) > 0 ||
         delta.commit !== null
     );
 }
@@ -1949,18 +1949,22 @@ export function formatHandoffContext(handoff: ConciergeDelta | null | undefined)
     }
 
     const lines = ['[Conversation context since last analysis:]'];
+    const constraints = handoff.constraints ?? [];
+    const eliminated = handoff.eliminated ?? [];
+    const preferences = handoff.preferences ?? [];
+    const context = handoff.context ?? [];
 
-    if (handoff.constraints.length > 0) {
-        lines.push(`Constraints: ${handoff.constraints.join('; ')}`);
+    if (constraints.length > 0) {
+        lines.push(`Constraints: ${constraints.join('; ')}`);
     }
-    if (handoff.eliminated.length > 0) {
-        lines.push(`Ruled out: ${handoff.eliminated.join('; ')}`);
+    if (eliminated.length > 0) {
+        lines.push(`Ruled out: ${eliminated.join('; ')}`);
     }
-    if (handoff.preferences.length > 0) {
-        lines.push(`Preferences: ${handoff.preferences.join('; ')}`);
+    if (preferences.length > 0) {
+        lines.push(`Preferences: ${preferences.join('; ')}`);
     }
-    if (handoff.context.length > 0) {
-        lines.push(`Situation: ${handoff.context.join('; ')}`);
+    if (context.length > 0) {
+        lines.push(`Situation: ${context.join('; ')}`);
     }
 
     return lines.join('\n');
@@ -1974,22 +1978,29 @@ export function formatHandoffContext(handoff: ConciergeDelta | null | undefined)
  * @param handoff - Current ConciergeDelta to echo
  * @returns Formatted echo block to prepend to user message
  */
-export function formatHandoffEcho(handoff: ConciergeDelta): string {
+export function formatHandoffEcho(handoff: ConciergeDelta | null | undefined): string {
+    if (!handoff) return '';
+
     const lines: string[] = ['Your current handoff (update if needed):'];
     lines.push('');
     lines.push('---CURRENT_HANDOFF---');
 
-    if (handoff.constraints.length > 0) {
-        lines.push(`constraints: ${handoff.constraints.join('; ')}`);
+    const constraints = handoff.constraints ?? [];
+    const eliminated = handoff.eliminated ?? [];
+    const preferences = handoff.preferences ?? [];
+    const context = handoff.context ?? [];
+
+    if (constraints.length > 0) {
+        lines.push(`constraints: ${constraints.join('; ')}`);
     }
-    if (handoff.eliminated.length > 0) {
-        lines.push(`eliminated: ${handoff.eliminated.join('; ')}`);
+    if (eliminated.length > 0) {
+        lines.push(`eliminated: ${eliminated.join('; ')}`);
     }
-    if (handoff.preferences.length > 0) {
-        lines.push(`preferences: ${handoff.preferences.join('; ')}`);
+    if (preferences.length > 0) {
+        lines.push(`preferences: ${preferences.join('; ')}`);
     }
-    if (handoff.context.length > 0) {
-        lines.push(`context: ${handoff.context.join('; ')}`);
+    if (context.length > 0) {
+        lines.push(`context: ${context.join('; ')}`);
     }
     // NEVER echo >>>COMMIT — it triggers fresh spawn, no echo needed
 

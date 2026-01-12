@@ -14,7 +14,6 @@ module.exports = {
                 // If you license Suisse Intl, replace 'Inter' with 'Suisse Intl'
                 sans: [
                     'Inter',
-                    '"Inter Fallback"',
                     ...defaultTheme.fontFamily.sans,
                 ],
                 mono: [

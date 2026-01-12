@@ -250,11 +250,11 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
             )}
             onMouseDown={() => handleLongPressStart(null)}
             onMouseUp={handleLongPressCancel}
-            onMouseLeave={(e) => {
+            onMouseLeave={() => {
                 handleLongPressCancel();
                 if (collapsed) setIsExpanded(false);
             }}
-            onMouseEnter={(e) => {
+            onMouseEnter={() => {
                 if (collapsed) setIsExpanded(true);
             }}
             ref={containerRef}

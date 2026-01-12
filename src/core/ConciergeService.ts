@@ -129,10 +129,18 @@ Rules:
 `;
 
 /**
+ * Safely escape user message to prevent formatting breaks / fence termination.
+ */
+const escapeUserMessage = (msg: string): string => {
+    // Use fenced code block to safely contain any content
+    return '```\n' + msg.replace(/```/g, '\\`\\`\\`') + '\n```';
+};
+
+/**
  * Build message for Turn 2: injects handoff protocol before user message.
  */
 export function buildTurn2Message(userMessage: string): string {
-    return HANDOFF_PROTOCOL + `User: "${userMessage}"`;
+    return HANDOFF_PROTOCOL + `\n\nUser Message:\n${escapeUserMessage(userMessage)}`;
 }
 
 /**
@@ -143,10 +151,11 @@ export function buildTurn3PlusMessage(
     userMessage: string,
     pendingHandoff: ConciergeDelta | null
 ): string {
-    if (pendingHandoff && hasHandoffContent(pendingHandoff)) {
-        return formatHandoffEcho(pendingHandoff) + `User: "${userMessage}"`;
-    }
-    return userMessage;
+    const handoffSection = pendingHandoff && hasHandoffContent(pendingHandoff)
+        ? `\n\n${formatHandoffEcho(pendingHandoff)}`
+        : '';
+
+    return `${handoffSection}\n\nUser Message:\n${escapeUserMessage(userMessage)}`;
 }
 
 /**
@@ -387,486 +396,6 @@ But be constructive—challenge to strengthen, not to destroy.`,
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// SHAPE-SPECIFIC BRIEFS
-// ═══════════════════════════════════════════════════════════════════════════
-
-function buildSettledBrief(analysis: StructuralAnalysis): string {
-    const { shape, landscape, ratios } = analysis;
-    const data = shape.data as SettledShapeData;
-
-    if (!data || data.pattern !== 'settled') {
-        return buildGenericBrief(analysis);
-    }
-
-    let brief = '';
-
-    brief += `## Shape: SETTLED (${Math.round(shape.confidence * 100)}%)\n\n`;
-    brief += `Strong agreement exists. The floor is established.\n\n`;
-    brief += `**Floor Strength**: ${data.floorStrength.toUpperCase()}\n`;
-    brief += `**Claims**: ${landscape.claimCount} from ${landscape.modelCount} sources\n`;
-    brief += `**Concentration**: ${Math.round(ratios.concentration * 100)}%\n\n`;
-
-    brief += `## The Floor\n\n`;
-    if (data.floor.length > 0) {
-        data.floor.forEach(c => {
-            const contested = c.isContested ? ' ⚠️ CONTESTED' : '';
-            brief += `**${c.label}** [${c.supportCount}/${landscape.modelCount}]${contested}\n`;
-            brief += `${c.text}\n\n`;
-        });
-    } else {
-        brief += `No strong consensus claims.\n\n`;
-    }
-
-    if (data.challengers.length > 0) {
-        brief += `## Challengers\n\n`;
-        data.challengers.forEach(c => {
-            brief += `⚡ **${c.label}** [${c.supportCount}/${landscape.modelCount}]\n`;
-            brief += `${c.text}\n`;
-            if (c.challenges) {
-                brief += `*Challenges: ${c.challenges}*\n`;
-            }
-            brief += `\n`;
-        });
-    }
-
-    if (data.blindSpots.length > 0) {
-        brief += `## Blind Spots\n\n`;
-        data.blindSpots.forEach(g => {
-            brief += `• ${g}\n`;
-        });
-        brief += `\n`;
-    }
-
-    const contestedFloor = data.floor.filter(c => c.isContested);
-    if (contestedFloor.length > 0) {
-        brief += `## ⚠️ Warning\n\n`;
-        brief += `${contestedFloor.length} floor claim(s) are under challenge. Settlement may be fragile.\n`;
-    }
-
-    return brief;
-}
-
-function buildLinearBrief(analysis: StructuralAnalysis): string {
-    const { shape, landscape, ratios } = analysis;
-    const data = shape.data as LinearShapeData;
-
-    if (!data || data.pattern !== 'linear') {
-        return buildGenericBrief(analysis);
-    }
-
-    let brief = '';
-
-    brief += `## Shape: LINEAR (${Math.round(shape.confidence * 100)}%)\n\n`;
-    brief += `There's a sequence of ${data.chainLength} steps. Order matters.\n\n`;
-    brief += `**Chain Length**: ${data.chainLength} steps\n`;
-    brief += `**Weak Links**: ${data.weakLinks.length}\n`;
-    brief += `**Depth**: ${Math.round(ratios.depth * 100)}%\n\n`;
-
-    brief += `## The Chain\n\n`;
-    data.chain.forEach((step, idx) => {
-        const weakIcon = step.isWeakLink ? ' ⚠️ WEAK' : '';
-        const arrow = idx < data.chain.length - 1 ? ' →' : ' (terminal)';
-
-        brief += `### Step ${idx + 1}: ${step.label}${weakIcon}\n`;
-        brief += `[${step.supportCount}/${landscape.modelCount}]${arrow}\n\n`;
-        brief += `${step.text}\n\n`;
-
-        if (step.isWeakLink && step.weakReason) {
-            brief += `*⚠️ ${step.weakReason}*\n\n`;
-        }
-    });
-
-    if (data.weakLinks.length > 0) {
-        brief += `## Cascade Risks\n\n`;
-        data.weakLinks.forEach(wl => {
-            brief += `• **${wl.step.label}** — If this fails, ${wl.cascadeSize} downstream step(s) fail\n`;
-        });
-        brief += `\n`;
-    }
-
-    return brief;
-}
-
-function buildKeystoneBrief(analysis: StructuralAnalysis): string {
-    const { shape, landscape } = analysis;
-    const data = shape.data as KeystoneShapeData;
-
-    if (!data || data.pattern !== 'keystone') {
-        return buildGenericBrief(analysis);
-    }
-
-    let brief = '';
-
-    brief += `## Shape: KEYSTONE (${Math.round(shape.confidence * 100)}%)\n\n`;
-    brief += `Everything hinges on one critical claim.\n\n`;
-
-    const fragileIcon = data.keystone.isFragile ? ' ⚠️ FRAGILE' : ' ✓ SOLID';
-    brief += `## The Keystone${fragileIcon}\n\n`;
-    brief += `**${data.keystone.label}** [${data.keystone.supportCount}/${landscape.modelCount}]\n`;
-    brief += `${data.keystone.text}\n\n`;
-    brief += `**Dominance**: ${data.keystone.dominance.toFixed(1)}x more connected than next claim\n`;
-    brief += `**Cascade Size**: ${data.cascadeSize} dependent claims\n\n`;
-
-    if (data.dependencies.length > 0) {
-        brief += `## Dependencies\n\n`;
-        brief += `These claims require the keystone to hold:\n\n`;
-        data.dependencies.forEach(d => {
-            brief += `• **${d.label}** (${d.relationship})\n`;
-        });
-        brief += `\n`;
-    }
-
-    brief += `## If Keystone Fails\n\n`;
-    if (data.keystone.isFragile) {
-        brief += `⚠️ **HIGH RISK**: The keystone has only ${data.keystone.supportCount} supporter(s).\n`;
-        brief += `If it falls, ${data.cascadeSize} claims collapse with it.\n\n`;
-    } else {
-        brief += `The keystone has solid support, but still carries ${data.cascadeSize} dependents.\n\n`;
-    }
-
-    if (data.challengers.length > 0) {
-        brief += `## Challengers to Keystone\n\n`;
-        data.challengers.forEach(c => {
-            brief += `⚡ **${c.label}** [${c.supportCount}/${landscape.modelCount}]\n`;
-            brief += `${c.text}\n\n`;
-        });
-    }
-
-    return brief;
-}
-
-function buildContestedBrief(analysis: StructuralAnalysis): string {
-    const { shape, landscape, ratios, patterns } = analysis;
-    const data = shape.data as ContestedShapeData;
-
-    if (!data || data.pattern !== 'contested') {
-        return buildGenericBrief(analysis);
-    }
-
-    let brief = '';
-
-    brief += `## Shape: CONTESTED (${Math.round(shape.confidence * 100)}%)\n\n`;
-    brief += `There is genuine disagreement. The axis is: **${data.centralConflict.axis}**\n\n`;
-    brief += `**Tension**: ${Math.round(ratios.tension * 100)}%\n`;
-    brief += `**Conflicts**: ${patterns.conflicts.length}\n\n`;
-
-    brief += `## The Central Conflict\n\n`;
-
-    if (data.centralConflict.type === 'cluster') {
-        const cc = data.centralConflict;
-
-        brief += `### Target Position\n`;
-        brief += `**${cc.target.claim.label}** [${cc.target.claim.supportCount}/${landscape.modelCount}]\n`;
-        brief += `${cc.target.claim.text}\n\n`;
-
-        brief += `### Challenger Positions (${cc.challengers.claims.length})\n`;
-        cc.challengers.claims.forEach(c => {
-            brief += `⚡ **${c.label}** [${c.supportCount}/${landscape.modelCount}]\n`;
-            brief += `${c.text}\n\n`;
-        });
-
-        brief += `**Common Theme**: ${cc.challengers.commonTheme}\n\n`;
-
-    } else {
-        const cc = data.centralConflict;
-
-        brief += `### Position A\n`;
-        brief += `**${cc.positionA.claim.label}** [${cc.positionA.claim.supportCount}/${landscape.modelCount}]\n`;
-        brief += `${cc.positionA.claim.text}\n\n`;
-
-        brief += `### Position B\n`;
-        brief += `**${cc.positionB.claim.label}** [${cc.positionB.claim.supportCount}/${landscape.modelCount}]\n`;
-        brief += `${cc.positionB.claim.text}\n\n`;
-
-        brief += `**Dynamics**: ${cc.dynamics}\n`;
-    }
-
-    brief += `\n## Stakes\n\n`;
-    if (data.centralConflict.type === 'cluster') {
-        brief += `• ${data.centralConflict.stakes.acceptingTarget}\n`;
-        brief += `• ${data.centralConflict.stakes.acceptingChallengers}\n\n`;
-    } else {
-        brief += `• ${data.centralConflict.stakes.choosingA}\n`;
-        brief += `• ${data.centralConflict.stakes.choosingB}\n\n`;
-    }
-
-    if (data.secondaryConflicts.length > 0) {
-        brief += `## Secondary Conflicts\n\n`;
-        data.secondaryConflicts.slice(0, 3).forEach(c => {
-            brief += `• ${c.claimA.label} vs ${c.claimB.label}\n`;
-        });
-        brief += `\n`;
-    }
-
-    if (data.floor.exists) {
-        brief += `## Weak Floor (Outside Conflict)\n\n`;
-        data.floor.claims.forEach(c => {
-            brief += `• **${c.label}** [${c.supportCount}]\n`;
-        });
-        brief += `\n`;
-    }
-
-    if (data.collapsingQuestion) {
-        brief += `## The Question\n\n`;
-        brief += `${data.collapsingQuestion}\n`;
-    }
-
-    return brief;
-}
-
-function buildTradeoffBrief(analysis: StructuralAnalysis): string {
-    const { shape, landscape, ratios } = analysis;
-    const data = shape.data as TradeoffShapeData;
-
-    if (!data || data.pattern !== 'tradeoff') {
-        return buildGenericBrief(analysis);
-    }
-
-    let brief = '';
-
-    brief += `## Shape: TRADEOFF (${Math.round(shape.confidence * 100)}%)\n\n`;
-    brief += `Explicit tradeoffs exist. No universal best.\n\n`;
-    brief += `**Tradeoffs**: ${data.tradeoffs.length}\n`;
-    brief += `**Tension**: ${Math.round(ratios.tension * 100)}%\n\n`;
-
-    data.tradeoffs.forEach((t, idx) => {
-        brief += `## Tradeoff ${idx + 1}\n\n`;
-
-        brief += `### Option A: ${t.optionA.label}\n`;
-        brief += `[${t.optionA.supportCount}/${landscape.modelCount}]\n`;
-        brief += `${t.optionA.text}\n\n`;
-
-        brief += `### Option B: ${t.optionB.label}\n`;
-        brief += `[${t.optionB.supportCount}/${landscape.modelCount}]\n`;
-        brief += `${t.optionB.text}\n\n`;
-
-        brief += `**Symmetry**: ${t.symmetry.replace('_', ' ')}\n`;
-        if (t.governingFactor) {
-            brief += `**Governing Factor**: ${t.governingFactor}\n`;
-        }
-        brief += `\n`;
-    });
-
-    if (data.dominatedOptions.length > 0) {
-        brief += `## Dominated Options\n\n`;
-        data.dominatedOptions.forEach(d => {
-            brief += `• ${d.dominated} is dominated by ${d.dominatedBy}\n`;
-            brief += `  *${d.reason}*\n`;
-        });
-        brief += `\n`;
-    }
-
-    if (data.floor.length > 0) {
-        brief += `## Agreed Ground (Not In Tradeoff)\n\n`;
-        data.floor.forEach(c => {
-            brief += `• **${c.label}** [${c.supportCount}]\n`;
-        });
-        brief += `\n`;
-    }
-
-    return brief;
-}
-
-function buildDimensionalBrief(analysis: StructuralAnalysis): string {
-    const { shape, landscape, graph } = analysis;
-    const data = shape.data as DimensionalShapeData;
-
-    if (!data || data.pattern !== 'dimensional') {
-        return buildGenericBrief(analysis);
-    }
-
-    let brief = '';
-
-    brief += `## Shape: DIMENSIONAL (${Math.round(shape.confidence * 100)}%)\n\n`;
-    brief += `Multiple independent factors determine the answer.\n\n`;
-    brief += `**Dimensions**: ${data.dimensions.length}\n`;
-    brief += `**Components**: ${graph.componentCount}\n`;
-    brief += `**Local Coherence**: ${Math.round(graph.localCoherence * 100)}%\n\n`;
-
-    data.dimensions.forEach((dim) => {
-        brief += `## ${dim.theme}\n\n`;
-        dim.claims.forEach(c => {
-            brief += `• **${c.label}** [${c.supportCount}/${landscape.modelCount}]\n`;
-            brief += `  ${c.text}\n\n`;
-        });
-    });
-
-    if (data.interactions.length > 0) {
-        brief += `## Dimension Interactions\n\n`;
-        data.interactions.forEach(i => {
-            const icon = i.relationship === 'conflicting' ? '⚡' : i.relationship === 'overlapping' ? '↔' : '○';
-            brief += `${icon} ${i.dimensionA} — ${i.dimensionB}: ${i.relationship}\n`;
-        });
-        brief += `\n`;
-    }
-
-    if (data.governingConditions.length > 0) {
-        brief += `## Governing Conditions\n\n`;
-        data.governingConditions.forEach(c => {
-            brief += `• ${c}\n`;
-        });
-        brief += `\n`;
-    }
-
-    if (data.gaps.length > 0) {
-        brief += `## Unexplored Combinations\n\n`;
-        data.gaps.forEach(g => {
-            brief += `• ${g}\n`;
-        });
-        brief += `\n`;
-    }
-
-    return brief;
-}
-
-function buildExploratoryBrief(analysis: StructuralAnalysis): string {
-    const { shape, landscape, ratios, patterns, ghostAnalysis } = analysis;
-    const data = shape.data as ExploratoryShapeData;
-
-    if (!data || data.pattern !== 'exploratory') {
-        return buildGenericBrief(analysis);
-    }
-
-    let brief = '';
-
-    brief += `## Shape: EXPLORATORY (${Math.round(shape.confidence * 100)}%)\n\n`;
-    brief += `Structure is sparse. Low confidence. Be honest about uncertainty.\n\n`;
-    brief += `**Signal Strength**: ${Math.round(data.signalStrength * 100)}%\n`;
-    brief += `**Claims**: ${landscape.claimCount} (${patterns.isolatedClaims.length} isolated)\n`;
-    brief += `**Fragmentation**: ${Math.round(ratios.fragmentation * 100)}%\n\n`;
-
-    if (data.strongestSignals.length > 0) {
-        brief += `## Strongest Signals\n\n`;
-        data.strongestSignals.forEach(s => {
-            brief += `**${s.label}** [${s.supportCount}/${landscape.modelCount}] — ${s.reason}\n`;
-            brief += `${s.text}\n\n`;
-        });
-    }
-
-    if (data.looseClusters.length > 0) {
-        brief += `## Loose Clusters\n\n`;
-        data.looseClusters.forEach(c => {
-            const labels = c.claims.map(cl => cl.label).join(', ');
-            brief += `• **${c.theme}**: ${labels}\n`;
-        });
-        brief += `\n`;
-    }
-
-    if (data.isolatedClaims.length > 0) {
-        brief += `## Isolated Claims\n\n`;
-        data.isolatedClaims.forEach(c => {
-            brief += `○ **${c.label}**\n`;
-            brief += `  ${c.text}\n\n`;
-        });
-    }
-
-    if (data.clarifyingQuestions.length > 0) {
-        brief += `## To Collapse Ambiguity\n\n`;
-        data.clarifyingQuestions.forEach(q => {
-            brief += `• ${q}\n`;
-        });
-        brief += `\n`;
-    }
-
-    if (ghostAnalysis.count > 0) {
-        brief += `## Gaps\n\n`;
-        brief += `${ghostAnalysis.count} unaddressed area(s).\n`;
-    }
-
-    return brief;
-}
-
-function buildContextualBrief(analysis: StructuralAnalysis): string {
-    const { shape, landscape } = analysis;
-    const data = shape.data as ContextualShapeData;
-
-    if (!data || data.pattern !== 'contextual') {
-        return buildGenericBrief(analysis);
-    }
-
-    let brief = '';
-
-    brief += `## Shape: CONTEXTUAL (${Math.round(shape.confidence * 100)}%)\n\n`;
-    brief += `The answer depends on specific external factors.\n\n`;
-
-    brief += `## The Fork\n\n`;
-    brief += `**Governing Condition**: ${data.governingCondition}\n\n`;
-
-    if (data.branches.length > 0) {
-        brief += `## Branches\n\n`;
-        data.branches.forEach((branch) => {
-            brief += `### ${branch.condition}\n\n`;
-            branch.claims.forEach(c => {
-                brief += `• **${c.label}** [${c.supportCount}/${landscape.modelCount}]\n`;
-                brief += `  ${c.text}\n\n`;
-            });
-        });
-    }
-
-    if (data.defaultPath?.exists) {
-        brief += `## Default Path (Highest Support)\n\n`;
-        data.defaultPath.claims.forEach(c => {
-            brief += `• **${c.label}** [${c.supportCount}]\n`;
-        });
-        brief += `\n`;
-    }
-
-    if (data.missingContext.length > 0) {
-        brief += `## Missing Context\n\n`;
-        brief += `To give a specific answer, I need to know:\n\n`;
-        data.missingContext.forEach(m => {
-            brief += `• ${m}\n`;
-        });
-        brief += `\n`;
-    }
-
-    return brief;
-}
-
-function buildGenericBrief(analysis: StructuralAnalysis): string {
-    const { shape, claimsWithLeverage: claims, landscape, ratios, ghostAnalysis } = analysis;
-
-    let brief = '';
-
-    brief += `## Shape: ${shape.primaryPattern.toUpperCase()} (${Math.round(shape.confidence * 100)}%)\n\n`;
-    brief += `${shape.implications.action}\n\n`;
-
-    brief += `## Metrics\n\n`;
-    brief += `• Claims: ${landscape.claimCount} from ${landscape.modelCount} sources\n`;
-    brief += `• Concentration: ${Math.round(ratios.concentration * 100)}%\n`;
-    brief += `• Tension: ${Math.round(ratios.tension * 100)}%\n\n`;
-
-    const floor = claims.filter(c => c.isHighSupport);
-    if (floor.length > 0) {
-        brief += `## Floor (${floor.length})\n\n`;
-        floor.forEach(c => {
-            brief += `**${c.label}** [${c.supporters.length}/${landscape.modelCount}]\n`;
-            brief += `${c.text}\n\n`;
-        });
-    }
-
-    const lowSupport = claims.filter(c => !c.isHighSupport);
-    if (lowSupport.length > 0) {
-        brief += `## Other Claims (${lowSupport.length})\n\n`;
-        lowSupport.slice(0, 5).forEach(c => {
-            const icon = c.role === 'challenger' ? '⚡' : '○';
-            brief += `${icon} **${c.label}** [${c.supporters.length}]\n`;
-        });
-        if (lowSupport.length > 5) {
-            brief += `... and ${lowSupport.length - 5} more\n`;
-        }
-        brief += `\n`;
-    }
-
-    if (ghostAnalysis.count > 0) {
-        brief += `## Gaps\n\n`;
-        brief += `${ghostAnalysis.count} unaddressed area(s).\n`;
-    }
-
-    return brief;
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
 // SHAPE GUIDANCE
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -1091,7 +620,7 @@ function getTopologyDescription(pattern: string): string {
 // COMPOSITE SHAPE FLOW/FRICTION BUILDERS
 // ═══════════════════════════════════════════════════════════════════════════
 
-function buildFlowFromComposite(composite: CompositeShape, modelCount: number): string {
+function buildFlowFromComposite(composite: CompositeShape, _modelCount: number): string {
     const peakLabels = composite.peaks.slice(0, 3).map(p => `"${p.label}"`).join(', ');
 
     let flow = '';
@@ -1157,8 +686,8 @@ function buildFlowFromComposite(composite: CompositeShape, modelCount: number): 
 
 function buildFrictionFromComposite(
     composite: CompositeShape,
-    claims: EnrichedClaim[],
-    modelCount: number
+    _claims: EnrichedClaim[],
+    _modelCount: number
 ): string {
     const frictionParts: string[] = [];
 
@@ -1293,7 +822,7 @@ function buildFrictionFromComposite(
 }
 
 function buildFlowSection(analysis: StructuralAnalysis): string {
-    const { shape, landscape, claimsWithLeverage } = analysis;
+    const { shape, landscape } = analysis;
 
     // Use composite shape if available (new system)
     if (shape.compositeShape) {
@@ -2016,11 +1545,11 @@ export function buildConciergePrompt(
 
 "${userMessage}"
 
-${priorContextSection}${historySection}## What You Know
+${priorContextSection}${priorContextSection ? '\n' : ''}${historySection}${historySection ? '\n' : ''}## What You Know
 
 ${structuralBrief}
 
-${workflowSection}## How To Respond
+${workflowSection}${workflowSection ? '\n' : ''}## How To Respond
 
 ${shapeGuidance}
 

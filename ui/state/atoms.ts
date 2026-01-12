@@ -1,4 +1,5 @@
 import { atom } from "jotai";
+import type { ProviderLocks } from '@shared/provider-locks';
 import { atomWithImmer } from "jotai-immer";
 import { atomWithStorage, atomFamily } from "jotai/utils";
 
@@ -258,10 +259,10 @@ export const batchAutoRunEnabledAtom = atomWithStorage<boolean>(
   false,
 );
 
-export interface ProviderLocks {
-  mapping: boolean;
-  singularity: boolean;
-}
+
+
+// Re-export for consumers who import from this file
+export type { ProviderLocks } from '@shared/provider-locks';
 
 export const providerLocksAtom = atom<ProviderLocks>({
   mapping: false,

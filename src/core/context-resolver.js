@@ -226,28 +226,43 @@ export class ContextResolver {
     if (direct) return direct;
 
     const structuralTurnId = session?.lastStructuralTurnId;
+    let structuralTurn = null;
+
     if (structuralTurnId) {
       try {
-        const structuralTurn = await this._getTurn(structuralTurnId);
-        const fromStructural = this._extractStoredAnalysisFromTurn(structuralTurn);
-        if (fromStructural) return fromStructural;
-      } catch (_) { }
+        structuralTurn = await this._getTurn(structuralTurnId);
+      } catch (err) {
+        console.debug('[ContextResolver] Failed to fetch structural turn:', structuralTurnId, err);
+      }
+    }
+
+    if (structuralTurn) {
+      const fromStructural = this._extractStoredAnalysisFromTurn(structuralTurn);
+      if (fromStructural) return fromStructural;
     }
 
     const fallbackFromMapper = await this._computeStoredAnalysisFromMapperArtifact(lastTurn?.mapperArtifact);
     if (fallbackFromMapper) return fallbackFromMapper;
 
-    if (structuralTurnId) {
-      try {
-        const structuralTurn = await this._getTurn(structuralTurnId);
-        const fromMapper = await this._computeStoredAnalysisFromMapperArtifact(structuralTurn?.mapperArtifact);
-        if (fromMapper) return fromMapper;
-      } catch (_) { }
+    if (structuralTurn) {
+      const fromMapper = await this._computeStoredAnalysisFromMapperArtifact(structuralTurn.mapperArtifact);
+      if (fromMapper) return fromMapper;
     }
 
     if (!structuralTurnId) {
+      // Check adapter exists and is ready before use
+      const adapter = this.sessionManager?.adapter;
+      const adapterReady = adapter && (
+        typeof adapter.isReady === 'function' ? adapter.isReady() : true
+      );
+
+      if (!adapterReady) {
+        console.debug("[ContextResolver] Adapter not ready, skipping turn scan");
+        return null;
+      }
+
       try {
-        const turns = await this.sessionManager.adapter.getTurnsBySessionId(sessionId);
+        const turns = await adapter.getTurnsBySessionId(sessionId);
         if (Array.isArray(turns) && turns.length > 0) {
           for (let i = turns.length - 1; i >= 0; i--) {
             const t = turns[i];
@@ -261,7 +276,9 @@ export class ContextResolver {
             if (computed) return computed;
           }
         }
-      } catch (_) { }
+      } catch (e) {
+        console.debug("[ContextResolver] Failed to scan turns:", e);
+      }
     }
 
     return null;

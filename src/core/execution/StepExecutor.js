@@ -9,6 +9,7 @@ import {
   createMultiProviderAuthError
 } from '../../utils/ErrorHandler.js';
 import { buildReactiveBridge } from '../../services/ReactiveBridge';
+import { PROMPT_TEMPLATES } from '../templates/prompt-templates.js';
 // computeExplore import removed (unused)
 // persona signal injections removed (absorbed by Concierge)
 
@@ -52,25 +53,12 @@ export class StepExecutor {
       }
     }
 
-    if (previousContext) {
-      // Re-construct with proper ordering: Bridge (Priority 1) > Previous Answer (Priority 2)
-      const contextBlock = [
-        bridgeContext,
-        previousContext
-      ].filter(Boolean).join("\n\n");
-
-      enhancedPrompt = `You are part of the council. Context (backdrop only—do not summarize or re-answer):
-
-${contextBlock}
-
-Answer the user's message directly. Use context only to disambiguate.
-
-<user_prompt>
-  ${prompt}
-</user_prompt>`;
+    if (previousContext && bridgeContext) {
+      enhancedPrompt = PROMPT_TEMPLATES.withBridgeAndPrior(prompt, bridgeContext, previousContext);
+    } else if (previousContext) {
+      enhancedPrompt = PROMPT_TEMPLATES.withPriorOnly(prompt, previousContext);
     } else if (bridgeContext) {
-      // Fallback: Bridge exists but no previous context summary
-      enhancedPrompt = `${bridgeContext}\n\n${prompt}`;
+      enhancedPrompt = PROMPT_TEMPLATES.withBridgeOnly(prompt, bridgeContext);
     }
 
     const providerStatuses = [];
@@ -354,7 +342,7 @@ Answer the user's message directly. Use context only to disambiguate.
     });
   }
 
-  async executeMappingStep(step, context, stepResults, workflowContexts, resolvedContext, options) {
+  async executeMappingStep(step, context, stepResults, workflowContexts, options) {
     const { streamingManager } = options;
     const artifactProcessor = new ArtifactProcessor();
     const payload = step.payload;
@@ -453,7 +441,7 @@ Answer the user's message directly. Use context only to disambiguate.
                   turn: context.turn || 0,
                   timestamp: new Date().toISOString(),
                   model_count: citationOrder.length,
-                  souvenir: /** @type {any} */ (base).souvenir || ""
+
                 };
               }
 
@@ -921,7 +909,7 @@ Answer the user's message directly. Use context only to disambiguate.
     // ══════════════════════════════════════════════════════════════════
     // FEATURE 3: Rebuild historical prompts for recompute (Efficient Storage)
     // ══════════════════════════════════════════════════════════════════
-    const promptType = options?.frozenSingularityPromptType || payload.conciergePromptType;
+
     const promptSeed = options?.frozenSingularityPromptSeed || payload.conciergePromptSeed;
 
     if (options?.frozenSingularityPrompt) {

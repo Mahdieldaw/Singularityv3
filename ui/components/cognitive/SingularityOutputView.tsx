@@ -12,6 +12,27 @@ interface SingularityOutputViewProps {
     isLoading?: boolean;
 }
 
+interface SingularityError {
+    message?: string;
+    error?: string;
+    requiresReauth?: boolean;
+    code?: string;
+}
+
+const isSingularityError = (value: unknown): value is SingularityError => {
+    return typeof value === 'object' && value !== null && ('message' in value || 'error' in value || 'code' in value);
+};
+
+const getErrorMessage = (error: unknown): string => {
+    if (error instanceof Error) return error.message;
+    if (typeof error === 'string') return error;
+    if (isSingularityError(error)) {
+        if (error.message) return error.message;
+        if (error.error) return error.error;
+    }
+    return 'Unknown error occurred';
+};
+
 /**
  * Clean, chat-like display of the Singularity (Concierge) response.
  * Front and center, just like any modern chat interface.
@@ -25,15 +46,14 @@ const SingularityOutputView: React.FC<SingularityOutputViewProps> = ({
     const { output, isError, error, providerId } = singularityState;
 
     if (isError) {
-        const errorObj = error as Record<string, any> | null;
         return (
             <div className="py-8">
                 <PipelineErrorBanner
                     type="singularity"
                     failedProviderId={providerId || aiTurn.meta?.singularity || ""}
                     onRetry={(pid) => onRecompute({ providerId: pid })}
-                    errorMessage={typeof error === 'string' ? error : errorObj?.message}
-                    requiresReauth={!!errorObj?.requiresReauth}
+                    errorMessage={getErrorMessage(error)}
+                    requiresReauth={isSingularityError(error) ? !!error.requiresReauth : false}
                 />
             </div>
         );

@@ -12,7 +12,6 @@ import {
   mappingEnabledAtom,
   mappingProviderAtom,
   singularityProviderAtom,
-  powerUserModeAtom,
   thinkOnChatGPTAtom,
   activeAiTurnIdAtom,
   currentAppStepAtom,
@@ -44,7 +43,7 @@ export function useChat() {
   const selectedModels = useAtomValue(selectedModelsAtom);
   const mappingEnabled = useAtomValue(mappingEnabledAtom);
   const mappingProvider = useAtomValue(mappingProviderAtom);
-  const powerUserMode = useAtomValue(powerUserModeAtom);
+
   const thinkOnChatGPT = useAtomValue(thinkOnChatGPTAtom);
   const currentSessionId = useAtomValue(currentSessionIdAtom);
   const turnIds = useAtomValue(turnIdsAtom);
@@ -192,6 +191,7 @@ export function useChat() {
       setUiPhase,
       setCurrentAppStep,
       setActiveAiTurnId,
+      mappingEnabled,
       mappingProvider,
       singularityProvider,
       thinkOnChatGPT,

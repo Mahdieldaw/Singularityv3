@@ -23,7 +23,6 @@ export class CognitivePipelineHandler {
         context?.userMessage || currentUserMessage || "";
 
       let mapperArtifact = mappingResult?.mapperArtifact || null;
-      let artifactSource = mappingResult?.mapperArtifact ? 'direct_from_stepResults' : 'none';
 
       if (!mapperArtifact) {
         try {
@@ -55,28 +54,27 @@ export class CognitivePipelineHandler {
               graphTopology: result?.meta?.graphTopology,
               query: userMessageForSingularity,
             });
-            if (mapperArtifact) {
-              artifactSource = 'parsed_from_text';
 
-              // ⚠️ CRITICAL FIX: model_count is not set by parseV1MapperToArtifact
-              // Calculate it from citationSourceOrder or fallback to supporters count
-              if (!mapperArtifact.model_count || mapperArtifact.model_count === 0) {
-                const citationOrder = result?.meta?.citationSourceOrder;
-                if (citationOrder && typeof citationOrder === 'object') {
-                  mapperArtifact.model_count = Object.keys(citationOrder).length;
-                } else {
-                  // Fallback: count unique supporters across claims
-                  const supporterSet = new Set();
-                  (mapperArtifact.claims || []).forEach(c => {
-                    (c.supporters || []).forEach(s => {
-                      if (typeof s === 'number') supporterSet.add(s);
-                    });
+
+            // ⚠️ CRITICAL FIX: model_count is not set by parseV1MapperToArtifact
+            // Calculate it from citationSourceOrder or fallback to supporters count
+            if (!mapperArtifact.model_count || mapperArtifact.model_count === 0) {
+              const citationOrder = result?.meta?.citationSourceOrder;
+              if (citationOrder && typeof citationOrder === 'object') {
+                mapperArtifact.model_count = Object.keys(citationOrder).length;
+              } else {
+                // Fallback: count unique supporters across claims
+                const supporterSet = new Set();
+                (mapperArtifact.claims || []).forEach(c => {
+                  (c.supporters || []).forEach(s => {
+                    if (typeof s === 'number') supporterSet.add(s);
                   });
-                  mapperArtifact.model_count = supporterSet.size > 0 ? supporterSet.size : 1;
-                }
+                });
+                mapperArtifact.model_count = supporterSet.size > 0 ? supporterSet.size : 1;
               }
-              break;
             }
+            break;
+
           }
         } catch (e) {
           console.error('[CognitiveHandler] Fallback parsing failed:', e);
@@ -96,18 +94,23 @@ export class CognitivePipelineHandler {
       let singularityProviderId = null;
 
       // Determine Singularity provider from request or context
+      // Determine Singularity provider from request or context
       singularityProviderId = request?.singularity ||
         context?.singularityProvider ||
         context?.meta?.singularity;
 
-      // Only proceed if a provider is requested or inherited.
-      // If request.singularity is explicitly undefined (from ui/hooks/chat/useChat.ts omitting it),
-      // we check if we should skip.
-      if (!singularityProviderId && !request?.singularity) {
-        console.log("[CognitiveHandler] No singularity provider requested - checking history...");
+      // Check if singularity was explicitly provided (even if null/false)
+      const singularityExplicitlySet = request && Object.prototype.hasOwnProperty.call(request, 'singularity');
+      let singularityDisabled = false;
+
+      if (singularityExplicitlySet && !request.singularity) {
+        // UI explicitly set singularity to null/false/undefined — skip concierge
+        console.log("[CognitiveHandler] Singularity explicitly disabled - skipping concierge phase");
+        singularityProviderId = null;
+        singularityDisabled = true;
       }
 
-      if (stepExecutor && streamingManager) {
+      if (stepExecutor && streamingManager && !singularityDisabled) {
         let conciergeState = null;
         try {
           conciergeState = await this.sessionManager.getConciergePhaseState(context.sessionId);
@@ -169,6 +172,15 @@ export class CognitivePipelineHandler {
           // ══════════════════════════════════════════════════════════════════
           // HANDOFF V2: Calculate turn number within current instance
           // ══════════════════════════════════════════════════════════════════
+          // Race Condition Fix: Idempotency Check
+          if (conciergeState?.lastProcessedTurnId === context.canonicalAiTurnId) {
+            console.log(`[CognitivePipeline] Turn ${context.canonicalAiTurnId} already processed, skipping duplicate execution.`);
+            // Return a result that indicates skipping, consistent with the function's expected output.
+            // Assuming `orchestrateSingularityPhase` should return a boolean or similar to indicate completion/success.
+            // If the caller expects a detailed result object, this return type might need adjustment.
+            return true; // Or a specific object if the caller expects it.
+          }
+
           let turnInCurrentInstance = conciergeState?.turnInCurrentInstance || 0;
 
           if (needsFreshInstance) {
@@ -188,43 +200,71 @@ export class CognitivePipelineHandler {
           let conciergePromptType = "standard";
           let conciergePromptSeed = null;
 
-          const mod = await import('../ConciergeService');
-          const ConciergeService = mod.ConciergeService;
+          // Guarded dynamic import for resilience during partial deploys
+          let ConciergeModule;
+          try {
+            ConciergeModule = await import('../ConciergeService');
+          } catch (err) {
+            console.error("[CognitiveHandler] Critical error: ConciergeService module could not be loaded", err);
+          }
+          const ConciergeService = ConciergeModule?.ConciergeService;
 
-          if (turnInCurrentInstance === 1) {
-            // Turn 1: Full buildConciergePrompt with prior context if fresh spawn after COMMIT
-            conciergePromptType = "full";
-            conciergePromptSeed = {
-              stance: stanceSelection?.stance || undefined,
-              isFirstTurn: true,
-              activeWorkflow: conciergeState?.activeWorkflow || undefined,
-            };
-
-            // If fresh spawn after COMMIT, inject prior context
-            if (conciergeState?.commitPending && conciergeState?.pendingHandoff) {
-              conciergePromptSeed.priorContext = {
-                handoff: conciergeState.pendingHandoff,
-                committed: conciergeState.pendingHandoff?.commit || null,
-              };
-              console.log(`[CognitiveHandler] Fresh spawn with prior context from COMMIT`);
+          try {
+            if (!ConciergeService) {
+              throw new Error("ConciergeService not found in module");
             }
 
-            conciergePrompt = ConciergeService.buildConciergePrompt(
-              userMessageForSingularity,
-              structuralAnalysis,
-              conciergePromptSeed,
-            );
-          } else if (turnInCurrentInstance === 2) {
-            // Turn 2: Inject handoff protocol
-            conciergePromptType = "protocol_injection";
-            conciergePrompt = ConciergeService.buildTurn2Message(userMessageForSingularity);
-            console.log(`[CognitiveHandler] Turn 2: injecting handoff protocol`);
-          } else {
-            // Turn 3+: Echo current handoff for updates
-            conciergePromptType = "handoff_echo";
-            const pendingHandoff = conciergeState?.pendingHandoff || null;
-            conciergePrompt = ConciergeService.buildTurn3PlusMessage(userMessageForSingularity, pendingHandoff);
-            console.log(`[CognitiveHandler] Turn ${turnInCurrentInstance}: echoing current handoff`);
+            if (turnInCurrentInstance === 1) {
+              // Turn 1: Full buildConciergePrompt with prior context if fresh spawn after COMMIT
+              conciergePromptType = "full";
+              conciergePromptSeed = {
+                stance: stanceSelection?.stance || undefined,
+                isFirstTurn: true,
+                activeWorkflow: conciergeState?.activeWorkflow || undefined,
+                priorContext: undefined, // Fix inferred type error
+              };
+
+              // If fresh spawn after COMMIT, inject prior context
+              if (conciergeState?.commitPending && conciergeState?.pendingHandoff) {
+                conciergePromptSeed.priorContext = {
+                  handoff: conciergeState.pendingHandoff,
+                  committed: conciergeState.pendingHandoff?.commit || null,
+                };
+                console.log(`[CognitiveHandler] Fresh spawn with prior context from COMMIT`);
+              }
+
+              if (typeof ConciergeService.buildConciergePrompt === 'function') {
+                conciergePrompt = ConciergeService.buildConciergePrompt(
+                  userMessageForSingularity,
+                  structuralAnalysis,
+                  conciergePromptSeed,
+                );
+              } else {
+                console.warn("[CognitiveHandler] ConciergeService.buildConciergePrompt missing");
+              }
+            } else if (turnInCurrentInstance === 2) {
+              // Turn 2: Inject handoff protocol
+              conciergePromptType = "protocol_injection";
+              if (typeof ConciergeService.buildTurn2Message === 'function') {
+                conciergePrompt = ConciergeService.buildTurn2Message(userMessageForSingularity);
+                console.log(`[CognitiveHandler] Turn 2: injecting handoff protocol`);
+              } else {
+                console.warn("[CognitiveHandler] ConciergeService.buildTurn2Message missing, falling back to standard prompt");
+              }
+            } else {
+              // Turn 3+: Echo current handoff for updates
+              conciergePromptType = "handoff_echo";
+              const pendingHandoff = conciergeState?.pendingHandoff || null;
+              if (typeof ConciergeService.buildTurn3PlusMessage === 'function') {
+                conciergePrompt = ConciergeService.buildTurn3PlusMessage(userMessageForSingularity, pendingHandoff);
+                console.log(`[CognitiveHandler] Turn ${turnInCurrentInstance}: echoing current handoff`);
+              } else {
+                console.warn("[CognitiveHandler] ConciergeService.buildTurn3PlusMessage missing, falling back to standard prompt");
+              }
+            }
+          } catch (err) {
+            console.error("[CognitiveHandler] Error building concierge prompt:", err);
+            conciergePrompt = null; // Will trigger fallback below
           }
 
           if (!conciergePrompt) {
@@ -304,7 +344,7 @@ export class CognitivePipelineHandler {
                     // Check for COMMIT signal
                     if (parsed.handoff.commit) {
                       commitPending = true;
-                      console.log(`[CognitiveHandler] COMMIT detected: ${parsed.handoff.commit}`);
+                      console.log(`[CognitiveHandler] COMMIT detected (length: ${parsed.handoff.commit.length})`);
                     }
                   }
 

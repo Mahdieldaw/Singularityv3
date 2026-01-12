@@ -39,8 +39,8 @@ export class WorkflowEngine {
     this._executors = {
       prompt: (step, ctx, _results, _wfCtx, _resolved, opts) =>
         this.stepExecutor.executePromptStep(step, ctx, opts),
-      mapping: (step, ctx, results, wfCtx, resolved, opts) =>
-        this.stepExecutor.executeMappingStep(step, ctx, results, wfCtx, resolved, opts),
+      mapping: (step, ctx, results, wfCtx, _resolved, opts) =>
+        this.stepExecutor.executeMappingStep(step, ctx, results, wfCtx, opts),
     };
 
     // Provider key mapping for upsert

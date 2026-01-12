@@ -45,7 +45,7 @@ function analyzeMetafile(metaPath, bundleName) {
     output += `${"─".repeat(80)}\n`;
 
     inputs.slice(0, 100).forEach((item, idx) => {
-        const percentage = ((item.bytes / totalInputBytes) * 100).toFixed(1);
+        const percentage = totalInputBytes > 0 ? ((item.bytes / totalInputBytes) * 100).toFixed(1) : "0.0";
         const sizeStr = formatBytes(item.bytes).padEnd(12);
         const pctStr = `${percentage}%`.padEnd(7);
 
@@ -95,7 +95,7 @@ function analyzeMetafile(metaPath, bundleName) {
         output += `${"─".repeat(80)}\n`;
         largestPkgs.forEach(([pkg, bytes], idx) => {
             const sizeStr = formatBytes(bytes).padEnd(12);
-            const percentage = ((bytes / totalInputBytes) * 100).toFixed(1);
+            const percentage = totalInputBytes > 0 ? ((bytes / totalInputBytes) * 100).toFixed(1) : "0.0";
             const pctStr = `${percentage}%`.padEnd(7);
 
             output += `${(idx + 1).toString().padStart(3)}. ${sizeStr} (${pctStr}) ${pkg}\n`;

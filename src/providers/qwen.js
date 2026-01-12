@@ -199,14 +199,14 @@ export class QwenSessionApi {
 
         if (response.status === 500) {
           retryCount++;
-          const text = await response.text().catch(() => "");
+          const errorBody = await response.text().catch(() => "");
           if (retryCount >= MAX_RETRIES) {
             // Fall through to existing error handling or needAddSession if applicable (though 500 is usually transient)
             // But we removed 500 from needAddSession, so it will hit the final error throw.
             break;
           }
           const delay = 500 * Math.pow(2, retryCount); // Exponential backoff
-          console.warn(`[QwenProvider] 500 error, retrying (${retryCount}/${MAX_RETRIES}) in ${delay}ms...`);
+          console.warn(`[QwenProvider] 500 error, retrying (${retryCount}/${MAX_RETRIES}) in ${delay}ms...`, errorBody);
           await new Promise(r => setTimeout(r, delay));
           continue;
         }

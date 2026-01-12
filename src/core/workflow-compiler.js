@@ -194,9 +194,7 @@ export class WorkflowCompiler {
     if (resolvedContext?.type !== "extend") return request;
     if (request.batchAutoRunEnabled) return request;
 
-    const provider =
-      request.singularity ||
-      (Array.isArray(request.providers) ? request.providers[0] : null);
+    const provider = Array.isArray(request.providers) ? request.providers[0] : null;
 
     if (!provider) return request;
 

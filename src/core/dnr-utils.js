@@ -156,7 +156,7 @@ export class DNRUtils {
     const validOps = ["set", "remove", "append"];
     const finalOp = validOps.includes(op) ? op : "set";
     if (!validOps.includes(op)) {
-       // console.warn optional but good
+      console.warn(`DNR: Invalid operation "${op}" for header rule, defaulting to "set"`);
     }
 
     const rule = {
@@ -546,11 +546,11 @@ export class DNRUtils {
 
       // Recreate alarms for remaining temporary dynamic rules
       const now = Date.now();
-      for (const rule of this.scopedRules.values()) {
+      this.scopedRules.forEach((rule) => {
         if (rule.expiresAt && rule.expiresAt > now) {
           chrome.alarms.create(`dnr-expire-${rule.id}`, { when: rule.expiresAt });
         }
-      }
+      });
 
       this.dbg("DNR: Restored persisted rules");
     } catch (error) {

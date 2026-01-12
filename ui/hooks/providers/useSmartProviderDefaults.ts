@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import {
     providerAuthStatusAtom,
@@ -15,6 +15,34 @@ import {
     subscribeToLockChanges,
 } from '@shared/provider-locks';
 
+// Reusable hook for auto-selecting providers
+const useAutoSelectProvider = (
+    role: 'mapping' | 'singularity',
+    currentProvider: string | null,
+    isLocked: boolean,
+    setProvider: (provider: string) => void
+) => {
+    const authStatus = useAtomValue(providerAuthStatusAtom);
+
+    useEffect(() => {
+        // Skip if no auth data yet
+        if (Object.keys(authStatus).length === 0) return;
+
+        if (isLocked) return;
+
+        // Check if current is invalid
+        const isCurrentValid = currentProvider && isProviderAuthorized(currentProvider, authStatus);
+
+        if (!isCurrentValid) {
+            const best = selectBestProvider(role, authStatus);
+            if (best && best !== currentProvider) {
+                console.log(`[SmartDefaults] ${role}: ${currentProvider} → ${best}`);
+                setProvider(best);
+            }
+        }
+    }, [authStatus, currentProvider, isLocked, role, setProvider]);
+};
+
 /**
  * Automatically selects best available providers when:
  * 1. Auth status changes (provider logged in/out)
@@ -24,10 +52,10 @@ import {
  * Respects user locks - won't auto-change locked providers.
  */
 export function useSmartProviderDefaults() {
-    const authStatus = useAtomValue(providerAuthStatusAtom);
     const [mappingProvider, setMappingProvider] = useAtom(mappingProviderAtom);
     const [singularityProvider, setSingularityProvider] = useAtom(singularityProviderAtom);
     const setLocks = useSetAtom(providerLocksAtom);
+    const locks = useAtomValue(providerLocksAtom);
 
     // Track if we've done initial selection to avoid flash
     const [initialized, setInitialized] = useState(false);
@@ -38,41 +66,13 @@ export function useSmartProviderDefaults() {
         return subscribeToLockChanges(setLocks);
     }, [setLocks]);
 
-    const locks = useAtomValue(providerLocksAtom);
+    // Use extracted logic
+    useAutoSelectProvider('mapping', mappingProvider, locks.mapping, setMappingProvider);
+    useAutoSelectProvider('singularity', singularityProvider, locks.singularity, setSingularityProvider);
 
-    // React to auth changes
     useEffect(() => {
-        // Skip if no auth data yet
-        if (Object.keys(authStatus).length === 0) return;
-
-        // === Mapping Provider ===
-        if (!locks.mapping) {
-            const currentValid = mappingProvider && isProviderAuthorized(mappingProvider, authStatus);
-
-            if (!currentValid) {
-                const best = selectBestProvider('mapping', authStatus);
-                if (best && best !== mappingProvider) {
-                    console.log(`[SmartDefaults] Mapping: ${mappingProvider} → ${best}`);
-                    setMappingProvider(best);
-                }
-            }
-        }
-
-        // === Singularity Provider ===
-        if (!locks.singularity) {
-            const currentValid = singularityProvider && isProviderAuthorized(singularityProvider, authStatus);
-
-            if (!currentValid) {
-                const best = selectBestProvider('singularity', authStatus);
-                if (best && best !== singularityProvider) {
-                    console.log(`[SmartDefaults] Singularity: ${singularityProvider} → ${best}`);
-                    setSingularityProvider(best);
-                }
-            }
-        }
-
         setInitialized(true);
-    }, [authStatus, locks, mappingProvider, setMappingProvider, singularityProvider, setSingularityProvider]);
+    }, []);
 
     return { isInitialized: initialized };
 }

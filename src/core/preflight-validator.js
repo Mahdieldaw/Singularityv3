@@ -98,9 +98,9 @@ export async function runPreflight(request, authStatus, availableProviders) {
     // === Singularity ===
     let singularity = request.singularity || null;
     if (singularity && !isProviderAuthorized(singularity, authStatus)) {
-        // We reuse the mapping lock for now
+        // Check singularity lock to determine fallback behavior
         const candidate = selectBestProvider('singularity', authStatus, availableProviders);
-        if (locks.mapping === singularity) {
+        if (locks.singularity) {
             if (candidate) {
                 warnings.push(`Singularity provider "${singularity}" is unauthorized; using "${candidate}" for this request`);
                 singularity = candidate;

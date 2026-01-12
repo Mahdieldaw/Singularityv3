@@ -672,7 +672,7 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
                         turn: 0,
                         timestamp: new Date().toISOString(),
                         model_count: 0,
-                        souvenir: parsed?.map?.souvenir || "",
+
                       }
                       : null);
                 }

@@ -566,7 +566,7 @@ export interface PeakAnalysis {
   peaks: EnrichedClaim[];
   hills: EnrichedClaim[];
   floor: EnrichedClaim[];
-  peakIds: Set<string>;
+  peakIds: string[];
   peakConflicts: Edge[];
   peakTradeoffs: Edge[];
   peakSupports: Edge[];
@@ -685,7 +685,7 @@ export interface MapperArtifact extends MapperOutput {
   turn?: number;
   timestamp?: string;
   model_count?: number;
-  souvenir?: string;
+
   problemStructure?: ProblemStructure;
   narrative?: string;
   anchors?: Array<{ label: string; id: string; position: number }>;

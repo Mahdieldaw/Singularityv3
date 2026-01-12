@@ -6,13 +6,11 @@ import React, { useEffect, useRef, useState, useCallback, useMemo } from "react"
 import { useAtomValue } from "jotai";
 import {
     providerEffectiveStateFamily,
-    turnStreamingStateFamily,
     activeRecomputeStateAtom,
     chatInputHeightAtom,
     turnIdsAtom,
     turnsMapAtom,
     workflowProgressForTurnFamily,
-    isLoadingAtom,
 } from "../state/atoms";
 import { LLM_PROVIDERS_CONFIG } from "../constants";
 import { useProviderActions } from "../hooks/providers/useProviderActions";
@@ -61,12 +59,12 @@ export const ModelResponsePanel: React.FC<ModelResponsePanelProps> = React.memo(
         [shownTurnId, shownProviderId]
     );
     const effectiveState = useAtomValue(effectiveStateAtom);
-    const streamingState = useAtomValue(turnStreamingStateFamily(shownTurnId));
+
     const activeRecompute = useAtomValue(activeRecomputeStateAtom);
     const turnIds = useAtomValue(turnIdsAtom);
     const turnsMap = useAtomValue(turnsMapAtom);
     const workflowProgress = useAtomValue(workflowProgressForTurnFamily(shownTurnId));
-    const isGlobalLoading = useAtomValue(isLoadingAtom);
+
 
     // Actions hook
     const { handleRetryProvider, handleBranchContinue, handleToggleTarget, activeTarget } =
@@ -382,7 +380,7 @@ export const ModelResponsePanel: React.FC<ModelResponsePanelProps> = React.memo(
                                                             <MarkdownDisplay content={histText || '*Artifact only*'} />
                                                             {histArtifacts.length > 0 && (
                                                                 <div className="mt-2 flex flex-wrap gap-1">
-                                                            {histArtifacts.map((art, i) => (
+                                                                    {histArtifacts.map((art, i) => (
                                                                         <button
                                                                             key={i}
                                                                             onClick={() => setSelectedArtifact(art)}

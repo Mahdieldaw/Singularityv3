@@ -38,7 +38,7 @@ export function useCitationEvents(
         const num = handleExtraction(e.target as HTMLElement | null);
         if (!isNaN(num)) {
           if (e.cancelable) e.preventDefault();
-          e.stopImmediatePropagation();
+          e.stopPropagation();
           handleCitationClick(num);
         }
       } catch (err) {
@@ -52,7 +52,7 @@ export function useCitationEvents(
         const num = handleExtraction(e.target as HTMLElement | null);
         if (!isNaN(num)) {
           if (e.cancelable) e.preventDefault();
-          e.stopImmediatePropagation();
+          e.stopPropagation();
           handleCitationClick(num);
         }
       } catch (err) {
@@ -63,12 +63,12 @@ export function useCitationEvents(
     const onPointerDown = (e: PointerEvent) => {
       try {
         const isAux = e.button !== 0;
-        const isModifier = e.ctrlKey || (e as any).metaKey;
+        const isModifier = e.ctrlKey || e.metaKey;
         if (isAux || isModifier) {
           const num = handleExtraction(e.target as HTMLElement | null);
           if (!isNaN(num)) {
             if (e.cancelable) e.preventDefault();
-            e.stopImmediatePropagation();
+            e.stopPropagation();
             handleCitationClick(num);
           }
         }
