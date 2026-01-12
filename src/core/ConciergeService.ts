@@ -23,11 +23,16 @@ import {
     ChainPatternData,
     FragilePatternData,
     OrphanedPatternData,
+    // Handoff V2
+    ConciergeDelta,
 } from "../../shared/contract";
 import {
     parseConciergeOutput,
     validateBatchPrompt,
     ConciergeSignal,
+    // Handoff V2
+    hasHandoffContent,
+    formatHandoffEcho,
 } from "../../shared/parsing-utils";
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -66,6 +71,15 @@ export interface WorkflowStep {
 }
 
 /**
+ * Prior context for fresh concierge instances after COMMIT or batch re-invoke.
+ * Contains distilled handoff data and the commit summary.
+ */
+export interface PriorContext {
+    handoff: ConciergeDelta | null;
+    committed: string | null;
+}
+
+/**
  * Options for building the concierge prompt
  */
 export interface ConciergePromptOptions {
@@ -73,6 +87,8 @@ export interface ConciergePromptOptions {
     conversationHistory?: string;
     activeWorkflow?: ActiveWorkflow;
     isFirstTurn?: boolean;
+    /** Prior context for fresh spawns after COMMIT or batch re-invoke */
+    priorContext?: PriorContext;
 }
 
 export interface HandleTurnResult {
@@ -80,6 +96,91 @@ export interface HandleTurnResult {
     stance: ConciergeStance;
     stanceReason: string;
     signal: ConciergeSignal | null;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// HANDOFF V2: PROTOCOL AND MESSAGE BUILDERS
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Handoff protocol injected on Turn 2 of each concierge instance.
+ * Model learns this format and uses it for Turn 2+ until fresh spawn.
+ */
+export const HANDOFF_PROTOCOL = `## Handoff Protocol
+
+From this turn forward, if meaningful context emerges that would help future analysis, end your response with a handoff block:
+
+---HANDOFF---
+constraints: [hard limits - budget, team size, timeline, technical requirements]
+eliminated: [options ruled out, with brief reason]
+preferences: [trade-off signals user has indicated: "X over Y"]
+context: [situational facts revealed: stage, domain, team composition]
+>>>COMMIT: [only if user commits to a plan or requests execution guidance — summarize decision and intent]
+---/HANDOFF---
+
+Rules:
+• Only include if something worth capturing emerged this turn
+• Each handoff is COMPLETE — carry forward anything still true
+• Be terse: few words per item, semicolon-separated
+• >>>COMMIT is a special signal — only use when user is done exploring and ready to execute
+• Never reference the handoff in your visible response to the user
+• Omit the entire block if nothing meaningful emerged
+
+`;
+
+/**
+ * Build message for Turn 2: injects handoff protocol before user message.
+ */
+export function buildTurn2Message(userMessage: string): string {
+    return HANDOFF_PROTOCOL + `User: "${userMessage}"`;
+}
+
+/**
+ * Build message for Turn 3+: echoes current handoff before user message.
+ * Allows model to update or carry forward the handoff.
+ */
+export function buildTurn3PlusMessage(
+    userMessage: string,
+    pendingHandoff: ConciergeDelta | null
+): string {
+    if (pendingHandoff && hasHandoffContent(pendingHandoff)) {
+        return formatHandoffEcho(pendingHandoff) + `User: "${userMessage}"`;
+    }
+    return userMessage;
+}
+
+/**
+ * Build prior context section for fresh spawns.
+ * Woven into buildConciergePrompt() when priorContext is provided.
+ */
+function buildPriorContextSection(priorContext: PriorContext): string {
+    const parts: string[] = [];
+
+    // What was committed (most important)
+    if (priorContext.committed) {
+        parts.push(`## What's Been Decided\n\n${priorContext.committed}\n`);
+    }
+
+    // Distilled context from prior conversation
+    if (priorContext.handoff && hasHandoffContent(priorContext.handoff)) {
+        parts.push(`## Prior Context\n`);
+
+        if (priorContext.handoff.constraints.length > 0) {
+            parts.push(`**Constraints:** ${priorContext.handoff.constraints.join('; ')}`);
+        }
+        if (priorContext.handoff.eliminated.length > 0) {
+            parts.push(`**Ruled out:** ${priorContext.handoff.eliminated.join('; ')}`);
+        }
+        if (priorContext.handoff.preferences.length > 0) {
+            parts.push(`**Preferences:** ${priorContext.handoff.preferences.join('; ')}`);
+        }
+        if (priorContext.handoff.context.length > 0) {
+            parts.push(`**Situation:** ${priorContext.handoff.context.join('; ')}`);
+        }
+        parts.push('');
+    }
+
+    return parts.length > 0 ? parts.join('\n') + '\n' : '';
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1896,6 +1997,11 @@ export function buildConciergePrompt(
         ? `\n${stanceGuidance.framing}\n`
         : '';
 
+    // Handoff V2: Prior context for fresh spawns after COMMIT or batch re-invoke
+    const priorContextSection = options?.priorContext
+        ? buildPriorContextSection(options.priorContext)
+        : '';
+
     const historySection = options?.conversationHistory
         ? `## Conversation\n${options.conversationHistory}\n\n`
         : '';
@@ -1910,7 +2016,7 @@ export function buildConciergePrompt(
 
 "${userMessage}"
 
-${historySection}## What You Know
+${priorContextSection}${historySection}## What You Know
 
 ${structuralBrief}
 
@@ -2121,4 +2227,8 @@ export const ConciergeService = {
     // Re-export signal parsing for convenience
     parseConciergeOutput,
     validateBatchPrompt,
+    // Handoff V2
+    HANDOFF_PROTOCOL,
+    buildTurn2Message,
+    buildTurn3PlusMessage,
 };

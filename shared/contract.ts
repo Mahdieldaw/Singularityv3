@@ -39,6 +39,27 @@ export interface SingularityOutput {
   pipeline?: SingularityPipelineSnapshot | null;
 }
 
+/**
+ * Concierge Handoff Delta
+ * Captures conversational evolution between batch invocations.
+ * The concierge appends invisible handoff blocks to responses, which are
+ * parsed and stored. When batch is re-invoked, this context is injected
+ * to inform batch models of constraints, eliminations, preferences, and
+ * situational context that emerged during concierge-only turns.
+ */
+export interface ConciergeDelta {
+  /** Hard limits: "2-person team", "budget under 5K/month" */
+  constraints: string[];
+  /** Ruled out options: "AWS Lambda (cold start concerns)" */
+  eliminated: string[];
+  /** Trade-off signals: "simplicity over performance" */
+  preferences: string[];
+  /** Situational facts: "early-stage startup", "pre-revenue" */
+  context: string[];
+  /** COMMIT signal - user committed to a plan, triggers fresh spawn. Null if not committed. */
+  commit: string | null;
+}
+
 export interface Claim {
   id: string;
   label: string;

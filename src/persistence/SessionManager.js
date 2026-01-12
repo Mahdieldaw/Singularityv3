@@ -1263,6 +1263,10 @@ export class SessionManager {
       hasRunConcierge: false,
       lastSingularityProviderId: null,
       activeWorkflow: null,
+      // Handoff V2 fields
+      turnInCurrentInstance: 0,    // Tracks Turn 1, 2, 3+ within current instance
+      pendingHandoff: null,        // ConciergeDelta from last response
+      commitPending: false,        // True when COMMIT detected, triggers fresh spawn
     };
   }
 
