@@ -418,7 +418,7 @@ export function parseProseGraphTopology(text: string): GraphTopology | null {
 /**
  * Pattern to match GRAPH_TOPOLOGY headers in various formats
  */
-const GRAPH_TOPOLOGY_PATTERN = /\n#{1,3}\s*[^\w\n].*?GRAPH[_\s]*TOPOLOGY|\n?(?:🔬|📊|🗺️)*\s*={0,}GRAPH[_\s]*TOPOLOGY={0,}|\n?(?:🔬|📊|🗺️)\s*GRAPH[_\s]*TOPOLOGY|={3,}\s*GRAPH[_\s]*TOPOLOGY\s*={3,}/iu;
+const GRAPH_TOPOLOGY_PATTERN = /\n#{1,3}\s*[^\w\n].*?GRAPH[_\s]*TOPOLOGY|\n?(?:🔬|📊|🗺️)*\s*={0,}GRAPH[_\s]*TOPOLOGY={0,}|\n?(?:🔬|📊|🗺️)\s*GRAPH[_\s]*TOPOLOGY|={3,}\s*GRAPH[_\s]*TOPOLOGY\s*={3,}/i;
 
 /**
  * Find position of GRAPH_TOPOLOGY header in text
@@ -518,10 +518,10 @@ export function extractGraphTopologyAndStrip(text: string): { text: string; topo
  */
 const OPTIONS_PATTERNS = [
     // Markdown H2/H3 header with any emoji prefix: ## 🛠️ ALL_AVAILABLE_OPTIONS
-    { re: /\n#{1,3}\s*[^\w\n].*?ALL[_\s]*AVAILABLE[_\s]*OPTIONS.*?\n/iu, minPosition: 0.15 },
+    { re: /\n#{1,3}\s*[^\w\n].*?ALL[_\s]*AVAILABLE[_\s]*OPTIONS.*?\n/i, minPosition: 0.15 },
 
     // Emoji-prefixed format (🛠️ ALL_AVAILABLE_OPTIONS) - standalone
-    { re: /\n?(?:🛠️|🔧|⚙️|🛠)\s*ALL[_\s]*AVAILABLE[_\s]*OPTIONS\s*\n/iu, minPosition: 0.15 },
+    { re: /\n?(?:🛠️|🔧|⚙️|🛠)\s*ALL[_\s]*AVAILABLE[_\s]*OPTIONS\s*\n/i, minPosition: 0.15 },
 
     // Standard delimiter with === or --- or unicode equivalent wrapper
     { re: /\n?[=\-─━═＝]{2,}\s*ALL[_\s]*AVAILABLE[_\s]*OPTIONS\s*[=\-─━═＝]{2,}\n?/i, minPosition: 0 },
@@ -549,9 +549,9 @@ const OPTIONS_PATTERNS = [
 export function cleanNarrativeText(text: string): string {
     return text
         .replace(/\n---+\s*$/, '')
-        .replace(/\n#{1,3}\s*(?:🛠️|🔧|⚙️|🛠)?\s*ALL[_\s]*AVAILABLE[_\s]*OPTIONS.*$/iu, '')
-        .replace(/\n#{1,3}\s*(?:🛠️|🔧|⚙️|🛠)\s*$/iu, '')
-        .replace(/(?:🛠️|🔧|⚙️|🛠)\s*$/iu, '')
+        .replace(/\n#{1,3}\s*(?:🛠️|🔧|⚙️|🛠)?\s*ALL[_\s]*AVAILABLE[_\s]*OPTIONS.*$/i, '')
+        .replace(/\n#{1,3}\s*(?:🛠️|🔧|⚙️|🛠)\s*$/i, '')
+        .replace(/(?:🛠️|🔧|⚙️|🛠)\s*$/i, '')
         .trim();
 }
 
@@ -603,7 +603,7 @@ export function extractOptionsAndStrip(text: string): { text: string; options: s
     const listPreview = afterDelimiter.slice(0, 400);
 
     // Validate that what follows looks like structured content
-    const hasListStructure = /^\s*[-*•]\s+|\n\s*[-*•]\s+|^\s*\d+\.\s+|\n\s*\d+\.\s+|^\s*\*\*[^*]+\*\*|^\s*Theme\s*:|^\s*###?\s+|^\s*[A-Z][^:\n]{2,}:|(?:🌀|🗿|😀|🙏|🚀|🛩)/iu.test(listPreview);
+    const hasListStructure = /^\s*[-*•]\s+|\n\s*[-*•]\s+|^\s*\d+\.\s+|\n\s*\d+\.\s+|^\s*\*\*[^*]+\*\*|^\s*Theme\s*:|^\s*###?\s+|^\s*[A-Z][^:\n]{2,}:|(?:🌀|🗿|😀|🙏|🚀|🛩)/i.test(listPreview);
     const hasSubstantiveContent = afterDelimiter.length > 50 && (afterDelimiter.includes('\n') || afterDelimiter.includes(':'));
 
     if (!hasListStructure && !hasSubstantiveContent) {
@@ -1616,91 +1616,6 @@ export interface ConciergeOutput {
 }
 
 /**
- * Parse concierge output to extract user-facing response and any batch request signals.
- * The signal is delimited by <<<SINGULARITY_BATCH_REQUEST>>> ... <<<END_BATCH_REQUEST>>>
- */
-export function parseConciergeOutput(rawResponse: string): ConciergeOutput {
-    if (!rawResponse) {
-        return { userResponse: '', signal: null };
-    }
-
-    // Look for the signal delimiter
-    const signalMatch = rawResponse.match(
-        /<<<SINGULARITY_BATCH_REQUEST>>>([\s\S]*?)<<<END_BATCH_REQUEST>>>/
-    );
-
-    if (!signalMatch) {
-        return {
-            userResponse: rawResponse.trim(),
-            signal: null
-        };
-    }
-
-    // Extract user-facing response (everything before the signal)
-    const userResponse = rawResponse
-        .substring(0, rawResponse.indexOf('<<<SINGULARITY_BATCH_REQUEST>>>'))
-        .trim();
-
-    // Parse the signal content
-    const signalContent = signalMatch[1];
-    const signal = parseSignalContent(signalContent);
-
-    return {
-        userResponse,
-        signal
-    };
-}
-
-/**
- * Parse the content inside the batch request delimiters
- */
-function parseSignalContent(content: string): ConciergeSignal {
-    if (!content) return null;
-
-    // Extract TYPE
-    const typeMatch = content.match(/TYPE:\s*(\w+)/i);
-    const type = typeMatch?.[1]?.toUpperCase();
-
-    // Extract PROMPT (everything after "PROMPT:")
-    const promptMatch = content.match(/PROMPT:\s*([\s\S]*?)$/);
-    const batchPrompt = promptMatch?.[1]?.trim() || '';
-
-    if (!batchPrompt) {
-        console.warn('[parsing-utils] Signal detected but no batch prompt found');
-        return null;
-    }
-
-    if (type === 'WORKFLOW') {
-        const goalMatch = content.match(/GOAL:\s*(.+?)(?=\n(?:STEP:|BLOCKER:|CONTEXT:|PROMPT:)|$)/s);
-        const contextMatch = content.match(/CONTEXT:\s*(.+?)(?=\n(?:PROMPT:)|$)/s);
-
-        return {
-            type: 'GENERATE_WORKFLOW',
-            goal: goalMatch?.[1]?.trim() || '',
-            context: contextMatch?.[1]?.trim() || '',
-            batchPrompt
-        };
-    }
-
-    if (type === 'STEP_HELP') {
-        const stepMatch = content.match(/STEP:\s*(.+?)(?=\n(?:BLOCKER:|CONTEXT:|PROMPT:)|$)/s);
-        const blockerMatch = content.match(/BLOCKER:\s*(.+?)(?=\n(?:CONTEXT:|PROMPT:)|$)/s);
-        const contextMatch = content.match(/CONTEXT:\s*(.+?)(?=\n(?:PROMPT:)|$)/s);
-
-        return {
-            type: 'STEP_HELP_NEEDED',
-            step: stepMatch?.[1]?.trim() || '',
-            blocker: blockerMatch?.[1]?.trim() || '',
-            constraint: contextMatch?.[1]?.trim() || '',
-            batchPrompt
-        };
-    }
-
-    console.warn(`[parsing-utils] Unknown signal type: ${type}`);
-    return null;
-}
-
-/**
  * Validate a batch prompt for quality
  */
 export function validateBatchPrompt(prompt: string): { valid: boolean; issues: string[] } {
@@ -1892,24 +1807,24 @@ function parseHandoffBlock(text: string): ConciergeDelta {
         switch (key) {
             case 'constraints':
             case 'constraint':
-                delta.constraints = [...new Set([...delta.constraints, ...items])];
+                delta.constraints = Array.from(new Set([...delta.constraints, ...items]));
                 break;
             case 'eliminated':
             case 'eliminate':
             case 'ruled out':
             case 'ruled_out':
-                delta.eliminated = [...new Set([...delta.eliminated, ...items])];
+                delta.eliminated = Array.from(new Set([...delta.eliminated, ...items]));
                 break;
             case 'preferences':
             case 'preference':
             case 'trade-offs':
             case 'tradeoffs':
-                delta.preferences = [...new Set([...delta.preferences, ...items])];
+                delta.preferences = Array.from(new Set([...delta.preferences, ...items]));
                 break;
             case 'context':
             case 'situation':
             case 'situational':
-                delta.context = [...new Set([...delta.context, ...items])];
+                delta.context = Array.from(new Set([...delta.context, ...items]));
                 break;
             // Silently ignore unknown keys (including 'committed' etc)
         }

@@ -420,7 +420,7 @@ function matchUserMessage(
 
     // Priority 2: Fuzzy match (weight: 0.9)
     if (!matched) {
-      for (const [term, entry] of termIndex.terms.entries()) {
+      for (const [term, entry] of Array.from(termIndex.terms.entries())) {
         if (fuzzyMatch(userTerm, term)) {
           addScores(entry, 0.9, claimScores);
           matched = true;
