@@ -9,6 +9,7 @@ export interface SingularityOutputState {
     isLoading: boolean;
     isError: boolean;
     providerId?: string | null;
+    requestedProviderId?: string | null;
     rawText?: string;
     error?: unknown;
     setPinnedProvider: (providerId: string) => void;
@@ -28,7 +29,7 @@ export function useSingularityOutput(aiTurnId: string | null, forcedProviderId?:
     }, [aiTurnId, setPinnedProviders]);
 
     return useMemo(() => {
-        const defaultState = {
+        const defaultState: SingularityOutputState = {
             output: null,
             isLoading: false,
             isError: false,
@@ -41,66 +42,49 @@ export function useSingularityOutput(aiTurnId: string | null, forcedProviderId?:
         if (!turn || turn.type !== "ai") return defaultState;
 
         const aiTurn = turn as AiTurn;
-        // Priority: Forced (Prop) > Pinned (User Selection) > Auto (Fallback)
-        const pinnedId = pinnedProviders[aiTurnId];
-        const effectiveProviderId = forcedProviderId || pinnedId;
+        const pinnedId = pinnedProviders[aiTurnId] || forcedProviderId;
 
-        const singularityOutput = aiTurn.singularityOutput;
-        if (singularityOutput && (!effectiveProviderId || String(effectiveProviderId) === String(singularityOutput.providerId))) {
-            return {
-                output: singularityOutput,
-                isLoading: false,
-                isError: false,
-                providerId: singularityOutput.providerId,
-                rawText: singularityOutput.text,
-                setPinnedProvider
-            };
-        }
-
-        const singularityResponses = aiTurn.singularityResponses;
-        if (!singularityResponses || Object.keys(singularityResponses).length === 0) {
-            if (effectiveProviderId) {
+        // Simplify responses into comparable candidates
+        const candidates = Object.entries(aiTurn.singularityResponses || {})
+            .map(([pid, arr]) => {
+                const responses = arr as any[];
+                if (!responses.length) return null;
+                const last = responses[responses.length - 1];
+                const text = String(last?.text || "");
                 return {
-                    output: null,
-                    isLoading: true,
-                    isError: false,
-                    providerId: effectiveProviderId,
-                    setPinnedProvider
+                    providerId: pid,
+                    last,
+                    ts: Number(last?.updatedAt || last?.createdAt || 0),
+                    hasData: text.trim().length > 0,
+                    isError: last.status === "error",
+                    isLoading: last.status === "streaming" || last.status === "pending"
                 };
-            }
-            return defaultState;
-        }
+            })
+            .filter(Boolean) as any[];
 
-        let providerId = effectiveProviderId;
-        let responses = providerId ? singularityResponses[providerId] : undefined;
+        // Selection Logic: High priority to providers that have tokens or errors
+        const pinnedCandidate = candidates.find(c => c.providerId === pinnedId);
+        const bestWithData = [...candidates]
+            .filter(c => c.hasData || c.isError)
+            .sort((a, b) => b.ts - a.ts)[0];
 
-        // If a specific provider is requested (Forced or Pinned)
-        if (effectiveProviderId) {
-            // If requested provider is missing data, show LOADING state for it (Ghost Switching Fix)
-            if (!responses || responses.length === 0) {
-                return {
-                    output: null,
-                    isLoading: true, // Explicitly loading the requested provider
-                    isError: false,
-                    providerId: effectiveProviderId,
-                    setPinnedProvider
-                };
-            }
+        // The "Active" provider we will actually render
+        let active;
+        if (pinnedCandidate && (pinnedCandidate.hasData || pinnedCandidate.isError)) {
+            // Priority 1: User requested this and it's showing something
+            active = pinnedCandidate;
+        } else if (bestWithData) {
+            // Priority 2: Fallback to the best thing that has data (avoids ghost states)
+            active = bestWithData;
         } else {
-            // Auto Mode: Fallback to last available (or first, depending on preference)
-            const keys = Object.keys(singularityResponses);
-            providerId = keys[keys.length - 1]; // "Last Write Wins" for auto-mode is usually fine
-            responses = singularityResponses[providerId];
+            // Priority 3: No data anywhere, show pinned or whatever we have
+            active = pinnedCandidate || candidates.sort((a, b) => b.ts - a.ts)[0];
         }
 
-        if (!responses || responses.length === 0) return defaultState;
+        if (!active) return defaultState;
 
-        const latestResponse = responses[responses.length - 1];
-
-        const isLoading = latestResponse.status === "streaming" || latestResponse.status === "pending";
-        const isError = latestResponse.status === "error";
-
-        const meta: any = (latestResponse as any).meta || {};
+        const latestResponse = active.last;
+        const meta: any = latestResponse?.meta || {};
         const metaOutput = meta.singularityOutput as SingularityOutput | undefined;
 
         let output: SingularityOutput;
@@ -108,7 +92,7 @@ export function useSingularityOutput(aiTurnId: string | null, forcedProviderId?:
             output = {
                 ...metaOutput,
                 text: metaOutput.text || latestResponse.text,
-                providerId: metaOutput.providerId || providerId,
+                providerId: metaOutput.providerId || active.providerId,
                 timestamp: metaOutput.timestamp || latestResponse.createdAt || Date.now(),
                 leakageDetected: metaOutput.leakageDetected ?? meta.leakageDetected,
                 leakageViolations: metaOutput.leakageViolations ?? meta.leakageViolations
@@ -116,18 +100,21 @@ export function useSingularityOutput(aiTurnId: string | null, forcedProviderId?:
         } else {
             output = {
                 text: latestResponse.text,
-                providerId,
+                providerId: active.providerId,
                 timestamp: latestResponse.createdAt || Date.now(),
                 leakageDetected: meta?.leakageDetected,
                 leakageViolations: meta?.leakageViolations
             };
         }
 
+        // Return state for the "Active" provider, but reflect the "Requested" state
+        const requestedCandidate = pinnedCandidate || active;
         return {
             output,
-            isLoading,
-            isError,
-            providerId,
+            isLoading: requestedCandidate.isLoading,
+            isError: active.isError,
+            providerId: active.providerId,
+            requestedProviderId: pinnedId || active.providerId,
             rawText: latestResponse.text,
             error: (latestResponse.meta as any)?.error,
             setPinnedProvider

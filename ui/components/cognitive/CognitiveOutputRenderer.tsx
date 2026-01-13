@@ -36,13 +36,16 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
 }) => {
     const [activeMode, setActiveModeInternal] = useState<'artifact' | 'singularity'>('artifact');
     const { runSingularity } = useSingularityMode(aiTurn.id);
-    
+
     // Derived transition state
     const isTransitioning = singularityState.isLoading;
 
     // Helper for recomputing singularity
     const triggerAndSwitch = async (options: any = {}) => {
         setActiveModeInternal('singularity');
+        if (options.providerId) {
+            singularityState.setPinnedProvider(options.providerId);
+        }
         await runSingularity(aiTurn.id, options);
     };
 
@@ -51,11 +54,9 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
     const setActiveSplitPanel = useSetAtom(activeSplitPanelAtom);
     const setIsDecisionMapOpen = useSetAtom(isDecisionMapOpenAtom);
 
-    const hasSingularityOutput = !!(
-        singularityState.output ||
-        aiTurn.singularityOutput ||
-        (aiTurn.singularityResponses && Object.keys(aiTurn.singularityResponses).length > 0)
-    );
+    const hasSingularityText = useMemo(() => {
+        return String(singularityState.output?.text || "").trim().length > 0;
+    }, [singularityState.output]);
 
     const [hasAutoSwitched, setHasAutoSwitched] = useState(false);
     const [hasUserOverride, setHasUserOverride] = useState(false);
@@ -67,12 +68,12 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
     };
 
     useEffect(() => {
-        if (!hasSingularityOutput || hasAutoSwitched || hasUserOverride) return;
+        if (!hasSingularityText || hasAutoSwitched || hasUserOverride) return;
         if (activeMode !== 'singularity') {
             setActiveModeInternal('singularity');
         }
         setHasAutoSwitched(true);
-    }, [hasSingularityOutput, hasAutoSwitched, hasUserOverride, activeMode]);
+    }, [hasSingularityText, hasAutoSwitched, hasUserOverride, activeMode]);
 
     // Get mapper data
     const activeMapperPid = useMemo(() => {
@@ -153,14 +154,14 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
         p => p.stage === 'thinking' || p.stage === 'streaming'
     );
 
-    const showSingularity = hasSingularityOutput && activeMode === 'singularity';
+    const showSingularity = hasSingularityText && activeMode === 'singularity';
 
     return (
         <div className="w-full max-w-3xl mx-auto animate-in fade-in duration-500">
             {/* === UNIFIED HEADER (Toggle + Orbs + Metrics) === */}
             <div className="flex flex-col gap-6 mb-8">
                 {/* View Toggle */}
-                {hasSingularityOutput && (
+                {hasSingularityText && (
                     <div className="flex justify-center">
                         <button
                             onClick={() => setActiveMode(showSingularity ? 'artifact' : 'singularity')}
@@ -191,8 +192,8 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
                             variant={isStreaming ? "active" : "historical"}
                             workflowProgress={workflowProgress}
                             onOrbClick={(pid) => {
+                                // Orbs strictly control the ModelResponsePanel selection, not the Singularity Main View
                                 setActiveSplitPanel({ turnId: aiTurn.id, providerId: pid });
-                                singularityState.setPinnedProvider(pid);
                             }}
                         />
                     </div>

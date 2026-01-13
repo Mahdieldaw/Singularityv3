@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useState } from 'react';
+import { LLM_PROVIDERS_CONFIG } from '../../constants';
 import { AiTurn } from '../../types';
 import MarkdownDisplay from '../MarkdownDisplay';
 import { SingularityOutputState } from '../../hooks/useSingularityOutput';
@@ -43,59 +44,132 @@ const SingularityOutputView: React.FC<SingularityOutputViewProps> = ({
     onRecompute,
     isLoading
 }) => {
-    const { output, isError, error, providerId } = singularityState;
+    const [showRegenMenu, setShowRegenMenu] = useState(false);
+    const { output, isError, error, providerId, requestedProviderId } = singularityState;
+    const effectiveIsLoading = singularityState.isLoading || !!isLoading;
+    const hasRenderableText = !!String(output?.text || "").trim();
 
-    if (isError) {
-        return (
-            <div className="py-8">
-                <PipelineErrorBanner
-                    type="singularity"
-                    failedProviderId={providerId || aiTurn.meta?.singularity || ""}
-                    onRetry={(pid) => onRecompute({ providerId: pid })}
-                    errorMessage={getErrorMessage(error)}
-                    requiresReauth={isSingularityError(error) ? !!error.requiresReauth : false}
-                />
-            </div>
-        );
-    }
 
-    if (!output && !isLoading) {
+
+    const currentProviderName = output?.providerId
+        ? LLM_PROVIDERS_CONFIG.find(p => p.id === output.providerId)?.name || output.providerId
+        : "Concierge";
+
+    // Unified Handler
+    const handleProviderSelect = (pid: string) => {
+        const hasResponse = (aiTurn.singularityResponses?.[pid]?.length || 0) > 0;
+
+        if (hasResponse) {
+            singularityState.setPinnedProvider(pid);
+        } else {
+            // New compute, will auto-pin via parent
+            onRecompute({ providerId: pid });
+        }
+        setShowRegenMenu(false);
+    };
+
+    const renderSwitcher = (variant: 'pill' | 'rect' = 'rect') => {
+        const buttonClasses = variant === 'pill'
+            ? "flex items-center gap-2 px-3 py-1.5 rounded-full bg-surface-raised border border-border-subtle hover:bg-surface-highlight text-xs font-medium text-text-secondary transition-all"
+            : "flex items-center gap-2 px-3 py-1.5 rounded-lg bg-surface-highlight/50 hover:bg-surface-highlight border border-border-subtle text-xs font-medium text-text-secondary transition-all";
+
         return (
-            <div className="flex flex-col items-center justify-center py-16 text-text-muted italic gap-4">
-                <span className="text-5xl filter opacity-30">✨</span>
-                <span className="text-sm">No response generated yet.</span>
+            <div className="relative">
                 <button
-                    onClick={() => onRecompute()}
-                    className="mt-2 px-6 py-2.5 rounded-xl bg-brand-500/10 hover:bg-brand-500/20 text-brand-500 text-sm font-medium transition-colors border border-brand-500/20"
+                    onClick={() => setShowRegenMenu(!showRegenMenu)}
+                    className={buttonClasses}
                 >
-                    Generate Response
+                    <span className={`w-1.5 h-1.5 rounded-full ${variant === 'pill' ? 'bg-brand-500' : 'bg-emerald-500'}`} />
+                    <span>{currentProviderName}</span>
+                    <span className="text-[10px] opacity-50 ml-1">▼</span>
                 </button>
+
+                {showRegenMenu && (
+                    <>
+                        <div className="fixed inset-0 z-40" onClick={() => setShowRegenMenu(false)} />
+                        <div className={`absolute bottom-full mb-2 w-56 py-1 rounded-xl border border-border-subtle bg-surface-raised shadow-xl z-50 overflow-hidden animate-in fade-in slide-in-from-bottom-2 duration-200 
+                            ${variant === 'pill' ? 'left-1/2 -translate-x-1/2' : 'left-0'}`}
+                        >
+                            <div className="px-3 py-2 text-[10px] uppercase font-bold text-text-muted border-b border-border-subtle/50 bg-surface-highlight/20">
+                                Select Model
+                            </div>
+                            <div className="max-h-64 overflow-y-auto custom-scrollbar">
+                                {LLM_PROVIDERS_CONFIG.map((provider) => {
+                                    const isCurrent = output?.providerId === provider.id;
+                                    const hasResponse = (aiTurn.singularityResponses?.[provider.id]?.length || 0) > 0;
+
+                                    return (
+                                        <button
+                                            key={provider.id}
+                                            onClick={() => handleProviderSelect(provider.id)}
+                                            className={`w-full text-left px-3 py-2.5 text-xs transition-colors flex items-center justify-between group
+                                                ${isCurrent
+                                                    ? "bg-brand-500/5 text-brand-500 font-medium"
+                                                    : "text-text-secondary hover:text-text-primary hover:bg-surface-highlight"
+                                                }
+                                            `}
+                                        >
+                                            <div className="flex items-center gap-2">
+                                                <span
+                                                    className={`w-1.5 h-1.5 rounded-full ${hasResponse ? 'bg-emerald-500' : 'bg-border-subtle group-hover:bg-brand-500/50'}`}
+                                                    title={hasResponse ? "Response available" : "Click to generate"}
+                                                />
+                                                <span>{provider.name}</span>
+                                            </div>
+                                            {isCurrent && <span>✓</span>}
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    </>
+                )}
             </div>
         );
-    }
+    };
 
-    if (isLoading && !output) {
-        return (
-            <div className="flex flex-col items-center justify-center py-16">
-                <div className="relative">
-                    <div className="w-16 h-16 rounded-full bg-brand-500/10 animate-pulse flex items-center justify-center">
-                        <span className="text-3xl">✨</span>
+    const renderContent = () => {
+        if (isError) {
+            return (
+                <div className="py-8 space-y-6">
+                    <PipelineErrorBanner
+                        type="singularity"
+                        failedProviderId={providerId || aiTurn.meta?.singularity || ""}
+                        onRetry={(pid) => onRecompute({ providerId: pid })}
+                        errorMessage={getErrorMessage(error)}
+                        requiresReauth={isSingularityError(error) ? !!error.requiresReauth : false}
+                    />
+                    <div className="flex justify-center">
+                        {renderSwitcher('pill')}
                     </div>
-                    <div className="absolute inset-0 rounded-full border-2 border-brand-500/30 animate-ping" />
                 </div>
-                <div className="text-text-secondary font-medium mt-6">
-                    Synthesizing response...
-                </div>
-                <div className="text-xs text-text-muted mt-2 text-center">
-                    Converging insights from the council.
-                </div>
-            </div>
-        );
-    }
+            );
+        }
 
-    return (
-        <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-            {/* Main Response Container - Clean and readable */}
+        if (effectiveIsLoading && !hasRenderableText) {
+            return (
+                <div className="flex flex-col items-center justify-center py-16">
+                    <div className="relative">
+                        <div className="w-16 h-16 rounded-full bg-brand-500/10 animate-pulse flex items-center justify-center">
+                            <span className="text-3xl">✨</span>
+                        </div>
+                        <div className="absolute inset-0 rounded-full border-2 border-brand-500/30 animate-ping" />
+                    </div>
+                    <div className="text-text-secondary font-medium mt-6">
+                        Synthesizing response...
+                    </div>
+                    <div className="text-xs text-text-muted mt-2 text-center">
+                        Converging insights from the council.
+                    </div>
+                    {/* Switcher in Loading State too */}
+                    <div className="mt-6">
+                        {renderSwitcher('pill')}
+                    </div>
+                </div>
+            );
+        }
+
+        return (
             <div className="bg-surface border border-border-subtle rounded-2xl overflow-hidden shadow-sm relative">
                 {/* Subtle gradient accent */}
                 <div className="absolute top-0 right-0 w-80 h-80 bg-brand-500/5 rounded-full blur-[100px] -translate-y-1/2 translate-x-1/3 pointer-events-none" />
@@ -110,33 +184,32 @@ const SingularityOutputView: React.FC<SingularityOutputViewProps> = ({
                 {/* Footer Actions */}
                 <div className="relative z-10 px-6 py-4 border-t border-border-subtle/50 bg-surface-highlight/5 flex items-center justify-between">
                     <div className="flex items-center gap-2 text-xs text-text-muted">
-                        {output?.providerId && (
-                            <span className="px-2 py-0.5 rounded-md bg-surface-highlight border border-border-subtle">
-                                {output.providerId}
-                            </span>
-                        )}
-                        {output?.leakageDetected && (
-                            <span className="px-2 py-0.5 rounded-md bg-amber-500/10 border border-amber-500/20 text-amber-400">
-                                ⚠️ Machinery detected
-                            </span>
-                        )}
+                        {renderSwitcher('rect')}
                     </div>
+
                     <div className="flex items-center gap-2">
                         <CopyButton
                             text={output?.text || ""}
                             label="Copy response"
                             variant="icon"
                         />
+                        {/* Re-run current (Refresher) - Optional but useful since main click doesn't re-run anymore */}
                         <button
-                            onClick={() => onRecompute()}
-                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-text-secondary hover:text-text-primary hover:bg-surface-highlight border border-border-subtle transition-colors"
+                            onClick={() => onRecompute({ providerId: output?.providerId })}
+                            title="Regenerate this response"
+                            className="flex items-center justify-center w-8 h-8 rounded-lg text-text-secondary hover:text-text-primary hover:bg-surface-highlight border border-transparent hover:border-border-subtle transition-all"
                         >
                             <span>↻</span>
-                            <span>Regenerate</span>
                         </button>
                     </div>
                 </div>
             </div>
+        );
+    };
+
+    return (
+        <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+            {renderContent()}
 
             {/* Leakage Details (if any) */}
             {output?.leakageDetected && output.leakageViolations && output.leakageViolations.length > 0 && (
