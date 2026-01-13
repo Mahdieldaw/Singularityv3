@@ -41,7 +41,7 @@ export const MetricsRibbon: React.FC<MetricsRibbonProps> = ({
             <div className="flex items-center gap-3 mb-3">
                 {problemStructure && (
                     <span className="text-xs font-medium text-brand-400 capitalize">
-                        {problemStructure.primaryPattern} structure
+                        {problemStructure.primary} structure
                     </span>
                 )}
                 {confidence !== undefined && (

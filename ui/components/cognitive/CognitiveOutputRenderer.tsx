@@ -1,6 +1,6 @@
 import React, { useMemo, useEffect, useState } from 'react';
 import { AiTurn } from '../../types';
-import { useModeSwitching } from '../../hooks/cognitive/useModeSwitching';
+import { useSingularityMode } from '../../hooks/cognitive/useCognitiveMode';
 import SingularityOutputView from './SingularityOutputView';
 import { SingularityOutputState } from '../../hooks/useSingularityOutput';
 import { CouncilOrbs } from '../CouncilOrbs';
@@ -34,12 +34,17 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
     singularityState,
     onArtifactSelect
 }) => {
-    const {
-        activeMode,
-        setActiveMode: setActiveModeInternal,
-        triggerAndSwitch,
-        isTransitioning
-    } = useModeSwitching(aiTurn.id);
+    const [activeMode, setActiveModeInternal] = useState<'artifact' | 'singularity'>('artifact');
+    const { runSingularity } = useSingularityMode(aiTurn.id);
+    
+    // Derived transition state
+    const isTransitioning = singularityState.isLoading;
+
+    // Helper for recomputing singularity
+    const triggerAndSwitch = async (options: any = {}) => {
+        setActiveModeInternal('singularity');
+        await runSingularity(aiTurn.id, options);
+    };
 
     const selectedModels = useAtomValue(selectedModelsAtom);
     const workflowProgress = useAtomValue(workflowProgressForTurnFamily(aiTurn.id));
@@ -56,7 +61,7 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
     const [hasUserOverride, setHasUserOverride] = useState(false);
     const [isOrbTrayExpanded, setIsOrbTrayExpanded] = useState(false);
 
-    const setActiveMode = (mode: any) => {
+    const setActiveMode = (mode: 'artifact' | 'singularity') => {
         setHasUserOverride(true);
         setActiveModeInternal(mode);
     };
@@ -67,7 +72,7 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
             setActiveModeInternal('singularity');
         }
         setHasAutoSwitched(true);
-    }, [hasSingularityOutput, hasAutoSwitched, hasUserOverride, activeMode, setActiveModeInternal]);
+    }, [hasSingularityOutput, hasAutoSwitched, hasUserOverride, activeMode]);
 
     // Get mapper data
     const activeMapperPid = useMemo(() => {
@@ -209,7 +214,7 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
                                         Structural Topology
                                     </div>
                                     <StructureGlyph
-                                        pattern={problemStructure.primaryPattern}
+                                        pattern={problemStructure.primary}
                                         claimCount={aiTurn.mapperArtifact?.claims?.length || 0}
                                         width={320}
                                         height={140}
@@ -217,8 +222,8 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
                                     />
                                     <div className="text-[11px] text-text-muted italic">
                                         {problemStructure.confidence > 0.7
-                                            ? `High confidence ${problemStructure.primaryPattern} pattern detected`
-                                            : `Emerging ${problemStructure.primaryPattern} structure`}
+                                            ? `High confidence ${problemStructure.primary} pattern detected`
+                                            : `Emerging ${problemStructure.primary} structure`}
                                     </div>
                                 </div>
                             </div>

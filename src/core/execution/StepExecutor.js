@@ -1,7 +1,6 @@
-
 import { ArtifactProcessor } from '../../../shared/artifact-processor';
 import { PROVIDER_LIMITS } from '../../../shared/provider-limits';
-import { parseUnifiedMapperOutput, parseV1MapperToArtifact } from '../../../shared/parsing-utils';
+import { parseUnifiedMapperOutput, parseMapperArtifact } from '../../../shared/parsing-utils';
 import { classifyError } from '../error-classifier.js';
 import {
   errorHandler,
@@ -846,10 +845,7 @@ export class StepExecutor {
     const mapperArtifact =
       payload.mapperArtifact ||
       (payload.mappingText
-        ? parseV1MapperToArtifact(payload.mappingText, {
-          graphTopology: payload?.mappingMeta?.graphTopology,
-          query: payload.originalPrompt,
-        })
+        ? parseMapperArtifact(payload.mappingText)
         : null);
 
     if (!mapperArtifact) {
@@ -965,6 +961,11 @@ export class StepExecutor {
         } : null,
         leakageDetected,
         leakageViolations,
+        pipeline,
+        parsed: {
+          signal,
+          rawText,
+        },
       };
 
       return {

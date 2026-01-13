@@ -71,6 +71,17 @@ export interface LLMProvider {
   emoji?: string;
 }
 
+export interface ParsedOption {
+  title: string;
+  description: string;
+  citations: (number | string)[];
+}
+
+export interface ParsedTheme {
+  name: string;
+  options: ParsedOption[];
+}
+
 // =============================================================================
 // UNIFIED TURN TYPES (UI-ADAPTED FROM CONTRACT)
 // =============================================================================
@@ -154,6 +165,5 @@ export interface FullSessionPayload {
   providerContexts: Record<string, any>;
 }
 
-export type { GraphNode, GraphEdge, GraphTopology } from "../../shared/contract";
+export type { GraphNode, GraphEdge, GraphTopology, Claim, Edge } from "../../shared/contract";
 
-export type CognitiveViewMode = 'artifact' | 'singularity';

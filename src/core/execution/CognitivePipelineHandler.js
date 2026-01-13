@@ -1,5 +1,5 @@
 
-import { parseV1MapperToArtifact } from '../../../shared/parsing-utils';
+import { parseMapperArtifact } from '../../../shared/parsing-utils';
 import { extractUserMessage } from '../context-utils.js';
 
 export class CognitivePipelineHandler {
@@ -50,15 +50,15 @@ export class CognitivePipelineHandler {
               continue;
             }
 
-            mapperArtifact = parseV1MapperToArtifact(text, {
-              graphTopology: result?.meta?.graphTopology,
-              query: userMessageForSingularity,
-            });
+            mapperArtifact = parseMapperArtifact(text);
+            if (mapperArtifact) {
+                mapperArtifact.query = userMessageForSingularity;
+            }
 
 
-            // ⚠️ CRITICAL FIX: model_count is not set by parseV1MapperToArtifact
+            // ⚠️ CRITICAL FIX: model_count is not set by parser sometimes
             // Calculate it from citationSourceOrder or fallback to supporters count
-            if (!mapperArtifact.model_count || mapperArtifact.model_count === 0) {
+            if (mapperArtifact && (!mapperArtifact.model_count || mapperArtifact.model_count === 0)) {
               const citationOrder = result?.meta?.citationSourceOrder;
               if (citationOrder && typeof citationOrder === 'object') {
                 mapperArtifact.model_count = Object.keys(citationOrder).length;
@@ -496,10 +496,10 @@ export class CognitivePipelineHandler {
       const latestMappingMeta = mappingResponses?.[0]?.meta || {};
 
       if (!mapperArtifact && mappingResponses?.[0]) {
-        mapperArtifact = parseV1MapperToArtifact(String(latestMappingText), {
-          graphTopology: latestMappingMeta?.graphTopology,
-          query: originalPrompt,
-        });
+        mapperArtifact = parseMapperArtifact(String(latestMappingText));
+        if (mapperArtifact) {
+            mapperArtifact.query = originalPrompt;
+        }
       }
 
       if (!mapperArtifact) {

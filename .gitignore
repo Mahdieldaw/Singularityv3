@@ -16,8 +16,8 @@ dm-mono-main/
 old ui/
 
 # Assets (Root level only, source assets in ui/assets/ are tracked)
-/*.svg
-/*.png
+*.svg
+*.png
 
 # Environment variables
 .env
@@ -36,15 +36,19 @@ yarn-error.log*
 Thumbs.db
 
 
+# Documentation
+scripts/
+docs/
+*.md
+*.txt
+*.d.ts
+*.css
+.*test.ts
+src/core/V31Verification.ts
+
+jest.config.js
 oldaiturnblock.tsx
 oldsynthesisbubble.tsx
-
-.md
-/.md
-.md/
-.txt
-
-docs/*
-docs/
-
-*.md
+/fonts/
+/scripts/*
+package-lock.json

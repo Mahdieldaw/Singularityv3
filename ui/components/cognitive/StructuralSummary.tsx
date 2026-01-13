@@ -155,7 +155,7 @@ function buildFloorLine(
     }
 
     // Low consensus (<40%)
-    if (structure?.primaryPattern === "exploratory") {
+    if (!structure || structure.primary === "sparse") {
         return {
             type: "floor",
             icon: "○",
@@ -164,8 +164,8 @@ function buildFloorLine(
         };
     }
 
-    // Contested or tradeoff - different framing
-    if (structure?.primaryPattern === "contested" || structure?.primaryPattern === "tradeoff") {
+    // Forked or constrained - different framing
+    if (structure && (structure.primary === "forked" || structure.primary === "constrained")) {
         if (top2) {
             return {
                 type: "floor",
@@ -235,18 +235,14 @@ function buildTensionLine(
         };
     }
 
-    // Tradeoff structure but no explicit conflicts
-    if (structure?.primaryPattern === "tradeoff") {
-        const data = structure.data as any;
-        if (data?.tradeoffs?.[0]) {
-            const t = data.tradeoffs[0];
-            return {
-                type: "tension",
-                icon: "⚖️",
-                text: `"${t.optionA.label}" trades off against "${t.optionB.label}" — you can't fully have both`,
-                color: "text-orange-400",
-            };
-        }
+    // Constrained (tradeoff-like) structure but no explicit conflicts
+    if (structure && structure.primary === "constrained") {
+        return {
+            type: "tension",
+            icon: "⚖️",
+            text: "Structure is constrained by tradeoffs between positions — you can't fully have all of them.",
+            color: "text-orange-400",
+        };
     }
 
     return null;

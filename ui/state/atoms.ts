@@ -528,31 +528,3 @@ export const selectedModeAtom = atomWithStorage<CognitiveMode>(
   "htos_selected_mode",
   "auto"
 );
-
-
-// -----------------------------
-// Cognitive Pipeline UI State
-// -----------------------------
-import { CognitiveViewMode } from "../types";
-
-/**
- * Tracks the active view for each cognitive turn.
- * Key: aiTurnId, Value: 'artifact' | 'understand' | 'gauntlet'
- */
-export const cognitiveModeMapAtom = atomWithImmer<Record<string, CognitiveViewMode>>({});
-
-/**
- * Family to access/update mode for a specific turn
- */
-export const turnCognitiveModeFamily = atomFamily(
-  (turnId: string) =>
-    atom(
-      (get) => get(cognitiveModeMapAtom)[turnId] || 'artifact',
-      (_get, set, newMode: CognitiveViewMode) => {
-        set(cognitiveModeMapAtom, (draft) => {
-          draft[turnId] = newMode;
-        });
-      }
-    ),
-  (a, b) => a === b
-);

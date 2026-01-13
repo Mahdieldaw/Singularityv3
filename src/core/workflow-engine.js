@@ -8,7 +8,7 @@ import { ContextManager } from './execution/ContextManager';
 import { PersistenceCoordinator } from './execution/PersistenceCoordinator';
 import { TurnEmitter } from './execution/TurnEmitter';
 import { CognitivePipelineHandler } from './execution/CognitivePipelineHandler';
-import { formatArtifactAsOptions, parseV1MapperToArtifact } from '../../shared/parsing-utils';
+import { parseMapperArtifact } from '../../shared/parsing-utils';
 
 export class WorkflowEngine {
   constructor(orchestrator, sessionManager, port, options = {}) {
@@ -300,20 +300,10 @@ export class WorkflowEngine {
           .find(text => text.includes("<mapping_output>") || text.includes("<decision_map>"));
 
         if (v1MappingText) {
-          context.mapperArtifact = parseV1MapperToArtifact(v1MappingText, {
-            query: context.userMessage || ""
-          });
+          context.mapperArtifact = parseMapperArtifact(v1MappingText);
         }
       } catch (err) {
         console.warn("[WorkflowEngine] Cross-version hydration failed:", err);
-      }
-    }
-    if (context.mapperArtifact && !context.extractedOptions) {
-      try {
-        console.log("[WorkflowEngine] Flattening V2 MapperArtifact for V1-compatible consumers...");
-        context.extractedOptions = formatArtifactAsOptions(context.mapperArtifact);
-      } catch (err) {
-        console.warn("[WorkflowEngine] V2 artifact flattening failed:", err);
       }
     }
   }
@@ -437,3 +427,4 @@ export class WorkflowEngine {
     );
   }
 }
+

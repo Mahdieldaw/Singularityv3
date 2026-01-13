@@ -21,7 +21,6 @@ import { formatDecisionMapForMd, formatGraphForMd } from "../utils/copy-format-u
 
 import {
   parseUnifiedMapperOutput,
-  cleanOptionsText,
 } from "../../shared/parsing-utils";
 import { computeProblemStructureFromArtifact, computeStructuralAnalysis } from "../../src/core/PromptMethods";
 import type { StructuralAnalysis } from "../../shared/contract";
@@ -79,8 +78,6 @@ const StructuralDebugPanel: React.FC<StructuralDebugPanelProps> = ({ analysis })
     if (value >= 0.3) return "🟡";
     return "🔴";
   };
-
-  const patternScores = analysis.shape.scores || undefined;
 
   return (
     <div className="h-full overflow-y-auto relative custom-scrollbar p-6">
@@ -399,49 +396,19 @@ const StructuralDebugPanel: React.FC<StructuralDebugPanelProps> = ({ analysis })
 
           <details>
             <summary className="cursor-pointer text-sm font-semibold flex items-center gap-2">
-              <span>🧱 Phase 6: Shape Classification</span>
-              <span className="text-[10px] text-text-muted uppercase tracking-wide">determineShapeSparseAware, generateEvidenceSparseAware</span>
+              <span>🧱 Phase 6: Composite Shape</span>
+              <span className="text-[10px] text-text-muted uppercase tracking-wide">peak-first primary + secondary patterns</span>
             </summary>
             <div className="mt-2 text-xs space-y-2">
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                {patternScores && Object.entries(patternScores).map(([k, v]) => (
-                  <div key={k}>
-                    <div className="text-text-muted capitalize">{k}</div>
-                    <div className="font-mono">
-                      {v.toFixed(2)}{" "}
-                      {analysis.shape.primaryPattern === k && "← winner"}
-                      {analysis.shape.runnerUpPattern === k && analysis.shape.primaryPattern !== k && "· runner-up"}
-                    </div>
-                  </div>
-                ))}
-              </div>
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-2 pt-2 border-t border-border-subtle/60">
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-2 pt-2">
                 <div>
-                  <div className="text-text-muted">Primary pattern</div>
-                  <div className="font-mono capitalize">{analysis.shape.primaryPattern}</div>
+                  <div className="text-text-muted">Primary shape</div>
+                  <div className="font-mono capitalize">{analysis.shape.primary}</div>
                 </div>
                 <div>
-                  <div className="text-text-muted">Base confidence</div>
-                  <div className="font-mono">
-                    {analysis.shape.baseConfidence != null ? analysis.shape.baseConfidence.toFixed(2) : "–"}
-                  </div>
-                </div>
-                <div>
-                  <div className="text-text-muted">Final confidence</div>
+                  <div className="text-text-muted">Primary confidence</div>
                   <div className="font-mono">
                     {analysis.shape.confidence.toFixed(2)} {ratioBadge(analysis.shape.confidence)}
-                  </div>
-                </div>
-                <div>
-                  <div className="text-text-muted">Signal penalty</div>
-                  <div className="font-mono">
-                    {analysis.shape.signalPenalty != null ? (-analysis.shape.signalPenalty).toFixed(2) : "–"}
-                  </div>
-                </div>
-                <div>
-                  <div className="text-text-muted">Fragility penalty</div>
-                  <div className="font-mono">
-                    {analysis.shape.fragilityPenalty?.total != null ? (-analysis.shape.fragilityPenalty.total).toFixed(2) : "–"}
                   </div>
                 </div>
                 <div>
@@ -451,61 +418,34 @@ const StructuralDebugPanel: React.FC<StructuralDebugPanelProps> = ({ analysis })
                   </div>
                 </div>
               </div>
-              {analysis.shape.fragilityPenalty && (
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-                  <div className="text-[11px]">
-                    Low-support articulation points:{" "}
-                    <span className="font-mono">
-                      {analysis.shape.fragilityPenalty.lowSupportArticulations}
-                    </span>
-                  </div>
-                  <div className="text-[11px]">
-                    Conditional conflicts:{" "}
-                    <span className="font-mono">
-                      {analysis.shape.fragilityPenalty.conditionalConflicts}
-                    </span>
-                  </div>
-                  <div className="text-[11px]">
-                    Disconnected consensus:{" "}
-                    <span className="font-mono">
-                      {analysis.shape.fragilityPenalty.disconnectedConsensus ? "Yes" : "No"}
-                    </span>
-                  </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2 pt-2 border-t border-border-subtle/60">
+                <div>
+                  <div className="text-[11px] text-text-muted mb-1">Secondary patterns</div>
+                  {analysis.shape.patterns.length > 0 ? (
+                    <ul className="list-disc list-inside space-y-1">
+                      {analysis.shape.patterns.map((p, idx) => (
+                        <li key={idx} className="capitalize">
+                          {p.type} ({p.severity})
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <div className="text-[11px] text-text-muted">No secondary patterns detected.</div>
+                  )}
                 </div>
-              )}
-              <div className="pt-2 border-t border-border-subtle/60">
-                <div className="text-[11px] text-text-muted mb-1">Evidence list</div>
-                <ul className="list-disc list-inside space-y-1">
-                  {analysis.shape.evidence.map((e, idx) => (
-                    <li key={idx}>{e}</li>
-                  ))}
-                </ul>
+                <div>
+                  <div className="text-[11px] text-text-muted mb-1">Evidence list</div>
+                  <ul className="list-disc list-inside space-y-1">
+                    {analysis.shape.evidence.map((e, idx) => (
+                      <li key={idx}>{e}</li>
+                    ))}
+                  </ul>
+                </div>
               </div>
             </div>
           </details>
 
-          <details>
-            <summary className="cursor-pointer text-sm font-semibold flex items-center gap-2">
-              <span>🧱 Phase 7: Shape-Specific Data</span>
-              <span className="text-[10px] text-text-muted uppercase tracking-wide">pattern-specific builders</span>
-            </summary>
-            <div className="mt-2 text-xs space-y-2">
-              {analysis.shape.data ? (
-                <>
-                  <div className="text-[11px] text-text-muted">
-                    Pattern data type: {(analysis.shape.data as any).pattern}
-                  </div>
-                  <pre className="text-[11px] leading-snug bg-surface border border-border-subtle rounded-lg p-3 overflow-x-auto">
-                    {JSON.stringify(analysis.shape.data, null, 2)}
-                  </pre>
-                </>
-              ) : (
-                <div className="text-[11px] text-text-muted">
-                  No shape-specific data available for this pattern.
-                </div>
-              )}
-            </div>
-          </details>
+          {/* Phase 7 (legacy shape-specific data) removed in peak-first composite architecture */}
         </div>
       )}
     </div>
@@ -523,7 +463,7 @@ const ConciergePipelinePanel: React.FC<ConciergePipelinePanelProps> = ({ state, 
 
   const pipeline: any = useMemo(() => {
     if (state.output?.pipeline) return state.output.pipeline;
-    if (!analysis || !userMessage || !state.output) return null;
+      if (!analysis || !userMessage || !state.output) return null;
 
     try {
       const selection = ConciergeService.selectStance(userMessage, analysis.shape);
@@ -545,7 +485,7 @@ const ConciergePipelinePanel: React.FC<ConciergePipelinePanelProps> = ({ state, 
         stanceReason: selection.reason,
         stanceConfidence: selection.confidence,
         structuralShape: {
-          primaryPattern: analysis.shape.primaryPattern,
+          primaryPattern: analysis.shape.primary,
           confidence: analysis.shape.confidence,
         },
         leakageDetected,
@@ -726,12 +666,14 @@ function buildThemesFromClaims(claims: any[]): ParsedTheme[] {
   const themesByName = new Map<string, ParsedTheme>();
 
   const getThemeNameForClaim = (claim: any): string => {
-    const role = String(claim?.role || '').toLowerCase();
-    if (role === 'anchor') return 'Anchors';
-    if (role === 'challenger') return 'Challengers';
-    if (role === 'supplement') return 'Supplements';
-    if (role === 'branch') return 'Branches';
-    return 'Claims';
+    switch (claim.type) {
+      case 'factual': return 'Facts';
+      case 'prescriptive': return 'Recommendations';
+      case 'conditional': return 'Conditions';
+      case 'contested': return 'Contested';
+      case 'speculative': return 'Possibilities';
+      default: return 'Positions';
+    }
   };
 
   for (const claim of claims) {
@@ -765,102 +707,7 @@ function buildThemesFromClaims(claims: any[]): ParsedTheme[] {
   return Array.from(themesByName.values());
 }
 
-function parseOptionsIntoThemes(optionsText: string | null): ParsedTheme[] {
-  if (!optionsText) return [];
 
-  const lines = optionsText.split('\n');
-  const themes: ParsedTheme[] = [];
-  let currentTheme: ParsedTheme | null = null;
-
-  // Patterns for theme headers:
-  // 1. Emoji-prefixed: "📐 Architecture & Pipeline" or "💻 Visualization..."
-  // 2. "Theme:" prefix: "Theme: Defining the Interactive Role"
-
-
-  // Pattern for option items (bold title followed by colon)
-  const optionPattern = /^\s*[-*•]?\s*\*?\*?([^:*]+)\*?\*?:\s*(.*)$/;
-
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-
-    // Check if this is a theme header
-    let isTheme = false;
-    let themeName = '';
-
-    // Check emoji-prefixed (starts with emoji)
-    if (/^[\u{1F300}-\u{1FAD6}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/u.test(trimmed)) {
-      isTheme = true;
-      themeName = trimmed;
-    }
-    // Check "Theme:" prefix
-    else if (/^Theme:\s*/i.test(trimmed)) {
-      isTheme = true;
-      themeName = trimmed.replace(/^Theme:\s*/i, '').trim();
-    }
-    // Check markdown header that doesn't look like an option
-    else if (/^#+\s*/.test(trimmed) && !optionPattern.test(trimmed)) {
-      isTheme = true;
-      themeName = trimmed.replace(/^#+\s*/, '').trim();
-    }
-
-    if (isTheme && themeName) {
-      currentTheme = { name: themeName, options: [] };
-      themes.push(currentTheme);
-      continue;
-    }
-
-    // Check if this is an option item
-    const optionMatch = trimmed.match(/^\s*[-*•]?\s*\*{0,2}([^:]+?)\*{0,2}:\s*(.+)$/);
-    if (optionMatch && currentTheme) {
-      const title = optionMatch[1].trim().replace(/^\*\*|\*\*$/g, '');
-      const rest = optionMatch[2].trim();
-
-      // Extract citation numbers [1], [2, 3], etc.
-      const citations: number[] = [];
-      const citationMatches = rest.matchAll(/\[(\d+(?:\s*,\s*\d+)*)\]/g);
-      for (const cm of citationMatches) {
-        const nums = cm[1].split(/\s*,\s*/).map(n => parseInt(n.trim(), 10));
-        citations.push(...nums.filter(n => !isNaN(n)));
-      }
-
-      // Remove citations from description
-      const description = rest.replace(/\s*\[\d+(?:\s*,\s*\d+)*\]/g, '').trim();
-
-      currentTheme.options.push({ title, description, citations });
-    } else if (currentTheme && currentTheme.options.length > 0) {
-      // Continuation of previous option description
-      const lastOption = currentTheme.options[currentTheme.options.length - 1];
-      lastOption.description += ' ' + trimmed.replace(/\s*\[\d+(?:\s*,\s*\d+)*\]/g, '').trim();
-    }
-  }
-
-  // If no themes were detected, create a default theme
-  if (themes.length === 0 && optionsText.trim()) {
-    const defaultTheme: ParsedTheme = { name: 'Options', options: [] };
-    // Try to parse all lines as options
-    for (const line of lines) {
-      const optionMatch = line.trim().match(/^\s*[-*•]?\s*\*{0,2}([^:]+?)\*{0,2}:\s*(.+)$/);
-      if (optionMatch) {
-        const title = optionMatch[1].trim().replace(/^\*\*|\*\*$/g, '');
-        const rest = optionMatch[2].trim();
-        const citations: number[] = [];
-        const citationMatches = rest.matchAll(/\[(\d+(?:\s*,\s*\d+)*)\]/g);
-        for (const cm of citationMatches) {
-          const nums = cm[1].split(/\s*,\s*/).map(n => parseInt(n.trim(), 10));
-          citations.push(...nums.filter(n => !isNaN(n)));
-        }
-        const description = rest.replace(/\s*\[\d+(?:\s*,\s*\d+)*\]/g, '').trim();
-        defaultTheme.options.push({ title, description, citations });
-      }
-    }
-    if (defaultTheme.options.length > 0) {
-      themes.push(defaultTheme);
-    }
-  }
-
-  return themes;
-}
 
 // ============================================================================
 // NARRATIVE EXTRACTION - Find paragraphs containing canonical label
@@ -1753,16 +1600,15 @@ export const DecisionMapSheet = React.memo(() => {
     const meta: any = latestMapping?.meta || null;
     let fromMeta = meta?.allAvailableOptions || meta?.all_available_options || meta?.options || null;
     if (fromMeta) {
-      // Use shared cleanup function to strip any trailing GRAPH_TOPOLOGY
-      return cleanOptionsText(fromMeta);
+      return fromMeta;
     }
     return parsedMapping.options ?? null;
   }, [latestMapping, parsedMapping.options]);
 
   const parsedThemes = useMemo(() => {
     if (claimThemes.length > 0) return claimThemes;
-    return parseOptionsIntoThemes(optionsText || '');
-  }, [claimThemes, optionsText]);
+    return [];
+  }, [claimThemes]);
 
   // Extract citation source order from mapping metadata for correct citation-to-model mapping
   const citationSourceOrder = useMemo(() => {
@@ -1950,7 +1796,8 @@ export const DecisionMapSheet = React.memo(() => {
                 <CopyButton
                   text={formatDecisionMapForMd(
                     mappingText,
-                    optionsText,
+                    graphData.claims,
+                    graphData.edges,
                     graphTopology
                   )}
                   label="Copy full decision map"
@@ -1992,7 +1839,7 @@ export const DecisionMapSheet = React.memo(() => {
                     {problemStructure && (
                       <div className="absolute top-4 left-4 z-50 px-3 py-1.5 rounded-full bg-black/70 border border-white/10 text-xs font-medium text-white/90">
                         <span className="opacity-60 mr-2">Structure:</span>
-                        <span className="capitalize">{problemStructure.primaryPattern}</span>
+                        <span className="capitalize">{(problemStructure as any).primaryPattern ?? problemStructure.primary}</span>
                         {problemStructure.confidence < 0.7 && (
                           <span className="ml-2 text-amber-400">(?)</span>
                         )}

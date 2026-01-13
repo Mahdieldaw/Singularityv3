@@ -115,7 +115,7 @@ const DecisionMapGraph: React.FC<Props> = ({
         const usableW = Math.max(1, width - padding * 2);
         const usableH = Math.max(1, height - padding * 2);
 
-        if (problemStructure?.primaryPattern === 'linear' && graphAnalysis?.longestChain && graphAnalysis.longestChain.length > 0) {
+        if ((problemStructure as any)?.primaryPattern === 'linear' && graphAnalysis?.longestChain && graphAnalysis.longestChain.length > 0) {
             const longestChain = graphAnalysis.longestChain;
             const chainPositions = new Map<string, number>();
             longestChain.forEach((id: string, idx: number) => chainPositions.set(id, idx));
@@ -133,7 +133,7 @@ const DecisionMapGraph: React.FC<Props> = ({
                     y: padding + (idx / Math.max(1, nodeIds.length - longestChain.length)) * usableH
                 });
             });
-        } else if (problemStructure?.primaryPattern === 'keystone') {
+        } else if ((problemStructure as any)?.primaryPattern === 'keystone') {
             const keystoneId = graphAnalysis?.hubClaim || null;
             if (keystoneId) {
                 targets.set(keystoneId, { x: width / 2, y: height / 2 });
@@ -151,7 +151,7 @@ const DecisionMapGraph: React.FC<Props> = ({
                     });
                 });
             }
-        } else if (problemStructure?.primaryPattern === 'settled' || (problemStructure as any)?.primaryPattern === 'contextual') {
+        } else if ((problemStructure as any)?.primaryPattern === 'settled' || (problemStructure as any)?.primaryPattern === 'contextual') {
             const centerX = width / 2;
             const centerY = height / 2;
             const radius = Math.min(usableW, usableH) * 0.25;
@@ -198,7 +198,7 @@ const DecisionMapGraph: React.FC<Props> = ({
         decisionMapGraphDbg("init", {
             claims: inputClaims.length,
             edges: inputEdges.length,
-            pattern: problemStructure?.primaryPattern || null,
+            pattern: problemStructure?.primary || null,
             confidence: problemStructure?.confidence ?? null,
             targets: targets.size,
         });
@@ -213,9 +213,9 @@ const DecisionMapGraph: React.FC<Props> = ({
         const isWideLayout = aspectRatio > 1.5;
         const nodePadding = 80; // Keep nodes away from edges (increased for larger spread)
 
-        const isLinear = problemStructure?.primaryPattern === 'linear' && targets.size > 0;
-        const isKeystone = problemStructure?.primaryPattern === 'keystone' && targets.size > 0;
-        // const isSettled = problemStructure?.primaryPattern === 'settled' || (problemStructure as any)?.primaryPattern === 'contextual';
+        const isLinear = (problemStructure as any)?.primaryPattern === 'linear' && targets.size > 0;
+        const isKeystone = (problemStructure as any)?.primaryPattern === 'keystone' && targets.size > 0;
+        // const isSettled = (problemStructure as any)?.primaryPattern === 'settled' || (problemStructure as any)?.primaryPattern === 'contextual';
 
         const simulation = d3.forceSimulation<GraphNode>(simNodes)
             .force('charge', d3.forceManyBody().strength(isLinear ? -700 : -1000))
@@ -808,7 +808,7 @@ const DecisionMapGraph: React.FC<Props> = ({
                                 )}
 
                                 {/* NEW: Chain position indicator for linear patterns */}
-                                {problemStructure?.primaryPattern === 'linear' && enriched?.chainDepth !== undefined && (
+                                {(problemStructure as any)?.primaryPattern === 'linear' && enriched?.chainDepth !== undefined && (
                                     <text
                                         y={-radius - 6}
                                         textAnchor="middle"

@@ -1,6 +1,7 @@
-import { AiTurn, GraphTopology, ProviderResponse, UserTurn, TurnMessage, isUserTurn, isAiTurn } from "../types";
+import { AiTurn, GraphTopology, ProviderResponse, UserTurn, TurnMessage, isUserTurn, isAiTurn, ParsedTheme, Claim, Edge } from "../types";
 import { LLM_PROVIDERS_CONFIG } from "../constants";
 import { getProviderName } from "./provider-helpers";
+import { parseUnifiedMapperOutput } from "../../shared/parsing-utils";
 
 // ============================================================================
 // MARKDOWN FORMATTING UTILITIES
@@ -31,22 +32,114 @@ export function formatAnalysisContextForMd(analysis: any, providerName: string =
     return md;
 }
 
+export function buildThemesFromClaims(claims: any[]): ParsedTheme[] {
+  if (!Array.isArray(claims) || claims.length === 0) return [];
+
+  const themesByName = new Map<string, ParsedTheme>();
+
+  const getThemeNameForClaim = (claim: any): string => {
+    switch (claim.type) {
+      case 'factual': return 'Facts';
+      case 'prescriptive': return 'Recommendations';
+      case 'conditional': return 'Conditions';
+      case 'contested': return 'Contested';
+      case 'speculative': return 'Possibilities';
+      default: return 'Positions';
+    }
+  };
+
+  for (const claim of claims) {
+    if (!claim) continue;
+    const themeName = getThemeNameForClaim(claim);
+    if (!themesByName.has(themeName)) {
+      themesByName.set(themeName, { name: themeName, options: [] });
+    }
+    const theme = themesByName.get(themeName)!;
+
+    const rawId = claim.id != null ? String(claim.id) : '';
+    const cleanId = rawId.replace(/^claim_?/i, "").trim();
+    const formattedId = cleanId ? `#${cleanId}` : "";
+    const rawLabel = typeof claim.label === 'string' ? claim.label : '';
+
+    const titleParts: string[] = [];
+    if (formattedId) titleParts.push(formattedId);
+    if (rawLabel.trim()) titleParts.push(rawLabel.trim());
+    const title = titleParts.length > 0 ? titleParts.join(' ') : 'Claim';
+
+    const description = typeof claim.text === 'string' ? claim.text : '';
+    const supporters = Array.isArray(claim.supporters) ? claim.supporters : [];
+
+    theme.options.push({
+      title,
+      description,
+      citations: supporters,
+    });
+  }
+
+  return Array.from(themesByName.values());
+}
+
+export function formatClaimsAsText(claims: Claim[], edges: Edge[]): string {
+    const lines: string[] = ['#### Positions\n'];
+    
+    for (const claim of claims) {
+      // Title
+      lines.push(`**${claim.label}**`);
+      
+      // Description
+      lines.push(claim.text);
+      
+      // Relationships (inline, no hierarchy language)
+      const challenges = claim.challenges 
+        ? claims.find(c => c.id === claim.challenges)?.label
+        : null;
+      
+      if (challenges) {
+        lines.push(`↳ *Challenges: ${challenges}*`);
+      }
+      
+      const dependsOn = edges
+        .filter(e => e.to === claim.id && e.type === 'prerequisite')
+        .map(e => claims.find(c => c.id === e.from)?.label)
+        .filter(Boolean);
+      
+      if (dependsOn.length > 0) {
+        lines.push(`↳ *Depends on: ${dependsOn.join(', ')}*`);
+      }
+      
+      const conflictsWith = edges
+        .filter(e => e.type === 'conflicts' && (e.from === claim.id || e.to === claim.id))
+        .map(e => {
+          const otherId = e.from === claim.id ? e.to : e.from;
+          return claims.find(c => c.id === otherId)?.label;
+        })
+        .filter(Boolean);
+      
+      if (conflictsWith.length > 0) {
+        lines.push(`↳ *Conflicts with: ${conflictsWith.join(', ')}*`);
+      }
+      
+      lines.push(''); // blank line between claims
+    }
+    
+    return lines.join('\n');
+}
+
 export function formatDecisionMapForMd(
     narrative: string,
-    options: string | null,
+    claims: Claim[],
+    edges: Edge[],
     graphTopology: GraphTopology | null
 ): string {
     let md = "### The Decision Landscape\n\n";
 
     if (narrative) {
-        // Convert narrative blockquotes or ensure they stand out
-        // If narrative already uses blockquotes, keep them. If not, maybe quote the whole thing?
-        // For now, raw narrative is usually fine if it's structured.
         md += `${narrative}\n\n`;
     }
 
-    if (options) {
-        md += `#### Options\n\n${options}\n\n`;
+    if (claims && claims.length > 0) {
+        md += formatClaimsAsText(claims, edges);
+        md += '\n';
     }
 
     if (graphTopology) {
@@ -78,7 +171,7 @@ export function formatTurnForMd(
     userPrompt: string | null,
     singularityText: string | null,
     singularityProviderId: string | undefined,
-    decisionMap: { narrative?: string; options?: string | null; topology?: GraphTopology | null } | null,
+    decisionMap: { narrative?: string; claims?: Claim[]; edges?: Edge[]; options?: string | null; topology?: GraphTopology | null } | null,
     batchResponses: Record<string, ProviderResponse>,
     includePrompt: boolean = true
 ): string {
@@ -102,7 +195,8 @@ export function formatTurnForMd(
     if (decisionMap) {
         md += formatDecisionMapForMd(
             decisionMap.narrative || "",
-            decisionMap.options || null,
+            decisionMap.claims || [],
+            decisionMap.edges || [],
             decisionMap.topology || null
         );
     }
@@ -166,7 +260,7 @@ export function formatSessionForMarkdown(fullSession: { title: string, turns: Tu
         } else if (isAiTurn(turn)) {
             // Found AI turn. Render the pair.
             const aiTurn = turn as AiTurn;
-            let decisionMap: { narrative?: string; options?: string | null; topology?: GraphTopology | null } | null = null;
+            let decisionMap: { narrative?: string; claims?: Claim[]; edges?: Edge[]; options?: string | null; topology?: GraphTopology | null } | null = null;
 
             // Resolve effective user prompt
             // If aiTurn.userTurnId matches lastUserTurn.id, use that.
@@ -212,11 +306,16 @@ export function formatSessionForMarkdown(fullSession: { title: string, turns: Tu
                     const meta = (latest as any).meta || {};
                     const fromMeta = typeof meta.rawMappingText === "string" ? meta.rawMappingText : "";
                     const fromText = typeof latest.text === "string" ? latest.text : "";
-                    const narrative = fromMeta && fromMeta.length >= fromText.length ? fromMeta : fromText;
+                    const rawText = fromMeta && fromMeta.length >= fromText.length ? fromMeta : fromText;
+
+                    const parsed = parseUnifiedMapperOutput(rawText);
+                    const narrative = parsed.narrative;
+
                     decisionMap = {
                         narrative,
-                        options: meta.allAvailableOptions || null,
-                        topology: meta.graphTopology || null
+                        claims: parsed.claims || [],
+                        edges: parsed.edges || [],
+                        topology: meta.graphTopology || parsed.topology || null
                     };
                 }
             }

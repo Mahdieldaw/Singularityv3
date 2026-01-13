@@ -1,22 +1,15 @@
 import { Claim, Edge, MapperArtifact, ParsedMapperOutput, GraphTopology, GraphNode, GraphEdge, ConciergeDelta } from './contract';
 
 /**
- * Shared Parsing Utilities for ALL_AVAILABLE_OPTIONS and GRAPH_TOPOLOGY
+ * Shared Parsing Utilities
  * 
- * Single source of truth for parsing mapping responses.
- * Used by both backend (workflow-engine.js) and frontend (DecisionMapSheet.tsx).
+ * Single source of truth for parsing mapping responses and concierge outputs.
+ * Cleaned up to support V3 Unified Output (<map>, <narrative>) and Concierge signals.
  */
 
-// ============================================================================
-// TYPES
-// ============================================================================
-
-// Graph types imported from contract
-
-
-// ============================================================================
+// ============================================================================ 
 // CENTRALIZED JSON EXTRACTION
-// ============================================================================
+// ============================================================================ 
 
 export function repairJson(text: string): string {
     const input = String(text ?? '');
@@ -321,488 +314,7 @@ export function extractJsonObject(text: string): { json: any | null; path: strin
     return { json: null, path: 'none' };
 }
 
-// ============================================================================
-// NORMALIZATION
-// ============================================================================
-
-
-/**
- * Normalize markdown escapes and unicode variants
- */
-export function normalizeText(text: string): string {
-    return text
-        .replace(/\\=/g, '=')
-        .replace(/\\_/g, '_')
-        .replace(/\\\*/g, '*')
-        .replace(/\\-/g, '-')
-        .replace(/[＝═⁼˭꓿﹦]/g, '=')
-        .replace(/[‗₌]/g, '=')
-        .replace(/\u2550/g, '=')
-        .replace(/\uFF1D/g, '=');
-}
-
-export function parseProseGraphTopology(text: string): GraphTopology | null {
-    if (!text) return null;
-
-    const nodes: GraphNode[] = [];
-    const edges: GraphEdge[] = [];
-    const nodeMap = new Map<string, string>();
-    let nodeCounter = 1;
-
-    const normalizeLabel = (label: string): string => {
-        return label
-            .trim()
-            .replace(/^\*\*|\*\*$/g, '')
-            .replace(/^["']|["']$/g, '')
-            .trim();
-    };
-
-    const getOrCreateNodeId = (rawLabel: string): string => {
-        const label = normalizeLabel(rawLabel);
-        if (!label) return '';
-        const existing = nodeMap.get(label);
-        if (existing) return existing;
-
-        const id = `opt_${nodeCounter++}`;
-        nodeMap.set(label, id);
-        nodes.push({
-            id,
-            label,
-            theme: '',
-            supporters: [],
-            support_count: 1,
-        });
-        return id;
-    };
-
-    const edgePatterns: RegExp[] = [
-        /\*\*([^*]+)\*\*\s*--\[(\w+)\]-->\s*\*\*([^*\n]+)\*\*/g,
-        /^[-*•]?\s*([A-Z][^-\n]*?)\s*--\[(\w+)\]-->\s*([^\n]+)/gm,
-        /["']([^"']+)["']\s*--\[(\w+)\]-->\s*["']([^"'\n]+)["']/g,
-        /([^-\n\[\]]{3,}?)\s*--\[(\w+)\]-->\s*([^\n]+)/g,
-    ];
-
-    for (const pattern of edgePatterns) {
-        pattern.lastIndex = 0;
-        let match: RegExpExecArray | null;
-        while ((match = pattern.exec(text)) !== null) {
-            const sourceLabel = String(match[1] || '').trim();
-            const edgeType = String(match[2] || '').toLowerCase();
-            const targetLabel = String(match[3] || '').trim();
-
-            const sourceId = getOrCreateNodeId(sourceLabel);
-            const targetId = getOrCreateNodeId(targetLabel);
-
-            if (!sourceId || !targetId || !edgeType) continue;
-
-            const exists = edges.some((e) => e.source === sourceId && e.target === targetId && e.type === edgeType);
-            if (exists) continue;
-
-            edges.push({
-                source: sourceId,
-                target: targetId,
-                type: edgeType as any,
-                reason: '',
-            });
-        }
-    }
-
-    if (nodes.length === 0 || edges.length === 0) return null;
-    return { nodes, edges };
-}
-
-// ============================================================================
-// GRAPH_TOPOLOGY PARSING
-// ============================================================================
-
-/**
- * Pattern to match GRAPH_TOPOLOGY headers in various formats
- */
-const GRAPH_TOPOLOGY_PATTERN = /\n#{1,3}\s*[^\w\n].*?GRAPH[_\s]*TOPOLOGY|\n?(?:🔬|📊|🗺️)*\s*={0,}GRAPH[_\s]*TOPOLOGY={0,}|\n?(?:🔬|📊|🗺️)\s*GRAPH[_\s]*TOPOLOGY|={3,}\s*GRAPH[_\s]*TOPOLOGY\s*={3,}/i;
-
-/**
- * Find position of GRAPH_TOPOLOGY header in text
- */
-export function findGraphTopologyPosition(text: string): number {
-    const match = text.match(GRAPH_TOPOLOGY_PATTERN);
-    return match && typeof match.index === 'number' ? match.index : -1;
-}
-
-/**
- * Extract GRAPH_TOPOLOGY JSON from text and return cleaned text
- */
-export function extractGraphTopologyAndStrip(text: string): { text: string; topology: GraphTopology | null } {
-    if (!text || typeof text !== 'string') return { text: text || '', topology: null };
-
-    const normalized = normalizeText(text);
-    const match = normalized.match(GRAPH_TOPOLOGY_PATTERN);
-
-    if (!match || typeof match.index !== 'number') {
-        return { text: normalized, topology: parseProseGraphTopology(normalized) };
-    }
-
-    const start = match.index + match[0].length;
-    let rest = normalized.slice(start).trim();
-
-    // Handle code block wrapped JSON
-    const codeBlockMatch = rest.match(/^```(?:json)?\s*\n?([\s\S]*?)\n?```/);
-    if (codeBlockMatch) {
-        rest = codeBlockMatch[1].trim();
-    }
-
-    // Find JSON object
-    let i = 0;
-    while (i < rest.length && rest[i] !== '{') i++;
-    if (i >= rest.length) {
-        const prose = parseProseGraphTopology(rest);
-        if (prose) return { text: normalized.slice(0, match.index).trim(), topology: prose };
-        return { text: normalized.slice(0, match.index).trim(), topology: null };
-    }
-
-    // Parse JSON with balanced braces
-    let depth = 0;
-    let inStr = false;
-    let esc = false;
-
-    for (let j = i; j < rest.length; j++) {
-        const ch = rest[j];
-        if (inStr) {
-            if (esc) {
-                esc = false;
-            } else if (ch === '\\') {
-                esc = true;
-            } else if (ch === '"') {
-                inStr = false;
-            }
-            continue;
-        }
-        if (ch === '"') {
-            inStr = true;
-            continue;
-        }
-        if (ch === '{') {
-            depth++;
-        } else if (ch === '}') {
-            depth--;
-            if (depth === 0) {
-                try {
-                    let jsonText = rest.slice(i, j + 1);
-                    // Fix unquoted S in supporters arrays
-                    jsonText = jsonText.replace(/("supporters"\s*:\s*\[)\s*S\s*([,\]])/g, '$1"S"$2');
-                    const topology = JSON.parse(jsonText);
-                    const before = normalized.slice(0, match.index).trim();
-                    const after = rest.slice(j + 1).trim();
-                    const newText = after ? `${before}\n${after}` : before;
-                    return { text: newText, topology };
-                } catch {
-                    break;
-                }
-            }
-        }
-    }
-
-    const prose = parseProseGraphTopology(rest);
-    if (prose) {
-        return { text: normalized.slice(0, match.index).trim(), topology: prose };
-    }
-
-    return { text: normalized.slice(0, match.index).trim(), topology: null };
-}
-
-// ============================================================================
-// ALL_AVAILABLE_OPTIONS PARSING
-// ============================================================================
-
-/**
- * Patterns to match ALL_AVAILABLE_OPTIONS headers
- */
-const OPTIONS_PATTERNS = [
-    // Markdown H2/H3 header with any emoji prefix: ## 🛠️ ALL_AVAILABLE_OPTIONS
-    { re: /\n#{1,3}\s*[^\w\n].*?ALL[_\s]*AVAILABLE[_\s]*OPTIONS.*?\n/i, minPosition: 0.15 },
-
-    // Emoji-prefixed format (🛠️ ALL_AVAILABLE_OPTIONS) - standalone
-    { re: /\n?(?:🛠️|🔧|⚙️|🛠)\s*ALL[_\s]*AVAILABLE[_\s]*OPTIONS\s*\n/i, minPosition: 0.15 },
-
-    // Standard delimiter with === or --- or unicode equivalent wrapper
-    { re: /\n?[=\-─━═＝]{2,}\s*ALL[_\s]*AVAILABLE[_\s]*OPTIONS\s*[=\-─━═＝]{2,}\n?/i, minPosition: 0 },
-    { re: /\n?[=\-─━═＝]{2,}\s*ALL[_\s]*OPTIONS\s*[=\-─━═＝]{2,}\n?/i, minPosition: 0 },
-
-    // Markdown wrapped variants or multi-char blocks
-    { re: /\n\*\*\s*[=\-─━═＝]{2,}\s*ALL[_\s]*AVAILABLE[_\s]*OPTIONS\s*[=\-─━═＝]{2,}\s*\*\*\n?/i, minPosition: 0 },
-    { re: /\n\*{0,2}[=\-─━═＝]{3,}\s*ALL[_\s]*AVAILABLE[_\s]*OPTIONS\s*[=\-─━═＝]{3,}\*{0,2}\n/i, minPosition: 0 },
-    { re: /\n###\s*[=\-─━═＝]{2,}\s*ALL[_\s]*AVAILABLE[_\s]*OPTIONS\s*[=\-─━═＝]{2,}\n?/i, minPosition: 0 },
-
-    // Heading styles
-    { re: /\n\*\*\s*All\s+Available\s+Options:?\s*\*\*\n/i, minPosition: 0.25 },
-    { re: /\n##\s+All\s+Available\s+Options:?\n/i, minPosition: 0.25 },
-    { re: /\n###\s+All\s+Available\s+Options:?\n/i, minPosition: 0.25 },
-
-    // Looser patterns
-    { re: /\nAll\s+Available\s+Options:\n/i, minPosition: 0.3 },
-    { re: /\n\*\*\s*Options:?\s*\*\*\n/i, minPosition: 0.3 },
-    { re: /\n##\s+Options:?\n/i, minPosition: 0.3 },
-];
-
-/**
- * Clean narrative text by removing trailing separators and leftover header fragments
- */
-export function cleanNarrativeText(text: string): string {
-    return text
-        .replace(/\n---+\s*$/, '')
-        .replace(/\n#{1,3}\s*(?:🛠️|🔧|⚙️|🛠)?\s*ALL[_\s]*AVAILABLE[_\s]*OPTIONS.*$/i, '')
-        .replace(/\n#{1,3}\s*(?:🛠️|🔧|⚙️|🛠)\s*$/i, '')
-        .replace(/(?:🛠️|🔧|⚙️|🛠)\s*$/i, '')
-        .trim();
-}
-
-/**
- * Clean options text by removing trailing GRAPH_TOPOLOGY header
- */
-export function cleanOptionsText(text: string): string {
-    const graphTopoPos = findGraphTopologyPosition(text);
-    if (graphTopoPos > 0) {
-        return text.slice(0, graphTopoPos).trim();
-    }
-    return text.trim();
-}
-
-/**
- * Extract ALL_AVAILABLE_OPTIONS from text and return cleaned narrative
- */
-export function extractOptionsAndStrip(text: string): { text: string; options: string | null } {
-    if (!text || typeof text !== 'string') return { text: text || '', options: null };
-
-    let normalized = normalizeText(text);
-
-    // First, find and strip GRAPH_TOPOLOGY section
-    const graphTopoStart = findGraphTopologyPosition(normalized);
-    if (graphTopoStart > 0) {
-        normalized = normalized.slice(0, graphTopoStart).trim();
-    }
-
-    // Find best matching options delimiter
-    let bestMatch: { index: number; length: number } | null = null;
-    let bestScore = -1;
-
-    for (const pattern of OPTIONS_PATTERNS) {
-        const match = normalized.match(pattern.re);
-        if (match && typeof match.index === 'number') {
-            const position = match.index / normalized.length;
-            if (position < pattern.minPosition) continue;
-            const score = position * 100;
-            if (score > bestScore) {
-                bestScore = score;
-                bestMatch = { index: match.index, length: match[0].length };
-            }
-        }
-    }
-
-    if (!bestMatch) return { text: normalized, options: null };
-
-    const afterDelimiter = normalized.substring(bestMatch.index + bestMatch.length).trim();
-    const listPreview = afterDelimiter.slice(0, 400);
-
-    // Validate that what follows looks like structured content
-    const hasListStructure = /^\s*[-*•]\s+|\n\s*[-*•]\s+|^\s*\d+\.\s+|\n\s*\d+\.\s+|^\s*\*\*[^*]+\*\*|^\s*Theme\s*:|^\s*###?\s+|^\s*[A-Z][^:\n]{2,}:|(?:🌀|🗿|😀|🙏|🚀|🛩)/i.test(listPreview);
-    const hasSubstantiveContent = afterDelimiter.length > 50 && (afterDelimiter.includes('\n') || afterDelimiter.includes(':'));
-
-    if (!hasListStructure && !hasSubstantiveContent) {
-        return { text: normalized, options: null };
-    }
-
-    const narrative = cleanNarrativeText(normalized.substring(0, bestMatch.index));
-    const options = cleanOptionsText(afterDelimiter);
-
-    return { text: narrative, options: options || null };
-}
-
-/**
- * Parse mapping response - convenience function that extracts both options and topology
- */
-export function parseMappingResponse(response: string | null | undefined): {
-    narrative: string;
-    options: string | null;
-    optionTitles: string[];
-    graphTopology: any | null;
-} {
-    if (!response) return { narrative: '', options: null, optionTitles: [], graphTopology: null };
-
-    const hasUnifiedTags =
-        response.includes('<map>') ||
-        response.includes('<narrative>') ||
-        response.includes('\\<map\\>') ||
-        response.includes('\\<narrative\\>') ||
-        /#{1,6}\s*THE\s*(?:MAP|NARRATIVE)\b/i.test(response) ||
-        /#{1,3}\s*(?:\d+\.)?\s*\\?<(?:map|narrative)\\?>/i.test(response) ||
-        /#{1,3}\s*(?:\d+\.)?\s*(?:map|narrative)\s*\n/i.test(response) ||
-        /\*\*(?:map|narrative)\*\*/i.test(response) ||
-        response.includes('<narrative_summary>') ||
-        response.includes('<options_inventory>') ||
-        response.includes('<mapper_artifact>') ||
-        response.includes('<graph_topology>') ||
-        response.includes('\\<narrative_summary\\>') ||
-        response.includes('\\<options_inventory\\>') ||
-        response.includes('\\<mapper_artifact\\>') ||
-        response.includes('\\<graph_topology\\>') ||
-        /#{1,3}\s*(?:\d+\.)?\s*\\?<(?:narrative_summary|options_inventory|mapper_artifact|graph_topology)\\?>/i.test(response) ||
-        /#{1,3}\s*(?:\d+\.)?\s*(?:narrative[_\s]*summary|options[_\s]*inventory|mapper[_\s]*artifact|graph[_\s]*topology)\s*\n/i.test(response) ||
-        /\*\*(?:narrative[_\s]*summary|options[_\s]*inventory|mapper[_\s]*artifact|graph[_\s]*topology)\*\*/i.test(response);
-
-    if (hasUnifiedTags) {
-        const unified = parseUnifiedMapperOutput(response);
-        const optionTitles = unified.options ? parseOptionTitles(unified.options) : [];
-        return {
-            narrative: unified.narrative || response, // Fallback to raw if narrative tag is missing
-            options: unified.options ?? null,
-            optionTitles,
-            graphTopology: unified.topology,
-        };
-    }
-
-    // First extract graph topology
-    const { text: textWithoutTopology, topology } = extractGraphTopologyAndStrip(response);
-
-    // Then extract options from remaining text
-    const { text: narrative, options } = extractOptionsAndStrip(textWithoutTopology);
-
-    // Extract option titles if options were found
-    const optionTitles = options ? parseOptionTitles(options) : [];
-
-    return {
-        narrative: cleanNarrativeText(narrative),
-        options: options ? cleanOptionsText(options) : null,
-        optionTitles,
-        graphTopology: topology,
-    };
-}
-
-/**
- * Extract bold titles from options text
- */
-export function parseOptionTitles(optionsText: string): string[] {
-    if (!optionsText) return [];
-    const titles: string[] = [];
-    const lines = optionsText.split('\n');
-    for (const line of lines) {
-        // Match: **Bold Title** (with optional colon/dash after)
-        const match = line.match(/\*\*([^*]+)\*\*/);
-        if (match) {
-            const title = match[1].trim();
-            // Avoid duplicates
-            if (title && !titles.includes(title)) {
-                titles.push(title);
-            }
-        }
-    }
-    return titles;
-}
-
-// ============================================================================
-// MAPPER ARTIFACT PARSING
-// ============================================================================
-
-/**
- * Create empty MapperArtifact
- */
-export function createEmptyMapperArtifact(): MapperArtifact {
-    return {
-        claims: [],
-        edges: [],
-        ghosts: [],
-        query: "",
-        turn: 0,
-        timestamp: new Date().toISOString(),
-        model_count: 0,
-
-    };
-}
-
-const NARRATIVE_SUMMARY_PATTERNS: RegExp[] = [
-    /<narrative_summary>([\s\S]*?)<\/narrative_summary>/i,
-    /\\<narrative_summary\\>([\s\S]*?)\\<\/narrative_summary\\>/i,
-    /#{1,3}\s*(?:\d+\.)?\s*\\?<narrative_summary\\?>\s*\n([\s\S]*?)(?=#{1,3}\s*(?:\d+\.)?\s*\\?<|$)/i,
-    /#{1,3}\s*(?:\d+\.)?\s*\\?<narrative_summary\\?>\s*\n([\s\S]*?)\\?<\/narrative_summary\\?>/i,
-    /#{1,3}\s*(?:\d+\.)?\s*narrative[_\s]*summary\s*\n([\s\S]*?)(?=#{1,3}\s*(?:\d+\.)?\s*(?:options|mapper|graph)|$)/i,
-    /\*\*narrative[_\s]*summary\*\*[:\s]*\n([\s\S]*?)(?=\*\*(?:options|mapper|graph)|#{1,3}|$)/i,
-];
-
-const OPTIONS_INVENTORY_PATTERNS: RegExp[] = [
-    /<options_inventory>([\s\S]*?)<\/options_inventory>/i,
-    /\\<options_inventory\\>([\s\S]*?)\\<\/options_inventory\\>/i,
-    /#{1,3}\s*(?:\d+\.)?\s*\\?<options_inventory\\?>\s*\n([\s\S]*?)(?=#{1,3}\s*(?:\d+\.)?\s*\\?<|$)/i,
-    /#{1,3}\s*(?:\d+\.)?\s*\\?<options_inventory\\?>\s*\n([\s\S]*?)\\?<\/options_inventory\\?>/i,
-    /#{1,3}\s*(?:\d+\.)?\s*options[_\s]*inventory\s*\n([\s\S]*?)(?=#{1,3}\s*(?:\d+\.)?\s*(?:narrative|mapper|graph)|$)/i,
-    /\*\*options[_\s]*inventory\*\*[:\s]*\n([\s\S]*?)(?=\*\*(?:narrative|mapper|graph)|#{1,3}|$)/i,
-];
-
-const MAPPER_ARTIFACT_PATTERNS: RegExp[] = [
-    /<mapper_artifact>([\s\S]*?)<\/mapper_artifact>/i,
-    /\\<mapper_artifact\\>([\s\S]*?)\\<\/mapper_artifact\\>/i,
-    /#{1,3}\s*(?:\d+\.)?\s*\\?<mapper_artifact\\?>\s*\n([\s\S]*?)(?=#{1,3}\s*(?:\d+\.)?\s*\\?<|$)/i,
-    /#{1,3}\s*(?:\d+\.)?\s*\\?<mapper_artifact\\?>\s*\n([\s\S]*?)(?:\\?<\/mapper_artifact\\?>|(?=#{1,3}\s*(?:\d+\.)?\s*(?:graph|$)))/i,
-    /#{1,3}\s*(?:\d+\.)?\s*mapper[_\s]*artifact\s*\n([\s\S]*?)(?=#{1,3}\s*(?:\d+\.)?\s*(?:narrative|options|graph)|$)/i,
-    /\*\*mapper[_\s]*artifact\*\*[:\s]*\n([\s\S]*?)(?=\*\*(?:narrative|options|graph)|#{1,3}|$)/i,
-    /mapper[_\s]*artifact[:\s]*\n*```(?:json)?\s*\n?(\{[\s\S]*?"consensus"[\s\S]*?"claims"[\s\S]*?\})\s*\n?```/i,
-];
-
-const GRAPH_TOPOLOGY_TAG_PATTERNS: RegExp[] = [
-    /<graph_topology>([\s\S]*?)<\/graph_topology>/i,
-    /\\<graph_topology\\>([\s\S]*?)\\<\/graph_topology\\>/i,
-    /#{1,3}\s*(?:\d+\.)?\s*\\?<graph_topology\\?>\s*\n([\s\S]*?)(?=#{1,3}\s*(?:\d+\.)?\s*\\?<|$)/i,
-    /#{1,3}\s*(?:\d+\.)?\s*\\?<graph_topology\\?>\s*\n([\s\S]*?)\\?<\/graph_topology\\?>/i,
-    /#{1,3}\s*(?:\d+\.)?\s*graph[_\s]*topology\s*\n([\s\S]*?)(?=#{1,3}\s|$)/i,
-    /\*\*graph[_\s]*topology\*\*[:\s]*\n([\s\S]*?)(?=\*\*|#{1,3}|$)/i,
-];
-
-function tryPatterns(text: string, patterns: RegExp[]): string | null {
-    for (const pattern of patterns) {
-        const match = text.match(pattern);
-        if (match?.[1]?.trim()) return match[1].trim();
-    }
-    return null;
-}
-
-interface PatternMatch {
-    content: string;
-    patternIndex: number;
-    position: number;
-    length: number;
-}
-
-function bestPatternMatchFromSources(sources: Array<string | null | undefined>, patterns: RegExp[]): PatternMatch | null {
-    let best: { match: PatternMatch; score: number } | null = null;
-
-    for (let s = 0; s < sources.length; s++) {
-        const src = sources[s];
-        if (!src) continue;
-
-        for (let p = 0; p < patterns.length; p++) {
-            const re = patterns[p];
-            const cloned = new RegExp(re.source, re.flags);
-            const m = cloned.exec(src);
-            if (!m || !m[1] || !String(m[1]).trim()) continue;
-            const content = String(m[1]).trim();
-
-            const position = typeof (m as any).index === 'number' ? (m as any).index : src.indexOf(m[0] || '');
-            const length = content.length;
-
-            let score = (patterns.length - p) * 1_000_000 + length;
-            if (length > src.length * 0.9) score -= 500_000;
-            score -= Math.max(0, position);
-
-            if (!best || score > best.score) {
-                best = {
-                    match: { content, patternIndex: p, position: Math.max(0, position), length },
-                    score,
-                };
-            }
-        }
-    }
-
-    return best ? best.match : null;
-}
-
-function extractJsonFromContent(content: string | null): any | null {
+export function extractJsonFromContent(content: string | null): any | null {
     if (!content) return null;
 
     const extracted = extractJsonObject(content);
@@ -817,7 +329,7 @@ function extractJsonFromContent(content: string | null): any | null {
     if (firstBrace !== -1 && lastBrace > firstBrace) {
         try {
             return JSON.parse(jsonText.substring(firstBrace, lastBrace + 1));
-        } catch { }
+        } catch { } 
     }
 
     try {
@@ -827,10 +339,22 @@ function extractJsonFromContent(content: string | null): any | null {
     }
 }
 
-/**
- * Parse Unified Mapper Output
- * Extracts content from <raw_narrative>, <options_inventory>, <mapper_artifact>, and <graph_topology> tags.
- */
+// ============================================================================ 
+// MAPPER ARTIFACT PARSING
+// ============================================================================ 
+
+export function createEmptyMapperArtifact(): MapperArtifact {
+    return {
+        claims: [],
+        edges: [],
+        ghosts: [],
+        query: "",
+        turn: 0,
+        timestamp: new Date().toISOString(),
+        model_count: 0,
+    };
+}
+
 export function extractAnchorPositions(narrative: string): Array<{ label: string; id: string; position: number }> {
     const anchors: Array<{ label: string; id: string; position: number }> = [];
     const pattern = /\*\*\[([^\]|]+)\|([^\]]+)\]\*\*|\[([^\]|]+)\|([^\]]+)\]/g;
@@ -852,7 +376,6 @@ export function extractAnchorPositions(narrative: string): Array<{ label: string
 /**
  * Parse Unified Mapper Output (V3)
  * Extracts content from <narrative> and <map> tags.
- * Falls back to legacy parsing if those tags are absent.
  */
 export function parseUnifiedMapperOutput(text: string): ParsedMapperOutput {
     if (!text) {
@@ -965,630 +488,165 @@ export function parseUnifiedMapperOutput(text: string): ParsedMapperOutput {
                 map = extracted;
                 foundV3Map = true;
             }
-        } catch { }
+        } catch { } 
     }
 
-    if (foundV3Map || narrativeMatch || rawNarrativeMatch || narrativeFromHeading) {
-        let narrative = "";
-        const candidates: string[] = [];
-        if (narrativeMatch && narrativeMatch[1]) candidates.push(String(narrativeMatch[1]).trim());
-        if (rawNarrativeMatch && rawNarrativeMatch[1]) candidates.push(String(rawNarrativeMatch[1]).trim());
-        if (narrativeFromHeading) {
-            candidates.push(
-                narrativeFromHeading
-                    .replace(/<narrative\b[^>]*>/i, '')
-                    .replace(/<\/narrative\s*>/i, '')
-                    .replace(/<raw_narrative\b[^>]*>/i, '')
-                    .replace(/<\/raw_narrative\s*>/i, '')
-                    .trim()
-            );
+    let narrative = "";
+    const candidates: string[] = [];
+    if (narrativeMatch && narrativeMatch[1]) candidates.push(String(narrativeMatch[1]).trim());
+    if (rawNarrativeMatch && rawNarrativeMatch[1]) candidates.push(String(rawNarrativeMatch[1]).trim());
+    if (narrativeFromHeading) {
+        candidates.push(
+            narrativeFromHeading
+                .replace(/<narrative\b[^>]*>/i, '')
+                .replace(/<\/narrative\s*>/i, '')
+                .replace(/<raw_narrative\b[^>]*>/i, '')
+                .replace(/<\/raw_narrative\s*>/i, '')
+                .trim()
+        );
+    }
+    candidates.sort((a, b) => b.length - a.length);
+    narrative = candidates.find((c) => c && c.trim()) || "";
+
+    if (!narrative) {
+        // Fallback: if map is found but no narrative tag, assume rest is narrative
+        narrative = normalizedText.replace(/<map\b[^>]*>[\s\S]*?<\/map\s*>/i, '').trim();
+        if (mapSection) {
+            narrative = (normalizedText.slice(0, mapSection.start) + normalizedText.slice(mapSection.end)).trim();
         }
-        candidates.sort((a, b) => b.length - a.length);
-        narrative = candidates.find((c) => c && c.trim()) || "";
-
-        if (!narrative) {
-            // Fallback: if map is found but no narrative tag, assume rest is narrative
-            narrative = normalizedText.replace(/<map\b[^>]*>[\s\S]*?<\/map\s*>/i, '').trim();
-            if (mapSection) {
-                narrative = (normalizedText.slice(0, mapSection.start) + normalizedText.slice(mapSection.end)).trim();
-            }
-        }
-
-        const anchors = extractAnchorPositions(narrative);
-
-        const normalizeClaimType = (t: any): Claim["type"] => {
-            const v = String(t || "").toLowerCase();
-            if (v === "factual" || v === "prescriptive" || v === "conditional" || v === "contested" || v === "speculative") {
-                return v as Claim["type"];
-            }
-            return "speculative";
-        };
-
-        const normalizeClaimRole = (r: any): Claim["role"] => {
-            const v = String(r || "").toLowerCase();
-            if (v === "anchor" || v === "branch" || v === "challenger" || v === "supplement") {
-                return v as Claim["role"];
-            }
-            return "branch";
-        };
-
-        const normalizedClaims: Claim[] = Array.isArray((map as any).claims)
-            ? (map as any).claims
-                .filter((c: any) => c && (c.id || c.label))
-                .map((c: any): Claim => {
-                    const role = normalizeClaimRole(c.role);
-                    return {
-                        id: String(c.id ?? ""),
-                        label: String(c.label ?? ""),
-                        text: String(c.text ?? ""),
-                        supporters: Array.isArray(c.supporters) ? c.supporters.filter((s: any) => typeof s === "number") : [],
-                        type: normalizeClaimType(c.type),
-                        role,
-                        challenges: role === "challenger" && typeof c.challenges === "string" ? c.challenges : null,
-                        ...(typeof c.quote === "string" ? { quote: c.quote } : {}),
-                        ...(typeof c.support_count === "number" ? { support_count: c.support_count } : {}),
-                        ...(typeof c.originalId === "string" ? { originalId: c.originalId } : {}),
-                    };
-                })
-                .filter((c: any) => c.id && c.label)
-            : [];
-
-        const normalizedEdges: Edge[] = Array.isArray((map as any).edges)
-            ? (map as any).edges
-                .filter((e: any) => e && (e.from || e.to))
-                .map((e: any) => ({
-                    from: String(e.from ?? ""),
-                    to: String(e.to ?? ""),
-                    type:
-                        e.type === "supports" || e.type === "conflicts" || e.type === "tradeoff" || e.type === "prerequisite"
-                            ? e.type
-                            : "supports",
-                }))
-                .filter((e: any) => e.from && e.to)
-            : [];
-
-        const normalizedGhosts: string[] | null =
-            (map as any).ghosts == null
-                ? null
-                : Array.isArray((map as any).ghosts)
-                    ? (map as any).ghosts.map((g: any) => String(g)).filter((g: any) => g && g.trim())
-                    : [String((map as any).ghosts)].filter((g: any) => g && g.trim());
-
-        // Auto-generate topology from map for compatibility
-        let topology: GraphTopology | null = null;
-        if (normalizedClaims.length > 0 || normalizedEdges.length > 0) {
-            topology = {
-                nodes: normalizedClaims.map((c: any) => ({
-                    id: c.id,
-                    label: c.label,
-                    theme: c.type,
-                    supporters: Array.isArray(c.supporters) ? c.supporters.filter((s: any) => typeof s === 'number') : [],
-                    support_count: (c.supporters?.length || 0)
-                })),
-                edges: normalizedEdges.map((e: any) => ({
-                    source: e.from,
-                    target: e.to,
-                    type: e.type,
-                    reason: e.type
-                }))
-            };
-        }
-
-        const artifact = {
-            ...createEmptyMapperArtifact(),
-            claims: normalizedClaims,
-            edges: normalizedEdges,
-            ghosts: normalizedGhosts
-        };
-
-        return {
-            claims: normalizedClaims,
-            edges: normalizedEdges,
-            ghosts: normalizedGhosts,
-            narrative,
-            map: { claims: normalizedClaims, edges: normalizedEdges, ghosts: normalizedGhosts },
-            anchors,
-            topology,
-            options: null,
-            artifact
-        };
     }
 
-    // 2. Legacy Fallback
-    const extractWithPatterns = (patterns: RegExp[]): string | null => {
-        const best = bestPatternMatchFromSources([normalizedText, text], patterns);
-        if (best?.content) return best.content;
-        const first = tryPatterns(normalizedText, patterns);
-        if (first) return first;
-        return tryPatterns(text, patterns);
+    const anchors = extractAnchorPositions(narrative);
+
+    const normalizeClaimType = (t: any): Claim["type"] => {
+        const v = String(t || "").toLowerCase();
+        if (v === "factual" || v === "prescriptive" || v === "conditional" || v === "contested" || v === "speculative") {
+            return v as Claim["type"];
+        }
+        return "speculative";
     };
 
-    const narrativeSummary = extractWithPatterns(NARRATIVE_SUMMARY_PATTERNS);
-    const optionsInventory = extractWithPatterns(OPTIONS_INVENTORY_PATTERNS);
-    const mapperArtifactRaw = extractWithPatterns(MAPPER_ARTIFACT_PATTERNS);
-    const graphTopologyRaw = extractWithPatterns(GRAPH_TOPOLOGY_TAG_PATTERNS);
-
-    const empty = createEmptyMapperArtifact();
-
-    let artifact: MapperArtifact | null = null;
-    if (mapperArtifactRaw) {
-        const parsed = extractJsonFromContent(mapperArtifactRaw);
-        if (parsed && typeof parsed === 'object') {
-            // Attempt to fit into MapperArtifact shape
-            artifact = { ...empty, ...parsed };
+    const normalizeClaimRole = (r: any): Claim["role"] => {
+        const v = String(r || "").toLowerCase();
+        if (v === "anchor" || v === "branch" || v === "challenger" || v === "supplement") {
+            return v as Claim["role"];
         }
-    }
+        return "branch";
+    };
 
-    // Attempt embedded JSON if explicit artifact missing
-    if (!artifact) {
-        const embeddedMatch = normalizedText.match(/```(?:json)?\s*(\{[\s\S]*?"consensus"[\s\S]*?"claims"[\s\S]*?\})\s*```/i);
-        if (embeddedMatch) {
-            const parsed = extractJsonFromContent(embeddedMatch[1]);
-            if (parsed) artifact = { ...empty, ...parsed };
-        }
-    }
+    const normalizedClaims: Claim[] = Array.isArray((map as any).claims)
+        ? (map as any).claims
+            .filter((c: any) => c && (c.id || c.label))
+            .map((c: any): Claim => {
+                const role = normalizeClaimRole(c.role);
+                return {
+                    id: String(c.id ?? ""),
+                    label: String(c.label ?? ""),
+                    text: String(c.text ?? ""),
+                    supporters: Array.isArray(c.supporters) ? c.supporters.filter((s: any) => typeof s === "number") : [],
+                    type: normalizeClaimType(c.type),
+                    role,
+                    challenges: role === "challenger" && typeof c.challenges === "string" ? c.challenges : null,
+                    ...(typeof c.quote === "string" ? { quote: c.quote } : {}),
+                    ...(typeof c.support_count === "number" ? { support_count: c.support_count } : {}),
+                    ...(typeof c.originalId === "string" ? { originalId: c.originalId } : {}),
+                };
+            })
+            .filter((c: any) => c.id && c.label)
+        : [];
 
+    const normalizedEdges: Edge[] = Array.isArray((map as any).edges)
+        ? (map as any).edges
+            .filter((e: any) => e && (e.from || e.to))
+            .map((e: any) => ({
+                from: String(e.from ?? ""),
+                to: String(e.to ?? ""),
+                type:
+                    e.type === "supports" || e.type === "conflicts" || e.type === "tradeoff" || e.type === "prerequisite"
+                        ? e.type
+                        : "supports",
+            }))
+            .filter((e: any) => e.from && e.to)
+        : [];
+
+    const normalizedGhosts: string[] | null =
+        (map as any).ghosts == null
+            ? null
+            : Array.isArray((map as any).ghosts)
+                ? (map as any).ghosts.map((g: any) => String(g)).filter((g: any) => g && g.trim())
+                : [String((map as any).ghosts)].filter((g: any) => g && g.trim());
+
+    // Auto-generate topology from map for compatibility
     let topology: GraphTopology | null = null;
-    if (graphTopologyRaw) {
-        const parsed = extractJsonFromContent(graphTopologyRaw);
-        if (parsed && Array.isArray((parsed as any).nodes)) {
-            topology = parsed as GraphTopology;
-        } else {
-            topology = parseProseGraphTopology(graphTopologyRaw);
-        }
-    }
-
-    if (!topology) {
-        topology = parseProseGraphTopology(text);
-    }
-
-    const stripNonNarrativeSections = (src: string): string => {
-        let out = src;
-        out = out.replace(/<mapper_artifact\b[^>]*>[\s\S]*?<\/mapper_artifact\s*>/gi, '');
-        out = out.replace(/\\<mapper_artifact\\>[\s\S]*?\\<\/mapper_artifact\\>/gi, '');
-        out = out.replace(/<options_inventory\b[^>]*>[\s\S]*?<\/options_inventory\s*>/gi, '');
-        out = out.replace(/\\<options_inventory\\>[\s\S]*?\\<\/options_inventory\\>/gi, '');
-        out = out.replace(/<graph_topology\b[^>]*>[\s\S]*?<\/graph_topology\s*>/gi, '');
-        out = out.replace(/\\<graph_topology\\>[\s\S]*?\\<\/graph_topology\\>/gi, '');
-
-        out = out.replace(
-            /^[ \t]*#{1,6}\s*(?:\d+\.)?\s*(?:mapper[_\s]*artifact|graph[_\s]*topology|options[_\s]*inventory)\b[\s\S]*?(?=^[ \t]*#{1,6}\s|$)/gim,
-            '',
-        );
-
-        out = out.replace(
-            /^\*\*(?:mapper[_\s]*artifact|graph[_\s]*topology|options[_\s]*inventory)\*\*[:\s]*\n[\s\S]*?(?=^\*\*|^[ \t]*#{1,6}\s|$)/gim,
-            '',
-        );
-
-        return out.trim();
-    };
-
-    const strippedBase = stripNonNarrativeSections(normalizedText);
-    const { text: strippedNoTopology, topology: strippedTopology } = extractGraphTopologyAndStrip(strippedBase);
-    const { text: strippedNarrativeText, options: strippedOptions } = extractOptionsAndStrip(strippedNoTopology);
-    const cleanedStrippedNarrative = cleanNarrativeText(strippedNarrativeText);
-    const cleanedNarrativeSummary = narrativeSummary ? cleanNarrativeText(narrativeSummary) : "";
-
-    const pickedNarrative =
-        [cleanedStrippedNarrative, cleanedNarrativeSummary]
-            .filter((s) => s && s.trim().length > 0)
-            .sort((a, b) => b.length - a.length)[0] || "";
-
-    const pickedOptionsRaw =
-        (optionsInventory ? optionsInventory : null) ||
-        (strippedOptions ? strippedOptions : null) ||
-        null;
-    const pickedOptions = pickedOptionsRaw ? cleanOptionsText(pickedOptionsRaw) : null;
-
-    if (!topology && strippedTopology) {
-        topology = strippedTopology;
-    }
-
-    const pickedAnchors = pickedNarrative ? extractAnchorPositions(pickedNarrative) : [];
-
-    // If absolutely nothing structural found, treat as raw narrative
-    if (!narrativeSummary && !optionsInventory && !mapperArtifactRaw && !graphTopologyRaw) {
-        const { text: textWithoutTopology, topology: legacyTopology } = extractGraphTopologyAndStrip(text);
-        const { text: narrative, options } = extractOptionsAndStrip(textWithoutTopology);
-        return {
-            claims: [],
-            edges: [],
-            ghosts: [],
-            narrative: cleanNarrativeText(narrative),
-            options: options ? cleanOptionsText(options) : null,
-            artifact: null,
-            topology: legacyTopology || topology,
-            map: null,
-            anchors: extractAnchorPositions(cleanNarrativeText(narrative))
+    if (normalizedClaims.length > 0 || normalizedEdges.length > 0) {
+        topology = {
+            nodes: normalizedClaims.map((c: any) => ({
+                id: c.id,
+                label: c.label,
+                theme: c.type,
+                supporters: Array.isArray(c.supporters) ? c.supporters.filter((s: any) => typeof s === 'number') : [],
+                support_count: (c.supporters?.length || 0)
+            })),
+            edges: normalizedEdges.map((e: any) => ({
+                source: e.from,
+                target: e.to,
+                type: e.type,
+                reason: e.type
+            }))
         };
     }
 
-    // Legacy structured output
+    const artifact = {
+        ...createEmptyMapperArtifact(),
+        claims: normalizedClaims,
+        edges: normalizedEdges,
+        ghosts: normalizedGhosts
+    };
+
     return {
-        claims: artifact?.claims || [],
-        edges: artifact?.edges || [],
-        ghosts: artifact?.ghosts || [],
-        narrative: pickedNarrative,
-        options: pickedOptions,
-        artifact: artifact,
-        topology: (topology as any) || null, // Cast to avoid deep mismatch if any fields slightly differ
-        map: null,
-        anchors: pickedAnchors
+        claims: normalizedClaims,
+        edges: normalizedEdges,
+        ghosts: normalizedGhosts,
+        narrative,
+        map: { claims: normalizedClaims, edges: normalizedEdges, ghosts: normalizedGhosts },
+        anchors,
+        topology,
+        options: null,
+        artifact
     };
 }
 
 /**
- * Parse MapperArtifact from text.
- * Expects sections: ===CONSENSUS===, ===OUTLIERS===, ===METADATA===
- */
-/**
- * Parse MapperArtifact from text.
- * Expects sections: ===CONSENSUS===, ===OUTLIERS===, ===METADATA===
- * Adapts legacy sections to V3 schema (claims, edges, ghosts).
+ * Robustly parse MapperArtifact from text.
+ * Uses parseUnifiedMapperOutput logic primarily.
  */
 export function parseMapperArtifact(text: string): MapperArtifact {
     if (!text) return createEmptyMapperArtifact();
 
-    const normalized = normalizeText(text);
-    const artifact = createEmptyMapperArtifact();
-
-    // 1. Try Unified Tagged Parser first
-    if (
-        normalized.includes('<mapper_artifact>') ||
-        normalized.includes('\\<mapper_artifact\\>') ||
-        /#{1,3}\s*(?:\d+\.)?\s*\\?<mapper_artifact\\?>/i.test(text) ||
-        /#{1,3}\s*(?:\d+\.)?\s*mapper[_\s]*artifact\s*\n/i.test(text)
-    ) {
-        const unified = parseUnifiedMapperOutput(text);
-        if (unified.map) {
-            // Convert map to artifact
-            return {
-                ...artifact,
-                claims: unified.map.claims || [],
-                edges: unified.map.edges || [],
-                ghosts: unified.map.ghosts || []
-            };
-        }
-        if (unified.artifact) return unified.artifact;
+    // 1. Try Unified Tagged Parser
+    const unified = parseUnifiedMapperOutput(text);
+    if (unified.artifact && unified.artifact.claims && unified.artifact.claims.length > 0) {
+        return unified.artifact;
     }
-
-    // 2. Try JSON parsing
+    
+    // 2. Try raw JSON fallback (if the text IS just the JSON object)
     try {
-        const jsonMatch = normalized.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/) || normalized.match(/^\{[\s\S]*\}$/);
-        if (jsonMatch) {
-            const jsonText = jsonMatch[1] || jsonMatch[0];
-            const parsed = JSON.parse(jsonText);
-            if (parsed && typeof parsed === 'object') {
-                // If it's V3 JSON
-                if (parsed.claims) return { ...artifact, ...parsed };
-
-                // If it's V2 JSON (consensus/outliers), adapt it
-                if (parsed.consensus) {
-                    const consensusClaims = Array.isArray(parsed.consensus.claims) ? parsed.consensus.claims.map((c: any, idx: number) => ({
-                        id: `claim_${idx + 1}`,
-                        label: c.text.split(' ').slice(0, 3).join(' '),
-                        text: c.text,
-                        supporters: c.supporters || [],
-                        type: 'factual',
-                        role: 'anchor',
-                        challenges: null
-                    })) : [];
-
-                    const outlierClaims = Array.isArray(parsed.outliers) ? parsed.outliers.map((o: any, idx: number) => ({
-                        id: `outlier_${idx + 1}`,
-                        label: o.insight.split(' ').slice(0, 3).join(' '),
-                        text: o.insight,
-                        supporters: [o.source_index !== undefined ? o.source_index : -1],
-                        type: 'speculative',
-                        role: o.type === 'frame_challenger' ? 'challenger' : 'supplement',
-                        challenges: o.challenges || null
-                    })) : [];
-
-                    return {
-                        ...artifact,
-                        claims: [...consensusClaims, ...outlierClaims],
-                        edges: [], // V2 didn't have explicit edges usually, or they werent compatible
-                        ghosts: parsed.ghost ? [parsed.ghost] : [],
-                        ...parsed
-                    };
-                }
-            }
-        }
-    } catch (e) {
-        // Fallback to regex
-    }
-
-    // Helper for Mapper sections with === headers
-    const extractMapperSection = (name: string) => {
-        const pattern = new RegExp(`={3,}\\s*${name}\\s*={3,}\\n([\\s\\S]*?)(?=\\n={3,}|$)`, 'i');
-        const match = normalized.match(pattern);
-        return match ? match[1].trim() : extractSection(normalized, name);
-    };
-
-    const consensusText = extractMapperSection('CONSENSUS');
-    const outliersText = extractMapperSection('OUTLIERS');
-    const metadataText = extractMapperSection('METADATA');
-
-    const newClaims: any[] = [];
-
-    // Parse Consensus
-    if (consensusText) {
-        const lines = consensusText.split('\n');
-        lines.forEach((line, idx) => {
-            const match = line.match(/^[-*•]\s*(.+)$/);
-            if (match) {
-                newClaims.push({
-                    id: `c_${idx}`,
-                    label: match[1].split(' ').slice(0, 3).join(' '),
-                    text: match[1].trim(),
-                    supporters: [],
-                    type: 'factual',
-                    role: 'anchor'
-                });
-            }
-        });
-    }
-
-    // Parse Outliers
-    if (outliersText) {
-        const outlierBlocks = outliersText.split(/\n\s*[-*•]\s+/).filter(Boolean);
-        outlierBlocks.forEach((block, idx) => {
-            const parts = block.split('\n');
-            if (parts.length > 0) {
-                newClaims.push({
-                    id: `o_${idx}`,
-                    label: parts[0].split(' ').slice(0, 3).join(' '),
-                    text: parts[0].trim(),
-                    supporters: [],
-                    type: 'speculative',
-                    role: 'supplement'
-                });
-            }
-        });
-    }
-
-    if (newClaims.length > 0) artifact.claims = newClaims;
-
-    // Parse Metadata
-    if (metadataText) {
-        const ghost = extractLabeledValue(metadataText, 'ghost');
-        if (ghost && ghost.toLowerCase() !== 'none') artifact.ghosts = [ghost];
-
-        const query = extractLabeledValue(metadataText, 'query');
-        if (query) artifact.query = query;
-    }
-
-    return artifact;
-}
-
-export function formatArtifactAsOptions(artifact: MapperArtifact): string {
-    const safe = artifact || createEmptyMapperArtifact();
-    const lines: string[] = [];
-
-    const claims = Array.isArray(safe?.claims) ? safe.claims : [];
-    const modelCount = typeof safe?.model_count === "number" ? safe.model_count : 0;
-
-    const consensus = claims.filter(c => c.supporters && c.supporters.length >= 2);
-    const divergent = claims.filter(c => !c.supporters || c.supporters.length < 2);
-
-    if (consensus.length > 0) {
-        lines.push("### Consensus Claims");
-        for (const c of consensus) {
-            const supportCount = c.supporters ? c.supporters.length : 0;
-            const denom = modelCount > 0 ? modelCount : (supportCount > 0 ? supportCount : 1);
-            lines.push(`- **${c.label}** ("${c.text}") [${supportCount}/${denom}]`);
-        }
-    }
-
-    if (divergent.length > 0) {
-        if (lines.length > 0) lines.push("");
-        lines.push("### Particulars");
-        for (const c of divergent) {
-            lines.push(`- **${c.label}** ("${c.text}") [Model ${c.supporters[0] || '?'}]`);
-            if (c.challenges) lines.push(`  Challenges: ${c.challenges}`);
-        }
-    }
-
-    return lines.join("\n").trim();
-}
-
-export function parseV1MapperToArtifact(
-    v1Output: string,
-    options: { graphTopology?: any; query?: string; turn?: number; timestamp?: string } = {},
-): MapperArtifact {
-    const normalizedForTags = String(v1Output || '').replace(/\\</g, '<').replace(/\\>/g, '>');
-    const hasUnifiedTaggedOutput =
-        /<mapper_artifact\b/i.test(normalizedForTags) ||
-        /<map\b/i.test(normalizedForTags) ||
-        /#{1,6}\s*THE\s*MAP\b/im.test(normalizedForTags) ||
-        /#{1,6}\s*THE\s*NARRATIVE\b/im.test(normalizedForTags);
-
-    if (hasUnifiedTaggedOutput) {
-        const unified = parseUnifiedMapperOutput(v1Output);
-
-        let unifiedArtifact = unified.artifact;
-        if (!unifiedArtifact && unified.map && unified.map.claims) {
-            unifiedArtifact = {
+        const extracted = extractJsonFromContent(text);
+        if (extracted && Array.isArray(extracted.claims)) {
+             return {
                 ...createEmptyMapperArtifact(),
-                claims: unified.map.claims,
-                edges: unified.map.edges || [],
-                ghosts: unified.map.ghosts || [],
-            };
+                ...extracted
+             };
         }
+    } catch { } 
 
-        if (unifiedArtifact) {
-            return {
-                ...unifiedArtifact,
-                query: options.query || unifiedArtifact.query || "",
-                turn: options.turn || unifiedArtifact.turn || 0,
-                timestamp: options.timestamp || unifiedArtifact.timestamp || new Date().toISOString()
-            };
-        }
-    }
-
-    // 2. Normalize and fallback to V2 JSON
-    const normalizedOutput = normalizedForTags;
-    // ... Parsing V2 JSON and adapting it ...
-    // Note: For simplicity, if we don't find V2 JSON, we fall back to empty or rudimentary
-
-    // We reuse parseMapperArtifact as the robust fallback since it now handles V2 adaptation
-    const parsed = parseMapperArtifact(normalizedOutput);
-
-    const topologyCandidate = options.graphTopology && typeof options.graphTopology === 'object'
-        ? (options.graphTopology as GraphTopology)
-        : null;
-
-    const claimTypeFromNode = (nodeType: any): Claim['type'] => {
-        const t = String(nodeType || '').toLowerCase();
-        if (t === 'factual' || t === 'prescriptive' || t === 'conditional' || t === 'contested' || t === 'speculative') {
-            return t as Claim['type'];
-        }
-        return 'speculative';
-    };
-
-    const edgeTypeFromGraph = (raw: any): Edge['type'] => {
-        const t = String(raw || '').toLowerCase();
-        if (t.includes('conflict')) return 'conflicts';
-        if (t.includes('trade')) return 'tradeoff';
-        if (t.includes('pre') && t.includes('req')) return 'prerequisite';
-        if (t === 'supports' || t === 'conflicts' || t === 'tradeoff' || t === 'prerequisite') return t as Edge['type'];
-        return 'supports';
-    };
-
-    let claims: Claim[] = Array.isArray(parsed.claims) ? parsed.claims : [];
-    let edges: Edge[] = Array.isArray(parsed.edges) ? parsed.edges : [];
-    const ghosts = parsed.ghosts ?? null;
-
-    if (topologyCandidate?.nodes?.length && claims.length === 0) {
-        claims = topologyCandidate.nodes
-            .filter((n: any) => n && (n.id || n.label))
-            .map((n: any): Claim => {
-                const supporters: number[] = Array.isArray(n.supporters)
-                    ? n.supporters.filter((s: any) => typeof s === 'number')
-                    : [];
-                return {
-                    id: String(n.id ?? ''),
-                    label: String(n.label ?? ''),
-                    text: String(n.text ?? n.label ?? ''),
-                    supporters,
-                    type: claimTypeFromNode(n.type ?? n.theme),
-                    role: 'branch',
-                    challenges: null,
-                    support_count: typeof n.support_count === 'number' ? n.support_count : supporters.length,
-                };
-            })
-            .filter((c: Claim) => !!c.id && !!c.label);
-    }
-
-    if (topologyCandidate?.edges?.length && edges.length === 0) {
-        edges = topologyCandidate.edges
-            .filter((e: any) => e && (e.source || e.target))
-            .map((e: any) => ({
-                from: String(e.source ?? ''),
-                to: String(e.target ?? ''),
-                type: edgeTypeFromGraph(e.type),
-            }))
-            .filter((e: any) => e.from && e.to);
-    }
-
-    let model_count = typeof parsed.model_count === 'number' ? parsed.model_count : 0;
-    if ((!model_count || model_count === 0) && topologyCandidate?.nodes?.length) {
-        let maxSupporter = 0;
-        for (const n of topologyCandidate.nodes) {
-            const supporters = Array.isArray((n as any)?.supporters) ? (n as any).supporters : [];
-            for (const s of supporters) {
-                if (typeof s === 'number' && s > maxSupporter) maxSupporter = s;
-            }
-        }
-        model_count = maxSupporter || 0;
-    }
-
-    return {
-        ...parsed,
-        claims,
-        edges,
-        ghosts,
-        ...(model_count ? { model_count } : {}),
-        query: options.query || parsed.query || "",
-        turn: options.turn || parsed.turn || 0,
-        timestamp: options.timestamp || parsed.timestamp || new Date().toISOString()
-    };
+    return createEmptyMapperArtifact();
 }
 
-// ============================================================================
-// CORE HELPERS
-// ============================================================================
 
-/**
- * Extract a named section from markdown text.
- * Handles: ## Header, ### Header, **Header**:, Header:, etc.
- */
-function extractSection(text: string, sectionName: string): string {
-    if (!text || !sectionName) return '';
-
-    const escapedName = sectionName.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
-
-    // Patterns from strictest to loosest for main section
-    const patterns = [
-        // ## Section Name or ### Section Name
-        new RegExp(
-            `(?:^|\\n)#{1,3}\\s*[^\\w\\n]*${escapedName}[^\\n]*\\n([\\s\\S]*?)(?=\\n#{1,3}\\s|\\n---\\s*\\n|$)`,
-            'i'
-        ),
-        // **Section Name**: or **Section Name**
-        new RegExp(
-            `\\*\\*\\s*${escapedName}\\s*\\*\\*[:\\s]*\\n?([\\s\\S]*?)(?=\\n\\*\\*[A-Z]|\\n#{1,3}\\s|\\n---\\s*\\n|$)`,
-            'i'
-        ),
-        // Section Name: (plain)
-        new RegExp(
-            `(?:^|\\n)${escapedName}[:\\s]+\\n?([\\s\\S]*?)(?=\\n[A-Z][a-z]+[:\\s]+\\n|\\n#{1,3}\\s|\\n---\\s*\\n|$)`,
-            'i'
-        ),
-    ];
-
-    for (const pattern of patterns) {
-        const match = text.match(pattern);
-        if (match?.[1]?.trim()) {
-            return match[1].trim();
-        }
-    }
-
-    return '';
-}
-
-/**
- * Extract a labeled value from text.
- * Handles: **Label**: value, - **Label**: value, Label: value
- */
-function extractLabeledValue(text: string, label: string): string | null {
-    if (!text || !label) return null;
-
-    const escaped = label.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
-
-    const patterns = [
-        // - **Label**: value (list item with bold)
-        new RegExp(`[-*•]\\s*\\*\\*${escaped}\\*\\*[:\\s]*([^\\n]+)`, 'i'),
-        // **Label**: value (inline bold)
-        new RegExp(`\\*\\*${escaped}\\*\\*[:\\s]*([^\\n]+)`, 'i'),
-        // Label: value (plain)
-        new RegExp(`(?:^|\\n)${escaped}[:\\s]+([^\\n]+)`, 'i'),
-    ];
-
-    for (const pattern of patterns) {
-        const match = text.match(pattern);
-        if (match?.[1]?.trim()) {
-            return match[1].trim();
-        }
-    }
-
-    return null;
-}
-
-// ============================================================================
+// ============================================================================ 
 // CONCIERGE BATCH REQUEST PARSING
-// ============================================================================
+// ============================================================================ 
 
 /**
  * Signal types for concierge-triggered batch requests
@@ -1613,6 +671,91 @@ export type ConciergeSignal = WorkflowSignal | StepHelpSignal | null;
 export interface ConciergeOutput {
     userResponse: string;
     signal: ConciergeSignal;
+}
+
+/**
+ * Parse concierge output to extract user-facing response and any batch request signals.
+ * The signal is delimited by <<<SINGULARITY_BATCH_REQUEST>>> ... <<<END_BATCH_REQUEST>>> 
+ */
+export function parseConciergeOutput(rawResponse: string): ConciergeOutput {
+    if (!rawResponse) {
+        return { userResponse: '', signal: null };
+    }
+
+    // Look for the signal delimiter
+    const signalMatch = rawResponse.match(
+        /<<<SINGULARITY_BATCH_REQUEST>>>([\s\S]*?)<<<END_BATCH_REQUEST>>>/ 
+    );
+
+    if (!signalMatch) {
+        return {
+            userResponse: rawResponse.trim(),
+            signal: null
+        };
+    }
+
+    // Extract user-facing response (everything before the signal)
+    const userResponse = rawResponse
+        .substring(0, rawResponse.indexOf('<<<SINGULARITY_BATCH_REQUEST>>>'))
+        .trim();
+
+    // Parse the signal content
+    const signalContent = signalMatch[1];
+    const signal = parseSignalContent(signalContent);
+
+    return {
+        userResponse,
+        signal
+    };
+}
+
+/**
+ * Parse the content inside the batch request delimiters
+ */
+function parseSignalContent(content: string): ConciergeSignal {
+    if (!content) return null;
+
+    // Extract TYPE
+    const typeMatch = content.match(/TYPE:\s*(\w+)/i);
+    const type = typeMatch?.[1]?.toUpperCase();
+
+    // Extract PROMPT (everything after "PROMPT:")
+    const promptMatch = content.match(/PROMPT:\s*([\s\S]*?)$/);
+    const batchPrompt = promptMatch?.[1]?.trim() || '';
+
+    if (!batchPrompt) {
+        console.warn('[parsing-utils] Signal detected but no batch prompt found');
+        return null;
+    }
+
+    if (type === 'WORKFLOW') {
+        const goalMatch = content.match(/GOAL:\s*([\s\S]+?)(?=\n(?:STEP:|BLOCKER:|CONTEXT:|PROMPT:)|$)/);
+        const contextMatch = content.match(/CONTEXT:\s*([\s\S]+?)(?=\n(?:PROMPT:)|$)/);
+
+        return {
+            type: 'GENERATE_WORKFLOW',
+            goal: goalMatch?.[1]?.trim() || '',
+            context: contextMatch?.[1]?.trim() || '',
+            batchPrompt
+        };
+    }
+
+    if (type === 'STEP_HELP') {
+        const stepMatch = content.match(/STEP:\s*([\s\S]+?)(?=\n(?:BLOCKER:|CONTEXT:|PROMPT:)|$)/);
+        const blockerMatch = content.match(/BLOCKER:\s*([\s\S]+?)(?=\n(?:CONTEXT:|PROMPT:)|$)/);
+        const contextMatch = content.match(/CONTEXT:\s*([\s\S]+?)(?=\n(?:PROMPT:)|$)/);
+
+        return {
+            type: 'STEP_HELP_NEEDED',
+            step: stepMatch?.[1]?.trim() || '',
+            blocker: blockerMatch?.[1]?.trim() || '',
+            constraint: contextMatch?.[1]?.trim() || '',
+            batchPrompt
+        };
+    }
+
+    console.warn(`[parsing-utils] Unknown signal type: ${type}`);
+    return null;
 }
 
 /**
@@ -1662,21 +805,12 @@ export function validateBatchPrompt(prompt: string): { valid: boolean; issues: s
     };
 }
 
-// ============================================================================
+// ============================================================================ 
 // CONCIERGE HANDOFF PARSING (Phase 2: Conversational Evolution)
-// ============================================================================
+// ============================================================================ 
 
 /**
  * Regex to match handoff blocks in concierge responses.
- * Supports both standard and escaped tag variants.
- * Format:
- *   ---HANDOFF---
- *   constraints: item1; item2
- *   eliminated: item1; item2
- *   preferences: item1; item2
- *   context: item1; item2
- *   >>>COMMIT: decision summary
- *   ---/HANDOFF---
  */
 const HANDOFF_REGEX = /--- ?HANDOFF ?---\r?\n?([\s\S]*?)--- ?\/HANDOFF ?---/i;
 
@@ -1704,10 +838,6 @@ export interface ParsedHandoffResponse {
 
 /**
  * Parse concierge response to extract and strip handoff block.
- * Returns both the user-facing text and the parsed handoff delta.
- * 
- * @param raw - Raw concierge response text
- * @returns ParsedHandoffResponse with userFacing text and optional handoff
  */
 export function parseHandoffResponse(raw: string): ParsedHandoffResponse {
     if (!raw || typeof raw !== 'string') {
@@ -1729,13 +859,6 @@ export function parseHandoffResponse(raw: string): ParsedHandoffResponse {
     return { userFacing, handoff };
 }
 
-/**
- * Parse the COMMIT field with echo rejection.
- * Rejects template placeholders that indicate the model is echoing instructions.
- * 
- * @param text - Full handoff block content
- * @returns Commit string or null if not found/rejected
- */
 function parseCommitField(text: string): string | null {
     const match = text.match(COMMIT_MARKER_REGEX);
     if (!match?.[1]) return null;
@@ -1749,7 +872,7 @@ function parseCommitField(text: string): string | null {
     }
 
     // 2. Block short bracketed content (≤3 words) — likely placeholder
-    if (/^\[.+\]$/.test(commitText)) {
+    if (/^\['.+'\]$/.test(commitText)) {
         const inner = commitText.slice(1, -1).trim();
         const wordCount = inner.split(/\s+/).length;
         if (wordCount <= 3) {
@@ -1760,13 +883,6 @@ function parseCommitField(text: string): string | null {
     return commitText;
 }
 
-/**
- * Parse the content inside ---HANDOFF--- block into ConciergeDelta.
- * Handles semicolon-separated values, COMMIT signal, and graceful degradation.
- * 
- * @param text - Content inside the handoff delimiters
- * @returns Parsed ConciergeDelta structure
- */
 function parseHandoffBlock(text: string): ConciergeDelta {
     const delta: ConciergeDelta = {
         constraints: [],
@@ -1780,7 +896,7 @@ function parseHandoffBlock(text: string): ConciergeDelta {
         return delta;
     }
 
-    // Parse COMMIT field separately (special handling with echo rejection)
+    // Parse COMMIT field separately
     delta.commit = parseCommitField(text);
 
     // Parse other fields
@@ -1826,20 +942,12 @@ function parseHandoffBlock(text: string): ConciergeDelta {
             case 'situational':
                 delta.context = Array.from(new Set([...delta.context, ...items]));
                 break;
-            // Silently ignore unknown keys (including 'committed' etc)
         }
     }
 
     return delta;
 }
 
-/**
- * Check if a ConciergeDelta has any meaningful content.
- * Used to avoid storing/injecting empty handoffs.
- * 
- * @param delta - ConciergeDelta to check
- * @returns true if any bucket has items or commit is set
- */
 export function hasHandoffContent(delta: ConciergeDelta | null | undefined): boolean {
     if (!delta) return false;
     return (
@@ -1851,13 +959,6 @@ export function hasHandoffContent(delta: ConciergeDelta | null | undefined): boo
     );
 }
 
-/**
- * Format handoff context for injection into batch prompts.
- * Returns a human-readable block if handoff has content, null otherwise.
- * 
- * @param handoff - ConciergeDelta to format
- * @returns Formatted context string or null
- */
 export function formatHandoffContext(handoff: ConciergeDelta | null | undefined): string | null {
     if (!handoff || !hasHandoffContent(handoff)) {
         return null;
@@ -1885,14 +986,6 @@ export function formatHandoffContext(handoff: ConciergeDelta | null | undefined)
     return lines.join('\n');
 }
 
-/**
- * Format handoff for echo back to concierge on Turn 3+.
- * Shows current handoff state so model can update or carry forward.
- * NEVER includes commit - that triggers fresh spawn, no echo needed.
- * 
- * @param handoff - Current ConciergeDelta to echo
- * @returns Formatted echo block to prepend to user message
- */
 export function formatHandoffEcho(handoff: ConciergeDelta | null | undefined): string {
     if (!handoff) return '';
 
@@ -1917,25 +1010,7 @@ export function formatHandoffEcho(handoff: ConciergeDelta | null | undefined): s
     if (context.length > 0) {
         lines.push(`context: ${context.join('; ')}`);
     }
-    // NEVER echo >>>COMMIT — it triggers fresh spawn, no echo needed
-
-    lines.push('---/CURRENT_HANDOFF---');
-    lines.push('');
+    lines.push('---/HANDOFF---');
 
     return lines.join('\n');
 }
-
-/**
- * Create an empty ConciergeDelta.
- * Useful for initialization.
- */
-export function createEmptyHandoff(): ConciergeDelta {
-    return {
-        constraints: [],
-        eliminated: [],
-        preferences: [],
-        context: [],
-        commit: null
-    };
-}
-

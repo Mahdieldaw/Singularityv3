@@ -6,16 +6,6 @@
 import {
     ProblemStructure,
     StructuralAnalysis,
-    SettledShapeData,
-    LinearShapeData,
-    KeystoneShapeData,
-    ContestedShapeData,
-    TradeoffShapeData,
-    DimensionalShapeData,
-    ExploratoryShapeData,
-    ContextualShapeData,
-    // NEW: Composite shape types for peak-first detection
-    CompositeShape,
     EnrichedClaim,
     DissentPatternData,
     ChallengedPatternData,
@@ -26,6 +16,8 @@ import {
     // Handoff V2
     ConciergeDelta,
 } from "../../shared/contract";
+
+type CompositeShape = ProblemStructure;
 import {
     parseConciergeOutput,
     validateBatchPrompt,
@@ -287,30 +279,34 @@ function detectQueryIntent(userMessage: string): { stance: ConciergeStance; conf
 }
 
 function getShapeDefaultStance(shape: ProblemStructure): { stance: ConciergeStance; confidence: number } {
-    switch (shape.primaryPattern) {
-        case 'tradeoff':
-            // Explicit tradeoffs - explore helps map the space
+    const { primary, patterns } = shape;
+    const hasHighDissent = patterns.some(p => p.type === 'dissent' && p.severity === 'high');
+    const hasFragility = patterns.some(p => p.type === 'fragile' || p.type === 'keystone');
+
+    switch (primary) {
+        case 'sparse':
             return { stance: 'explore', confidence: 0.7 };
 
-        case 'exploratory':
-            // Sparse structure - explore to find what matters
+        case 'constrained':
+            return { stance: 'explore', confidence: 0.75 };
+
+        case 'parallel':
             return { stance: 'explore', confidence: 0.65 };
 
-        case 'dimensional':
-            // Multiple factors - explore to surface dimensions
-            return { stance: 'explore', confidence: 0.6 };
-
-        case 'contextual':
-            // Need more info - explore to surface what's missing
-            return { stance: 'explore', confidence: 0.65 };
-
-        case 'contested':
-        case 'settled':
-        case 'keystone':
-        case 'linear':
-        default:
-            // Default stance works well for these
+        case 'forked':
             return { stance: 'default', confidence: 0.6 };
+
+        case 'convergent':
+            if (hasHighDissent) {
+                return { stance: 'challenge', confidence: 0.7 };
+            }
+            if (hasFragility) {
+                return { stance: 'challenge', confidence: 0.6 };
+            }
+            return { stance: 'default', confidence: 0.75 };
+
+        default:
+            return { stance: 'default', confidence: 0.5 };
     }
 }
 
@@ -400,52 +396,62 @@ But be constructive—challenge to strengthen, not to destroy.`,
 // ═══════════════════════════════════════════════════════════════════════════
 
 export function getShapeGuidance(shape: ProblemStructure): string {
-    // Check for composite shape
-    const composite = shape.compositeShape;
-    const hasDissentPattern = composite?.patterns.some(p => p.type === 'dissent');
+    const composite = shape;
+    const { primary, patterns, peaks } = composite;
+    const dissent = patterns.find(p => p.type === 'dissent');
+    const keystone = patterns.find(p => p.type === 'keystone');
+    const fragile = patterns.find(p => p.type === 'fragile');
 
-    const guidance: Record<ProblemStructure['primaryPattern'], string> = {
-        settled: `**Shape Note: CONVERGENT**
-Strong agreement exists. ${hasDissentPattern ? 'But there is dissent—surface it.' : 'Watch for blind spots in unanimous consensus.'}
-Lead with the answer, but make the minority report visible. Consensus isn't always correct.`,
+    switch (primary) {
+        case 'convergent':
+            if (dissent) {
+                return `**Shape: CONVERGENT with DISSENT**
+${peaks.length} position(s) dominate, but minority voices exist.
+Lead with the consensus, then surface the minority report.
+The dissent may contain the actual insight.`;
+            }
+            if (keystone) {
+                return `**Shape: CONVERGENT (Hub-Centric)**
+Everything flows from "${(keystone.data as any).keystone.label}".
+If the hub fails, the structure collapses. Stress-test it.`;
+            }
+            if (fragile) {
+                return `**Shape: CONVERGENT but FRAGILE**
+Consensus exists but rests on weak foundations.
+Surface the fragility. The floor may not hold.`;
+            }
+            return `**Shape: CONVERGENT**
+Strong agreement. ${peaks.length} dominant position(s).
+Lead with the answer. Watch for blind spots in unanimity.`;
 
-        contested: `**Shape Note: FORKED**
-Genuine disagreement exists between well-supported positions. This is a real fork, not uncertainty.
-Present both paths as valid. Help them see what each choice requires and forecloses.
-Don't pick a side unless they give you context that resolves the fork.`,
+        case 'forked':
+            return `**Shape: FORKED**
+${peaks.length} valid positions conflict directly.
+This is a real fork—not uncertainty. Present both paths.
+The choice depends on values they haven't stated.`;
 
-        keystone: `**Shape Note: HUB-CENTRIC**
-Everything hinges on one critical claim. Center your response around it.
-Show what depends on it. If they ask "why" or "what if," stress-test the keystone.
-If it fails, acknowledge the cascade honestly.`,
+        case 'constrained':
+            return `**Shape: CONSTRAINED**
+Tradeoffs exist between well-supported positions.
+You cannot optimize for all. Map the costs explicitly.
+Ask what they're willing to sacrifice.`;
 
-        linear: `**Shape Note: SEQUENTIAL**
-There's a clear sequence with prerequisites. Walk through steps in order.
-Emphasize why order matters. Help them identify where they are in the chain.
-Flag weak links—steps with low support that could break the sequence.`,
+        case 'parallel':
+            return `**Shape: PARALLEL**
+${peaks.length} dimensions that don't interact.
+Each may have its own valid answer. Ask which matters most.
+Don't collapse prematurely.`;
 
-        tradeoff: `**Shape Note: CONSTRAINED**
-Explicit tradeoffs exist. There is no universal best.
-Map what is sacrificed for what is gained. Ask about priorities.
-Don't force a choice—show the consequences of each path.`,
+        case 'sparse':
+            return `**Shape: SPARSE**
+Weak signal. No dominant positions.
+Be honest about uncertainty. Ask clarifying questions.
+Structure may emerge with more context.`;
 
-        dimensional: `**Shape Note: PARALLEL**
-Multiple valid dimensions exist that don't directly interact.
-Ask which dimension matters most to them. Don't collapse prematurely.
-Each dimension may have its own answer.`,
-
-        contextual: `**Shape Note: CONDITIONAL**
-The answer depends on specific context you don't have.
-Ask for the missing context directly. Explain how the answer changes based on it.
-Don't guess—show the branches and let them pick.`,
-
-        exploratory: `**Shape Note: SPARSE**
-Structure is weak. Low confidence. Be honest about uncertainty.
-Surface what signals exist. Ask clarifying questions.
-Don't fabricate certainty where none exists.`,
-    };
-
-    return guidance[shape.primaryPattern] || guidance.exploratory;
+        default:
+            return `**Shape: UNMAPPED**
+Structure unclear. Probe carefully.`;
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -453,167 +459,125 @@ Don't fabricate certainty where none exists.`,
 // ═══════════════════════════════════════════════════════════════════════════
 
 export function buildStructuralBrief(analysis: StructuralAnalysis): string {
-    const { shape, landscape, ghostAnalysis, patterns } = analysis;
-    const modelCount = landscape.modelCount || 0;
-    const claimById = new Map<string, { id: string; label?: string; text?: string }>();
-    (analysis.claimsWithLeverage || []).forEach((c) => {
-        if (c?.id) claimById.set(c.id, c);
-    });
-
-    const formatSupport = (supportCount?: number) => {
-        if (typeof supportCount !== "number") return "";
-        return modelCount > 0 ? ` [${supportCount}/${modelCount}]` : ` [${supportCount}]`;
-    };
-
-    const topClaims = (analysis.claimsWithLeverage || [])
-        .slice()
-        .sort((a, b) => (b.support_count || 0) - (a.support_count || 0))
-        .slice(0, 6);
+    const { claimsWithLeverage, edges, ghostAnalysis, shape } = analysis;
 
     let brief = "";
 
-    brief += `## Topology: ${getTopologyName(shape.primaryPattern)}\n\n`;
-    brief += `${getTopologyDescription(shape.primaryPattern)}\n\n`;
+    // ═══════════════════════════════════════════════════════════════════════
+    // POSITIONS (No counts, no rankings)
+    // ═══════════════════════════════════════════════════════════════════════
 
-    if (topClaims.length > 0) {
-        brief += `## Core Claims\n\n`;
-        topClaims.forEach((c) => {
-            brief += `• **${c.label}**${formatSupport(c.support_count)}\n`;
-            if (c.text) brief += `  ${c.text}\n`;
-        });
-        brief += `\n`;
+    brief += `## Positions\n\n`;
+
+    for (const claim of claimsWithLeverage) {
+        brief += `• **${claim.label}**\n`;
+        brief += `  ${claim.text}\n\n`;
     }
 
-    const conflictInfos = Array.isArray(patterns?.conflictInfos) ? patterns.conflictInfos : [];
-    const topConflicts = conflictInfos
-        .slice()
-        .sort((a, b) => (b.significance || 0) - (a.significance || 0))
-        .slice(0, 3);
-    if (topConflicts.length > 0) {
-        brief += `## Key Tensions\n\n`;
-        topConflicts.forEach((c) => {
-            const axis = c?.axis?.resolved ? ` — ${c.axis.resolved}` : "";
-            brief += `• **${c.claimA.label}**${formatSupport(c.claimA.supportCount)} vs **${c.claimB.label}**${formatSupport(c.claimB.supportCount)}${axis}\n`;
-            if (c?.stakes?.choosingA) brief += `  - Stakes (A): ${c.stakes.choosingA}\n`;
-            if (c?.stakes?.choosingB) brief += `  - Stakes (B): ${c.stakes.choosingB}\n`;
-        });
-        brief += `\n`;
-    }
+    // ═══════════════════════════════════════════════════════════════════════
+    // RELATIONSHIPS (Structure without hierarchy)
+    // ═══════════════════════════════════════════════════════════════════════
 
-    const tradeoffs = Array.isArray(patterns?.tradeoffs) ? patterns.tradeoffs : [];
-    if (tradeoffs.length > 0 && topConflicts.length === 0) {
-        brief += `## Tradeoffs\n\n`;
-        tradeoffs.slice(0, 3).forEach((t) => {
-            const aSupport = modelCount > 0 ? `${t.claimA.supporterCount}/${modelCount}` : String(t.claimA.supporterCount);
-            const bSupport = modelCount > 0 ? `${t.claimB.supporterCount}/${modelCount}` : String(t.claimB.supporterCount);
-            brief += `• **${t.claimA.label}** [${aSupport}] vs **${t.claimB.label}** [${bSupport}]\n`;
-        });
-        brief += `\n`;
-    }
+    const conflicts = edges.filter(e => e.type === 'conflicts');
+    const tradeoffs = edges.filter(e => e.type === 'tradeoff');
+    const supports = edges.filter(e => e.type === 'supports');
+    const prerequisites = edges.filter(e => e.type === 'prerequisite');
 
-    const leverageInversions = Array.isArray(patterns?.leverageInversions) ? patterns.leverageInversions : [];
-    const cascadeRisks = Array.isArray(patterns?.cascadeRisks) ? patterns.cascadeRisks : [];
-    if (leverageInversions.length > 0 || cascadeRisks.length > 0) {
-        brief += `## Structural Risks\n\n`;
-        leverageInversions.slice(0, 3).forEach((li) => {
-            const support = typeof li.supporterCount === "number" ? formatSupport(li.supporterCount) : "";
-            const strongClaim = li.strongClaim ? ` — many arguments lean on "${li.strongClaim}"` : "";
-            brief += `• **${li.claimLabel}**${support}${strongClaim}\n`;
-            if (li.reason) brief += `  ${li.reason}\n`;
-        });
-        cascadeRisks.slice(0, 3).forEach((cr) => {
-            const dependents = Array.isArray(cr.dependentLabels) ? cr.dependentLabels.filter(Boolean) : [];
-            const preview = dependents.slice(0, 4).join(", ");
-            const more = dependents.length > 4 ? ` (+${dependents.length - 4} more)` : "";
-            if (preview) {
-                brief += `• If **${cr.sourceLabel}** breaks, it may break: ${preview}${more}\n`;
-            } else {
-                brief += `• If **${cr.sourceLabel}** breaks, downstream claims may fail\n`;
-            }
-        });
-        brief += `\n`;
-    }
+    if (conflicts.length > 0 || tradeoffs.length > 0 || supports.length > 0 || prerequisites.length > 0) {
+        brief += `## Relationships\n\n`;
 
-    if (ghostAnalysis.count > 0) {
-        brief += `## Gaps\n\n`;
-        brief += `• ${ghostAnalysis.count} area(s) not addressed by any source\n`;
-        if (ghostAnalysis.mayExtendChallenger && Array.isArray(ghostAnalysis.challengerIds)) {
-            const challengerLabels = ghostAnalysis.challengerIds
-                .map((id) => claimById.get(id)?.label)
-                .filter(Boolean)
-                .slice(0, 4);
-            if (challengerLabels.length > 0) {
-                brief += `• These challenger claims may expand if explored: ${challengerLabels.join(", ")}\n`;
+        for (const edge of conflicts) {
+            const from = claimsWithLeverage.find(c => c.id === edge.from);
+            const to = claimsWithLeverage.find(c => c.id === edge.to);
+            if (from && to) {
+                brief += `• **${from.label}** conflicts with **${to.label}**\n`;
+                brief += `  Choosing one forecloses the other.\n\n`;
             }
         }
-        brief += `\n`;
+
+        for (const edge of tradeoffs) {
+            const from = claimsWithLeverage.find(c => c.id === edge.from);
+            const to = claimsWithLeverage.find(c => c.id === edge.to);
+            if (from && to) {
+                brief += `• **${from.label}** trades off against **${to.label}**\n`;
+                brief += `  Optimizing for one sacrifices the other.\n\n`;
+            }
+        }
+
+        for (const edge of supports) {
+            const from = claimsWithLeverage.find(c => c.id === edge.from);
+            const to = claimsWithLeverage.find(c => c.id === edge.to);
+            if (from && to) {
+                brief += `• **${from.label}** supports **${to.label}**\n\n`;
+            }
+        }
+
+        for (const edge of prerequisites) {
+            const from = claimsWithLeverage.find(c => c.id === edge.from);
+            const to = claimsWithLeverage.find(c => c.id === edge.to);
+            if (from && to) {
+                brief += `• **${to.label}** depends on **${from.label}**\n\n`;
+            }
+        }
     }
 
-    brief += `## The Flow\n\n`;
-    brief += buildFlowSection(analysis);
-    brief += `\n`;
+    // ═══════════════════════════════════════════════════════════════════════
+    // CHALLENGES (What questions what)
+    // ═══════════════════════════════════════════════════════════════════════
 
-    brief += `## The Friction\n\n`;
-    brief += buildFrictionSection(analysis);
-    brief += `\n`;
+    const challengers = claimsWithLeverage.filter(c =>
+        c.role === 'challenger' || c.challenges
+    );
 
-    const fragilities = collectFragilities(analysis);
-    if (fragilities.length > 0) {
-        brief += `## Fragilities\n\n`;
-        fragilities.forEach(f => {
-            brief += `• ${f}\n`;
-        });
-        brief += `\n`;
+    if (challengers.length > 0) {
+        brief += `## Challenges\n\n`;
+
+        for (const challenger of challengers) {
+            if (challenger.challenges) {
+                const target = claimsWithLeverage.find(c => c.id === challenger.challenges);
+                if (target) {
+                    brief += `• **${challenger.label}** challenges **${target.label}**\n`;
+                    brief += `  ${challenger.text}\n\n`;
+                }
+            } else {
+                brief += `• **${challenger.label}** challenges a premise\n`;
+                brief += `  ${challenger.text}\n\n`;
+            }
+        }
     }
 
-    brief += `## The Transfer\n\n`;
-    brief += buildTransferSection(analysis);
+    // ═══════════════════════════════════════════════════════════════════════
+    // DEPENDENCIES (What breaks what)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    const hasSignificantDeps = prerequisites.length >= 2;
+
+    if (hasSignificantDeps) {
+        brief += `## Dependencies\n\n`;
+        brief += `Some positions depend on others being true. `;
+        brief += `If a foundation fails, what rests on it falls.\n\n`;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // UNADDRESSED (What no one covered)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    if (ghostAnalysis.count > 0) {
+        brief += `## Unaddressed\n\n`;
+        brief += `Areas not covered by any perspective:\n`;
+        brief += `• ${ghostAnalysis.count} gap(s) in coverage\n\n`;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // TRANSFER QUESTION (What would help)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    if (shape.transferQuestion) {
+        brief += `## The Question\n\n`;
+        brief += `${shape.transferQuestion}\n`;
+    }
 
     return brief;
-}
-
-function getTopologyName(pattern: string): string {
-    const names: Record<string, string> = {
-        settled: "CONVERGENT",
-        contested: "FORKED",
-        keystone: "HUB-CENTRIC",
-        linear: "SEQUENTIAL",
-        tradeoff: "CONSTRAINED",
-        dimensional: "PARALLEL",
-        exploratory: "SPARSE",
-        contextual: "CONDITIONAL",
-    };
-    return names[pattern] || pattern.toUpperCase();
-}
-
-function getTopologyDescription(pattern: string): string {
-    const descriptions: Record<string, string> = {
-        settled:
-            "Multiple reasoning paths converge on a central cluster. " +
-            "Strong agreement exists, but check the minority report—consensus can mask blind spots.",
-        contested:
-            "The structure contains genuine opposition between well-supported positions. " +
-            "This is a real fork—choosing one path forecloses another. The question is: what determines which path applies?",
-        keystone:
-            "The structure radiates from a central hub. Many claims depend on one foundation. " +
-            "If that foundation is wrong, the cascade is significant.",
-        linear:
-            "The structure forms sequential chains of prerequisites. " +
-            "Order matters. Validate early steps before proceeding.",
-        tradeoff:
-            "The structure contains explicit optimization boundaries. " +
-            "You cannot maximize both. What are you optimizing for?",
-        dimensional:
-            "The structure fragments into independent clusters. " +
-            "Different lenses on the problem that don't directly interact. Which dimension matters most?",
-        exploratory:
-            "The structure is sparse or fragmented. Low coherence. " +
-            "Either the domain is underexplored, the question was ambiguous, or perspectives diverged significantly.",
-        contextual:
-            "The structure is conditional—different paths activate based on specific inputs. " +
-            "There is no universal answer; it depends on context the system does not have.",
-    };
-    return descriptions[pattern] || "Pattern detected but not characterized.";
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -621,7 +585,7 @@ function getTopologyDescription(pattern: string): string {
 // ═══════════════════════════════════════════════════════════════════════════
 
 function buildFlowFromComposite(composite: CompositeShape, _modelCount: number): string {
-    const peakLabels = composite.peaks.slice(0, 3).map(p => `"${p.label}"`).join(', ');
+    const peakLabels = composite.peaks.slice(0, 3).map((p: { label: string }) => `"${p.label}"`).join(', ');
 
     let flow = '';
 
@@ -632,7 +596,7 @@ function buildFlowFromComposite(composite: CompositeShape, _modelCount: number):
                 ? `This is the dominant position with ${(composite.peaks[0].supportRatio * 100).toFixed(0)}% support.\n\n`
                 : `These positions reinforce each other.\n\n`;
 
-            composite.peaks.forEach(p => {
+            composite.peaks.forEach((p: { label: string; supportRatio: number }) => {
                 flow += `• **${p.label}** [${(p.supportRatio * 100).toFixed(0)}%]\n`;
             });
             break;
@@ -644,7 +608,7 @@ function buildFlowFromComposite(composite: CompositeShape, _modelCount: number):
 
             flow += `**Peak Relationship:** ${composite.peakRelationship}\n\n`;
 
-            composite.peaks.forEach(p => {
+            composite.peaks.forEach((p: { label: string; supportRatio: number }) => {
                 flow += `• **${p.label}** [${(p.supportRatio * 100).toFixed(0)}%]\n`;
             });
             break;
@@ -653,7 +617,7 @@ function buildFlowFromComposite(composite: CompositeShape, _modelCount: number):
             flow += `**Independent Dimensions:** ${peakLabels} address different aspects of the problem.\n\n`;
             flow += `They don't conflict because they don't interact.\n\n`;
 
-            composite.peaks.forEach(p => {
+            composite.peaks.forEach((p: { label: string; supportRatio: number }) => {
                 flow += `• **${p.label}** [${(p.supportRatio * 100).toFixed(0)}%]\n`;
             });
             break;
@@ -673,7 +637,7 @@ function buildFlowFromComposite(composite: CompositeShape, _modelCount: number):
 
             if (composite.peaks.length > 0) {
                 flow += `**Strongest signals:**\n`;
-                composite.peaks.forEach(p => {
+                composite.peaks.forEach((p: { label: string; supportRatio: number }) => {
                     flow += `• **${p.label}** [${(p.supportRatio * 100).toFixed(0)}%]\n`;
                 });
             }
@@ -694,7 +658,9 @@ function buildFrictionFromComposite(
     // ─────────────────────────────────────────────────────────────────────────
     // DISSENT IS PRIMARY FOR CONVERGENT/PARALLEL SHAPES
     // ─────────────────────────────────────────────────────────────────────────
-    const dissentPattern = composite.patterns.find(p => p.type === 'dissent');
+    const dissentPattern = composite.patterns.find(
+        (p: { type: string }) => p.type === 'dissent'
+    ) as { data: DissentPatternData } | undefined;
 
     if (composite.primary === 'convergent' || composite.primary === 'parallel') {
         if (dissentPattern) {
@@ -733,10 +699,10 @@ function buildFrictionFromComposite(
     // ─────────────────────────────────────────────────────────────────────────
     // OTHER PATTERNS
     // ─────────────────────────────────────────────────────────────────────────
-    const otherPatterns = composite.patterns
+    const otherPatterns = (composite.patterns as Array<{ type: string; severity: 'high' | 'medium' | 'low'; data: any }>)
         .filter(p => p.type !== 'dissent')
         .sort((a, b) => {
-            const severityOrder = { high: 0, medium: 1, low: 2 };
+            const severityOrder: Record<'high' | 'medium' | 'low', number> = { high: 0, medium: 1, low: 2 };
             return severityOrder[a.severity] - severityOrder[b.severity];
         });
 
@@ -823,531 +789,7 @@ function buildFrictionFromComposite(
 
 function buildFlowSection(analysis: StructuralAnalysis): string {
     const { shape, landscape } = analysis;
-
-    // Use composite shape if available (new system)
-    if (shape.compositeShape) {
-        return buildFlowFromComposite(shape.compositeShape, landscape.modelCount);
-    }
-
-    // Fall back to legacy builders
-    const data = shape.data;
-
-    if (!data) return "Structure data not available.\n";
-
-    switch (shape.primaryPattern) {
-        case "settled":
-            return buildSettledFlow(data as SettledShapeData, landscape.modelCount);
-        case "contested":
-            return buildContestedFlow(data as ContestedShapeData, landscape.modelCount);
-        case "keystone":
-            return buildKeystoneFlow(data as KeystoneShapeData, landscape.modelCount);
-        case "linear":
-            return buildLinearFlow(data as LinearShapeData, landscape.modelCount);
-        case "tradeoff":
-            return buildTradeoffFlow(data as TradeoffShapeData, landscape.modelCount);
-        case "dimensional":
-            return buildDimensionalFlow(data as DimensionalShapeData, landscape.modelCount);
-        case "exploratory":
-            return buildExploratoryFlow(data as ExploratoryShapeData, landscape.modelCount);
-        case "contextual":
-            return buildContextualFlow(data as ContextualShapeData, landscape.modelCount);
-        default:
-            return "Flow not characterized for this pattern.\n";
-    }
-}
-
-function buildSettledFlow(data: SettledShapeData, modelCount: number): string {
-    let flow = `**Narrative Gravity:** Reasoning paths converge on ${data.floor.length} central claim(s).\n\n`;
-
-    flow += `**The Centroid (${data.floorStrength} floor):**\n\n`;
-
-    data.floor.forEach(c => {
-        const contested = c.isContested ? " ⚠️" : "";
-        flow += `• **${c.label}** [${c.supportCount}/${modelCount}]${contested}\n`;
-        flow += `  ${c.text}\n\n`;
-    });
-
-    if (data.floorAssumptions && data.floorAssumptions.length > 0) {
-        flow += `**What the centroid assumes:**\n`;
-        data.floorAssumptions.forEach(a => {
-            flow += `• ${a}\n`;
-        });
-        flow += `\n`;
-    }
-
-    return flow;
-}
-
-function buildContestedFlow(data: ContestedShapeData, modelCount: number): string {
-    let flow = `**The Fault Line:** ${data.centralConflict.axis}\n\n`;
-
-    if (data.centralConflict.type === "individual") {
-        const cc = data.centralConflict;
-
-        flow += `**Position A: ${cc.positionA.claim.label}** [${cc.positionA.claim.supportCount}/${modelCount}]\n`;
-        flow += `${cc.positionA.claim.text}\n\n`;
-
-        flow += `**Position B: ${cc.positionB.claim.label}** [${cc.positionB.claim.supportCount}/${modelCount}]\n`;
-        flow += `${cc.positionB.claim.text}\n\n`;
-
-        flow += `**Dynamics:** ${cc.dynamics === "symmetric" ? "Evenly matched" : "Asymmetric support"}\n\n`;
-    } else {
-        const cc = data.centralConflict;
-
-        flow += `**Target Under Siege: ${cc.target.claim.label}** [${cc.target.claim.supportCount}/${modelCount}]\n`;
-        flow += `${cc.target.claim.text}\n\n`;
-
-        flow += `**Challengers (${cc.challengers.claims.length}):**\n`;
-        cc.challengers.claims.forEach(c => {
-            flow += `• **${c.label}** [${c.supportCount}/${modelCount}]: ${c.text}\n`;
-        });
-        flow += `\n`;
-    }
-
-    flow += `**Stakes:**\n`;
-    if (data.centralConflict.type === "individual") {
-        flow += `• Choosing A: ${data.centralConflict.stakes.choosingA}\n`;
-        flow += `• Choosing B: ${data.centralConflict.stakes.choosingB}\n`;
-    } else {
-        flow += `• Accepting target: ${data.centralConflict.stakes.acceptingTarget}\n`;
-        flow += `• Accepting challengers: ${data.centralConflict.stakes.acceptingChallengers}\n`;
-    }
-    flow += `\n`;
-
-    return flow;
-}
-
-function buildKeystoneFlow(data: KeystoneShapeData, modelCount: number): string {
-    const fragileMarker = data.keystone.isFragile ? " ⚠️ FRAGILE" : "";
-
-    let flow = `**The Hub: ${data.keystone.label}** [${data.keystone.supportCount}/${modelCount}]${fragileMarker}\n`;
-    flow += `${data.keystone.text}\n\n`;
-
-    flow += `**Structural Position:**\n`;
-    flow += `• Dominance: ${data.keystone.dominance.toFixed(1)}x more connected than next claim\n`;
-    flow += `• Cascade size: ${data.cascadeSize} claims depend on this\n\n`;
-
-    if (data.dependencies.length > 0) {
-        flow += `**What flows from the hub:**\n`;
-        data.dependencies.slice(0, 5).forEach(d => {
-            flow += `• ${d.label} (${d.relationship})\n`;
-        });
-        if (data.dependencies.length > 5) {
-            flow += `• ...and ${data.dependencies.length - 5} more\n`;
-        }
-        flow += `\n`;
-    }
-
-    return flow;
-}
-
-function buildLinearFlow(data: LinearShapeData, modelCount: number): string {
-    let flow = `**The Sequence:** ${data.chainLength} steps\n\n`;
-
-    data.chain.forEach((step, idx) => {
-        const weakMarker = step.isWeakLink ? " ⚠️ WEAK LINK" : "";
-        const arrow = idx < data.chain.length - 1 ? " →" : " (terminal)";
-
-        flow += `**Step ${idx + 1}: ${step.label}** [${step.supportCount}/${modelCount}]${weakMarker}${arrow}\n`;
-        flow += `${step.text}\n`;
-
-        if (step.isWeakLink && step.weakReason) {
-            flow += `*${step.weakReason}*\n`;
-        }
-        flow += `\n`;
-    });
-
-    return flow;
-}
-
-function buildTradeoffFlow(data: TradeoffShapeData, modelCount: number): string {
-    let flow = `**Optimization Boundaries:** ${data.tradeoffs.length} detected\n\n`;
-
-    data.tradeoffs.forEach((t, idx) => {
-        flow += `### Tradeoff ${idx + 1}\n\n`;
-
-        flow += `**Option A: ${t.optionA.label}** [${t.optionA.supportCount}/${modelCount}]\n`;
-        flow += `${t.optionA.text}\n\n`;
-
-        flow += `**Option B: ${t.optionB.label}** [${t.optionB.supportCount}/${modelCount}]\n`;
-        flow += `${t.optionB.text}\n\n`;
-
-        flow += `**Balance:** ${t.symmetry.replace("_", " ")}\n`;
-        if (t.governingFactor) {
-            flow += `**Governing factor:** ${t.governingFactor}\n`;
-        }
-        flow += `\n`;
-    });
-
-    if (data.dominatedOptions.length > 0) {
-        flow += `**Dominated options (can be eliminated):**\n`;
-        data.dominatedOptions.forEach(d => {
-            flow += `• ${d.dominated} — dominated by ${d.dominatedBy}\n`;
-        });
-        flow += `\n`;
-    }
-
-    return flow;
-}
-
-function buildDimensionalFlow(data: DimensionalShapeData, modelCount: number): string {
-    let flow = `**Independent Dimensions:** ${data.dimensions.length}\n\n`;
-
-    if (data.dominantDimension) {
-        const avgSupporters = modelCount > 0 ? Math.round(data.dominantDimension.avgSupport * modelCount) : null;
-        flow += `### Primary Lens: ${data.dominantDimension.theme}\n`;
-        flow += `${data.dominantDimension.claims.length} claims`;
-        if (typeof avgSupporters === "number") {
-            flow += `, avg support: ${avgSupporters}/${modelCount}`;
-        }
-        flow += `\n\n`;
-
-        data.dominantDimension.claims.slice(0, 3).forEach(c => {
-            flow += `• **${c.label}** [${c.supportCount}/${modelCount}]\n`;
-        });
-        if (data.dominantDimension.claims.length > 3) {
-            flow += `• ...and ${data.dominantDimension.claims.length - 3} more\n`;
-        }
-        flow += `\n`;
-    }
-
-    if (data.dimensions.length > 1) {
-        flow += `**Other dimensions:**\n`;
-        data.dimensions.slice(1).forEach(d => {
-            flow += `• ${d.theme}: ${d.claims.length} claims\n`;
-        });
-        flow += `\n`;
-    }
-
-    const conflicts = data.interactions.filter(i => i.relationship === "conflicting");
-    if (conflicts.length > 0) {
-        flow += `**Dimension conflicts:** ${conflicts.length}\n`;
-    }
-
-    return flow;
-}
-
-function buildExploratoryFlow(data: ExploratoryShapeData, modelCount: number): string {
-    const signalLabel = data.signalStrength < 0.35 ? "low" : data.signalStrength < 0.6 ? "medium" : "high";
-    let flow = `**Signal Strength:** ${signalLabel} (sparse)\n\n`;
-
-    if (data.strongestSignals.length > 0) {
-        flow += `**Strongest signals:**\n\n`;
-        data.strongestSignals.forEach(s => {
-            flow += `• **${s.label}** [${s.supportCount}/${modelCount}] — ${s.reason}\n`;
-            flow += `  ${s.text}\n\n`;
-        });
-    }
-
-    if (data.looseClusters.length > 0) {
-        flow += `**Loose clusters:**\n`;
-        data.looseClusters.forEach(c => {
-            const labels = c.claims.map(cl => cl.label).join(", ");
-            flow += `• ${c.theme}: ${labels}\n`;
-        });
-        flow += `\n`;
-    }
-
-    if (data.sparsityReasons && data.sparsityReasons.length > 0) {
-        flow += `**Why the structure is sparse:**\n`;
-        data.sparsityReasons.forEach(r => {
-            flow += `• ${r}\n`;
-        });
-        flow += `\n`;
-    }
-
-    return flow;
-}
-
-function buildContextualFlow(data: ContextualShapeData, modelCount: number): string {
-    let flow = `**Governing Condition:** ${data.governingCondition}\n\n`;
-
-    flow += `**Branches:**\n\n`;
-
-    data.branches.forEach(branch => {
-        flow += `### ${branch.condition}\n`;
-        branch.claims.forEach(c => {
-            flow += `• **${c.label}** [${c.supportCount}/${modelCount}]\n`;
-        });
-        flow += `\n`;
-    });
-
-    if (data.defaultPath?.exists) {
-        flow += `**Default path (highest support):**\n`;
-        data.defaultPath.claims.forEach(c => {
-            flow += `• ${c.label}\n`;
-        });
-        flow += `\n`;
-    }
-
-    return flow;
-}
-
-function buildFrictionSection(analysis: StructuralAnalysis): string {
-    const { shape, landscape, claimsWithLeverage } = analysis;
-
-    // Use composite shape if available (new system)
-    if (shape.compositeShape) {
-        return buildFrictionFromComposite(shape.compositeShape, claimsWithLeverage, landscape.modelCount);
-    }
-
-    // Fall back to legacy builders
-    const data = shape.data;
-
-    if (!data) return "Friction data not available.\n";
-
-    switch (shape.primaryPattern) {
-        case "settled":
-            return buildSettledFriction(data as SettledShapeData, landscape.modelCount);
-        case "contested":
-            return buildContestedFriction(data as ContestedShapeData);
-        case "keystone":
-            return buildKeystoneFriction(data as KeystoneShapeData, landscape.modelCount);
-        case "linear":
-            return buildLinearFriction(data as LinearShapeData);
-        case "tradeoff":
-            return buildTradeoffFriction(data as TradeoffShapeData);
-        case "dimensional":
-            return buildDimensionalFriction(data as DimensionalShapeData, landscape.modelCount);
-        case "exploratory":
-            return buildExploratoryFriction(data as ExploratoryShapeData, landscape.modelCount);
-        case "contextual":
-            return buildContextualFriction(data as ContextualShapeData);
-        default:
-            return "Friction not characterized for this pattern.\n";
-    }
-}
-
-function buildSettledFriction(data: SettledShapeData, modelCount: number): string {
-    let friction = "";
-
-    if (data.strongestOutlier) {
-        const o = data.strongestOutlier;
-        friction += `**The Minority Report:**\n\n`;
-        friction += `**${o.claim.label}** [${o.claim.supportCount}/${modelCount}]\n`;
-        friction += `${o.claim.text}\n\n`;
-        friction += `• Structural role: ${o.structuralRole}\n`;
-        friction += `• What it questions: ${o.whatItQuestions}\n\n`;
-        friction += `*For the consensus to be correct, this minority view must be wrong. Is it?*\n\n`;
-    } else if (data.challengers.length > 0) {
-        friction += `**Explicit Challengers:**\n\n`;
-        data.challengers.forEach(c => {
-            friction += `• **${c.label}** [${c.supportCount}/${modelCount}]\n`;
-            friction += `  ${c.text}\n`;
-            if (c.challenges) {
-                friction += `  *Challenges: ${c.challenges}*\n`;
-            }
-            friction += `\n`;
-        });
-    } else {
-        friction += `**No significant friction detected.**\n\n`;
-        friction += `This is either genuine consensus OR a blind spot where all sources share the same gap.\n\n`;
-    }
-
-    if (data.blindSpots.length > 0) {
-        friction += `**Unexplored areas (potential friction sources):**\n`;
-        data.blindSpots.slice(0, 3).forEach(b => {
-            friction += `• ${b}\n`;
-        });
-        friction += `\n`;
-    }
-
-    return friction;
-}
-
-function buildContestedFriction(data: ContestedShapeData): string {
-    let friction = `**The friction IS the structure.** Both positions are the friction against each other.\n\n`;
-
-    if (data.floor.exists && data.floor.claims.length > 0) {
-        friction += `**Outside the conflict (potential common ground):**\n`;
-        data.floor.claims.forEach(c => {
-            friction += `• **${c.label}** [${c.supportCount}]\n`;
-        });
-        friction += `\n`;
-    }
-
-    if (data.secondaryConflicts.length > 0) {
-        friction += `**Secondary conflicts:**\n`;
-        data.secondaryConflicts.slice(0, 3).forEach(c => {
-            friction += `• ${c.claimA.label} vs ${c.claimB.label}\n`;
-        });
-        friction += `\n`;
-    }
-
-    return friction;
-}
-
-function buildKeystoneFriction(data: KeystoneShapeData, modelCount: number): string {
-    let friction = "";
-
-    if (data.challengers.length > 0) {
-        friction += `**Challengers to the hub:**\n\n`;
-        data.challengers.forEach(c => {
-            friction += `• **${c.label}** [${c.supportCount}/${modelCount}]\n`;
-            friction += `  ${c.text}\n\n`;
-        });
-    }
-
-    if (data.decoupledClaims && data.decoupledClaims.length > 0) {
-        friction += `**Decoupled claims (survive if hub fails):**\n\n`;
-        data.decoupledClaims.forEach(c => {
-            friction += `• **${c.label}** [${c.supportCount}/${modelCount}]\n`;
-            friction += `  Not connected to hub — ${c.independenceReason}\n\n`;
-        });
-    } else {
-        friction += `**No decoupled claims found.** If the hub fails, the entire structure is compromised.\n\n`;
-    }
-
-    if (data.cascadeConsequences) {
-        friction += `**If the hub is wrong:**\n`;
-        friction += `• Directly affected: ${data.cascadeConsequences.directlyAffected} claims\n`;
-        friction += `• Transitively affected: ${data.cascadeConsequences.transitivelyAffected} claims\n`;
-        friction += `• Survives regardless: ${data.cascadeConsequences.survives} claims\n\n`;
-    }
-
-    return friction;
-}
-
-function buildLinearFriction(data: LinearShapeData): string {
-    let friction = "";
-
-    if (data.weakLinks.length > 0) {
-        friction += `**Weak links in the chain:**\n\n`;
-        data.weakLinks.forEach(wl => {
-            friction += `• **Step ${wl.step.position + 1}: ${wl.step.label}**\n`;
-            friction += `  Only ${wl.step.supportCount} supporter(s)\n`;
-            friction += `  If this breaks: ${wl.cascadeSize} downstream step(s) fail\n\n`;
-        });
-    } else {
-        friction += `**No weak links detected.** All steps have reasonable support.\n\n`;
-    }
-
-    if (data.shortcuts && data.shortcuts.length > 0) {
-        friction += `**Potential shortcuts (steps might be bypassable):**\n\n`;
-        data.shortcuts.forEach(s => {
-            const skipsText = s.skips.length > 0 ? `Skips: ${s.skips.length} step(s)` : "";
-            friction += `• ${s.from.label} → ${s.to.label} ${skipsText}\n`;
-            friction += `  ${s.supportEvidence}\n\n`;
-        });
-    }
-
-    if (data.chainFragility) {
-        friction += `**Chain fragility:** ${data.chainFragility.weakLinkCount}/${data.chainFragility.totalSteps} steps are weak links\n\n`;
-    }
-
-    return friction;
-}
-
-function buildTradeoffFriction(data: TradeoffShapeData): string {
-    let friction = `**There is no resolution to a true tradeoff.** `;
-    friction += `Choosing means accepting the cost of what you did not choose.\n\n`;
-
-    data.tradeoffs.forEach((t, idx) => {
-        friction += `**Tradeoff ${idx + 1}:**\n`;
-        friction += `• Choosing ${t.optionA.label} costs you: what ${t.optionB.label} provides\n`;
-        friction += `• Choosing ${t.optionB.label} costs you: what ${t.optionA.label} provides\n\n`;
-    });
-
-    if (data.floor.length > 0) {
-        friction += `**Unaffected by tradeoff:**\n`;
-        data.floor.forEach(c => {
-            friction += `• ${c.label}\n`;
-        });
-        friction += `\n`;
-    }
-
-    return friction;
-}
-
-function buildDimensionalFriction(data: DimensionalShapeData, modelCount: number): string {
-    let friction = "";
-
-    if (data.hiddenDimension) {
-        friction += `**The Hidden Dimension: ${data.hiddenDimension.theme}**\n\n`;
-        friction += `This perspective has ${data.hiddenDimension.claims.length} claim(s) but may be overlooked.\n\n`;
-
-        data.hiddenDimension.claims.forEach(c => {
-            friction += `• **${c.label}** [${c.supportCount}/${modelCount}]\n`;
-        });
-        friction += `\n`;
-    }
-
-    if (data.dominantBlindSpots && data.dominantBlindSpots.length > 0) {
-        friction += `**What the primary lens may miss:**\n`;
-        data.dominantBlindSpots.forEach(b => {
-            friction += `• ${b}\n`;
-        });
-        friction += `\n`;
-    }
-
-    const conflicts = data.interactions.filter(i => i.relationship === "conflicting");
-    if (conflicts.length > 0) {
-        friction += `**Dimension conflicts:**\n`;
-        conflicts.forEach(c => {
-            const dimA = data.dimensions.find(d => d.id === c.dimensionA);
-            const dimB = data.dimensions.find(d => d.id === c.dimensionB);
-            friction += `• ${dimA?.theme} conflicts with ${dimB?.theme}\n`;
-        });
-        friction += `\n`;
-    }
-
-    return friction;
-}
-
-function buildExploratoryFriction(data: ExploratoryShapeData, modelCount: number): string {
-    let friction = "";
-
-    if (data.outerBoundary) {
-        friction += `**The Outer Boundary:**\n\n`;
-        friction += `**${data.outerBoundary.label}** [${data.outerBoundary.supportCount}/${modelCount}]\n`;
-        friction += `${data.outerBoundary.text}\n`;
-        friction += `*${data.outerBoundary.distanceReason}*\n\n`;
-        friction += `This marks how far the unmapped territory extends.\n\n`;
-    }
-
-    if (data.isolatedClaims.length > 0) {
-        friction += `**Isolated claims (no connections):**\n`;
-        data.isolatedClaims.forEach(c => {
-            friction += `• ${c.label}\n`;
-        });
-        friction += `\n`;
-    }
-
-    friction += `**The structure is sparse—this could mean:**\n`;
-    friction += `• The question was ambiguous\n`;
-    friction += `• The domain is genuinely underexplored\n`;
-    friction += `• Structure exists but was not detected\n`;
-    friction += `• Perspectives interpreted the question differently\n\n`;
-
-    return friction;
-}
-
-function buildContextualFriction(data: ContextualShapeData): string {
-    let friction = `**The friction is: which branch applies?**\n\n`;
-
-    if (data.branches.length > 1) {
-        const nonDefault = data.branches.filter(b =>
-            !data.defaultPath?.claims.some(c => b.claims.some(bc => bc.id === c.id))
-        );
-
-        if (nonDefault.length > 0) {
-            friction += `**The exceptions:**\n`;
-            nonDefault.forEach(b => {
-                friction += `• ${b.condition}\n`;
-            });
-            friction += `\n`;
-        }
-    }
-
-    if (data.missingContext.length > 0) {
-        friction += `**To resolve which branch applies, need to know:**\n`;
-        data.missingContext.forEach(m => {
-            friction += `• ${m}\n`;
-        });
-        friction += `\n`;
-    }
-
-    return friction;
+    return buildFlowFromComposite(shape as ProblemStructure, landscape.modelCount);
 }
 
 function collectFragilities(analysis: StructuralAnalysis): string[] {
@@ -1372,19 +814,6 @@ function collectFragilities(analysis: StructuralAnalysis): string[] {
         );
     }
 
-    if (shape.fragilityPenalty) {
-        const fp = shape.fragilityPenalty;
-        if (fp.lowSupportArticulations > 0) {
-            fragilities.push(`${fp.lowSupportArticulations} fragile bridge(s) with low support`);
-        }
-        if (fp.conditionalConflicts > 0) {
-            fragilities.push(`${fp.conditionalConflicts} hidden conflict(s) that may activate under conditions`);
-        }
-        if (fp.disconnectedConsensus) {
-            fragilities.push(`High-support claims are not well connected to each other`);
-        }
-    }
-
     return fragilities;
 }
 
@@ -1393,21 +822,10 @@ function buildTransferSection(analysis: StructuralAnalysis): string {
 
     let transfer = "";
 
-    // Use composite shape transfer question if available (prioritizes dissent for convergent shapes)
-    const transferQuestion = shape.compositeShape?.transferQuestion ||
-        getTransferQuestion(shape.primaryPattern, shape.data);
+    const transferQuestion = shape.transferQuestion || "What would help you navigate this?";
 
     transfer += `**The question this hands to you:**\n\n`;
     transfer += `${transferQuestion}\n\n`;
-
-    const whatWouldHelp = getWhatWouldHelp(shape.primaryPattern, shape.data, analysis);
-    if (whatWouldHelp.length > 0) {
-        transfer += `**What would help:**\n`;
-        whatWouldHelp.forEach(w => {
-            transfer += `• ${w}\n`;
-        });
-        transfer += `\n`;
-    }
 
     return transfer;
 }
@@ -1661,12 +1079,10 @@ export function buildMetaResponse(analysis: StructuralAnalysis): string {
 
     return `I drew from ${landscape.modelCount} expert perspectives to form this view.
 
-• **Pattern**: ${shape.primaryPattern} (${Math.round(shape.confidence * 100)}% confidence)
+• **Pattern**: ${shape.primary} (${Math.round(shape.confidence * 100)}% confidence)
 • **Strong positions**: ${highSupportCount}
 • **Tensions**: ${tensionCount}
 • **Gaps**: ${ghostAnalysis.count}
-
-${shape.implications.action}
 
 Want the full breakdown, or shall we continue?`;
 }

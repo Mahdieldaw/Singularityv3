@@ -4,7 +4,7 @@
 // Pure response processing - NO I/O
 // ═══════════════════════════════════════════════════════════════════════════
 
-import { parseMappingResponse, parseOptionTitles } from '../../shared/parsing-utils';
+import { parseUnifiedMapperOutput } from '../../shared/parsing-utils';
 
 
 export class ResponseProcessor {
@@ -48,17 +48,17 @@ export class ResponseProcessor {
         options: string | null;
         optionTitles: string[];
     } {
-        const { narrative, graphTopology, options, optionTitles } = parseMappingResponse(text);
+        const { narrative, topology, options } = parseUnifiedMapperOutput(text);
 
         return {
             text: narrative,
-            topology: graphTopology,
-            options,
-            optionTitles,
+            topology: topology || null,
+            options: options || null,
+            optionTitles: [],
         };
     }
 
     parseOptionTitles(text: string): string[] {
-        return parseOptionTitles(text);
+        return [];
     }
 }

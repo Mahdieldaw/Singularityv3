@@ -46,21 +46,13 @@ describe('ConciergeService', () => {
             depth: 0
         },
         shape: {
-            primaryPattern: 'settled',
+            primary: 'convergent',
             confidence: 0.8,
+            patterns: [],
+            peaks: [],
+            peakRelationship: 'none',
             evidence: [],
-            implications: { action: 'Act now' },
-            data: {
-                 pattern: 'settled',
-                 floor: [],
-                 floorStrength: 'strong',
-                 challengers: [],
-                 blindSpots: [],
-                 confidence: 0.8,
-                 strongestOutlier: null,
-                 floorAssumptions: [],
-                 transferQuestion: "Why?"
-            }
+            transferQuestion: "Why?"
         }
     };
 

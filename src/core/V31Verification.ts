@@ -59,10 +59,10 @@ const scenario2: MapperArtifact = {
 
 console.log("\n--- RUNNING SCENARIO 1 (Settled/Keystone) ---");
 const result1 = computeProblemStructureFromArtifact(scenario1);
-console.log("Primary Pattern:", result1.primaryPattern);
+console.log("Primary Shape:", result1.primary);
 console.log("Evidence:", result1.evidence);
 
 console.log("\n--- RUNNING SCENARIO 2 (Leverage/Contested) ---");
 const result2 = computeProblemStructureFromArtifact(scenario2);
-console.log("Primary Pattern:", result2.primaryPattern);
+console.log("Primary Shape:", result2.primary);
 console.log("Evidence:", result2.evidence);

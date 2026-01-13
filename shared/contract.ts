@@ -103,42 +103,17 @@ export interface GraphTopology {
 }
 
 export interface ProblemStructure {
-  primaryPattern:
-  | "settled"
-  | "linear"
-  | "dimensional"
-  | "tradeoff"
-  | "contested"
-  | "exploratory"
-  | "contextual"
-  | "keystone";
+  primary: PrimaryShape;
   confidence: number;
+  patterns: SecondaryPattern[];
+  peaks: Array<{ id: string; label: string; supportRatio: number }>;
+  peakRelationship: "conflicting" | "trading-off" | "supporting" | "independent" | "none";
   evidence: string[];
-  implications: {
-    action: string;
-  };
-  data?: ContestedShapeData | SettledShapeData | KeystoneShapeData | LinearShapeData | TradeoffShapeData | DimensionalShapeData | ExploratoryShapeData | ContextualShapeData;
-  scores?: {
-    settled: number;
-    linear: number;
-    keystone: number;
-    contested: number;
-    tradeoff: number;
-    dimensional: number;
-    exploratory: number;
-  };
-  baseConfidence?: number;
-  signalPenalty?: number;
-  fragilityPenalty?: {
-    total: number;
-    lowSupportArticulations: number;
-    conditionalConflicts: number;
-    disconnectedConsensus: boolean;
-  };
+  transferQuestion: string;
   signalStrength?: number;
-  runnerUpPattern?: ProblemStructure["primaryPattern"];
-  compositeShape?: CompositeShape; // NEW: Peak-first composite shape detection
 }
+
+export type CompositeShape = ProblemStructure;
 
 export type ClaimRole = 'anchor' | 'branch' | 'challenger' | 'supplement';
 
@@ -572,19 +547,6 @@ export interface PeakAnalysis {
   peakSupports: Edge[];
   peakUnconnected: boolean;
 }
-
-export interface CompositeShape {
-  primary: PrimaryShape;
-  primaryConfidence: number;
-  patterns: SecondaryPattern[];
-  peaks: Array<{ id: string; label: string; supportRatio: number }>;
-  peakRelationship: 'conflicting' | 'trading-off' | 'supporting' | 'independent' | 'none';
-  evidence: string[];
-  transferQuestion: string;
-  // For backwards compatibility with existing shape data builders
-  legacyPattern: ProblemStructure['primaryPattern'];
-}
-
 
 export interface CoreRatios {
   concentration: number;
