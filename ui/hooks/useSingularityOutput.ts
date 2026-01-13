@@ -78,7 +78,7 @@ export function useSingularityOutput(aiTurnId: string | null, forcedProviderId?:
             active = bestWithData;
         } else {
             // Priority 3: No data anywhere, show pinned or whatever we have
-            active = pinnedCandidate || candidates.sort((a, b) => b.ts - a.ts)[0];
+            active = pinnedCandidate || [...candidates].sort((a, b) => b.ts - a.ts)[0];
         }
 
         if (!active) return defaultState;

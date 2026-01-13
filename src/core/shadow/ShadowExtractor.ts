@@ -80,13 +80,7 @@ export interface TwoPassResult {
     processingTime: number;
 }
 
-// ═══════════════════════════════════════════════════════════════════
-// PERFORMANCE LIMITS
-// Mitigation for scale: if someone feeds 10 models × 2000 words each
-// ═══════════════════════════════════════════════════════════════════
 
-const SENTENCE_LIMIT = 500;   // Per batch
-const CANDIDATE_LIMIT = 200;  // Per batch
 
 // ═══════════════════════════════════════════════════════════════════
 // SENTENCE EXTRACTION
@@ -249,14 +243,8 @@ export function executeShadowExtraction(
 
     // Process each model's response
     for (const response of batchResponses) {
-        let sentences = extractSentences(response.content);
+        const sentences = extractSentences(response.content);
         stats.totalSentences += sentences.length;
-
-        // Performance limit: cap sentences
-        if (sentences.length > SENTENCE_LIMIT) {
-            console.warn(`[Shadow] Sentence count (${sentences.length}) exceeds limit. Sampling.`);
-            sentences = sentences.slice(0, SENTENCE_LIMIT);
-        }
 
         for (let i = 0; i < sentences.length; i++) {
             const sentence = sentences[i];
@@ -269,12 +257,6 @@ export function executeShadowExtraction(
             if (pass1Matches.length === 0) continue;  // No patterns matched
 
             stats.pass1Candidates++;
-
-            // Performance limit: cap candidates
-            if (stats.pass1Candidates > CANDIDATE_LIMIT) {
-                console.warn(`[Shadow] Candidate count exceeds limit. Truncating pass2.`);
-                break;
-            }
 
             // Primary type is highest priority
             const primaryMatch = pass1Matches[0];

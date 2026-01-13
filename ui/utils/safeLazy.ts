@@ -18,8 +18,10 @@ export function safeLazy<T extends React.ComponentType<any>>(
         const load = async (): Promise<{ default: T }> => {
             try {
                 const module = await importFn();
-                // Reset counter on success so next failure in same session can still reload
-                sessionStorage.removeItem(RELOAD_COUNTER_KEY);
+                try {
+                    // Reset counter on success so next failure in same session can still reload
+                    sessionStorage.removeItem(RELOAD_COUNTER_KEY);
+                } catch (e) { }
                 return module;
             } catch (error: any) {
                 const errorName = error?.name || "";
@@ -37,9 +39,15 @@ export function safeLazy<T extends React.ComponentType<any>>(
 
                 console.warn("[safeLazy] Lazy load failed after retries, checking reload guard...", error);
 
-                const reloadCount = parseInt(sessionStorage.getItem(RELOAD_COUNTER_KEY) || "0", 10);
+                let reloadCount = 0;
+                try {
+                    reloadCount = parseInt(sessionStorage.getItem(RELOAD_COUNTER_KEY) || "0", 10);
+                } catch (e) { }
+
                 if (reloadCount < MAX_RELOADS) {
-                    sessionStorage.setItem(RELOAD_COUNTER_KEY, String(reloadCount + 1));
+                    try {
+                        sessionStorage.setItem(RELOAD_COUNTER_KEY, String(reloadCount + 1));
+                    } catch (e) { }
                     window.location.reload();
                     // Return temporary loading state while browser navigates
                     const ReloadingFallback = () => React.createElement("div", { className: "loading" }, "Reloading...");
@@ -76,7 +84,12 @@ export function safeLazy<T extends React.ComponentType<any>>(
                         {
                             type: 'button',
                             className: 'px-4 py-2 bg-surface-raised hover:bg-surface-highlight rounded border border-border-subtle transition-colors',
-                            onClick: () => window.location.reload(),
+                            onClick: () => {
+                                try {
+                                    sessionStorage.removeItem(RELOAD_COUNTER_KEY);
+                                } catch (e) { }
+                                window.location.reload();
+                            },
                             'aria-label': 'Reload page to retry loading component'
                         },
                         'Reload'

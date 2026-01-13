@@ -49,7 +49,7 @@ export const EXCLUSION_RULES: ExclusionRule[] = [
     {
         id: 'quoted_material',
         appliesTo: ['prescriptive', 'conflict', 'prerequisite', 'conditional', 'assertive'],
-        pattern: /^[""][^""]{10,}[""]$/,
+        pattern: /^(["“”])[^"“”]{10,}\1$/,
         reason: 'Quoted material, not original claim',
         severity: 'hard'
     },

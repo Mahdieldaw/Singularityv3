@@ -100,12 +100,12 @@ export async function runPreflight(request, authStatus, availableProviders) {
     if (singularity && !isProviderAuthorized(singularity, authStatus)) {
         // Check singularity lock to determine fallback behavior
         const candidate = selectBestProvider('singularity', authStatus, availableProviders);
-        if (locks.singularity) {
+        if (locks.singularity === singularity) {
             if (candidate) {
-                warnings.push(`Singularity provider "${singularity}" is unauthorized; using "${candidate}" for this request`);
+                warnings.push(`Singularity provider "${singularity}" is locked but unauthorized; using "${candidate}" for this request`);
                 singularity = candidate;
             } else {
-                warnings.push(`Singularity provider "${singularity}" is unauthorized and no fallback available`);
+                warnings.push(`Singularity provider "${singularity}" is locked but unauthorized and no fallback available`);
                 singularity = 'gemini';
             }
         } else {

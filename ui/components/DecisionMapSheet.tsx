@@ -421,9 +421,9 @@ const StructuralDebugPanel: React.FC<StructuralDebugPanelProps> = ({ analysis })
               <div className="grid grid-cols-1 md:grid-cols-2 gap-2 pt-2 border-t border-border-subtle/60">
                 <div>
                   <div className="text-[11px] text-text-muted mb-1">Secondary patterns</div>
-                  {analysis.shape.patterns.length > 0 ? (
+                  {(analysis.shape?.patterns ?? []).length > 0 ? (
                     <ul className="list-disc list-inside space-y-1">
-                      {analysis.shape.patterns.map((p, idx) => (
+                      {(analysis.shape?.patterns ?? []).map((p, idx) => (
                         <li key={idx} className="capitalize">
                           {p.type} ({p.severity})
                         </li>
@@ -435,11 +435,15 @@ const StructuralDebugPanel: React.FC<StructuralDebugPanelProps> = ({ analysis })
                 </div>
                 <div>
                   <div className="text-[11px] text-text-muted mb-1">Evidence list</div>
-                  <ul className="list-disc list-inside space-y-1">
-                    {analysis.shape.evidence.map((e, idx) => (
-                      <li key={idx}>{e}</li>
-                    ))}
-                  </ul>
+                  {(analysis.shape?.evidence ?? []).length > 0 ? (
+                    <ul className="list-disc list-inside space-y-1">
+                      {(analysis.shape?.evidence ?? []).map((e, idx) => (
+                        <li key={idx}>{e}</li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <div className="text-[11px] text-text-muted">No evidence provided.</div>
+                  )}
                 </div>
               </div>
             </div>
@@ -463,7 +467,7 @@ const ConciergePipelinePanel: React.FC<ConciergePipelinePanelProps> = ({ state, 
 
   const pipeline: any = useMemo(() => {
     if (state.output?.pipeline) return state.output.pipeline;
-      if (!analysis || !userMessage || !state.output) return null;
+    if (!analysis || !userMessage || !state.output) return null;
 
     try {
       const selection = ConciergeService.selectStance(userMessage, analysis.shape);

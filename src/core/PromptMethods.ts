@@ -564,7 +564,7 @@ const generateWhyItMatters = (
 };
 
 const detectDissentPattern = (
-    _claims: EnrichedClaim[],
+    claims: EnrichedClaim[],
     edges: Edge[],
     peakIds: string[],
     peaks: EnrichedClaim[]
@@ -576,7 +576,7 @@ const detectDissentPattern = (
     // ─────────────────────────────────────────────────────────────────────────
     // 1. LEVERAGE INVERSIONS: Low support, high structural importance
     // ─────────────────────────────────────────────────────────────────────────
-    const leverageInversions = _claims.filter(c => c.isLeverageInversion);
+    const leverageInversions = claims.filter(c => c.isLeverageInversion);
 
     for (const claim of leverageInversions) {
         const targets = edges
@@ -598,7 +598,7 @@ const detectDissentPattern = (
     // ─────────────────────────────────────────────────────────────────────────
     // 2. EXPLICIT CHALLENGERS: Role = challenger, attacks peaks
     // ─────────────────────────────────────────────────────────────────────────
-    const challengers = _claims.filter(c =>
+    const challengers = claims.filter(c =>
         c.role === 'challenger' ||
         (c.challenges && peakIdsSet.has(c.challenges))
     );
@@ -638,14 +638,14 @@ const detectDissentPattern = (
     const peakSupporters = new Set(peaks.flatMap(p => p.supporters));
     const outsiderModels = new Set<number>();
 
-    _claims.forEach(c => {
+    claims.forEach(c => {
         c.supporters.forEach(s => {
             if (!peakSupporters.has(s)) outsiderModels.add(s);
         });
     });
 
     if (outsiderModels.size > 0) {
-        const outsiderClaims = _claims.filter(c => {
+        const outsiderClaims = claims.filter(c => {
             const outsiderSupport = c.supporters.filter(s => outsiderModels.has(s)).length;
             return outsiderSupport > c.supporters.length * 0.5 && !peakIdsSet.has(c.id);
         });
@@ -668,7 +668,7 @@ const detectDissentPattern = (
     // ─────────────────────────────────────────────────────────────────────────
     // 4. EDGE CASES: Conditional claims with low support
     // ─────────────────────────────────────────────────────────────────────────
-    const edgeCases = _claims.filter(c =>
+    const edgeCases = claims.filter(c =>
         c.type === 'conditional' &&
         c.supportRatio < 0.4 &&
         !dissentVoices.some(v => v.id === c.id)
@@ -697,12 +697,12 @@ const detectDissentPattern = (
     // Identify suppressed dimensions
     const peakTypes = new Set(peaks.map(p => p.type));
     const minorityOnlyTypes = Array.from(new Set(rankedVoices.map(v => {
-        const claim = _claims.find(c => c.id === v.id);
+        const claim = claims.find(c => c.id === v.id);
         return claim?.type;
     }))).filter(t => t && !peakTypes.has(t));
 
     const strongestVoice = rankedVoices[0];
-    const strongestClaim = _claims.find(c => c.id === strongestVoice.id);
+    const strongestClaim = claims.find(c => c.id === strongestVoice.id);
 
     return {
         type: 'dissent',
@@ -1817,21 +1817,7 @@ export const computeProblemStructureFromArtifact = (artifact: MapperArtifact): P
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
-// SHADOW MAPPER: EXTENDED STRUCTURAL ANALYSIS
 // ═══════════════════════════════════════════════════════════════════════════
-
-/**
- * Extended analysis that includes Shadow Mapper audit.
- * Use this when batch responses are available for shadow extraction.
- */
-export interface StructuralAnalysisWithShadow extends StructuralAnalysis {
-    shadow: {
-        audit: ShadowAudit;
-        unindexed: UnindexedStatement[];
-        topUnindexed: UnindexedStatement[];  // Top 5 by adjusted score
-        processingTime: number;
-    };
-}
 
 /**
  * Compute full analysis including Shadow Mapper.
@@ -1845,7 +1831,7 @@ export const computeFullAnalysis = (
     batchResponses: Array<{ modelIndex: number; content: string }>,
     primaryArtifact: MapperArtifact,
     userQuery: string
-): StructuralAnalysisWithShadow => {
+): StructuralAnalysis => {
     // 1. Run existing structural analysis (unchanged)
     const baseAnalysis = computeStructuralAnalysis(primaryArtifact);
 
@@ -1858,6 +1844,26 @@ export const computeFullAnalysis = (
         primaryArtifact,
         userQuery
     );
+
+    // ═════════════════════════════════════════════════════════════════
+    // DEBUG LOGGING (Shadow Mapper)
+    // ═════════════════════════════════════════════════════════════════
+    console.groupCollapsed(`[Shadow] Audit: ${shadowDelta.unindexed.length} unindexed gaps found`);
+    console.log("Stats:", shadowDelta.audit.extraction);
+    console.log("Gaps:", shadowDelta.audit.gaps);
+
+    if (shadowDelta.unindexed.length > 0) {
+        console.log("TOP UNINDEXED GAPS (Query-Relevant):");
+        console.table(shadowDelta.unindexed.slice(0, 10).map(u => ({
+            Type: u.type,
+            Score: u.adjustedScore.toFixed(2),
+            Text: u.text.length > 120 ? u.text.substring(0, 117) + "..." : u.text,
+            Models: u.sourceModels.join(', ')
+        })));
+    }
+
+    console.log("Survival by Type:", shadowDelta.audit.typeSurvival);
+    console.groupEnd();
 
     // 4. Combine
     return {

@@ -649,6 +649,7 @@ export interface MapperArtifact extends MapperOutput {
   model_count?: number;
 
   problemStructure?: ProblemStructure;
+  fullAnalysis?: StructuralAnalysis;
   narrative?: string;
   anchors?: Array<{ label: string; id: string; position: number }>;
 }
@@ -1111,4 +1112,20 @@ export interface StructuralAnalysis {
   graph: GraphAnalysis;
   ratios: CoreRatios;
   shape: ProblemStructure;
+  shadow?: {
+    audit: any; // We'll use any here to avoid importing ShadowAudit into contract, or we can define a simple interface
+    unindexed: Array<{
+      text: string;
+      type: string;
+      sourceModels: number[];
+      adjustedScore: number;
+    }>;
+    topUnindexed: Array<{
+      text: string;
+      type: string;
+      sourceModels: number[];
+      adjustedScore: number;
+    }>;
+    processingTime: number;
+  };
 }

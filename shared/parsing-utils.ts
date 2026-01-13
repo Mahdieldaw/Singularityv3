@@ -329,7 +329,7 @@ export function extractJsonFromContent(content: string | null): any | null {
     if (firstBrace !== -1 && lastBrace > firstBrace) {
         try {
             return JSON.parse(jsonText.substring(firstBrace, lastBrace + 1));
-        } catch { } 
+        } catch { }
     }
 
     try {
@@ -488,7 +488,7 @@ export function parseUnifiedMapperOutput(text: string): ParsedMapperOutput {
                 map = extracted;
                 foundV3Map = true;
             }
-        } catch { } 
+        } catch { }
     }
 
     let narrative = "";
@@ -628,17 +628,17 @@ export function parseMapperArtifact(text: string): MapperArtifact {
     if (unified.artifact && unified.artifact.claims && unified.artifact.claims.length > 0) {
         return unified.artifact;
     }
-    
+
     // 2. Try raw JSON fallback (if the text IS just the JSON object)
     try {
         const extracted = extractJsonFromContent(text);
         if (extracted && Array.isArray(extracted.claims)) {
-             return {
+            return {
                 ...createEmptyMapperArtifact(),
                 ...extracted
-             };
+            };
         }
-    } catch { } 
+    } catch { }
 
     return createEmptyMapperArtifact();
 }
@@ -684,7 +684,7 @@ export function parseConciergeOutput(rawResponse: string): ConciergeOutput {
 
     // Look for the signal delimiter
     const signalMatch = rawResponse.match(
-        /<<<SINGULARITY_BATCH_REQUEST>>>([\s\S]*?)<<<END_BATCH_REQUEST>>>/ 
+        /<<<SINGULARITY_BATCH_REQUEST>>>([\s\S]*?)<<<END_BATCH_REQUEST>>>/
     );
 
     if (!signalMatch) {
@@ -872,7 +872,7 @@ function parseCommitField(text: string): string | null {
     }
 
     // 2. Block short bracketed content (≤3 words) — likely placeholder
-    if (/^\['.+'\]$/.test(commitText)) {
+    if (/^\[[^\]]+\]$/.test(commitText)) {
         const inner = commitText.slice(1, -1).trim();
         const wordCount = inner.split(/\s+/).length;
         if (wordCount <= 3) {
@@ -991,7 +991,7 @@ export function formatHandoffEcho(handoff: ConciergeDelta | null | undefined): s
 
     const lines: string[] = ['Your current handoff (update if needed):'];
     lines.push('');
-    lines.push('---CURRENT_HANDOFF---');
+    lines.push('---HANDOFF---');
 
     const constraints = handoff.constraints ?? [];
     const eliminated = handoff.eliminated ?? [];

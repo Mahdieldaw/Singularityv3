@@ -52,7 +52,7 @@ export class CognitivePipelineHandler {
 
             mapperArtifact = parseMapperArtifact(text);
             if (mapperArtifact) {
-                mapperArtifact.query = userMessageForSingularity;
+              mapperArtifact.query = userMessageForSingularity;
             }
 
 
@@ -129,18 +129,34 @@ export class CognitivePipelineHandler {
         try {
           let structuralAnalysis = null;
           try {
-            const { computeStructuralAnalysis } = await import('../PromptMethods');
-            structuralAnalysis = computeStructuralAnalysis(mapperArtifact);
+            const { computeStructuralAnalysis, computeFullAnalysis } = await import('../PromptMethods');
+
+            // Collect batch responses if available (Turn 1 transition)
+            const promptStep = steps.find(s => s.type === 'prompt');
+            const promptResult = promptStep ? stepResults.get(promptStep.stepId) : null;
+            const batchResults = promptResult?.result?.results || null;
+
+            if (batchResults && Object.keys(batchResults).length > 0) {
+              const batchResponses = Object.entries(batchResults).map(([_, resp], idx) => ({
+                modelIndex: idx,
+                content: resp.text || ""
+              }));
+              console.log(`[CognitiveHandler] Running FULL analysis with Shadow Mapper (${batchResponses.length} models)`);
+              structuralAnalysis = computeFullAnalysis(batchResponses, mapperArtifact, userMessageForSingularity);
+            } else {
+              console.log(`[CognitiveHandler] Running base structural analysis (no batch responses found)`);
+              structuralAnalysis = computeStructuralAnalysis(mapperArtifact);
+            }
           } catch (e) {
-            console.warn("[CognitiveHandler] computeStructuralAnalysis failed:", e);
-          }
-          if (structuralAnalysis && Array.isArray(structuralAnalysis.claimsWithLeverage) && Array.isArray(structuralAnalysis.edges)) {
-            context.storedAnalysis = {
-              claimsWithLeverage: structuralAnalysis.claimsWithLeverage,
-              edges: structuralAnalysis.edges,
-            };
+            console.error("[CognitiveHandler] Analysis failed:", e);
           }
 
+          if (structuralAnalysis && Array.isArray(structuralAnalysis.claimsWithLeverage) && Array.isArray(structuralAnalysis.edges)) {
+            context.storedAnalysis = structuralAnalysis; // Store full analysis
+            // Also attach to mapperArtifact for the UI
+            mapperArtifact.problemStructure = structuralAnalysis.shape;
+            mapperArtifact.fullAnalysis = structuralAnalysis; // Add this for UI components
+          }
           let stanceSelection = null;
           try {
             const mod = await import('../ConciergeService');
@@ -222,6 +238,7 @@ export class CognitivePipelineHandler {
                 isFirstTurn: true,
                 activeWorkflow: conciergeState?.activeWorkflow || undefined,
                 priorContext: undefined, // Fix inferred type error
+                shadow: structuralAnalysis?.shadow || undefined,
               };
 
               // If fresh spawn after COMMIT, inject prior context
@@ -271,7 +288,11 @@ export class CognitivePipelineHandler {
             // Fallback to standard prompt
             console.warn("[CognitiveHandler] Prompt building failed, using fallback");
             conciergePromptType = "standard_fallback";
-            conciergePrompt = ConciergeService.buildConciergePrompt(userMessageForSingularity, structuralAnalysis);
+            if (ConciergeService && typeof ConciergeService.buildConciergePrompt === 'function') {
+              conciergePrompt = ConciergeService.buildConciergePrompt(userMessageForSingularity, structuralAnalysis);
+            } else {
+              console.error("[CognitiveHandler] ConciergeService.buildConciergePrompt unavailable for fallback");
+            }
           }
 
           // ══════════════════════════════════════════════════════════════════
@@ -362,6 +383,7 @@ export class CognitivePipelineHandler {
                 ...(conciergeState || {}),
                 lastSingularityProviderId: singularityProviderId,
                 hasRunConcierge: true,
+                lastProcessedTurnId: context.canonicalAiTurnId, // Idempotency guard 
                 // Handoff V2 fields
                 turnInCurrentInstance,
                 pendingHandoff: parsedHandoff || conciergeState?.pendingHandoff || null,
@@ -498,7 +520,7 @@ export class CognitivePipelineHandler {
       if (!mapperArtifact && mappingResponses?.[0]) {
         mapperArtifact = parseMapperArtifact(String(latestMappingText));
         if (mapperArtifact) {
-            mapperArtifact.query = originalPrompt;
+          mapperArtifact.query = originalPrompt;
         }
       }
 

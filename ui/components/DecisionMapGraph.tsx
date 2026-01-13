@@ -198,7 +198,7 @@ const DecisionMapGraph: React.FC<Props> = ({
         decisionMapGraphDbg("init", {
             claims: inputClaims.length,
             edges: inputEdges.length,
-            pattern: problemStructure?.primary || null,
+            pattern: (problemStructure as any)?.primaryPattern || null,
             confidence: problemStructure?.confidence ?? null,
             targets: targets.size,
         });
