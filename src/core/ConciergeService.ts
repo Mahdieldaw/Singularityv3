@@ -17,6 +17,9 @@ import {
     ConciergeDelta,
 } from "../../shared/contract";
 
+// Shadow Mapper types
+import type { ShadowAudit, UnindexedStatement } from './PromptMethods';
+
 type CompositeShape = ProblemStructure;
 import {
     parseConciergeOutput,
@@ -81,6 +84,11 @@ export interface ConciergePromptOptions {
     isFirstTurn?: boolean;
     /** Prior context for fresh spawns after COMMIT or batch re-invoke */
     priorContext?: PriorContext;
+    /** Shadow analysis data (optional - computed from batch responses) */
+    shadow?: {
+        audit: ShadowAudit;
+        topUnindexed: UnindexedStatement[];
+    };
 }
 
 export interface HandleTurnResult {
@@ -927,8 +935,88 @@ function formatActiveWorkflow(workflow: ActiveWorkflow): string {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// SHADOW MAPPER: SECTION BUILDER
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Shadow data to include in concierge prompt.
+ * Passed separately from StructuralAnalysis since shadow is optional.
+ */
+export interface ShadowData {
+    audit: ShadowAudit;
+    topUnindexed: UnindexedStatement[];
+}
+
+/**
+ * Build shadow section for Concierge brief.
+ * Surfaces gaps detected by mechanical extraction that Primary missed.
+ */
+function buildShadowSection(shadow: ShadowData): string {
+    const { audit, topUnindexed } = shadow;
+    const parts: string[] = [];
+
+    // Check if there's meaningful signal
+    const hasGaps =
+        audit.gaps.conflicts > 0 ||
+        audit.gaps.prerequisites > 0 ||
+        topUnindexed.some(u => u.adjustedScore > 0.3);
+
+    if (!hasGaps) {
+        return '';  // Nothing significant to add
+    }
+
+    parts.push('## What Might Be Missing\n');
+
+    // Gap summary
+    if (audit.gaps.conflicts > 0) {
+        parts.push(
+            `• ${audit.gaps.conflicts} potential conflict(s) not surfaced above`
+        );
+    }
+    if (audit.gaps.prerequisites > 0) {
+        parts.push(
+            `• ${audit.gaps.prerequisites} potential dependency(ies) not surfaced above`
+        );
+    }
+    if (audit.gaps.prescriptive > 0 && audit.primaryCounts.claims < 10) {
+        parts.push(
+            `• ${audit.gaps.prescriptive} prescriptive statement(s) detected (should/must/always)`
+        );
+    }
+
+    // Top unindexed (query-relevant)
+    const relevant = topUnindexed.filter(u => u.adjustedScore > 0.25);
+    if (relevant.length > 0) {
+        parts.push('');
+        parts.push('**Potentially missed (sorted by relevance):**');
+        for (const item of relevant.slice(0, 3)) {
+            const typeLabel = item.type.charAt(0).toUpperCase() + item.type.slice(1);
+            const truncatedText = item.text.length > 100
+                ? item.text.slice(0, 97) + '...'
+                : item.text;
+            let line = `• [${typeLabel}] "${truncatedText}"`;
+            if (item.sourceModels.length > 1) {
+                line += ` (from ${item.sourceModels.length} perspectives)`;
+            }
+            parts.push(line);
+        }
+    }
+
+    // Survival rate warning (if lots got filtered, patterns may be too aggressive)
+    if (audit.extraction.survivalRate < 0.5 && audit.extraction.pass1Candidates > 20) {
+        parts.push('');
+        parts.push(
+            `*Note: Some potential signals were filtered as likely noise.*`
+        );
+    }
+
+    return parts.join('\n');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // THE PROMPT BUILDER
 // ═══════════════════════════════════════════════════════════════════════════
+
 
 export function buildConciergePrompt(
     userMessage: string,
@@ -957,6 +1045,11 @@ export function buildConciergePrompt(
         ? `## Active Workflow\n${formatActiveWorkflow(options.activeWorkflow)}\n`
         : '';
 
+    // Shadow Mapper: What mechanical extraction found that Primary missed
+    const shadowSection = options?.shadow
+        ? buildShadowSection(options.shadow)
+        : '';
+
     return `You are Singularity—an intelligence that has drawn from multiple expert perspectives.${framingLine}
 
 ## The Query
@@ -967,7 +1060,7 @@ ${priorContextSection}${priorContextSection ? '\n' : ''}${historySection}${histo
 
 ${structuralBrief}
 
-${workflowSection}${workflowSection ? '\n' : ''}## How To Respond
+${shadowSection}${shadowSection ? '\n' : ''}${workflowSection}${workflowSection ? '\n' : ''}## How To Respond
 
 ${shapeGuidance}
 
@@ -979,7 +1072,7 @@ ${stanceGuidance.voice}
 
 ## Never
 
-- Reference "models," "analysis," "structure," "claims"
+- Reference "models," "analysis," "structure," "claims," "shadow"
 - Hedge without explaining what you're uncertain about
 - Be vague when you have signal
 - Say "it depends" without saying on what

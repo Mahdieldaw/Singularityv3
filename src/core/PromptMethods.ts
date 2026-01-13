@@ -30,6 +30,18 @@ import {
     OrphanedPatternData,
 } from "../../shared/contract";
 
+// ═══════════════════════════════════════════════════════════════════════════
+// SHADOW MAPPER INTEGRATION
+// ═══════════════════════════════════════════════════════════════════════════
+import {
+    executeShadowExtraction,
+    executeShadowDelta,
+    ShadowAudit,
+    UnindexedStatement,
+    TwoPassResult,
+    DeltaResult,
+} from './shadow';
+
 const DEBUG_STRUCTURAL_ANALYSIS = true;
 const structuralDbg = (...args: any[]) => {
     if (DEBUG_STRUCTURAL_ANALYSIS) console.debug("[PromptMethods:structural]", ...args);
@@ -979,7 +991,7 @@ const generateTransferQuestion = (
 // ─────────────────────────────────────────────────────────────────────────────
 // MAIN COMPOSITE SHAPE DETECTOR
 // ─────────────────────────────────────────────────────────────────────────────
- 
+
 const detectCompositeShape = (
     claims: EnrichedClaim[],
     edges: Edge[],
@@ -1009,9 +1021,9 @@ const detectCompositeShape = (
         else if (peakAnalysis.peakSupports.length > 0) peakRelationship = 'supporting';
         else if (peakAnalysis.peakUnconnected) peakRelationship = 'independent';
     }
- 
+
     const transferQuestion = generateTransferQuestion(primary, patterns, peakAnalysis.peaks);
- 
+
     const patternEvidence = patterns.map(p => {
         switch (p.type) {
             case 'dissent':
@@ -1032,7 +1044,7 @@ const detectCompositeShape = (
                 return null;
         }
     }).filter(Boolean) as string[];
- 
+
     return {
         primary,
         confidence: primaryConfidence,
@@ -1804,6 +1816,67 @@ export const computeProblemStructureFromArtifact = (artifact: MapperArtifact): P
     return computeStructuralAnalysis(artifact).shape;
 };
 
-export {
-    getTopNCount
+// ═══════════════════════════════════════════════════════════════════════════
+// SHADOW MAPPER: EXTENDED STRUCTURAL ANALYSIS
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Extended analysis that includes Shadow Mapper audit.
+ * Use this when batch responses are available for shadow extraction.
+ */
+export interface StructuralAnalysisWithShadow extends StructuralAnalysis {
+    shadow: {
+        audit: ShadowAudit;
+        unindexed: UnindexedStatement[];
+        topUnindexed: UnindexedStatement[];  // Top 5 by adjusted score
+        processingTime: number;
+    };
+}
+
+/**
+ * Compute full analysis including Shadow Mapper.
+ * Call this after batch responses AND mapper artifact are available.
+ * 
+ * @param batchResponses - Raw batch responses with modelIndex and content
+ * @param primaryArtifact - MapperArtifact from primary mapper
+ * @param userQuery - Original user query for relevance scoring
+ */
+export const computeFullAnalysis = (
+    batchResponses: Array<{ modelIndex: number; content: string }>,
+    primaryArtifact: MapperArtifact,
+    userQuery: string
+): StructuralAnalysisWithShadow => {
+    // 1. Run existing structural analysis (unchanged)
+    const baseAnalysis = computeStructuralAnalysis(primaryArtifact);
+
+    // 2. Run Shadow two-pass extraction (parallel safe with mapper)
+    const shadowExtraction = executeShadowExtraction(batchResponses);
+
+    // 3. Run Shadow delta (compare to Primary)
+    const shadowDelta = executeShadowDelta(
+        shadowExtraction,
+        primaryArtifact,
+        userQuery
+    );
+
+    // 4. Combine
+    return {
+        ...baseAnalysis,
+        shadow: {
+            audit: shadowDelta.audit,
+            unindexed: shadowDelta.unindexed,
+            topUnindexed: shadowDelta.unindexed.slice(0, 5),
+            processingTime: shadowExtraction.processingTime + shadowDelta.processingTime
+        }
+    };
 };
+
+export {
+    getTopNCount,
+    // Re-export shadow types for consumers
+    executeShadowExtraction,
+    executeShadowDelta,
+};
+
+// Re-export types
+export type { ShadowAudit, UnindexedStatement, TwoPassResult, DeltaResult };
