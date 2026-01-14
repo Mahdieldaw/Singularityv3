@@ -1,6 +1,10 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as d3 from 'd3-force';
-import { Claim, Edge, ProblemStructure, GraphAnalysis, EnrichedClaim } from '../../shared/contract';
+import {
+    Claim, Edge, ProblemStructure, GraphAnalysis, EnrichedClaim,
+    DissentPatternData, KeystonePatternData, ChainPatternData,
+    FragilePatternData, SecondaryPattern
+} from '../../shared/contract';
 
 const DEBUG_DECISION_MAP_GRAPH = false;
 const decisionMapGraphDbg = (...args: any[]) => {
@@ -67,8 +71,65 @@ function getNodeRadius(supportCount: number): number {
     return base + Math.max(1, supportCount) * scale;
 }
 
-// Helper functions removed: computePrereqDepths, pickKeystoneId are no longer needed
-// as we rely on graphAnalysis props.
+// Helper to get secondary pattern for a claim
+const getClaimSecondaryPatterns = (
+    claimId: string,
+    patterns?: SecondaryPattern[]
+): SecondaryPattern[] => {
+    if (!patterns) return [];
+
+    return patterns.filter(p => {
+        switch (p.type) {
+            case 'dissent':
+                return (p.data as DissentPatternData).voices.some(v => v.id === claimId) ||
+                    (p.data as DissentPatternData).strongestVoice?.id === claimId;
+            case 'keystone':
+                return (p.data as KeystonePatternData).keystone.id === claimId;
+            case 'chain':
+                return (p.data as ChainPatternData).chain.includes(claimId);
+            case 'fragile':
+                return (p.data as FragilePatternData).fragilities.some(
+                    f => f.peak.id === claimId || f.weakFoundation.id === claimId
+                );
+            default:
+                return false;
+        }
+    });
+};
+
+// Helper to check if claim is a peak
+const isPeakClaim = (claimId: string, shape?: ProblemStructure): boolean => {
+    return shape?.peaks?.some(p => p.id === claimId) ?? false;
+};
+
+// Helper to get chain position
+const getChainPosition = (claimId: string, shape?: ProblemStructure): number | null => {
+    const chainPattern = shape?.patterns?.find(p => p.type === 'chain');
+    if (!chainPattern) return null;
+
+    const chainData = chainPattern.data as ChainPatternData;
+    const index = chainData.chain.indexOf(claimId);
+    return index >= 0 ? index : null;
+};
+
+// Helper to check if claim is dissenting
+const isDissentingClaim = (claimId: string, shape?: ProblemStructure): boolean => {
+    const dissentPattern = shape?.patterns?.find(p => p.type === 'dissent');
+    if (!dissentPattern) return false;
+
+    const data = dissentPattern.data as DissentPatternData;
+    return data.strongestVoice?.id === claimId ||
+        data.voices.some(v => v.id === claimId);
+};
+
+// Helper to check if claim has fragile foundation
+const hasFragileFoundation = (claimId: string, shape?: ProblemStructure): boolean => {
+    const fragilePattern = shape?.patterns?.find(p => p.type === 'fragile');
+    if (!fragilePattern) return false;
+
+    const data = fragilePattern.data as FragilePatternData;
+    return data.fragilities.some(f => f.peak.id === claimId);
+};
 
 const DecisionMapGraph: React.FC<Props> = ({
     claims: inputClaims,
@@ -115,7 +176,11 @@ const DecisionMapGraph: React.FC<Props> = ({
         const usableW = Math.max(1, width - padding * 2);
         const usableH = Math.max(1, height - padding * 2);
 
-        if ((problemStructure as any)?.primaryPattern === 'linear' && graphAnalysis?.longestChain && graphAnalysis.longestChain.length > 0) {
+        // Layout based on PRIMARY SHAPE (peaks/hills model)
+        const primaryShape = problemStructure?.primary;
+
+        if (graphAnalysis?.longestChain && graphAnalysis.longestChain.length >= 3) {
+            // CHAIN secondary pattern takes precedence for layout
             const longestChain = graphAnalysis.longestChain;
             const chainPositions = new Map<string, number>();
             longestChain.forEach((id: string, idx: number) => chainPositions.set(id, idx));
@@ -133,37 +198,97 @@ const DecisionMapGraph: React.FC<Props> = ({
                     y: padding + (idx / Math.max(1, nodeIds.length - longestChain.length)) * usableH
                 });
             });
-        } else if ((problemStructure as any)?.primaryPattern === 'keystone') {
-            const keystoneId = graphAnalysis?.hubClaim || null;
-            if (keystoneId) {
-                targets.set(keystoneId, { x: width / 2, y: height / 2 });
-                const neighbors = inputEdges
-                    .filter((e) => e.from === keystoneId || e.to === keystoneId)
-                    .map((e) => (e.from === keystoneId ? e.to : e.from))
-                    .filter((id) => id !== keystoneId);
-                const uniq = Array.from(new Set(neighbors));
-                const radius = Math.min(usableW, usableH) * 0.28;
-                uniq.forEach((id, idx) => {
-                    const a = (idx / Math.max(uniq.length, 1)) * Math.PI * 2;
-                    targets.set(id, {
-                        x: width / 2 + Math.cos(a) * radius,
-                        y: height / 2 + Math.sin(a) * radius,
-                    });
+        } else if (graphAnalysis?.hubClaim && problemStructure?.patterns?.some(p => p.type === 'keystone')) {
+            // KEYSTONE secondary pattern - radial layout around hub
+            const keystoneId = graphAnalysis.hubClaim;
+            targets.set(keystoneId, { x: width / 2, y: height / 2 });
+
+            const neighbors = inputEdges
+                .filter(e => e.from === keystoneId || e.to === keystoneId)
+                .map(e => e.from === keystoneId ? e.to : e.from)
+                .filter(id => id !== keystoneId);
+            const uniq = Array.from(new Set(neighbors));
+            const radius = Math.min(usableW, usableH) * 0.28;
+
+            uniq.forEach((id, idx) => {
+                const a = (idx / Math.max(uniq.length, 1)) * Math.PI * 2;
+                targets.set(id, {
+                    x: width / 2 + Math.cos(a) * radius,
+                    y: height / 2 + Math.sin(a) * radius,
                 });
-            }
-        } else if ((problemStructure as any)?.primaryPattern === 'settled' || (problemStructure as any)?.primaryPattern === 'contextual') {
+            });
+        } else if (primaryShape === 'convergent') {
+            // CONVERGENT - tight cluster in center
             const centerX = width / 2;
             const centerY = height / 2;
             const radius = Math.min(usableW, usableH) * 0.25;
 
-            nodeIds.forEach((id, idx) => {
-                const angle = (idx / nodeIds.length) * Math.PI * 2;
+            // Peaks go in inner ring
+            const peakIds = new Set(problemStructure?.peaks?.map(p => p.id) || []);
+            const peaks = nodeIds.filter(id => peakIds.has(id));
+            const others = nodeIds.filter(id => !peakIds.has(id));
+
+            peaks.forEach((id, idx) => {
+                const angle = (idx / peaks.length) * Math.PI * 2;
                 targets.set(id, {
-                    x: centerX + Math.cos(angle) * radius * 0.5,
-                    y: centerY + Math.sin(angle) * radius * 0.5,
+                    x: centerX + Math.cos(angle) * radius * 0.3,
+                    y: centerY + Math.sin(angle) * radius * 0.3,
+                });
+            });
+
+            others.forEach((id, idx) => {
+                const angle = (idx / others.length) * Math.PI * 2;
+                targets.set(id, {
+                    x: centerX + Math.cos(angle) * radius * 0.8,
+                    y: centerY + Math.sin(angle) * radius * 0.8,
+                });
+            });
+        } else if (primaryShape === 'forked') {
+            // FORKED - two clusters on opposite sides
+            const peaks = problemStructure?.peaks || [];
+            const leftPeaks = peaks.slice(0, Math.ceil(peaks.length / 2));
+            const rightPeaks = peaks.slice(Math.ceil(peaks.length / 2));
+
+            leftPeaks.forEach((p, idx) => {
+                targets.set(p.id, {
+                    x: width * 0.25,
+                    y: height / 2 + (idx - leftPeaks.length / 2) * 60,
+                });
+            });
+
+            rightPeaks.forEach((p, idx) => {
+                targets.set(p.id, {
+                    x: width * 0.75,
+                    y: height / 2 + (idx - rightPeaks.length / 2) * 60,
+                });
+            });
+        } else if (primaryShape === 'constrained') {
+            // CONSTRAINED - horizontal spread showing tradeoff
+            const peaks = problemStructure?.peaks || [];
+            const spacing = usableW / (peaks.length + 1);
+
+            peaks.forEach((p, idx) => {
+                targets.set(p.id, {
+                    x: padding + spacing * (idx + 1),
+                    y: height / 2,
+                });
+            });
+        } else if (primaryShape === 'parallel') {
+            // PARALLEL - separate clusters for each dimension
+            const components = graphAnalysis?.components || [nodeIds];
+            const colWidth = usableW / components.length;
+
+            components.forEach((comp, compIdx) => {
+                const compCenterX = padding + colWidth * (compIdx + 0.5);
+                comp.forEach((id, idx) => {
+                    targets.set(id, {
+                        x: compCenterX,
+                        y: padding + (idx / Math.max(1, comp.length - 1)) * usableH,
+                    });
                 });
             });
         }
+        // SPARSE - no targets, let simulation find equilibrium
 
         // Map V3 Claims to GraphNodes
         const simNodes: GraphNode[] = inputClaims.map(c => {
@@ -198,7 +323,7 @@ const DecisionMapGraph: React.FC<Props> = ({
         decisionMapGraphDbg("init", {
             claims: inputClaims.length,
             edges: inputEdges.length,
-            pattern: (problemStructure as any)?.primaryPattern || null,
+            pattern: problemStructure?.primary || null,
             confidence: problemStructure?.confidence ?? null,
             targets: targets.size,
         });
@@ -213,8 +338,8 @@ const DecisionMapGraph: React.FC<Props> = ({
         const isWideLayout = aspectRatio > 1.5;
         const nodePadding = 80; // Keep nodes away from edges (increased for larger spread)
 
-        const isLinear = (problemStructure as any)?.primaryPattern === 'linear' && targets.size > 0;
-        const isKeystone = (problemStructure as any)?.primaryPattern === 'keystone' && targets.size > 0;
+        const isLinear = (graphAnalysis?.longestChain && graphAnalysis.longestChain.length >= 3 && targets.size > 0) || false;
+        const isKeystone = (!!graphAnalysis?.hubClaim && targets.size > 0) || false;
         // const isSettled = (problemStructure as any)?.primaryPattern === 'settled' || (problemStructure as any)?.primaryPattern === 'contextual';
 
         const simulation = d3.forceSimulation<GraphNode>(simNodes)
@@ -690,15 +815,27 @@ const DecisionMapGraph: React.FC<Props> = ({
                         // Find enriched data for this node
                         const enriched = enrichedClaims?.find(c => c.id === node.id);
 
-                        // Determine color based on V3.1 flags
-                        const color = enriched?.isKeystone ? '#8b5cf6' :     // Purple for keystone
-                            enriched?.isChallenger ? '#f59e0b' :    // Amber for challenger
-                                enriched?.isEvidenceGap ? '#ef4444' :   // Red for evidence gap
-                                    enriched?.isHighSupport ? '#3b82f6' :   // Blue for high support
-                                        getRoleColor(node.role);                 // Fallback to role color
+                        // NEW: Get patterns for this claim
+                        const claimPatterns = getClaimSecondaryPatterns(node.id, problemStructure?.patterns);
+                        const isPeak = isPeakClaim(node.id, problemStructure);
+                        const isKeystone = claimPatterns.some(p => p.type === 'keystone');
+                        const isDissent = isDissentingClaim(node.id, problemStructure);
+                        const isFragile = hasFragileFoundation(node.id, problemStructure);
+                        const chainPosition = getChainPosition(node.id, problemStructure);
+
+                        // Determine color based on patterns (priority order)
+                        const color =
+                            isKeystone ? '#8b5cf6' :          // Purple for keystone
+                                isDissent ? '#fbbf24' :           // Yellow/amber for dissent
+                                    isFragile ? '#f97316' :           // Orange for fragile
+                                        isPeak ? '#3b82f6' :              // Blue for peaks
+                                            enriched?.isChallenger ? '#f59e0b' :
+                                                enriched?.isEvidenceGap ? '#ef4444' :
+                                                    enriched?.isHighSupport ? '#10b981' :
+                                                        getRoleColor(node.role);
 
                         const isSelected = Array.isArray(selectedClaimIds) && selectedClaimIds.includes(node.id);
-                        const showWarning = enriched?.isEvidenceGap || enriched?.isLeverageInversion;
+                        const showWarning = enriched?.isEvidenceGap || enriched?.isLeverageInversion || isFragile;
 
                         return (
                             <g
@@ -780,8 +917,72 @@ const DecisionMapGraph: React.FC<Props> = ({
                                     opacity={isHovered ? 0.7 : 0.4}
                                 />
 
-                                {/* NEW: Warning indicator for evidence gaps / leverage inversions */}
-                                {showWarning && (
+                                {/* NEW: Dissent indicator (⚡) */}
+                                {isDissent && (
+                                    <text
+                                        y={-radius - 8}
+                                        textAnchor="middle"
+                                        fontSize={16}
+                                        style={{ filter: 'drop-shadow(0 0 4px rgba(251, 191, 36, 0.8))' }}
+                                    >
+                                        ⚡
+                                    </text>
+                                )}
+
+                                {/* Keystone crown indicator */}
+                                {isKeystone && !isDissent && (
+                                    <text
+                                        y={-radius - 8}
+                                        textAnchor="middle"
+                                        fontSize={14}
+                                    >
+                                        👑
+                                    </text>
+                                )}
+
+                                {/* Peak indicator (star) */}
+                                {isPeak && !isKeystone && !isDissent && (
+                                    <text
+                                        y={-radius - 8}
+                                        textAnchor="middle"
+                                        fontSize={12}
+                                        fill="#3b82f6"
+                                    >
+                                        ★
+                                    </text>
+                                )}
+
+                                {/* NEW: Fragile indicator */}
+                                {isFragile && (
+                                    <g transform={`translate(${radius * 0.6}, ${-radius * 0.6})`}>
+                                        <circle r={8} fill="#f97316" stroke="#fff" strokeWidth={1} />
+                                        <text
+                                            textAnchor="middle"
+                                            dy={4}
+                                            fill="#fff"
+                                            fontSize={10}
+                                            fontWeight="bold"
+                                        >
+                                            ~
+                                        </text>
+                                    </g>
+                                )}
+
+                                {/* Chain position indicator */}
+                                {chainPosition !== null && (
+                                    <text
+                                        y={radius + 24}
+                                        textAnchor="middle"
+                                        fill="rgba(59, 130, 246, 0.8)"
+                                        fontSize={10}
+                                        fontWeight="bold"
+                                    >
+                                        Step {chainPosition + 1}
+                                    </text>
+                                )}
+
+                                {/* Warning indicator for evidence gaps / leverage inversions */}
+                                {showWarning && !isFragile && (
                                     <g transform={`translate(${-radius * 0.6}, ${-radius * 0.6})`}>
                                         <circle r={8} fill="#ef4444" stroke="#fff" strokeWidth={1} />
                                         <text
@@ -794,29 +995,6 @@ const DecisionMapGraph: React.FC<Props> = ({
                                             !
                                         </text>
                                     </g>
-                                )}
-
-                                {/* NEW: Keystone crown indicator */}
-                                {enriched?.isKeystone && (
-                                    <text
-                                        y={-radius - 8}
-                                        textAnchor="middle"
-                                        fontSize={14}
-                                    >
-                                        👑
-                                    </text>
-                                )}
-
-                                {/* NEW: Chain position indicator for linear patterns */}
-                                {(problemStructure as any)?.primaryPattern === 'linear' && enriched?.chainDepth !== undefined && (
-                                    <text
-                                        y={-radius - 6}
-                                        textAnchor="middle"
-                                        fill="rgba(255,255,255,0.6)"
-                                        fontSize={9}
-                                    >
-                                        Step {enriched.chainDepth + 1}
-                                    </text>
                                 )}
 
                                 {/* Support count badge */}
@@ -930,21 +1108,38 @@ const DecisionMapGraph: React.FC<Props> = ({
             </g>
 
             {/* Legend - fixed position outside transform */}
-            <g transform={`translate(${width - 140}, 20)`}>
-                <rect x={-10} y={-10} width={135} height={98} fill="rgba(0,0,0,0.85)" rx={8} stroke="rgba(139,92,246,0.3)" strokeWidth={1} />
+            {/* Legend - updated for new model */}
+            <g transform={`translate(${width - 160}, 20)`}>
+                <rect x={-10} y={-10} width={155} height={150} fill="rgba(0,0,0,0.85)" rx={8} stroke="rgba(139,92,246,0.3)" strokeWidth={1} />
                 <text x={0} y={8} fill="rgba(255,255,255,0.8)" fontSize={10} fontWeight={600}>Legend</text>
 
+                {/* Edges */}
                 <line x1={0} y1={24} x2={30} y2={24} stroke="#9ca3af" strokeWidth={2.5} markerEnd="url(#arrowGray)" />
                 <text x={38} y={28} fill="rgba(255,255,255,0.7)" fontSize={9}>Supports</text>
 
-                <line x1={0} y1={42} x2={30} y2={42} stroke="#f97316" strokeWidth={2.5} strokeDasharray="2,2" markerStart="url(#arrowOrange)" markerEnd="url(#arrowOrange)" />
+                <line x1={0} y1={42} x2={30} y2={42} stroke="#f97316" strokeWidth={2.5} strokeDasharray="2,2" />
                 <text x={38} y={46} fill="rgba(255,255,255,0.7)" fontSize={9}>Tradeoff</text>
 
-                <line x1={0} y1={60} x2={30} y2={60} stroke="#ef4444" strokeWidth={2.5} strokeDasharray="6,4" markerStart="url(#arrowRed)" markerEnd="url(#arrowRed)" />
+                <line x1={0} y1={60} x2={30} y2={60} stroke="#ef4444" strokeWidth={2.5} strokeDasharray="6,4" />
                 <text x={38} y={64} fill="rgba(255,255,255,0.7)" fontSize={9}>Conflicts</text>
 
                 <line x1={0} y1={78} x2={30} y2={78} stroke="#111827" strokeWidth={2.5} markerEnd="url(#arrowBlack)" />
                 <text x={38} y={82} fill="rgba(255,255,255,0.7)" fontSize={9}>Prerequisite</text>
+
+                {/* Node indicators */}
+                <text x={0} y={100} fill="rgba(255,255,255,0.6)" fontSize={8}>NODE INDICATORS</text>
+
+                <text x={0} y={116} fontSize={12}>👑</text>
+                <text x={18} y={116} fill="rgba(255,255,255,0.7)" fontSize={9}>Keystone</text>
+
+                <text x={70} y={116} fontSize={12}>⚡</text>
+                <text x={88} y={116} fill="rgba(255,255,255,0.7)" fontSize={9}>Dissent</text>
+
+                <text x={0} y={134} fontSize={10}>★</text>
+                <text x={18} y={134} fill="rgba(255,255,255,0.7)" fontSize={9}>Peak</text>
+
+                <circle cx={78} cy={130} r={6} fill="#f97316" />
+                <text x={88} y={134} fill="rgba(255,255,255,0.7)" fontSize={9}>Fragile</text>
             </g>
         </svg>
     );

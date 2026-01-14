@@ -110,6 +110,7 @@ export interface ProblemStructure {
   peakRelationship: "conflicting" | "trading-off" | "supporting" | "independent" | "none";
   evidence: string[];
   transferQuestion: string;
+  data?: ShapeData;
   signalStrength?: number;
 }
 

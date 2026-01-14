@@ -35,17 +35,19 @@ yarn-error.log*
 .DS_Store
 Thumbs.db
 
+promptmeth/*
+promptmeth/
 
 # Documentation
 scripts/
 docs/
-*.md
+*.md    
 *.txt
 *.d.ts
 *.css
 .*test.ts
 src/core/V31Verification.ts
-
+docs/*
 jest.config.js
 oldaiturnblock.tsx
 oldsynthesisbubble.tsx

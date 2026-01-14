@@ -21,6 +21,7 @@ import { formatDecisionMapForMd, formatGraphForMd } from "../utils/copy-format-u
 
 import {
   parseUnifiedMapperOutput,
+
 } from "../../shared/parsing-utils";
 import { computeProblemStructureFromArtifact, computeStructuralAnalysis } from "../../src/core/PromptMethods";
 import type { StructuralAnalysis } from "../../shared/contract";
@@ -37,6 +38,10 @@ const decisionMapSheetDbg = (...args: any[]) => {
   if (DEBUG_DECISION_MAP_SHEET) console.debug("[DecisionMapSheet]", ...args);
 };
 
+// ============================================================================
+// STRUCTURAL DEBUG PANEL - Shows peaks/hills analysis pipeline
+// ============================================================================
+
 interface StructuralDebugPanelProps {
   analysis: StructuralAnalysis;
 }
@@ -44,6 +49,9 @@ interface StructuralDebugPanelProps {
 const StructuralDebugPanel: React.FC<StructuralDebugPanelProps> = ({ analysis }) => {
   const [showRaw, setShowRaw] = useState(false);
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // Signal strength computation (for display)
+  // ─────────────────────────────────────────────────────────────────────────
   const signal = useMemo(() => {
     const claimCount = analysis.claimsWithLeverage.length;
     const edgeCount = analysis.edges.length;
@@ -72,12 +80,53 @@ const StructuralDebugPanel: React.FC<StructuralDebugPanelProps> = ({ analysis })
     return { edgeSignal, supportSignal, coverageSignal, final };
   }, [analysis]);
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // Peaks & Hills detection (for display in Phase 6)
+  // ─────────────────────────────────────────────────────────────────────────
+  const peaksAndHills = useMemo(() => {
+    const modelCount = analysis.landscape.modelCount || 1;
+    const peakThreshold = 0.5; // >50% support
+    const hillThreshold = modelCount > 1 ? 2 / modelCount : 0.3;
+
+    const peaks = analysis.claimsWithLeverage.filter(c => c.supportRatio > peakThreshold);
+    const hills = analysis.claimsWithLeverage.filter(c =>
+      c.supportRatio > hillThreshold && c.supportRatio <= peakThreshold
+    );
+    const floor = analysis.claimsWithLeverage.filter(c => c.supportRatio <= hillThreshold);
+
+    return { peaks, hills, floor, peakThreshold, hillThreshold };
+  }, [analysis]);
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Dissent voices (minority with high insight potential)
+  // ─────────────────────────────────────────────────────────────────────────
+  const dissentVoices = useMemo(() => {
+    const dissentPattern = analysis.shape.patterns?.find(p => p.type === 'dissent');
+    if (dissentPattern?.data && Array.isArray((dissentPattern.data as any).voices)) {
+      return (dissentPattern.data as any).voices;
+    }
+    // Fallback: find low-support claims that challenge high-support claims
+    return analysis.claimsWithLeverage
+      .filter(c => c.isChallenger && c.supportRatio < 0.3)
+      .slice(0, 5)
+      .map(c => ({
+        claimId: c.id,
+        label: c.label,
+        supportRatio: c.supportRatio,
+        challenges: c.label,
+      }));
+  }, [analysis]);
+
   const ratioBadge = (value: number | undefined) => {
     if (value == null || Number.isNaN(value)) return "";
     if (value > 0.7) return "🟢";
     if (value >= 0.3) return "🟡";
     return "🔴";
   };
+
+  // Get primary pattern - support both old and new field names
+  const primaryPattern = analysis.shape.primary || (analysis.shape as any).primaryPattern || 'unknown';
+  const secondaryPatterns = analysis.shape.patterns || [];
 
   return (
     <div className="h-full overflow-y-auto relative custom-scrollbar p-6">
@@ -86,7 +135,7 @@ const StructuralDebugPanel: React.FC<StructuralDebugPanelProps> = ({ analysis })
           <span className="text-2xl">🔬</span>
           <div>
             <div className="text-sm font-semibold">Structural Analysis Debug</div>
-            <div className="text-xs text-text-muted">Current turn structural pipeline</div>
+            <div className="text-xs text-text-muted">Peaks & Hills pipeline for current turn</div>
           </div>
         </div>
         <button
@@ -110,6 +159,9 @@ const StructuralDebugPanel: React.FC<StructuralDebugPanelProps> = ({ analysis })
         </pre>
       ) : (
         <div className="space-y-4">
+          {/* ═══════════════════════════════════════════════════════════════════ */}
+          {/* PHASE 1: Graph Topology */}
+          {/* ═══════════════════════════════════════════════════════════════════ */}
           <details open>
             <summary className="cursor-pointer text-sm font-semibold flex items-center gap-2">
               <span>📊 Phase 1: Graph Topology</span>
@@ -188,6 +240,9 @@ const StructuralDebugPanel: React.FC<StructuralDebugPanelProps> = ({ analysis })
             </div>
           </details>
 
+          {/* ═══════════════════════════════════════════════════════════════════ */}
+          {/* PHASE 2: Landscape Metrics */}
+          {/* ═══════════════════════════════════════════════════════════════════ */}
           <details>
             <summary className="cursor-pointer text-sm font-semibold flex items-center gap-2">
               <span>🌐 Phase 2: Landscape Metrics</span>
@@ -221,6 +276,9 @@ const StructuralDebugPanel: React.FC<StructuralDebugPanelProps> = ({ analysis })
             </div>
           </details>
 
+          {/* ═══════════════════════════════════════════════════════════════════ */}
+          {/* PHASE 3: Claim Enrichment */}
+          {/* ═══════════════════════════════════════════════════════════════════ */}
           <details>
             <summary className="cursor-pointer text-sm font-semibold flex items-center gap-2">
               <span>📌 Phase 3: Claim Enrichment</span>
@@ -306,6 +364,9 @@ const StructuralDebugPanel: React.FC<StructuralDebugPanelProps> = ({ analysis })
             </div>
           </details>
 
+          {/* ═══════════════════════════════════════════════════════════════════ */}
+          {/* PHASE 4: Core Ratios */}
+          {/* ═══════════════════════════════════════════════════════════════════ */}
           <details>
             <summary className="cursor-pointer text-sm font-semibold flex items-center gap-2">
               <span>⚖️ Phase 4: Core Ratios</span>
@@ -345,6 +406,9 @@ const StructuralDebugPanel: React.FC<StructuralDebugPanelProps> = ({ analysis })
             </div>
           </details>
 
+          {/* ═══════════════════════════════════════════════════════════════════ */}
+          {/* PHASE 5: Pattern Detection */}
+          {/* ═══════════════════════════════════════════════════════════════════ */}
           <details>
             <summary className="cursor-pointer text-sm font-semibold flex items-center gap-2">
               <span>🧩 Phase 5: Pattern Detection</span>
@@ -394,19 +458,98 @@ const StructuralDebugPanel: React.FC<StructuralDebugPanelProps> = ({ analysis })
             </div>
           </details>
 
-          <details>
+          {/* ═══════════════════════════════════════════════════════════════════ */}
+          {/* PHASE 6: Peaks & Hills Detection (NEW) */}
+          {/* ═══════════════════════════════════════════════════════════════════ */}
+          <details open>
             <summary className="cursor-pointer text-sm font-semibold flex items-center gap-2">
-              <span>🧱 Phase 6: Composite Shape</span>
-              <span className="text-[10px] text-text-muted uppercase tracking-wide">peak-first primary + secondary patterns</span>
+              <span>⛰️ Phase 6: Peaks & Hills Detection</span>
+              <span className="text-[10px] text-text-muted uppercase tracking-wide">detectCompositeShape (peak-first)</span>
             </summary>
             <div className="mt-2 text-xs space-y-2">
+              {/* Thresholds */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-3">
+                <div>
+                  <div className="text-text-muted">Peak threshold</div>
+                  <div className="font-mono">&gt;{(peaksAndHills.peakThreshold * 100).toFixed(0)}% support</div>
+                </div>
+                <div>
+                  <div className="text-text-muted">Hill threshold</div>
+                  <div className="font-mono">&gt;{(peaksAndHills.hillThreshold * 100).toFixed(0)}% support</div>
+                </div>
+                <div>
+                  <div className="text-text-muted">Peaks found</div>
+                  <div className="font-mono text-emerald-400">{peaksAndHills.peaks.length}</div>
+                </div>
+                <div>
+                  <div className="text-text-muted">Hills found</div>
+                  <div className="font-mono text-amber-400">{peaksAndHills.hills.length}</div>
+                </div>
+              </div>
+
+              {/* Peaks list */}
+              {peaksAndHills.peaks.length > 0 && (
+                <div className="bg-emerald-500/5 border border-emerald-500/20 rounded-lg p-3 mb-2">
+                  <div className="text-[11px] font-semibold text-emerald-400 mb-2">
+                    ⛰️ Peaks ({peaksAndHills.peaks.length}) — Claims with &gt;50% model support
+                  </div>
+                  <div className="space-y-1">
+                    {peaksAndHills.peaks.slice(0, 8).map((p) => (
+                      <div key={p.id} className="flex items-center gap-2 text-[11px]">
+                        <span className="font-mono text-emerald-400">{(p.supportRatio * 100).toFixed(0)}%</span>
+                        <span className="truncate max-w-[300px]">{p.label}</span>
+                      </div>
+                    ))}
+                    {peaksAndHills.peaks.length > 8 && (
+                      <div className="text-text-muted">+{peaksAndHills.peaks.length - 8} more peaks...</div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Hills list */}
+              {peaksAndHills.hills.length > 0 && (
+                <div className="bg-amber-500/5 border border-amber-500/20 rounded-lg p-3">
+                  <div className="text-[11px] font-semibold text-amber-400 mb-2">
+                    🏔️ Hills ({peaksAndHills.hills.length}) — Notable but not majority support
+                  </div>
+                  <div className="space-y-1">
+                    {peaksAndHills.hills.slice(0, 5).map((h) => (
+                      <div key={h.id} className="flex items-center gap-2 text-[11px]">
+                        <span className="font-mono text-amber-400">{(h.supportRatio * 100).toFixed(0)}%</span>
+                        <span className="truncate max-w-[300px]">{h.label}</span>
+                      </div>
+                    ))}
+                    {peaksAndHills.hills.length > 5 && (
+                      <div className="text-text-muted">+{peaksAndHills.hills.length - 5} more hills...</div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {peaksAndHills.peaks.length === 0 && peaksAndHills.hills.length === 0 && (
+                <div className="text-text-muted italic">No peaks or hills detected — sparse landscape.</div>
+              )}
+            </div>
+          </details>
+
+          {/* ═══════════════════════════════════════════════════════════════════ */}
+          {/* PHASE 7: Composite Shape Classification */}
+          {/* ═══════════════════════════════════════════════════════════════════ */}
+          <details>
+            <summary className="cursor-pointer text-sm font-semibold flex items-center gap-2">
+              <span>🧱 Phase 7: Composite Shape</span>
+              <span className="text-[10px] text-text-muted uppercase tracking-wide">primary shape + secondary patterns</span>
+            </summary>
+            <div className="mt-2 text-xs space-y-2">
+              {/* Primary shape */}
               <div className="grid grid-cols-2 md:grid-cols-3 gap-2 pt-2">
                 <div>
                   <div className="text-text-muted">Primary shape</div>
-                  <div className="font-mono capitalize">{analysis.shape.primary}</div>
+                  <div className="font-mono capitalize text-brand-400 text-sm">{primaryPattern}</div>
                 </div>
                 <div>
-                  <div className="text-text-muted">Primary confidence</div>
+                  <div className="text-text-muted">Confidence</div>
                   <div className="font-mono">
                     {analysis.shape.confidence.toFixed(2)} {ratioBadge(analysis.shape.confidence)}
                   </div>
@@ -418,17 +561,45 @@ const StructuralDebugPanel: React.FC<StructuralDebugPanelProps> = ({ analysis })
                   </div>
                 </div>
               </div>
+
+              {/* Primary shape explanation */}
+              <div className="bg-surface-highlight/30 rounded-lg p-3 mt-2">
+                <div className="text-[11px] text-text-muted mb-1">Primary shape interpretation:</div>
+                <div className="text-[11px]">
+                  {primaryPattern === 'sparse' && "⚠️ Insufficient signal — not enough peaks to determine structure."}
+                  {primaryPattern === 'convergent' && "✅ Consensus detected — peaks support each other or form unified floor."}
+                  {primaryPattern === 'forked' && "⚔️ Genuine disagreement — peaks conflict with each other."}
+                  {primaryPattern === 'constrained' && "⚖️ Tradeoff detected — peaks cannot be maximized simultaneously."}
+                  {primaryPattern === 'parallel' && "📐 Independent dimensions — peaks exist on separate axes."}
+                </div>
+              </div>
+
+              {/* Secondary patterns */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-2 pt-2 border-t border-border-subtle/60">
                 <div>
-                  <div className="text-[11px] text-text-muted mb-1">Secondary patterns</div>
-                  {(analysis.shape?.patterns ?? []).length > 0 ? (
-                    <ul className="list-disc list-inside space-y-1">
-                      {(analysis.shape?.patterns ?? []).map((p, idx) => (
-                        <li key={idx} className="capitalize">
-                          {p.type} ({p.severity})
-                        </li>
+                  <div className="text-[11px] text-text-muted mb-1">Secondary patterns detected</div>
+                  {secondaryPatterns.length > 0 ? (
+                    <div className="space-y-1">
+                      {secondaryPatterns.map((p, idx) => (
+                        <div key={idx} className="flex items-center gap-2">
+                          <span className={clsx(
+                            "px-1.5 py-0.5 rounded text-[10px] font-medium capitalize",
+                            p.type === 'dissent' && "bg-yellow-500/20 text-yellow-400",
+                            p.type === 'keystone' && "bg-purple-500/20 text-purple-400",
+                            p.type === 'chain' && "bg-blue-500/20 text-blue-400",
+                            p.type === 'fragile' && "bg-red-500/20 text-red-400",
+                            p.type === 'challenged' && "bg-orange-500/20 text-orange-400",
+                            p.type === 'conditional' && "bg-indigo-500/20 text-indigo-400",
+                            p.type === 'orphaned' && "bg-slate-500/20 text-slate-400",
+                          )}>
+                            {p.type}
+                          </span>
+                          {p.severity && (
+                            <span className="text-[10px] text-text-muted">({p.severity})</span>
+                          )}
+                        </div>
                       ))}
-                    </ul>
+                    </div>
                   ) : (
                     <div className="text-[11px] text-text-muted">No secondary patterns detected.</div>
                   )}
@@ -438,7 +609,7 @@ const StructuralDebugPanel: React.FC<StructuralDebugPanelProps> = ({ analysis })
                   {(analysis.shape?.evidence ?? []).length > 0 ? (
                     <ul className="list-disc list-inside space-y-1">
                       {(analysis.shape?.evidence ?? []).map((e, idx) => (
-                        <li key={idx}>{e}</li>
+                        <li key={idx} className="text-[11px]">{e}</li>
                       ))}
                     </ul>
                   ) : (
@@ -446,15 +617,66 @@ const StructuralDebugPanel: React.FC<StructuralDebugPanelProps> = ({ analysis })
                   )}
                 </div>
               </div>
+
+              {/* Dissent voices (if DISSENT secondary pattern exists) */}
+              {dissentVoices.length > 0 && (
+                <div className="bg-yellow-500/5 border border-yellow-500/20 rounded-lg p-3 mt-2">
+                  <div className="text-[11px] font-semibold text-yellow-400 mb-2">
+                    📢 Dissent Voices — Minority views with potential insight
+                  </div>
+                  <div className="space-y-1">
+                    {dissentVoices.slice(0, 5).map((v: any, idx: number) => (
+                      <div key={idx} className="flex items-center gap-2 text-[11px]">
+                        <span className="font-mono text-yellow-400">
+                          {v.supportRatio != null ? `${(v.supportRatio * 100).toFixed(0)}%` : '?'}
+                        </span>
+                        <span className="truncate max-w-[300px]">{v.label || v.claimId}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           </details>
 
-          {/* Phase 7 (legacy shape-specific data) removed in peak-first composite architecture */}
+          {/* ═══════════════════════════════════════════════════════════════════ */}
+          {/* PHASE 8: Shape-Specific Data */}
+          {/* ═══════════════════════════════════════════════════════════════════ */}
+          <details>
+            <summary className="cursor-pointer text-sm font-semibold flex items-center gap-2">
+              <span>📦 Phase 8: Shape-Specific Data</span>
+              <span className="text-[10px] text-text-muted uppercase tracking-wide">pattern-specific builders</span>
+            </summary>
+            <div className="mt-2 text-xs space-y-2">
+              {analysis.shape.data ? (
+                <>
+                  <div className="text-[11px] text-text-muted">
+                    Pattern data type: {(analysis.shape.data as any).pattern || primaryPattern}
+                  </div>
+                  <pre className="text-[11px] leading-snug bg-surface border border-border-subtle rounded-lg p-3 overflow-x-auto">
+                    {JSON.stringify(analysis.shape.data, null, 2)}
+                  </pre>
+                  {analysis.shape.transferQuestion && (
+                    <div className="bg-brand-500/10 border border-brand-500/20 rounded-lg p-3">
+                      <div className="text-[11px] font-semibold text-brand-400 mb-1">Transfer Question</div>
+                      <div className="text-[11px]">{analysis.shape.transferQuestion}</div>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="text-[11px] text-text-muted">No shape-specific data available.</div>
+              )}
+            </div>
+          </details>
         </div>
       )}
     </div>
   );
 };
+
+// ============================================================================
+// CONCIERGE PIPELINE PANEL
+// ============================================================================
 
 interface ConciergePipelinePanelProps {
   state: SingularityOutputState;
@@ -489,7 +711,9 @@ const ConciergePipelinePanel: React.FC<ConciergePipelinePanelProps> = ({ state, 
         stanceReason: selection.reason,
         stanceConfidence: selection.confidence,
         structuralShape: {
-          primaryPattern: analysis.shape.primary,
+          // Use `primary` for peaks/hills model
+          primary: analysis.shape.primary,
+          patterns: analysis.shape.patterns || [],
           confidence: analysis.shape.confidence,
         },
         leakageDetected,
@@ -564,7 +788,7 @@ const ConciergePipelinePanel: React.FC<ConciergePipelinePanelProps> = ({ state, 
           <div>
             <div className="text-text-muted">Shape</div>
             <div className="font-mono text-[11px]">
-              {pipeline?.structuralShape?.primaryPattern || "—"}
+              {pipeline?.structuralShape?.primary || "—"}
             </div>
           </div>
         </div>
@@ -595,10 +819,28 @@ const ConciergePipelinePanel: React.FC<ConciergePipelinePanelProps> = ({ state, 
             <div>
               <div className="text-text-muted">Shape pattern</div>
               <div className="font-mono">
-                {pipeline?.structuralShape?.primaryPattern || "—"}
+                {pipeline?.structuralShape?.primary || "—"}
+                {(pipeline?.structuralShape?.patterns?.length ?? 0) > 0 && (
+                  <span className="text-purple-400 ml-1">
+                    +{pipeline.structuralShape.patterns.length}
+                  </span>
+                )}
               </div>
             </div>
           </div>
+          {/* Show secondary patterns if available */}
+          {pipeline?.structuralShape?.patterns?.length > 0 && (
+            <div className="mt-2 pt-2 border-t border-border-subtle/60">
+              <div className="text-text-muted text-[10px] mb-1">Secondary patterns:</div>
+              <div className="flex flex-wrap gap-1">
+                {pipeline.structuralShape.patterns.map((p: any, i: number) => (
+                  <span key={i} className="px-1.5 py-0.5 rounded bg-white/5 text-[10px] capitalize">
+                    {p.type}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
         </details>
 
         {showPrompt && (
@@ -664,12 +906,25 @@ interface ParsedTheme {
   options: ParsedOption[];
 }
 
+/**
+ * Build themes from claims - supports BOTH role-based AND type-based grouping
+ * Role takes priority (anchor, challenger, supplement, branch) because it maps 
+ * to structural significance, falling back to type for classification
+ */
 function buildThemesFromClaims(claims: any[]): ParsedTheme[] {
   if (!Array.isArray(claims) || claims.length === 0) return [];
 
   const themesByName = new Map<string, ParsedTheme>();
 
   const getThemeNameForClaim = (claim: any): string => {
+    // First check for structural role (from peaks/hills analysis)
+    const role = String(claim?.role || '').toLowerCase();
+    if (role === 'anchor') return 'Anchors';
+    if (role === 'challenger') return 'Challengers';
+    if (role === 'supplement') return 'Supplements';
+    if (role === 'branch') return 'Branches';
+
+    // Fall back to claim type
     switch (claim.type) {
       case 'factual': return 'Facts';
       case 'prescriptive': return 'Recommendations';
@@ -711,7 +966,103 @@ function buildThemesFromClaims(claims: any[]): ParsedTheme[] {
   return Array.from(themesByName.values());
 }
 
+/**
+ * Parse raw options text into themes - RESTORED fallback parser
+ * Handles:
+ * - Emoji-prefixed themes: "📐 Architecture & Pipeline"
+ * - "Theme:" prefix: "Theme: Defining the Interactive Role"
+ * - Markdown headers as themes
+ * - Bullet points with bold titles as options
+ */
+function parseOptionsIntoThemes(optionsText: string | null): ParsedTheme[] {
+  if (!optionsText) return [];
 
+  const lines = optionsText.split('\n');
+  const themes: ParsedTheme[] = [];
+  let currentTheme: ParsedTheme | null = null;
+
+  const optionPattern = /^\s*[-*•]?\s*\*?\*?([^:*]+)\*?\*?:\s*(.*)$/;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+
+    // Check if this is a theme header
+    let isTheme = false;
+    let themeName = '';
+
+    // Check emoji-prefixed (starts with emoji)
+    if (/^[\u{1F300}-\u{1FAD6}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/u.test(trimmed)) {
+      isTheme = true;
+      themeName = trimmed;
+    }
+    // Check "Theme:" prefix
+    else if (/^Theme:\s*/i.test(trimmed)) {
+      isTheme = true;
+      themeName = trimmed.replace(/^Theme:\s*/i, '').trim();
+    }
+    // Check markdown header that doesn't look like an option
+    else if (/^#+\s*/.test(trimmed) && !optionPattern.test(trimmed)) {
+      isTheme = true;
+      themeName = trimmed.replace(/^#+\s*/, '').trim();
+    }
+
+    if (isTheme && themeName) {
+      currentTheme = { name: themeName, options: [] };
+      themes.push(currentTheme);
+      continue;
+    }
+
+    // Check if this is an option item
+    const optionMatch = trimmed.match(/^\s*[-*•]?\s*\*{0,2}([^:]+?)\*{0,2}:\s*(.+)$/);
+    if (optionMatch && currentTheme) {
+      const title = optionMatch[1].trim().replace(/^\*\*|\*\*$/g, '');
+      const rest = optionMatch[2].trim();
+
+      // Extract citation numbers [1], [2, 3], etc.
+      const citations: number[] = [];
+      const citationMatches = rest.matchAll(/\[(\d+(?:\s*,\s*\d+)*)\]/g);
+      for (const cm of citationMatches) {
+        const nums = cm[1].split(/\s*,\s*/).map(n => parseInt(n.trim(), 10));
+        citations.push(...nums.filter(n => !isNaN(n)));
+      }
+
+      // Remove citations from description
+      const description = rest.replace(/\s*\[\d+(?:\s*,\s*\d+)*\]/g, '').trim();
+
+      currentTheme.options.push({ title, description, citations });
+    } else if (currentTheme && currentTheme.options.length > 0) {
+      // Continuation of previous option description
+      const lastOption = currentTheme.options[currentTheme.options.length - 1];
+      lastOption.description += ' ' + trimmed.replace(/\s*\[\d+(?:\s*,\s*\d+)*\]/g, '').trim();
+    }
+  }
+
+  // If no themes were detected, create a default theme
+  if (themes.length === 0 && optionsText.trim()) {
+    const defaultTheme: ParsedTheme = { name: 'Options', options: [] };
+    for (const line of lines) {
+      const optionMatch = line.trim().match(/^\s*[-*•]?\s*\*{0,2}([^:]+?)\*{0,2}:\s*(.+)$/);
+      if (optionMatch) {
+        const title = optionMatch[1].trim().replace(/^\*\*|\*\*$/g, '');
+        const rest = optionMatch[2].trim();
+        const citations: number[] = [];
+        const citationMatches = rest.matchAll(/\[(\d+(?:\s*,\s*\d+)*)\]/g);
+        for (const cm of citationMatches) {
+          const nums = cm[1].split(/\s*,\s*/).map(n => parseInt(n.trim(), 10));
+          citations.push(...nums.filter(n => !isNaN(n)));
+        }
+        const description = rest.replace(/\s*\[\d+(?:\s*,\s*\d+)*\]/g, '').trim();
+        defaultTheme.options.push({ title, description, citations });
+      }
+    }
+    if (defaultTheme.options.length > 0) {
+      themes.push(defaultTheme);
+    }
+  }
+
+  return themes;
+}
 
 // ============================================================================
 // NARRATIVE EXTRACTION - Find paragraphs containing canonical label
@@ -720,16 +1071,12 @@ function buildThemesFromClaims(claims: any[]): ParsedTheme[] {
 function extractNarrativeExcerpt(narrativeText: string, label: string): string {
   if (!narrativeText || !label) return '';
 
-  // Split into sentences/paragraphs
   const paragraphs = narrativeText.split(/\n\n+/);
   const matchingParagraphs: string[] = [];
-
-  // Simple case-insensitive search for the label
   const labelLower = label.toLowerCase();
 
   for (const para of paragraphs) {
     if (para.toLowerCase().includes(labelLower)) {
-      // Highlight the matching part
       const highlighted = para.replace(
         new RegExp(`(${escapeRegex(label)})`, 'gi'),
         '**$1**'
@@ -779,15 +1126,13 @@ function normalizeGraphTopologyCandidate(value: any): any | null {
 
 interface SupporterOrbsProps {
   supporters: (string | number)[];
-  citationSourceOrder?: Record<string | number, string>; // Maps citation number (or 'S') -> provider ID
+  citationSourceOrder?: Record<string | number, string>;
   onOrbClick?: (providerId: string) => void;
   size?: 'small' | 'large';
 }
 
 const SupporterOrbs: React.FC<SupporterOrbsProps> = ({ supporters, citationSourceOrder, onOrbClick, size = 'large' }) => {
-  // Map supporter numbers/ids to provider configs using citationSourceOrder when available
   const getProviderFromSupporter = (s: string | number) => {
-    // If it's a number and we have citationSourceOrder, use it
     if ((typeof s === 'number' || !isNaN(Number(s))) && citationSourceOrder) {
       const num = Number(s);
       const providerId = citationSourceOrder[num];
@@ -795,11 +1140,9 @@ const SupporterOrbs: React.FC<SupporterOrbsProps> = ({ supporters, citationSourc
         return getProviderConfig(providerId) || null;
       }
     }
-    // If it's a string, try direct lookup by provider ID
     if (typeof s === 'string' && isNaN(Number(s))) {
       return getProviderConfig(s) || null;
     }
-    // Fallback: no mapping available
     return null;
   };
 
@@ -853,7 +1196,7 @@ interface OptionsTabProps {
 }
 
 const OptionsTab: React.FC<OptionsTabProps> = ({ themes, citationSourceOrder, onCitationClick, mapperAudit }) => {
-  const [expandedThemes, setExpandedThemes] = useState<Set<number>>(new Set([0])); // First expanded by default
+  const [expandedThemes, setExpandedThemes] = useState<Set<number>>(new Set([0]));
 
   const toggleTheme = (idx: number) => {
     setExpandedThemes(prev => {
@@ -873,7 +1216,6 @@ const OptionsTab: React.FC<OptionsTabProps> = ({ themes, citationSourceOrder, on
 
   return (
     <div className="p-4 max-w-3xl mx-auto">
-      {/* Mapper Coverage Badge */}
       {mapperAudit && (
         <div className="mb-4 bg-surface rounded-lg border border-border-subtle p-3">
           {mapperAudit.complete ? (
@@ -955,7 +1297,6 @@ interface DetailViewProps {
 }
 
 const DetailView: React.FC<DetailViewProps> = ({ node, narrativeExcerpt, citationSourceOrder, onBack, onOrbClick, structural }) => {
-  // Get color from first supporter using citationSourceOrder
   const getNodeColor = () => {
     if (!node.supporters || node.supporters.length === 0) return '#8b5cf6';
     const first = node.supporters[0];
@@ -1071,7 +1412,6 @@ const DetailView: React.FC<DetailViewProps> = ({ node, narrativeExcerpt, citatio
       exit={{ opacity: 0, y: -20 }}
       className="h-full flex flex-col p-6 overflow-y-auto"
     >
-      {/* Back button - top left */}
       <button
         type="button"
         className="decision-back-btn self-start mb-6"
@@ -1083,9 +1423,7 @@ const DetailView: React.FC<DetailViewProps> = ({ node, narrativeExcerpt, citatio
         Back to Graph
       </button>
 
-      {/* Node as large centered header */}
       <div className="flex flex-col items-center mb-8">
-        {/* Node visual (120px) */}
         <div
           className="w-[120px] h-[120px] rounded-full mb-4 flex items-center justify-center"
           style={{
@@ -1099,7 +1437,6 @@ const DetailView: React.FC<DetailViewProps> = ({ node, narrativeExcerpt, citatio
           </span>
         </div>
 
-        {/* Full label */}
         <h2
           className="decision-detail-header"
           style={{ color: nodeColor }}
@@ -1112,7 +1449,6 @@ const DetailView: React.FC<DetailViewProps> = ({ node, narrativeExcerpt, citatio
         )}
       </div>
 
-      {/* Supported by row */}
       <div className="mb-8">
         <h3 className="text-sm font-medium text-text-muted mb-3">Supported by</h3>
         <SupporterOrbs
@@ -1137,7 +1473,6 @@ const DetailView: React.FC<DetailViewProps> = ({ node, narrativeExcerpt, citatio
         </div>
       )}
 
-      {/* Narrative excerpt */}
       {narrativeExcerpt && (
         <div className="flex-1">
           <h3 className="text-sm font-medium text-text-muted mb-3">From the Narrative</h3>
@@ -1171,7 +1506,6 @@ const MapperSelector: React.FC<MapperSelectorProps> = ({ aiTurn, activeProviderI
   const authStatus = useAtomValue(providerAuthStatusAtom);
   const menuRef = useRef<HTMLDivElement>(null);
 
-  // Close on outside click
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
@@ -1187,8 +1521,6 @@ const MapperSelector: React.FC<MapperSelectorProps> = ({ aiTurn, activeProviderI
   }, [isOpen]);
 
   const activeProvider = activeProviderId ? getProviderConfig(activeProviderId) : null;
-
-  // Filter out system provider
   const providers = useMemo(() => LLM_PROVIDERS_CONFIG.filter(p => p.id !== 'system'), []);
 
   return (
@@ -1220,7 +1552,6 @@ const MapperSelector: React.FC<MapperSelectorProps> = ({ aiTurn, activeProviderI
             {providers.map(p => {
               const pid = String(p.id);
               const isUnauthorized = authStatus && authStatus[pid] === false;
-
               const isDisabled = isUnauthorized;
 
               return (
@@ -1238,10 +1569,6 @@ const MapperSelector: React.FC<MapperSelectorProps> = ({ aiTurn, activeProviderI
     </div>
   );
 };
-
-
-
-
 
 const SingularitySelector: React.FC<{ aiTurn: AiTurn, activeProviderId?: string, onSelect: (pid: string) => void }> = ({ aiTurn, activeProviderId, onSelect }) => {
   const [isOpen, setIsOpen] = useState(false);
@@ -1332,7 +1659,6 @@ const SingularitySelector: React.FC<{ aiTurn: AiTurn, activeProviderId?: string,
   );
 };
 
-
 // ============================================================================
 // MAIN COMPONENT
 // ============================================================================
@@ -1341,7 +1667,7 @@ export const DecisionMapSheet = React.memo(() => {
   const [openState, setOpenState] = useAtom(isDecisionMapOpenAtom);
   const turnGetter = useAtomValue(turnByIdAtom);
   const mappingProvider = useAtomValue(mappingProviderAtom);
-  const singularityProvider = useAtomValue(singularityProviderAtom); // Added
+  const singularityProvider = useAtomValue(singularityProviderAtom);
   const setSingularityProvider = useSetAtom(singularityProviderAtom);
   const setActiveSplitPanel = useSetAtom(activeSplitPanelAtom);
 
@@ -1349,7 +1675,7 @@ export const DecisionMapSheet = React.memo(() => {
   const [selectedNode, setSelectedNode] = useState<{ id: string; label: string; supporters: (string | number)[]; theme?: string } | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [dims, setDims] = useState<{ w: number; h: number }>({ w: window.innerWidth, h: 400 });
-  const activeSingularityPid = singularityProvider; // Added
+  const activeSingularityPid = singularityProvider;
   const [sheetHeightRatio, setSheetHeightRatio] = useState(0.5);
   const [structuralAnalysis, setStructuralAnalysis] = useState<StructuralAnalysis | null>(null);
   const [structuralTurnId, setStructuralTurnId] = useState<string | null>(null);
@@ -1361,7 +1687,6 @@ export const DecisionMapSheet = React.memo(() => {
     moved: false,
   });
 
-  // Reset to graph tab when sheet opens
   useEffect(() => {
     if (openState) {
       setActiveTab('graph');
@@ -1412,7 +1737,6 @@ export const DecisionMapSheet = React.memo(() => {
     window.addEventListener('pointerup', onUp);
   }, [setOpenState, sheetHeightRatio]);
 
-  // Measure container dimensions after render and on resize
   useEffect(() => {
     const update = () => {
       const el = containerRef.current;
@@ -1423,10 +1747,9 @@ export const DecisionMapSheet = React.memo(() => {
       }
     };
 
-    // Initial update + delayed update after animation
     update();
     const raf = requestAnimationFrame(update);
-    const timeout = setTimeout(update, 350); // After spring animation
+    const timeout = setTimeout(update, 350);
 
     window.addEventListener('resize', update);
     return () => {
@@ -1450,7 +1773,6 @@ export const DecisionMapSheet = React.memo(() => {
     if (!t || (t as any).type !== 'user') return null;
     return (t as any).text || "";
   }, [aiTurn?.userTurnId, turnGetter]);
-
 
   const mappingResponses = useMemo(() => {
     const out: Record<string, ProviderResponse[]> = {};
@@ -1552,7 +1874,7 @@ export const DecisionMapSheet = React.memo(() => {
   }, [aiTurn, parsedMapping, graphData, latestMapping]);
 
   useEffect(() => {
-    if (activeTab !== 'debug') return;
+    if (activeTab !== 'debug' && activeTab !== 'concierge') return;
     if (!artifactForStructure || !openState?.turnId) return;
     if (structuralTurnId === openState.turnId && structuralAnalysis) return;
     let cancelled = false;
@@ -1609,6 +1931,7 @@ export const DecisionMapSheet = React.memo(() => {
     return parsedMapping.options ?? null;
   }, [latestMapping, parsedMapping.options]);
 
+  // Options now built directly from claims - no separate parsing needed
   const parsedThemes = useMemo(() => {
     if (claimThemes.length > 0) return claimThemes;
     return [];
@@ -1637,7 +1960,6 @@ export const DecisionMapSheet = React.memo(() => {
       let providerId: string | undefined;
       const metaOrder = latestMapping?.meta?.citationSourceOrder || null;
 
-      // Check if modelNumber is numeric (either a number or a string that's a number)
       const isNumeric = typeof modelNumber === 'number' || (!isNaN(parseInt(modelNumber, 10)) && /^\d+$/.test(modelNumber));
 
       if (isNumeric) {
@@ -1650,7 +1972,6 @@ export const DecisionMapSheet = React.memo(() => {
           providerId = activeOrdered[num - 1];
         }
       } else if (typeof modelNumber === 'string') {
-        // Direct provider ID
         providerId = normalizeProviderId(modelNumber.toLowerCase());
       }
 
@@ -1709,9 +2030,7 @@ export const DecisionMapSheet = React.memo(() => {
   const transformCitations = useCallback((text: string) => {
     if (!text) return "";
     let t = text;
-    // Handle [[CITE:X]] format
     t = t.replace(/\[\[CITE:(\d+)\]\]/gi, "[↗$1](#cite-$1)");
-    // Handle [1], [2, 3] format citations
     t = t.replace(/\[(\d+(?:\s*,\s*\d+)*)\](?!\()/gi, (_m, grp) => {
       const items = String(grp)
         .split(/\s*,\s*/)
@@ -1843,7 +2162,13 @@ export const DecisionMapSheet = React.memo(() => {
                     {problemStructure && (
                       <div className="absolute top-4 left-4 z-50 px-3 py-1.5 rounded-full bg-black/70 border border-white/10 text-xs font-medium text-white/90">
                         <span className="opacity-60 mr-2">Structure:</span>
-                        <span className="capitalize">{(problemStructure as any).primaryPattern ?? problemStructure.primary}</span>
+                        <span className="capitalize">{problemStructure.primary}</span>
+                        {/* Show secondary patterns count if any */}
+                        {(problemStructure.patterns?.length ?? 0) > 0 && (
+                          <span className="ml-2 text-purple-400">
+                            +{problemStructure.patterns.length}
+                          </span>
+                        )}
                         {problemStructure.confidence < 0.7 && (
                           <span className="ml-2 text-amber-400">(?)</span>
                         )}
@@ -1976,8 +2301,6 @@ export const DecisionMapSheet = React.memo(() => {
                     />
                   </m.div>
                 )}
-
-
               </AnimatePresence>
             </div>
           </m.div>

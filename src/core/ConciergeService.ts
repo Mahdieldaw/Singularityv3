@@ -592,64 +592,124 @@ export function buildStructuralBrief(analysis: StructuralAnalysis): string {
 // COMPOSITE SHAPE FLOW/FRICTION BUILDERS
 // ═══════════════════════════════════════════════════════════════════════════
 
-function buildFlowFromComposite(composite: CompositeShape, _modelCount: number): string {
+function buildFlowFromComposite(composite: CompositeShape, claims: EnrichedClaim[], _modelCount: number): string {
     const peakLabels = composite.peaks.slice(0, 3).map((p: { label: string }) => `"${p.label}"`).join(', ');
-
+    const data = composite.data; // Rich data if available
     let flow = '';
 
     switch (composite.primary) {
-        case 'convergent':
+        case 'convergent': {
             flow += `**Narrative Gravity:** The landscape converges on ${peakLabels}.\n\n`;
-            flow += composite.peaks.length === 1
-                ? `This is the dominant position with ${(composite.peaks[0].supportRatio * 100).toFixed(0)}% support.\n\n`
-                : `These positions reinforce each other.\n\n`;
+
+            // Check for keystone secondary pattern
+            const keystonePattern = composite.patterns.find((p: any) => p.type === 'keystone');
+            if (keystonePattern) {
+                const ks = keystonePattern.data as KeystonePatternData;
+                flow += `**The Hub:** "${ks.keystone.label}" — `;
+                flow += `${ks.cascadeSize} claims depend on this.\n\n`;
+            }
+
+            // Check for chain secondary pattern
+            const chainPattern = composite.patterns.find((p: any) => p.type === 'chain');
+            if (chainPattern) {
+                const chain = chainPattern.data as ChainPatternData;
+                flow += `**The Sequence:** ${chain.length} steps\n\n`;
+                // Use chain.chain (IDs) and lookup in claims
+                if (chain.chain && Array.isArray(chain.chain)) {
+                    chain.chain.forEach((stepId: string, idx: number) => {
+                        const claim = claims.find(c => c.id === stepId);
+                        if (claim) {
+                            const isWeak = chain.weakLinks && chain.weakLinks.includes(stepId);
+                            const weak = isWeak ? ' ⚠️' : '';
+                            flow += `${idx + 1}. **${claim.label}**${weak}\n`;
+                        }
+                    });
+                }
+                flow += '\n';
+            }
 
             composite.peaks.forEach((p: { label: string; supportRatio: number }) => {
                 flow += `• **${p.label}** [${(p.supportRatio * 100).toFixed(0)}%]\n`;
             });
-            break;
 
-        case 'forked':
+            // Add floor assumptions if available in data
+            if (data && (data as any).floorAssumptions?.length > 0) {
+                flow += `\n**What the centroid assumes:**\n`;
+                (data as any).floorAssumptions.forEach((a: string) => {
+                    flow += `• ${a}\n`;
+                });
+            }
+            break;
+        }
+
+        case 'forked': {
             flow += `**The Fork:** Two or more valid paths exist.\n\n`;
             flow += `${peakLabels} are all well-supported but conflict.\n`;
             flow += `The choice between them depends on values you haven't stated.\n\n`;
 
-            flow += `**Peak Relationship:** ${composite.peakRelationship}\n\n`;
+            // If we have contest data with stakes, show it
+            if (data && (data as any).centralConflict?.stakes) {
+                const stakes = (data as any).centralConflict.stakes;
+                flow += `**Stakes:**\n`;
+                if (stakes.choosingA) flow += `• Choosing first: ${stakes.choosingA}\n`;
+                if (stakes.choosingB) flow += `• Choosing second: ${stakes.choosingB}\n`;
+                flow += `\n`;
+            }
+
+            // Also show peak relationship from composite if available
+            if ((composite as any).peakRelationship) {
+                flow += `**Peak Relationship:** ${(composite as any).peakRelationship}\n\n`;
+            }
 
             composite.peaks.forEach((p: { label: string; supportRatio: number }) => {
                 flow += `• **${p.label}** [${(p.supportRatio * 100).toFixed(0)}%]\n`;
             });
             break;
+        }
 
-        case 'parallel':
-            flow += `**Independent Dimensions:** ${peakLabels} address different aspects of the problem.\n\n`;
+        case 'constrained': {
+            flow += `**Optimization Boundary:** ${peakLabels} represent tradeoffs.\n\n`;
+            flow += `Choosing one means sacrificing aspects of others.\n\n`;
+
+            // If we have tradeoff data with governing factors
+            if (data && (data as any).tradeoffs?.length > 0) {
+                (data as any).tradeoffs.forEach((t: any, idx: number) => {
+                    if (t.governingFactor) {
+                        flow += `**Tradeoff ${idx + 1}:** ${t.governingFactor}\n`;
+                    }
+                });
+            }
+
+            composite.peaks.forEach((p: { label: string; supportRatio: number }) => {
+                flow += `• **${p.label}** [${(p.supportRatio * 100).toFixed(0)}%]\n`;
+            });
+            break;
+        }
+
+        case 'parallel': {
+            flow += `**Independent Dimensions:** ${peakLabels} address different aspects.\n\n`;
             flow += `They don't conflict because they don't interact.\n\n`;
 
             composite.peaks.forEach((p: { label: string; supportRatio: number }) => {
                 flow += `• **${p.label}** [${(p.supportRatio * 100).toFixed(0)}%]\n`;
             });
             break;
-
-        case 'constrained':
-            flow += `**Optimization Boundary:** ${peakLabels} represent tradeoffs.\n\n`;
-            flow += `Choosing one means sacrificing aspects of others.\n\n`;
-
-            composite.peaks.forEach(p => {
-                flow += `• **${p.label}** [${(p.supportRatio * 100).toFixed(0)}%]\n`;
-            });
-            break;
+        }
 
         case 'sparse':
+        default: {
             flow += `**Weak Signal:** No position has strong support.\n\n`;
-            flow += `The models diverge significantly, suggesting the problem is underspecified.\n\n`;
 
             if (composite.peaks.length > 0) {
                 flow += `**Strongest signals:**\n`;
                 composite.peaks.forEach((p: { label: string; supportRatio: number }) => {
                     flow += `• **${p.label}** [${(p.supportRatio * 100).toFixed(0)}%]\n`;
                 });
+            } else {
+                flow += `Models diverge significantly. Structure may emerge with more context.\n`;
             }
             break;
+        }
     }
 
     flow += '\n';
@@ -796,8 +856,8 @@ function buildFrictionFromComposite(
 }
 
 function buildFlowSection(analysis: StructuralAnalysis): string {
-    const { shape, landscape } = analysis;
-    return buildFlowFromComposite(shape as ProblemStructure, landscape.modelCount);
+    const { shape, landscape, claimsWithLeverage } = analysis;
+    return buildFlowFromComposite(shape as ProblemStructure, claimsWithLeverage, landscape.modelCount);
 }
 
 function collectFragilities(analysis: StructuralAnalysis): string[] {
@@ -822,6 +882,34 @@ function collectFragilities(analysis: StructuralAnalysis): string[] {
         );
     }
 
+    // Fragility penalty details (from legacy system, if available)
+    const fragilityPenalty = (shape as any).fragilityPenalty;
+    if (fragilityPenalty) {
+        if (fragilityPenalty.lowSupportArticulations > 0) {
+            fragilities.push(`${fragilityPenalty.lowSupportArticulations} fragile bridge(s) with low support`);
+        }
+        if (fragilityPenalty.conditionalConflicts > 0) {
+            fragilities.push(`${fragilityPenalty.conditionalConflicts} hidden conflict(s) that may activate under conditions`);
+        }
+        if (fragilityPenalty.disconnectedConsensus) {
+            fragilities.push(`High-support claims are not well connected to each other`);
+        }
+    }
+
+    // Check secondary patterns for fragility indicators
+    if (shape.patterns) {
+        const fragilePattern = shape.patterns.find(p => p.type === 'fragile');
+        if (fragilePattern && fragilePattern.data) {
+            const fragileData = fragilePattern.data as FragilePatternData;
+            if (fragileData.fragilities && fragileData.fragilities.length > 0) {
+                const first = fragileData.fragilities[0];
+                fragilities.push(
+                    `"${first.peak.label}" rests on weak foundation "${first.weakFoundation.label}"`
+                );
+            }
+        }
+    }
+
     return fragilities;
 }
 
@@ -830,10 +918,22 @@ function buildTransferSection(analysis: StructuralAnalysis): string {
 
     let transfer = "";
 
-    const transferQuestion = shape.transferQuestion || "What would help you navigate this?";
+    // Get transfer question (from shape data or generate default)
+    const transferQuestion = shape.transferQuestion ||
+        getTransferQuestion(shape.primary, shape.data);
 
     transfer += `**The question this hands to you:**\n\n`;
     transfer += `${transferQuestion}\n\n`;
+
+    // Add "what would help" section
+    const whatWouldHelp = getWhatWouldHelp(shape.primary, shape.data, analysis);
+    if (whatWouldHelp.length > 0) {
+        transfer += `**What would help:**\n`;
+        whatWouldHelp.forEach(w => {
+            transfer += `• ${w}\n`;
+        });
+        transfer += `\n`;
+    }
 
     return transfer;
 }
@@ -844,22 +944,22 @@ function getTransferQuestion(pattern: string, data: any): string {
     }
 
     const defaults: Record<string, string> = {
-        settled:
-            "For the consensus to hold, what assumption must be true? Is it true in your situation?",
-        contested:
-            "Which constraint matters more to you? The choice determines the path.",
-        keystone:
-            "Is the foundation valid? Everything else depends on your answer.",
-        linear:
-            "Where are you in this sequence? Have you validated the early steps?",
-        tradeoff:
-            "What are you optimizing for? The system cannot maximize both.",
-        dimensional:
-            "Which dimension is most relevant to your situation?",
-        exploratory:
-            "What specific question would collapse this ambiguity?",
-        contextual:
-            "Which situation applies to you? The answer is conditional on your context.",
+        // New Primary Shapes
+        convergent: "For the consensus to hold, what assumption must be true? Is it true in your situation?",
+        forked: "Which constraint matters more to you? The choice determines the path.",
+        constrained: "What are you optimizing for? The system cannot maximize both.",
+        parallel: "Which dimension is most relevant to your situation?",
+        sparse: "What specific question would collapse this ambiguity?",
+
+        // Legacy / Secondary Patterns
+        settled: "For the consensus to hold, what assumption must be true? Is it true in your situation?",
+        contested: "Which constraint matters more to you? The choice determines the path.",
+        keystone: "Is the foundation valid? Everything else depends on your answer.",
+        linear: "Where are you in this sequence? Have you validated the early steps?",
+        tradeoff: "What are you optimizing for? The system cannot maximize both.",
+        dimensional: "Which dimension is most relevant to your situation?",
+        exploratory: "What specific question would collapse this ambiguity?",
+        contextual: "Which situation applies to you? The answer is conditional on your context.",
     };
 
     return defaults[pattern] || "What would help you navigate this?";
@@ -873,11 +973,13 @@ function getWhatWouldHelp(pattern: string, data: any, analysis: StructuralAnalys
     }
 
     switch (pattern) {
+        case "convergent":
         case "settled":
             if (data?.strongestOutlier) {
                 helps.push(`Your assessment of whether "${data.strongestOutlier.claim.label}" has merit`);
             }
             break;
+        case "forked":
         case "contested":
             if (data?.collapsingQuestion) {
                 helps.push(`Your answer to: ${data.collapsingQuestion}`);
@@ -895,6 +997,15 @@ function getWhatWouldHelp(pattern: string, data: any, analysis: StructuralAnalys
                 );
             }
             break;
+        case "constrained":
+        case "tradeoff":
+            // Add logic for tradeoff if needed (none in original code for 'tradeoff'?)
+            // Original code didn't have 'tradeoff' case in switch, so maybe no helps for it?
+            // Checking 'tradeoff' in original code... it was missing from switch!
+            // I'll leave it as fall-through or add if I see relevant data usage.
+            // But for now, map constrained to same behavior as tradeoff would have (nothing specific).
+            break;
+        case "sparse":
         case "exploratory":
             if (data?.clarifyingQuestions) {
                 data.clarifyingQuestions.forEach((q: string) => helps.push(q));
@@ -1170,6 +1281,10 @@ export function buildMetaResponse(analysis: StructuralAnalysis): string {
     const highSupportCount = analysis.claimsWithLeverage.filter(c => c.isHighSupport).length;
     const tensionCount = patterns.conflicts.length + patterns.tradeoffs.length;
 
+    // Get action implication from shape data or generate from primary
+    const actionText = (shape as any).implications?.action ||
+        getDefaultActionForShape(shape.primary);
+
     return `I drew from ${landscape.modelCount} expert perspectives to form this view.
 
 • **Pattern**: ${shape.primary} (${Math.round(shape.confidence * 100)}% confidence)
@@ -1177,7 +1292,25 @@ export function buildMetaResponse(analysis: StructuralAnalysis): string {
 • **Tensions**: ${tensionCount}
 • **Gaps**: ${ghostAnalysis.count}
 
+${actionText}
+
 Want the full breakdown, or shall we continue?`;
+}
+
+function getDefaultActionForShape(primary: string): string {
+    switch (primary) {
+        case 'convergent':
+            return 'Strong consensus exists. Lead with the answer, but surface any minority voices.';
+        case 'forked':
+            return 'Genuine disagreement exists. Present both paths and help identify what determines the choice.';
+        case 'constrained':
+            return 'Tradeoffs exist. Map what\'s sacrificed for what\'s gained.';
+        case 'parallel':
+            return 'Multiple independent factors. Ask which dimension matters most.';
+        case 'sparse':
+        default:
+            return 'Structure is weak. Be honest about uncertainty and ask clarifying questions.';
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
