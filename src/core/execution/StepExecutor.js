@@ -871,7 +871,6 @@ export class StepExecutor {
     }
 
     let singularityPrompt;
-    let stanceSelection = null;
     let analysis = null;
 
     if (!ConciergeService) {
@@ -889,18 +888,7 @@ export class StepExecutor {
       }
     }
 
-    if (payload.stance && typeof payload.stance === "string") {
-      stanceSelection = { stance: payload.stance, reason: 'user_override', confidence: 1.0 };
-    } else if (ConciergeService.selectStance && analysis?.shape) {
-      try {
-        stanceSelection = ConciergeService.selectStance(
-          payload.originalPrompt,
-          analysis.shape
-        );
-      } catch (e) {
-        console.warn("[StepExecutor] selectStance failed:", e);
-      }
-    }
+
 
     // ══════════════════════════════════════════════════════════════════
     // FEATURE 3: Rebuild historical prompts for recompute (Efficient Storage)
@@ -949,19 +937,16 @@ export class StepExecutor {
         }
       }
 
-      const pipeline = {
+      let pipeline = null;
+      pipeline = {
         userMessage: payload.originalPrompt,
         prompt: singularityPrompt,
-        stance: stanceSelection?.stance || null,
-        stanceReason: stanceSelection?.reason || null,
-        stanceConfidence: stanceSelection?.confidence ?? null,
         structuralShape: analysis && analysis.shape ? {
           primaryPattern: analysis.shape.primaryPattern,
           confidence: analysis.shape.confidence,
         } : null,
         leakageDetected,
         leakageViolations,
-        pipeline,
         parsed: {
           signal,
           rawText,

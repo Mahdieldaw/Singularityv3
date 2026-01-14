@@ -24,6 +24,7 @@ import {
     SecondaryPattern,
     CompositeShape,
     PeakAnalysis,
+    PeakPairRelationship,
     DissentPatternData,
     ChallengedPatternData,
     KeystonePatternData,
@@ -39,7 +40,6 @@ import {
     ExploratoryShapeData,
     ContestedShapeData,
     TradeoffShapeData,
-    ContextualShapeData,
 } from "../../shared/contract";
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -53,6 +53,7 @@ import {
     TwoPassResult,
     DeltaResult,
 } from './shadow';
+
 
 const DEBUG_STRUCTURAL_ANALYSIS = true;
 const structuralDbg = (...args: any[]) => {
@@ -144,30 +145,31 @@ const computeLongestChain = (claimIds: string[], edges: Edge[]): string[] => {
     const roots = claimIds.filter(id => !hasIncomingPrereq.has(id));
     let longestChain: string[] = [];
 
-    const findChain = (id: string, chain: string[]): string[] => {
-        const newChain = [...chain, id];
+    const findChain = (id: string, visited: Set<string>): string[] => {
+        const newVisited = new Set(visited);
+        newVisited.add(id);
+
         const children = prereqChildren.get(id) ?? [];
+        if (children.length === 0) return [id];
 
-        if (children.length === 0) return newChain;
-
-        let best = newChain;
+        let best: string[] = [];
         children.forEach(child => {
-            if (!chain.includes(child)) {
-                const candidate = findChain(child, newChain);
+            if (!visited.has(child)) {
+                const candidate = findChain(child, newVisited);
                 if (candidate.length > best.length) best = candidate;
             }
         });
-        return best;
+        return [id, ...best];
     };
 
     roots.forEach(root => {
-        const chain = findChain(root, []);
+        const chain = findChain(root, new Set());
         if (chain.length > longestChain.length) longestChain = chain;
     });
 
     if (longestChain.length === 0) {
         claimIds.forEach(id => {
-            const chain = findChain(id, []);
+            const chain = findChain(id, new Set());
             if (chain.length > longestChain.length) longestChain = chain;
         });
     }
@@ -374,9 +376,11 @@ const analyzePeaks = (
 
     const peakIds = new Set(peaks.map(p => p.id));
 
+    // Filter edges to only those between peaks
     const peakEdges = edges.filter(e => peakIds.has(e.from) && peakIds.has(e.to));
     const peakConflicts = peakEdges.filter(e => e.type === 'conflicts');
     const peakTradeoffs = peakEdges.filter(e => e.type === 'tradeoff');
+    // IMPORTANT: prerequisite edges are cohesive, not conflict
     const peakSupports = peakEdges.filter(e =>
         e.type === 'supports' || e.type === 'prerequisite'
     );
@@ -395,56 +399,68 @@ const analyzePeaks = (
     };
 };
 
+/**
+ * Detect primary shape using hardened peak-first logic.
+ * 
+ * Edge-type precedence (when multiple peaks exist):
+ *   conflicts > tradeoff > supports/prerequisite > none
+ * 
+ * Invariant: prerequisite edges are cohesive (pull peaks into convergent),
+ * they NEVER signal conflict or tradeoff.
+ */
 const detectPrimaryShape = (
     peakAnalysis: PeakAnalysis
 ): { primary: PrimaryShape; confidence: number; evidence: string[] } => {
     const { peaks, hills, peakConflicts, peakTradeoffs, peakSupports, peakUnconnected } = peakAnalysis;
 
-    // SPARSE: No peaks and fewer than 3 hills
-    if (peaks.length === 0 && hills.length < 3) {
+    // ═══════════════════════════════════════════════════════════════════════
+    // SPARSE: No peaks (regardless of hills count)
+    // Per instructions: peaks.length === 0 → ALWAYS sparse
+    // Hills are used for evidence/description, not for primary shape selection
+    // ═══════════════════════════════════════════════════════════════════════
+    if (peaks.length === 0) {
+        // Confidence scales with how "close" we are to having structure
+        // More hills = more "almost there" but still sparse
+        const hillRatio = hills.length / Math.max(1, hills.length + peakAnalysis.floor.length);
+        const confidence = hillRatio > 0.3 ? 0.7 : 0.9;
+
         return {
             primary: 'sparse',
-            confidence: 0.9,
+            confidence,
             evidence: [
-                `No claims with >50% support`,
-                `Only ${hills.length} claim(s) in contested range`,
-                `Insufficient signal to determine structure`
+                `No claims exceed 50% support threshold (0 peaks)`,
+                hills.length > 0
+                    ? `${hills.length} claim(s) in contested range (25-50% support)`
+                    : `No claims in contested range either`,
+                `Insufficient signal to determine structure`,
+                hillRatio > 0.3
+                    ? `Structure may emerge with additional perspectives`
+                    : `Landscape appears genuinely fragmented`
             ]
         };
     }
 
-    // CONVERGENT: Single peak or peaks that support each other
-    if (peaks.length === 1 ||
-        (peaks.length > 1 && peakConflicts.length === 0 && peakTradeoffs.length === 0 && peakSupports.length > 0)) {
-
-        const avgSupport = peaks.reduce((s, p) => s + p.supportRatio, 0) / peaks.length;
-
+    // ═══════════════════════════════════════════════════════════════════════
+    // CONVERGENT: Single peak
+    // ═══════════════════════════════════════════════════════════════════════
+    if (peaks.length === 1) {
+        const peak = peaks[0];
         return {
             primary: 'convergent',
-            confidence: Math.min(0.9, 0.5 + avgSupport * 0.4),
+            confidence: Math.min(0.9, 0.5 + peak.supportRatio * 0.4),
             evidence: [
-                peaks.length === 1
-                    ? `Single dominant position: "${peaks[0].label}" (${(peaks[0].supportRatio * 100).toFixed(0)}%)`
-                    : `${peaks.length} aligned peaks with mutual support`,
-                peakSupports.length > 0 ? `${peakSupports.length} reinforcing connection(s) between peaks` : '',
-            ].filter(Boolean) as string[]
-        };
-    }
-
-    // Edge case: No peaks but multiple hills
-    if (peaks.length === 0) {
-        return {
-            primary: 'parallel',
-            confidence: 0.5,
-            evidence: [
-                `No dominant positions (0 peaks)`,
-                `${hills.length} claims in contested range`,
-                `Landscape is unsettled`
+                `Single dominant position: "${peak.label}" (${(peak.supportRatio * 100).toFixed(0)}% support)`,
+                `Narrative gravity toward consensus`,
             ]
         };
     }
 
-    // FORKED: Peaks conflict with each other
+    // ═══════════════════════════════════════════════════════════════════════
+    // MULTIPLE PEAKS: Analyze relationships with strict precedence
+    // conflicts > tradeoff > supports/prerequisite > none
+    // ═══════════════════════════════════════════════════════════════════════
+
+    // Priority 1: FORKED - Any conflict edge between peaks
     if (peakConflicts.length > 0) {
         const symmetricConflicts = peakConflicts.filter(e => {
             const a = peaks.find(p => p.id === e.from);
@@ -460,25 +476,42 @@ const detectPrimaryShape = (
                 symmetricConflicts.length > 0
                     ? `${symmetricConflicts.length} symmetric (evenly matched) conflict(s)`
                     : `Asymmetric conflict—one position dominates`,
+                `Mutually exclusive choices—cannot have both`,
                 `This is a genuine fork, not noise`
             ]
         };
     }
 
-    // CONSTRAINED: Peaks trade off
+    // Priority 2: CONSTRAINED - Any tradeoff edge between peaks
     if (peakTradeoffs.length > 0) {
         return {
             primary: 'constrained',
             confidence: 0.8,
             evidence: [
                 `${peakTradeoffs.length} tradeoff(s) between high-support positions`,
-                `Cannot optimize for all simultaneously`,
-                `Choice requires sacrifice`
+                `Can have both, but optimizing one hurts the other`,
+                `Pareto frontier / engineering tradeoff`,
+                `Choice requires accepting sacrifice`
             ]
         };
     }
 
-    // PARALLEL: Peaks exist but aren't connected
+    // Priority 3: CONVERGENT - Support or prerequisite edges between peaks
+    if (peakSupports.length > 0) {
+        const avgSupport = peaks.reduce((s, p) => s + p.supportRatio, 0) / peaks.length;
+
+        return {
+            primary: 'convergent',
+            confidence: Math.min(0.85, 0.5 + avgSupport * 0.35),
+            evidence: [
+                `${peaks.length} peaks with mutual reinforcement`,
+                `${peakSupports.length} supporting/prerequisite connection(s) between peaks`,
+                `Peaks form cohesive consensus structure`,
+            ]
+        };
+    }
+
+    // Priority 4: PARALLEL - No edges between peaks
     if (peakUnconnected) {
         return {
             primary: 'parallel',
@@ -486,25 +519,61 @@ const detectPrimaryShape = (
             evidence: [
                 `${peaks.length} independent high-support positions`,
                 `No direct relationships between peaks`,
+                `Orthogonal concerns—can pursue all simultaneously`,
                 `May represent different dimensions of the problem`
             ]
         };
     }
 
-    // Fallback: multiple peaks with some connections but no conflicts/tradeoffs
+    // Fallback: Multiple peaks with some connections but unclear relationship
+    // Default to convergent with lower confidence
     return {
         primary: 'convergent',
         confidence: 0.6,
         evidence: [
-            `${peaks.length} peaks with mixed relationships`,
-            `No major conflicts detected`,
+            `${peaks.length} peaks with mixed/unclear relationships`,
+            `No major conflicts or tradeoffs detected`,
             `Defaulting to convergent with lower confidence`
         ]
     };
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
-// DISSENT PATTERN DETECTION
+// PEAK PAIR RELATIONSHIPS (for nuance preservation)
+// ═══════════════════════════════════════════════════════════════════════════
+
+const computePeakPairRelationships = (
+    peaks: EnrichedClaim[],
+    edges: Edge[]
+): PeakPairRelationship[] => {
+    const relations: PeakPairRelationship[] = [];
+
+    for (let i = 0; i < peaks.length; i++) {
+        for (let j = i + 1; j < peaks.length; j++) {
+            const a = peaks[i];
+            const b = peaks[j];
+
+            const relEdges = edges.filter(e =>
+                (e.from === a.id && e.to === b.id) ||
+                (e.from === b.id && e.to === a.id)
+            );
+
+            relations.push({
+                aId: a.id,
+                bId: b.id,
+                conflicts: relEdges.some(e => e.type === 'conflicts'),
+                tradesOff: relEdges.some(e => e.type === 'tradeoff'),
+                supports: relEdges.some(e => e.type === 'supports'),
+                prerequisites: relEdges.some(e => e.type === 'prerequisite'),
+            });
+        }
+    }
+
+    return relations;
+};
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DISSENT PATTERN DETECTION (MANDATORY FOR ALL SHAPES)
 // ═══════════════════════════════════════════════════════════════════════════
 
 const generateWhyItMatters = (
@@ -533,6 +602,12 @@ const generateWhyItMatters = (
     }
 };
 
+/**
+ * Detect dissent pattern - RUNS FOR ALL PRIMARY SHAPES
+ * 
+ * Philosophy: Low support ≠ low value. Consensus is often what the user
+ * already knows. Intelligence lives at the edges.
+ */
 const detectDissentPattern = (
     claims: EnrichedClaim[],
     edges: Edge[],
@@ -542,7 +617,10 @@ const detectDissentPattern = (
     const peakIdsSet = new Set(peakIds);
     const dissentVoices: DissentPatternData['voices'] = [];
 
-    // 1. LEVERAGE INVERSIONS
+    // ═══════════════════════════════════════════════════════════════════════
+    // Type 1: LEVERAGE INVERSIONS
+    // Low support, high structural importance
+    // ═══════════════════════════════════════════════════════════════════════
     const leverageInversions = claims.filter(c => c.isLeverageInversion);
 
     for (const claim of leverageInversions) {
@@ -562,17 +640,29 @@ const detectDissentPattern = (
         });
     }
 
-    // 2. EXPLICIT CHALLENGERS
-    const challengers = claims.filter(c =>
-        c.role === 'challenger' ||
-        (c.challenges && peakIdsSet.has(c.challenges))
-    );
+    // ═══════════════════════════════════════════════════════════════════════
+    // Type 2: EXPLICIT CHALLENGERS
+    // role='challenger' or attacks floor/peaks
+    // ═══════════════════════════════════════════════════════════════════════
+    const challengers = claims.filter(c => {
+        if (c.role === 'challenger') return true;
+        if (!c.challenges) return false;
+
+        const chalList = Array.isArray(c.challenges) ? c.challenges : [c.challenges];
+        return chalList.some(id => peakIdsSet.has(id));
+    });
 
     for (const claim of challengers) {
         if (dissentVoices.some(v => v.id === claim.id)) continue;
 
-        const targets = claim.challenges && peakIdsSet.has(claim.challenges)
-            ? [claim.challenges]
+        const chalList = Array.isArray(claim.challenges)
+            ? claim.challenges
+            : (claim.challenges ? [claim.challenges] : []);
+
+        const explicitTargets = chalList.filter(id => peakIdsSet.has(id));
+
+        const targets = explicitTargets.length > 0
+            ? explicitTargets
             : edges
                 .filter(e => e.from === claim.id && e.type === 'conflicts' && peakIdsSet.has(e.to))
                 .map(e => e.to);
@@ -590,7 +680,10 @@ const detectDissentPattern = (
         });
     }
 
-    // 3. UNIQUE PERSPECTIVES
+    // ═══════════════════════════════════════════════════════════════════════
+    // Type 3: UNIQUE PERSPECTIVES
+    // Supporters don't overlap with peak supporters
+    // ═══════════════════════════════════════════════════════════════════════
     const peakSupporters = new Set(peaks.flatMap(p => p.supporters));
     const outsiderModels = new Set<number>();
 
@@ -621,7 +714,10 @@ const detectDissentPattern = (
         }
     }
 
-    // 4. EDGE CASES
+    // ═══════════════════════════════════════════════════════════════════════
+    // Type 4: EDGE CASES
+    // Conditional claims with low support
+    // ═══════════════════════════════════════════════════════════════════════
     const edgeCases = claims.filter(c =>
         c.type === 'conditional' &&
         c.supportRatio < 0.4 &&
@@ -642,8 +738,10 @@ const detectDissentPattern = (
 
     if (dissentVoices.length === 0) return null;
 
+    // Rank by insight score
     const rankedVoices = [...dissentVoices].sort((a, b) => b.insightScore - a.insightScore);
 
+    // Identify suppressed dimensions (claim types only in minority)
     const peakTypes = new Set(peaks.map(p => p.type));
     const minorityOnlyTypes = Array.from(new Set(rankedVoices.map(v => {
         const claim = claims.find(c => c.id === v.id);
@@ -663,7 +761,8 @@ const detectDissentPattern = (
                 label: strongestVoice.label,
                 text: strongestVoice.text,
                 supportRatio: strongestVoice.supportRatio,
-                whyItMatters: generateWhyItMatters(strongestVoice, peaks)
+                whyItMatters: generateWhyItMatters(strongestVoice, peaks),
+                insightType: strongestVoice.insightType,
             } : null,
             suppressedDimensions: minorityOnlyTypes as string[]
         } as DissentPatternData
@@ -671,9 +770,14 @@ const detectDissentPattern = (
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
-// OTHER SECONDARY PATTERN DETECTORS
+// UNIVERSAL SECONDARY PATTERN DETECTORS
+// All patterns are checked regardless of primary shape
 // ═══════════════════════════════════════════════════════════════════════════
 
+/**
+ * CHALLENGED - Floor Under Attack
+ * High-support claims have conflict edges against them
+ */
 const detectChallengedPattern = (
     peakAnalysis: PeakAnalysis,
     claims: EnrichedClaim[],
@@ -683,6 +787,7 @@ const detectChallengedPattern = (
     const peakIdsSet = new Set(peakIds);
     const floorIds = new Set(floor.map(f => f.id));
 
+    // Find conflict edges where floor attacks peaks
     const challengeEdges = edges.filter(e =>
         e.type === 'conflicts' &&
         floorIds.has(e.from) &&
@@ -711,58 +816,70 @@ const detectChallengedPattern = (
     };
 };
 
-const detectKeystonePatternSecondary = (
-    peaks: EnrichedClaim[],
+/**
+ * KEYSTONE - Hub Claim with Cascade Risk
+ * Check if graph.hubClaim exists with ≥2 dependents
+ */
+const detectKeystonePattern = (
+    graph: GraphAnalysis,
+    claims: EnrichedClaim[],
+    edges: Edge[],
+    patterns: StructuralAnalysis["patterns"]
+): SecondaryPattern | null => {
+    if (!graph.hubClaim) return null;
+
+    // Use the rich builder
+    const ksShape = buildKeystonePatternData(claims, edges, graph, patterns);
+
+    // Check if valid (need dependents)
+    if (ksShape.dependencies.length < 2) return null;
+
+    return {
+        type: 'keystone',
+        severity: 'high', // Keystone is always structurally important
+        data: {
+            keystone: {
+                id: ksShape.keystone.id,
+                label: ksShape.keystone.label,
+                supportRatio: ksShape.keystone.supportRatio
+            },
+            dependents: ksShape.dependencies.map(d => d.id),
+            cascadeSize: ksShape.cascadeSize
+        } as KeystonePatternData
+    };
+};
+
+/**
+ * CHAIN - Sequential Dependencies
+ * Check if graph.longestChain.length >= 3
+ */
+const detectChainPattern = (
+    graph: GraphAnalysis,
+    claims: EnrichedClaim[],
     edges: Edge[],
     cascadeRisks: CascadeRisk[]
 ): SecondaryPattern | null => {
-    for (const peak of peaks) {
-        const outgoingPrereqs = edges.filter(e =>
-            e.from === peak.id && e.type === 'prerequisite'
-        );
-
-        if (outgoingPrereqs.length >= 2) {
-            const cascade = cascadeRisks.find(r => r.sourceId === peak.id);
-            const cascadeSize = cascade?.dependentIds.length || outgoingPrereqs.length;
-
-            return {
-                type: 'keystone',
-                severity: cascadeSize > 3 ? 'high' : cascadeSize > 1 ? 'medium' : 'low',
-                data: {
-                    keystone: { id: peak.id, label: peak.label, supportRatio: peak.supportRatio },
-                    dependents: outgoingPrereqs.map(e => e.to),
-                    cascadeSize
-                } as KeystonePatternData
-            };
-        }
-    }
-    return null;
-};
-
-const detectChainPatternSecondary = (
-    graph: GraphAnalysis,
-    claims: EnrichedClaim[]
-): SecondaryPattern | null => {
     if (graph.longestChain.length < MIN_CHAIN_LENGTH) return null;
 
-    const chainClaims = graph.longestChain
-        .map(id => claims.find(c => c.id === id))
-        .filter((c): c is EnrichedClaim => !!c);
-    const weakLinks = chainClaims
-        .filter(c => c.supportRatio < HILL_THRESHOLD)
-        .map(c => c.id);
+    // Use rich builder
+    const chainShape = buildChainPatternData(claims, edges, graph, cascadeRisks);
+    const weakLinks = chainShape.weakLinks.map(w => w.step.id);
 
     return {
         type: 'chain',
         severity: weakLinks.length > 1 ? 'high' : weakLinks.length > 0 ? 'medium' : 'low',
         data: {
-            chain: graph.longestChain,
-            length: graph.longestChain.length,
+            chain: chainShape.chain.map(step => step.id),
+            length: chainShape.chainLength,
             weakLinks
         } as ChainPatternData
     };
 };
 
+/**
+ * FRAGILE - Peak on Weak Foundation
+ * Peak depends on claim with low support via prerequisite edge
+ */
 const detectFragilePattern = (
     peakAnalysis: PeakAnalysis,
     claims: EnrichedClaim[],
@@ -772,13 +889,15 @@ const detectFragilePattern = (
     const fragilities: FragilePatternData['fragilities'] = [];
 
     for (const peak of peaks) {
+        // Find prerequisite edges TO this peak
         const incomingPrereqs = edges.filter(e =>
             e.to === peak.id && e.type === 'prerequisite'
         );
 
         for (const prereq of incomingPrereqs) {
             const foundation = claims.find(c => c.id === prereq.from);
-            if (foundation && foundation.supportRatio <= HILL_THRESHOLD) {
+            // Weak foundation: support ratio below 40%
+            if (foundation && foundation.supportRatio < 0.4) {
                 fragilities.push({
                     peak: { id: peak.id, label: peak.label },
                     weakFoundation: {
@@ -800,11 +919,17 @@ const detectFragilePattern = (
     };
 };
 
-const detectConditionalPatternSecondary = (
+/**
+ * CONDITIONAL - Context-Dependent Branches
+ * Multiple claims with type: 'conditional'
+ */
+const detectConditionalPattern = (
     claims: EnrichedClaim[],
     edges: Edge[]
 ): SecondaryPattern | null => {
     const conditionalClaims = claims.filter(c => c.type === 'conditional');
+
+    if (conditionalClaims.length < 2) return null;
 
     const conditions = conditionalClaims.map(c => {
         const branches = edges
@@ -822,6 +947,10 @@ const detectConditionalPatternSecondary = (
     };
 };
 
+/**
+ * ORPHANED - High Support but Disconnected
+ * Claim has high support but no edges
+ */
 const detectOrphanedPattern = (
     peaks: EnrichedClaim[],
     edges: Edge[]
@@ -848,50 +977,70 @@ const detectOrphanedPattern = (
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
-// SECONDARY PATTERN AGGREGATOR
+// UNIVERSAL SECONDARY PATTERN AGGREGATOR
+// Called ONCE in detectCompositeShape() after primary is determined
 // ═══════════════════════════════════════════════════════════════════════════
 
-const detectSecondaryPatterns = (
-    peakAnalysis: PeakAnalysis,
+/**
+ * Detect ALL secondary patterns regardless of primary shape.
+ * This is the universal pattern detection function per instructions.
+ */
+/**
+ * Detect ALL secondary patterns regardless of primary shape.
+ * This is the universal pattern detection function per instructions.
+ */
+/**
+ * Detect ALL secondary patterns regardless of primary shape.
+ * This is the universal pattern detection function per instructions.
+ */
+function detectAllSecondaryPatterns(
     claims: EnrichedClaim[],
+    peaks: EnrichedClaim[],
+    floor: EnrichedClaim[],
     edges: Edge[],
     graph: GraphAnalysis,
-    cascadeRisks: CascadeRisk[]
-): SecondaryPattern[] => {
+    patternsObj: StructuralAnalysis["patterns"]
+): SecondaryPattern[] {
+
     const patterns: SecondaryPattern[] = [];
+    const peakIds = peaks.map(p => p.id);
 
-    // 1. DISSENT - Most important
-    const dissent = detectDissentPattern(claims, edges, peakAnalysis.peakIds, peakAnalysis.peaks);
-    if (dissent) patterns.push(dissent);
+    // 1. DISSENT (mandatory check for all shapes)
+    const dissentPattern = detectDissentPattern(claims, edges, peakIds, peaks);
+    if (dissentPattern) patterns.push(dissentPattern);
 
-    // 2. FRAGILE
-    const fragile = detectFragilePattern(peakAnalysis, claims, edges);
-    if (fragile) patterns.push(fragile);
-
-    // 3. KEYSTONE
-    const keystone = detectKeystonePatternSecondary(peakAnalysis.peaks, edges, cascadeRisks);
-    if (keystone) patterns.push(keystone);
-
-    // 4. CHAIN
-    const chain = detectChainPatternSecondary(graph, claims);
-    if (chain) patterns.push(chain);
-
-    // 5. CONDITIONAL
-    const conditional = detectConditionalPatternSecondary(claims, edges);
-    if (conditional) patterns.push(conditional);
-
-    // 6. ORPHANED
-    const orphaned = detectOrphanedPattern(peakAnalysis.peaks, edges);
-    if (orphaned) patterns.push(orphaned);
-
-    // 7. CHALLENGED (only if no dissent)
-    if (!dissent) {
-        const challenged = detectChallengedPattern(peakAnalysis, claims, edges);
-        if (challenged) patterns.push(challenged);
+    // 2. KEYSTONE (if hub exists)
+    if (graph.hubClaim) {
+        // Pass full patterns object to use buildKeystonePatternData
+        const keystonePattern = detectKeystonePattern(graph, claims, edges, patternsObj);
+        if (keystonePattern) patterns.push(keystonePattern);
     }
 
+    // 3. CHAIN (if sequence ≥3 steps)
+    if (graph.longestChain.length >= 3) {
+        // Pass cascadeRisks from patternsObj
+        const chainPattern = detectChainPattern(graph, claims, edges, patternsObj.cascadeRisks);
+        if (chainPattern) patterns.push(chainPattern);
+    }
+
+    // 4. FRAGILE (if peaks on weak foundation)
+    const fragilePattern = detectFragilePattern({ peaks } as any, claims, edges);
+    if (fragilePattern) patterns.push(fragilePattern);
+
+    // 5. CHALLENGED (if floor under attack)
+    const challengedPattern = detectChallengedPattern({ peakIds, floor } as any, claims, edges);
+    if (challengedPattern) patterns.push(challengedPattern);
+
+    // 6. CONDITIONAL (if context-dependent branches)
+    const conditionalPattern = detectConditionalPattern(claims, edges);
+    if (conditionalPattern) patterns.push(conditionalPattern);
+
+    // 7. ORPHANED (if high support but isolated)
+    const orphanedPattern = detectOrphanedPattern(peaks, edges);
+    if (orphanedPattern) patterns.push(orphanedPattern);
+
     return patterns;
-};
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // TRANSFER QUESTION GENERATOR
@@ -918,14 +1067,20 @@ const generateTransferQuestion = (
             const peakLabels = peaks.slice(0, 2).map(p => `"${p.label}"`).join(' vs ');
             return `Two valid paths exist: ${peakLabels}. Which constraint matters more to you?`;
 
+        case 'constrained':
+            return "You can't maximize both—which matters more to you?";
+
         case 'parallel':
             return "Which dimension is most relevant to your situation?";
 
-        case 'constrained':
-            return "What are you optimizing for? You cannot maximize both.";
-
         case 'sparse':
-            return "What specific question would collapse this ambiguity?";
+            if (dissentPattern) {
+                const dissent = dissentPattern.data as DissentPatternData;
+                if (dissent.strongestVoice) {
+                    return `Signal is weak, but "${dissent.strongestVoice.label}" may be the answer despite low support. What's your context?`;
+                }
+            }
+            return "What specific question or constraint would clarify this?";
 
         default:
             return "What would help you navigate this?";
@@ -940,21 +1095,29 @@ const detectCompositeShape = (
     claims: EnrichedClaim[],
     edges: Edge[],
     graph: GraphAnalysis,
-    cascadeRisks: CascadeRisk[]
+    patternsObj: StructuralAnalysis["patterns"]
 ): CompositeShape => {
 
+    // Step 1: Analyze peaks
     const peakAnalysis = analyzePeaks(claims, edges);
+
+    // Step 2: Detect primary shape using hardened logic
     const { primary, confidence: primaryConfidence, evidence } = detectPrimaryShape(peakAnalysis);
 
-    const patterns = detectSecondaryPatterns(
-        peakAnalysis,
+    // Step 3: Detect ALL secondary patterns (universal detection)
+    const secondaryPatterns = detectAllSecondaryPatterns(
         claims,
+        peakAnalysis.peaks,
+        peakAnalysis.floor,
         edges,
         graph,
-        cascadeRisks
+        patternsObj
     );
 
+    // Step 4: Determine peak relationship and pair relations
     let peakRelationship: CompositeShape['peakRelationship'] = 'none';
+    const peakPairRelations = computePeakPairRelationships(peakAnalysis.peaks, edges);
+
     if (peakAnalysis.peaks.length > 1) {
         if (peakAnalysis.peakConflicts.length > 0) peakRelationship = 'conflicting';
         else if (peakAnalysis.peakTradeoffs.length > 0) peakRelationship = 'trading-off';
@@ -962,9 +1125,11 @@ const detectCompositeShape = (
         else if (peakAnalysis.peakUnconnected) peakRelationship = 'independent';
     }
 
-    const transferQuestion = generateTransferQuestion(primary, patterns, peakAnalysis.peaks);
+    // Step 5: Generate transfer question
+    const transferQuestion = generateTransferQuestion(primary, secondaryPatterns, peakAnalysis.peaks);
 
-    const patternEvidence = patterns.map(p => {
+    // Step 6: Build evidence including pattern indicators
+    const patternEvidence = secondaryPatterns.map((p: SecondaryPattern) => {
         switch (p.type) {
             case 'dissent':
                 return `⚡ Minority voice with potential insight`;
@@ -973,7 +1138,7 @@ const detectCompositeShape = (
             case 'keystone':
                 return `🔑 Structure depends on "${(p.data as KeystonePatternData).keystone.label}"`;
             case 'chain':
-                return `⛓️ ${(p.data as ChainPatternData).length}-step chain`;
+                return `⛓️ ${(p.data as ChainPatternData).length}-step dependency chain`;
             case 'fragile':
                 return `🧊 Peak(s) on weak foundations`;
             case 'conditional':
@@ -988,13 +1153,14 @@ const detectCompositeShape = (
     return {
         primary,
         confidence: primaryConfidence,
-        patterns,
+        patterns: secondaryPatterns,
         peaks: peakAnalysis.peaks.map(p => ({
             id: p.id,
             label: p.label,
             supportRatio: p.supportRatio
         })),
         peakRelationship,
+        peakPairRelations,
         evidence: [...evidence, ...patternEvidence],
         transferQuestion,
     };
@@ -1027,7 +1193,7 @@ const computeCoreRatios = (
 
     const alignment = topEdges.length > 0
         ? reinforcingEdges / topEdges.length
-        : 0.5;
+        : null;
 
     const tensionEdges = edges.filter(e =>
         e.type === "conflicts" || e.type === "tradeoff"
@@ -1249,7 +1415,7 @@ const assignPercentileFlags = (
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
-// PATTERN DETECTION
+// PATTERN DETECTION (Legacy patterns for StructuralAnalysis.patterns)
 // ═══════════════════════════════════════════════════════════════════════════
 
 const detectLeverageInversions = (
@@ -1458,76 +1624,11 @@ const analyzeGhosts = (ghosts: string[], claims: EnrichedClaim[]): StructuralAna
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
-// SHAPE DATA BUILDERS (Restored + Adapted for Peak-First Primary Shapes)
+// SHAPE DATA BUILDERS (Renamed per instructions)
+// 
+// These build rich data for the 5 PRIMARY shapes.
+// Pattern data lives in CompositeShape.patterns[], not duplicated here.
 // ═══════════════════════════════════════════════════════════════════════════
-
-type SettledShapeDataExtended = SettledShapeData & {
-    strongestOutlier: {
-        claim: {
-            id: string;
-            label: string;
-            text: string;
-            supportCount: number;
-            supportRatio: number;
-        };
-        reason: "leverage_inversion" | "explicit_challenger" | "minority_voice";
-        structuralRole: string;
-        whatItQuestions: string;
-    } | null;
-    floorAssumptions: string[];
-    transferQuestion: string;
-};
-
-type KeystoneShapeDataExtended = KeystoneShapeData & {
-    decoupledClaims: Array<{
-        id: string;
-        label: string;
-        text: string;
-        supportCount: number;
-        independenceReason: string;
-    }>;
-    cascadeConsequences: {
-        directlyAffected: number;
-        transitivelyAffected: number;
-        survives: number;
-    };
-    transferQuestion: string;
-};
-
-type LinearShapeDataExtended = LinearShapeData & {
-    shortcuts: Array<{
-        from: ChainStep;
-        to: ChainStep;
-        skips: string[];
-        supportEvidence: string;
-    }>;
-    chainFragility: {
-        weakLinkCount: number;
-        totalSteps: number;
-        fragilityRatio: number;
-        mostVulnerableStep: { step: ChainStep; cascadeSize: number } | null;
-    };
-    transferQuestion: string;
-};
-
-type DimensionalShapeDataExtended = DimensionalShapeData & {
-    dominantDimension: DimensionCluster | null;
-    hiddenDimension: DimensionCluster | null;
-    dominantBlindSpots: string[];
-    transferQuestion: string;
-};
-
-type ExploratoryShapeDataExtended = ExploratoryShapeData & {
-    outerBoundary: {
-        id: string;
-        label: string;
-        text: string;
-        supportCount: number;
-        distanceReason: string;
-    } | null;
-    sparsityReasons: string[];
-    transferQuestion: string;
-};
 
 function inferWhatOutlierQuestions(
     outlier: EnrichedClaim,
@@ -1543,11 +1644,15 @@ function inferWhatOutlierQuestions(
     return "assumptions underlying the consensus";
 }
 
-const buildSettledShapeData = (
+/**
+ * Build data for CONVERGENT primary shape (was buildSettledShapeData)
+ */
+const buildConvergentData = (
     claims: EnrichedClaim[],
     edges: Edge[],
-    ghosts: string[]
-): SettledShapeDataExtended => {
+    ghosts: string[],
+    modelCount: number
+): SettledShapeData => {
     const floorClaims = claims.filter(c => c.isHighSupport);
     const floorIds = new Set(floorClaims.map(c => c.id));
     const conflictEdges = edges.filter(e => e.type === "conflicts");
@@ -1578,13 +1683,12 @@ const buildSettledShapeData = (
         id: c.id,
         label: c.label,
         text: c.text,
-        supportCount: c.supporters.length,
-        challenges: c.challenges,
+        supportCount: c.supporters.length, challenges: c.challenges,
         targetsClaim: c.challenges
     }));
 
     const outsideClaims = claims.filter(c => !floorIds.has(c.id));
-    let strongestOutlier: SettledShapeDataExtended["strongestOutlier"] = null;
+    let strongestOutlier: SettledShapeData["strongestOutlier"] = null;
 
     if (outsideClaims.length > 0) {
         const leverageInversion = claims.find(c => c.isLeverageInversion);
@@ -1639,7 +1743,7 @@ const buildSettledShapeData = (
 
     const floorAssumptions: string[] = [];
     const floorSupporters = new Set(floorClaims.flatMap(c => c.supporters));
-    if (floorSupporters.size < (claims[0]?.supporters?.length || 0) * 0.5) {
+    if (floorSupporters.size < modelCount * 0.5) {
         floorAssumptions.push("Relies on a subset of model perspectives");
     }
     const hasConditional = floorClaims.some(c => c.type === "conditional");
@@ -1668,217 +1772,10 @@ const buildSettledShapeData = (
     };
 };
 
-const buildLinearShapeData = (
-    claims: EnrichedClaim[],
-    edges: Edge[],
-    graph: GraphAnalysis,
-    cascadeRisks: CascadeRisk[]
-): LinearShapeDataExtended => {
-    const prereqEdges = edges.filter(e => e.type === "prerequisite");
-    const chainIds = graph.longestChain;
-
-    const chain: ChainStep[] = chainIds.map((id, idx) => {
-        const claim = claims.find(c => c.id === id);
-        if (!claim) return null;
-        const enables = prereqEdges
-            .filter(e => e.from === id)
-            .map(e => e.to);
-        const isWeakLink = claim.supporters.length === 1;
-        const cascade = cascadeRisks.find(r => r.sourceId === id);
-        return {
-            id: claim.id,
-            label: claim.label,
-            text: claim.text,
-            supportCount: claim.supporters.length,
-            supportRatio: claim.supportRatio,
-            position: idx,
-            enables,
-            isWeakLink,
-            weakReason: isWeakLink
-                ? `Only 1 supporter - cascade affects ${cascade?.dependentIds.length || 0} claims`
-                : null
-        };
-    }).filter(Boolean) as ChainStep[];
-
-    const weakLinks = chain
-        .filter(step => step.isWeakLink)
-        .map(step => {
-            const cascade = cascadeRisks.find(r => r.sourceId === step.id);
-            return {
-                step,
-                cascadeSize: cascade?.dependentIds.length || 0
-            };
-        });
-
-    const terminalClaim = chain.length > 0 ? chain[chain.length - 1] : null;
-    const chainIdSet = new Set(chainIds);
-    const chainPositions = new Map(chainIds.map((id, idx) => [id, idx]));
-
-    const shortcuts: LinearShapeDataExtended["shortcuts"] = [];
-    for (const edge of prereqEdges) {
-        const fromPos = chainPositions.get(edge.from);
-        const toPos = chainPositions.get(edge.to);
-        if (fromPos !== undefined && toPos !== undefined && toPos - fromPos > 1) {
-            const fromStep = chain.find(s => s.id === edge.from);
-            const toStep = chain.find(s => s.id === edge.to);
-            const skippedIds = chainIds.slice(fromPos + 1, toPos);
-            if (fromStep && toStep && skippedIds.length > 0) {
-                shortcuts.push({
-                    from: fromStep,
-                    to: toStep,
-                    skips: skippedIds,
-                    supportEvidence: `Direct edge exists from step ${fromPos + 1} to step ${toPos + 1}`
-                });
-            }
-        }
-    }
-
-    const outsideChain = claims.filter(c => !chainIdSet.has(c.id));
-    for (const outside of outsideChain) {
-        const connectsTo = prereqEdges
-            .filter(e => e.from === outside.id && chainIdSet.has(e.to))
-            .map(e => chainPositions.get(e.to)!)
-            .filter(pos => pos !== undefined);
-        if (connectsTo.length > 0) {
-            const minPos = Math.min(...connectsTo);
-            if (minPos > 0) {
-                const toStep = chain[minPos];
-                shortcuts.push({
-                    from: {
-                        id: outside.id,
-                        label: outside.label,
-                        text: outside.text,
-                        supportCount: outside.supporters.length,
-                        supportRatio: outside.supportRatio,
-                        position: -1,
-                        enables: [],
-                        isWeakLink: false,
-                        weakReason: null
-                    },
-                    to: toStep,
-                    skips: chainIds.slice(0, minPos),
-                    supportEvidence: `"${outside.label}" may bypass early steps`
-                });
-            }
-        }
-    }
-
-    const chainFragility = {
-        weakLinkCount: weakLinks.length,
-        totalSteps: chain.length,
-        fragilityRatio: chain.length > 0 ? weakLinks.length / chain.length : 0,
-        mostVulnerableStep: weakLinks.length > 0
-            ? [...weakLinks].sort((a, b) => b.cascadeSize - a.cascadeSize)[0]
-            : null
-    };
-
-    const transferQuestion = weakLinks.length > 0
-        ? `Step "${weakLinks[0].step.label}" is a weak link. Is it actually required?`
-        : "Where are you in this sequence? Have you validated the early steps?";
-
-    return {
-        pattern: "linear",
-        chain,
-        chainLength: chain.length,
-        weakLinks,
-        alternativeChains: [],
-        terminalClaim,
-        shortcuts,
-        chainFragility,
-        transferQuestion
-    };
-};
-
-const buildKeystoneShapeData = (
-    claims: EnrichedClaim[],
-    edges: Edge[],
-    graph: GraphAnalysis,
-    patterns: StructuralAnalysis["patterns"]
-): KeystoneShapeDataExtended => {
-    const keystoneId = graph.hubClaim;
-    const keystoneClaim = claims.find(c => c.id === keystoneId);
-
-    if (!keystoneClaim) {
-        throw new Error("Keystone shape requires a hub claim");
-    }
-
-    const dependencies = edges
-        .filter(e => e.from === keystoneId && (e.type === "prerequisite" || e.type === "supports"))
-        .map(e => {
-            const dep = claims.find(c => c.id === e.to);
-            return {
-                id: e.to,
-                label: dep?.label || e.to,
-                relationship: e.type as "prerequisite" | "supports"
-            };
-        });
-
-    const cascade = patterns.cascadeRisks.find(r => r.sourceId === keystoneId);
-
-    const challengers = claims
-        .filter(c => c.role === "challenger")
-        .filter(c => {
-            return edges.some(e =>
-                e.type === "conflicts" &&
-                ((e.from === c.id && e.to === keystoneId) || (e.to === c.id && e.from === keystoneId))
-            );
-        })
-        .map(c => ({
-            id: c.id,
-            label: c.label,
-            text: c.text,
-            supportCount: c.supporters.length,
-            challenges: c.challenges,
-            targetsClaim: keystoneId || null
-        }));
-
-    const dependentIds = new Set(dependencies.map(d => d.id));
-    const keystoneConnectedIds = new Set<string>([keystoneId!, ...dependentIds]);
-
-    const decoupledClaims = claims
-        .filter(c => !keystoneConnectedIds.has(c.id))
-        .filter(c => c.supporters.length > 0)
-        .sort((a, b) => b.supporters.length - a.supporters.length)
-        .slice(0, 3)
-        .map(c => ({
-            id: c.id,
-            label: c.label,
-            text: c.text,
-            supportCount: c.supporters.length,
-            independenceReason: "Not connected to hub in graph structure"
-        }));
-
-    const cascadeConsequences = {
-        directlyAffected: dependencies.length,
-        transitivelyAffected: cascade?.dependentIds.length || dependencies.length,
-        survives: decoupledClaims.length
-    };
-
-    const transferQuestion = keystoneClaim.supporters.length <= 1
-        ? `The keystone has only ${keystoneClaim.supporters.length} supporter(s). Is "${keystoneClaim.label}" actually true in your situation?`
-        : `Everything flows from "${keystoneClaim.label}". Have you validated this foundation?`;
-
-    return {
-        pattern: "keystone",
-        keystone: {
-            id: keystoneClaim.id,
-            label: keystoneClaim.label,
-            text: keystoneClaim.text,
-            supportCount: keystoneClaim.supporters.length,
-            supportRatio: keystoneClaim.supportRatio,
-            dominance: graph.hubDominance,
-            isFragile: keystoneClaim.supporters.length <= 1
-        },
-        dependencies,
-        cascadeSize: cascade?.dependentIds.length || dependencies.length,
-        challengers,
-        decoupledClaims,
-        cascadeConsequences,
-        transferQuestion
-    };
-};
-
-const buildContestedShapeData = (
+/**
+ * Build data for FORKED primary shape (was buildContestedShapeData)
+ */
+const buildForkedData = (
     claims: EnrichedClaim[],
     patterns: StructuralAnalysis['patterns'],
     conflictInfos: ConflictInfo[],
@@ -1951,7 +1848,7 @@ const buildContestedShapeData = (
             stakes: topConflict.stakes
         };
     } else {
-        throw new Error("Contested shape requires at least one conflict");
+        throw new Error("Forked shape requires at least one conflict");
     }
 
     const usedIds = new Set<string>();
@@ -1995,7 +1892,10 @@ const buildContestedShapeData = (
     };
 };
 
-const buildTradeoffShapeData = (
+/**
+ * Build data for CONSTRAINED primary shape (was buildTradeoffShapeData)
+ */
+const buildConstrainedData = (
     claims: EnrichedClaim[],
     tradeoffPairs: TradeoffPair[]
 ): TradeoffShapeData => {
@@ -2019,7 +1919,12 @@ const buildTradeoffShapeData = (
                 supportCount: t.claimB.supporterCount,
                 supportRatio: claimB?.supportRatio || 0
             },
-            symmetry: t.symmetry as 'both_high' | 'both_low' | 'asymmetric',
+            symmetry:
+                t.symmetry === 'both_consensus'
+                    ? 'both_high' as const
+                    : t.symmetry === 'both_singular'
+                        ? 'both_low' as const
+                        : 'asymmetric' as const,
             governingFactor: null
         };
     });
@@ -2051,7 +1956,7 @@ const buildTradeoffShapeData = (
             supportCount: c.supporters.length,
             supportRatio: c.supportRatio,
             isContested: false,
-            contestedBy: []
+            contestedBy: [] as string[]
         }));
 
     return {
@@ -2062,6 +1967,9 @@ const buildTradeoffShapeData = (
     };
 };
 
+/**
+ * Helper for dimension theme inference
+ */
 function inferDimensionTheme(claims: EnrichedClaim[]): string {
     const types = claims.map(c => c.type);
     const dominantType = mode(types);
@@ -2078,17 +1986,20 @@ function inferDimensionTheme(claims: EnrichedClaim[]): string {
 function mode<T>(arr: T[]): T {
     const counts = new Map<T, number>();
     arr.forEach(v => counts.set(v, (counts.get(v) || 0) + 1));
-    const sorted = [...counts.entries()].sort((a, b) => b[1] - a[1]);
+    const sorted = Array.from(counts.entries()).sort((a, b) => b[1] - a[1]);
     return sorted[0]?.[0] ?? arr[0];
 }
 
-const buildDimensionalShapeData = (
+/**
+ * Build data for PARALLEL primary shape (was buildDimensionalShapeData)
+ */
+const buildParallelData = (
     claims: EnrichedClaim[],
     edges: Edge[],
     graph: GraphAnalysis,
     ghosts: string[]
-): DimensionalShapeDataExtended => {
-    const dimensions: Array<DimensionCluster & { claimCount: number }> = graph.components
+): DimensionalShapeData => {
+    const dimensions: DimensionCluster[] = graph.components
         .filter(comp => comp.length >= 2)
         .map((componentIds, idx) => {
             const componentClaims = claims.filter(c => componentIds.includes(c.id));
@@ -2108,13 +2019,12 @@ const buildDimensionalShapeData = (
                     supportCount: c.supporters.length
                 })),
                 cohesion,
-                avgSupport,
-                claimCount: componentClaims.length
+                avgSupport
             };
         })
-        .sort((a, b) => b.claimCount - a.claimCount);
+        .sort((a, b) => b.claims.length - a.claims.length);
 
-    const interactions: DimensionalShapeDataExtended["interactions"] = [];
+    const interactions: DimensionalShapeData["interactions"] = [];
     for (let i = 0; i < dimensions.length; i++) {
         for (let j = i + 1; j < dimensions.length; j++) {
             const dimA = dimensions[i];
@@ -2139,12 +2049,12 @@ const buildDimensionalShapeData = (
     const dominantBlindSpots: string[] = [];
     if (hiddenDimension) {
         dominantBlindSpots.push(
-            `"${hiddenDimension.theme}" perspective with ${hiddenDimension.claimCount} claim(s)`
+            `"${hiddenDimension.theme}" perspective with ${hiddenDimension.claims.length} claim(s)`
         );
     }
     const conflictingDims = interactions
-        .filter((i: any) => i.relationship === "conflicting")
-        .map((i: any) => {
+        .filter(i => i.relationship === "conflicting")
+        .map(i => {
             const other = i.dimensionA === dominantDimension?.id
                 ? dimensions.find(d => d.id === i.dimensionB)
                 : dimensions.find(d => d.id === i.dimensionA);
@@ -2176,18 +2086,21 @@ const buildDimensionalShapeData = (
     };
 };
 
-const buildExploratoryShapeData = (
+/**
+ * Build data for SPARSE primary shape (was buildExploratoryShapeData)
+ */
+const buildSparseData = (
     claims: EnrichedClaim[],
     graph: GraphAnalysis,
     ghosts: string[],
     signalStrength: number
-): ExploratoryShapeDataExtended => {
+): ExploratoryShapeData => {
     const sortedBySupport = [...claims].sort((a, b) => b.supporters.length - a.supporters.length);
     const sortedByDegree = [...claims].sort(
         (a, b) => (b.inDegree + b.outDegree) - (a.inDegree + a.outDegree)
     );
 
-    const strongestSignals: ExploratoryShapeDataExtended["strongestSignals"] = [];
+    const strongestSignals: ExploratoryShapeData["strongestSignals"] = [];
     if (sortedBySupport[0]) {
         strongestSignals.push({
             id: sortedBySupport[0].id,
@@ -2296,70 +2209,159 @@ const buildExploratoryShapeData = (
     };
 };
 
-const buildContextualShapeData = (
+/**
+ * Build keystone pattern data (for secondary pattern enrichment)
+ */
+const buildKeystonePatternData = (
     claims: EnrichedClaim[],
-    ghosts: string[]
-): ContextualShapeData => {
-    const conditionalClaims = claims.filter(c => c.type === 'conditional');
+    edges: Edge[],
+    graph: GraphAnalysis,
+    patterns: StructuralAnalysis["patterns"]
+): KeystoneShapeData => {
+    const keystoneId = graph.hubClaim;
+    const keystoneClaim = claims.find(c => c.id === keystoneId);
 
-    let governingCondition = "User's specific situation";
-    if (conditionalClaims.length > 0) {
-        governingCondition = conditionalClaims[0].text;
+    if (!keystoneClaim) {
+        throw new Error("Keystone pattern requires a hub claim");
     }
 
-    const branches: Array<{
-        condition: string;
-        claims: FloorClaim[];
-    }> = [];
-
-    const roots = claims.filter(c => c.type === 'conditional');
-
-    roots.forEach((root) => {
-        const branchClaims: FloorClaim[] = [{
-            id: root.id,
-            label: root.label,
-            text: root.text,
-            supportCount: root.supporters.length,
-            supportRatio: root.supportRatio,
-            isContested: false,
-            contestedBy: []
-        }];
-
-        branches.push({
-            condition: `If ${root.label}`,
-            claims: branchClaims
+    const dependencies = edges
+        .filter(e => e.from === keystoneId && (e.type === "prerequisite" || e.type === "supports"))
+        .map(e => {
+            const dep = claims.find(c => c.id === e.to);
+            return {
+                id: e.to,
+                label: dep?.label || e.to,
+                relationship: e.type as "prerequisite" | "supports"
+            };
         });
-    });
 
-    const defaultPath = branches.length > 0
-        ? {
-            exists: true,
-            claims: branches.sort((a, b) =>
-                b.claims.reduce((s, c) => s + c.supportCount, 0) -
-                a.claims.reduce((s, c) => s + c.supportCount, 0)
-            )[0].claims
-        }
-        : null;
+    const cascade = patterns.cascadeRisks.find(r => r.sourceId === keystoneId);
 
-    const missingContext = ghosts.filter(g =>
-        g.toLowerCase().includes('context') ||
-        g.toLowerCase().includes('depend') ||
-        g.toLowerCase().includes('situation')
-    );
+    const challengers = claims
+        .filter(c => c.role === "challenger")
+        .filter(c => {
+            return edges.some(e =>
+                e.type === "conflicts" &&
+                ((e.from === c.id && e.to === keystoneId) || (e.to === c.id && e.from === keystoneId))
+            );
+        })
+        .map(c => ({
+            id: c.id,
+            label: c.label,
+            text: c.text,
+            supportCount: c.supporters.length,
+            challenges: c.challenges,
+            targetsClaim: keystoneId || null
+        }));
 
     return {
-        pattern: 'contextual',
-        governingCondition,
-        branches,
-        defaultPath,
-        missingContext: missingContext.length > 0 ? missingContext : ghosts.slice(0, 2)
+        pattern: "keystone",
+        keystone: {
+            id: keystoneClaim.id,
+            label: keystoneClaim.label,
+            text: keystoneClaim.text,
+            supportCount: keystoneClaim.supporters.length,
+            supportRatio: keystoneClaim.supportRatio,
+            dominance: graph.hubDominance,
+            isFragile: keystoneClaim.supporters.length <= 1
+        },
+        dependencies,
+        cascadeSize: cascade?.dependentIds.length || dependencies.length,
+        challengers,
+        decoupledClaims: [],
+        cascadeConsequences: {
+            directlyAffected: dependencies.length,
+            transitivelyAffected: cascade?.dependentIds.length || dependencies.length,
+            survives: 0
+        },
+        transferQuestion: keystoneClaim.supporters.length <= 1
+            ? `The keystone has only ${keystoneClaim.supporters.length} supporter(s). Is "${keystoneClaim.label}" actually true in your situation?`
+            : `Everything flows from "${keystoneClaim.label}". Have you validated this foundation?`
     };
 };
+
+/**
+ * Build chain pattern data (for secondary pattern enrichment)
+ */
+const buildChainPatternData = (
+    claims: EnrichedClaim[],
+    edges: Edge[],
+    graph: GraphAnalysis,
+    cascadeRisks: CascadeRisk[]
+): LinearShapeData => {
+    const prereqEdges = edges.filter(e => e.type === "prerequisite");
+    const chainIds = graph.longestChain;
+
+    const chain: ChainStep[] = chainIds.map((id, idx) => {
+        const claim = claims.find(c => c.id === id);
+        if (!claim) return null;
+        const enables = prereqEdges
+            .filter(e => e.from === id)
+            .map(e => e.to);
+        const isWeakLink = claim.supporters.length === 1;
+        const cascade = cascadeRisks.find(r => r.sourceId === id);
+        return {
+            id: claim.id,
+            label: claim.label,
+            text: claim.text,
+            supportCount: claim.supporters.length,
+            supportRatio: claim.supportRatio,
+            position: idx,
+            enables,
+            isWeakLink,
+            weakReason: isWeakLink
+                ? `Only 1 supporter - cascade affects ${cascade?.dependentIds.length || 0} claims`
+                : null
+        };
+    }).filter(Boolean) as ChainStep[];
+
+    const weakLinks = chain
+        .filter(step => step.isWeakLink)
+        .map(step => {
+            const cascade = cascadeRisks.find(r => r.sourceId === step.id);
+            return {
+                step,
+                cascadeSize: cascade?.dependentIds.length || 0
+            };
+        });
+
+    const terminalClaim = chain.length > 0 ? chain[chain.length - 1] : null;
+
+    const chainFragility = {
+        weakLinkCount: weakLinks.length,
+        totalSteps: chain.length,
+        fragilityRatio: chain.length > 0 ? weakLinks.length / chain.length : 0,
+        mostVulnerableStep: weakLinks.length > 0
+            ? [...weakLinks].sort((a, b) => b.cascadeSize - a.cascadeSize)[0]
+            : null
+    };
+
+    const transferQuestion = weakLinks.length > 0
+        ? `Step "${weakLinks[0].step.label}" is a weak link. Is it actually required?`
+        : "Where are you in this sequence? Have you validated the early steps?";
+
+    return {
+        pattern: "linear",
+        chain,
+        chainLength: chain.length,
+        weakLinks,
+        alternativeChains: [],
+        terminalClaim,
+        shortcuts: [],
+        chainFragility,
+        transferQuestion
+    };
+};
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CONFLICT DETECTION (Enriched)
+// ═══════════════════════════════════════════════════════════════════════════
 
 const detectEnrichedConflicts = (
     edges: Edge[],
     claims: EnrichedClaim[],
-    landscape: { modelCount: number }
+    _landscape: { modelCount: number }
 ): ConflictInfo[] => {
     const claimMap = new Map(claims.map(c => [c.id, c]));
     const conflictEdges = edges.filter(e => e.type === "conflicts");
@@ -2418,13 +2420,12 @@ const detectEnrichedConflicts = (
 
 const detectConflictClusters = (
     conflicts: ConflictInfo[],
-    claims: EnrichedClaim[]
+    _claims: EnrichedClaim[]
 ): ConflictCluster[] => {
     const clusters: ConflictCluster[] = [];
     const conflictsByClaim = new Map<string, string[]>();
 
     for (const c of conflicts) {
-        // If explicit challenge, direction is known
         if (c.claimA.challenges === c.claimB.id) {
             const list = conflictsByClaim.get(c.claimB.id) || [];
             list.push(c.claimA.id);
@@ -2434,7 +2435,6 @@ const detectConflictClusters = (
             list.push(c.claimB.id);
             conflictsByClaim.set(c.claimA.id, list);
         } else {
-            // Indeterminate/Symmetric: Assume floor is the target
             if (c.claimB.isHighSupport && !c.claimA.isHighSupport) {
                 const list = conflictsByClaim.get(c.claimB.id) || [];
                 list.push(c.claimA.id);
@@ -2455,13 +2455,17 @@ const detectConflictClusters = (
                 axis: `Multiple challenges to ${targetId}`,
                 targetId,
                 challengerIds: challengers,
-                theme: "Dissent against consensus" // Placeholder theme
+                theme: "Dissent against consensus"
             });
         }
     }
 
     return clusters;
 };
+
+// ═══════════════════════════════════════════════════════════════════════════
+// MAIN STRUCTURAL ANALYSIS COMPUTATION
+// ═══════════════════════════════════════════════════════════════════════════
 
 export const computeStructuralAnalysis = (artifact: MapperArtifact): StructuralAnalysis => {
     const rawClaims = Array.isArray(artifact?.claims) ? artifact.claims : [];
@@ -2524,155 +2528,98 @@ export const computeStructuralAnalysis = (artifact: MapperArtifact): StructuralA
         claimsWithLeverage.map(c => c.supporters)
     );
 
-    // Step 11: Composite shape detection (peak-first approach)
+    // Step 11: Composite shape detection (peak-first approach with universal patterns)
     const compositeShape = detectCompositeShape(
         claimsWithLeverage,
         edges,
         graph,
-        patterns.cascadeRisks
+        patterns
     );
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // Step 12: BUILD SHAPE DATA BASED ON NEW PRIMARY SHAPE
-    // Secondary patterns augment, they don't replace
+    // Step 12: BUILD SHAPE DATA BASED ON PRIMARY SHAPE
+    // No enrichment - pattern data lives in patterns[] only
     // ═══════════════════════════════════════════════════════════════════════════
 
     const buildShapeData = (): ProblemStructure['data'] => {
-        const { primary, patterns: secondaryPatterns } = compositeShape;
-
-        // Check for secondary patterns that require specific handling
-        const hasKeystone = secondaryPatterns.some(p => p.type === 'keystone');
-        const hasChain = secondaryPatterns.some(p => p.type === 'chain');
-        const keystonePatternData = secondaryPatterns.find(p => p.type === 'keystone')?.data as KeystonePatternData | undefined;
-        const chainPatternData = secondaryPatterns.find(p => p.type === 'chain')?.data as ChainPatternData | undefined;
+        const { primary } = compositeShape;
 
         switch (primary) {
-            case 'convergent': {
-                // Use settled builder - consensus with challengers
-                const settledData = buildSettledShapeData(claimsWithLeverage, edges, ghosts);
+            case 'convergent':
+                return buildConvergentData(claimsWithLeverage, edges, ghosts, landscape.modelCount);
 
-                // If keystone secondary pattern exists AND we have a hub, enrich with keystone info
-                if (hasKeystone && keystonePatternData && graph.hubClaim) {
-                    try {
-                        const keystoneEnrichment = buildKeystoneShapeData(claimsWithLeverage, edges, graph, patterns);
-                        return {
-                            ...settledData,
-                            keystone: keystoneEnrichment.keystone,
-                            cascadeConsequences: keystoneEnrichment.cascadeConsequences,
-                            dependencies: keystoneEnrichment.dependencies,
-                        } as any;
-                    } catch (e) {
-                        // Keystone builder failed, continue with settled data
-                        console.warn('[PromptMethods] Keystone enrichment failed:', e);
-                    }
-                }
-
-                // If chain secondary pattern exists, note the dependency sequence
-                if (hasChain && chainPatternData && chainPatternData.length >= 3) {
-                    const linearEnrichment = buildLinearShapeData(claimsWithLeverage, edges, graph, patterns.cascadeRisks);
-                    return {
-                        ...settledData,
-                        chain: linearEnrichment.chain,
-                        chainFragility: linearEnrichment.chainFragility,
-                        chainLength: linearEnrichment.chainLength,
-                    } as any;
-                }
-
-                return settledData;
-            }
-
-            case 'forked': {
-                // Use contested builder - genuine disagreement between peaks
+            case 'forked':
                 if (enrichedConflicts.length === 0 && conflictClusters.length === 0) {
-                    // No conflicts found despite forked shape - fall back to settled with warning
-                    console.warn('[PromptMethods] Forked shape but no conflicts - falling back to settled');
-                    return buildSettledShapeData(claimsWithLeverage, edges, ghosts);
+                    console.warn('[PromptMethods] Forked shape but no conflicts - falling back to convergent');
+                    return buildConvergentData(claimsWithLeverage, edges, ghosts, landscape.modelCount);
                 }
-                return buildContestedShapeData(
-                    claimsWithLeverage,
-                    patterns,
-                    enrichedConflicts,
-                    conflictClusters
-                );
-            }
+                return buildForkedData(claimsWithLeverage, patterns, enrichedConflicts, conflictClusters);
 
-            case 'constrained': {
-                // Use tradeoff builder - optimization boundaries
+            case 'constrained':
                 if (patterns.tradeoffs.length === 0) {
-                    // No tradeoffs found despite constrained shape - check for conflicts
                     if (enrichedConflicts.length > 0) {
-                        return buildContestedShapeData(
-                            claimsWithLeverage,
-                            patterns,
-                            enrichedConflicts,
-                            conflictClusters
-                        );
+                        return buildForkedData(claimsWithLeverage, patterns, enrichedConflicts, conflictClusters);
                     }
-                    // Fall back to exploratory
-                    console.warn('[PromptMethods] Constrained shape but no tradeoffs - falling back to exploratory');
-                    return buildExploratoryShapeData(claimsWithLeverage, graph, ghosts, signalStrength);
+                    console.warn('[PromptMethods] Constrained shape but no tradeoffs - falling back to sparse');
+                    return buildSparseData(claimsWithLeverage, graph, ghosts, signalStrength);
                 }
-                return buildTradeoffShapeData(claimsWithLeverage, patterns.tradeoffs);
-            }
+                return buildConstrainedData(claimsWithLeverage, patterns.tradeoffs);
 
-            case 'parallel': {
-                // Use dimensional builder - independent axes
+            case 'parallel':
                 if (graph.componentCount < 2) {
-                    // Only one component - check if there are conditional claims
-                    const conditionalClaims = claimsWithLeverage.filter(c => c.type === 'conditional');
-                    if (conditionalClaims.length > 0) {
-                        return buildContextualShapeData(claimsWithLeverage, ghosts);
-                    }
-                    // Fall back to settled
-                    return buildSettledShapeData(claimsWithLeverage, edges, ghosts);
+                    return buildConvergentData(claimsWithLeverage, edges, ghosts, landscape.modelCount);
                 }
-                return buildDimensionalShapeData(claimsWithLeverage, edges, graph, ghosts);
-            }
+                return buildParallelData(claimsWithLeverage, edges, graph, ghosts);
 
             case 'sparse':
-            default: {
-                // Use exploratory builder - weak signal
-                return buildExploratoryShapeData(claimsWithLeverage, graph, ghosts, signalStrength);
-            }
+            default:
+                return buildSparseData(claimsWithLeverage, graph, ghosts, signalStrength);
         }
     };
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // Step 13: Assemble final shape with composite + data
+    // Step 13: Assemble final shape
     // ═══════════════════════════════════════════════════════════════════════════
 
     let shapeData: ProblemStructure['data'] | undefined;
 
     try {
         shapeData = buildShapeData();
-        console.log('[PromptMethods] Shape data built for primary:', compositeShape.primary, {
+        structuralDbg('Shape data built for primary:', compositeShape.primary, {
             hasData: !!shapeData,
             dataPattern: (shapeData as any)?.pattern,
             secondaryPatterns: compositeShape.patterns.map(p => p.type),
         });
     } catch (e) {
         console.error("[PromptMethods] Failed to build shape data:", e);
-        // Fallback to exploratory if shape-specific builder fails
-        shapeData = buildExploratoryShapeData(claimsWithLeverage, graph, ghosts, signalStrength);
-        console.log('[PromptMethods] Fell back to exploratory shape data');
+        shapeData = buildSparseData(claimsWithLeverage, graph, ghosts, signalStrength);
     }
+
+    // Extract convenience fields for CompositeShape
+    const floorAssumptions = (shapeData as SettledShapeData)?.floorAssumptions;
+    const centralConflict = (shapeData as ContestedShapeData)?.centralConflict
+        ? (shapeData as ContestedShapeData).collapsingQuestion || undefined
+        : undefined;
+    const tradeoffsList = (shapeData as TradeoffShapeData)?.tradeoffs?.map(t =>
+        t.governingFactor || `${t.optionA.label} vs ${t.optionB.label}`
+    );
 
     // Build the final ProblemStructure
     const shape: ProblemStructure = {
-        // New peak-first fields
         primary: compositeShape.primary,
         confidence: compositeShape.confidence,
         patterns: compositeShape.patterns,
         peaks: compositeShape.peaks,
         peakRelationship: compositeShape.peakRelationship,
+        peakPairRelations: compositeShape.peakPairRelations,
         evidence: compositeShape.evidence,
         transferQuestion: compositeShape.transferQuestion,
-
-        // Rich shape data from builders
         data: shapeData,
-
-        // Signal strength for sparse detection
         signalStrength,
+        // Convenience fields
+        floorAssumptions,
+        centralConflict,
+        tradeoffs: tradeoffsList,
     };
 
     const analysis: StructuralAnalysis = {
@@ -2686,7 +2633,7 @@ export const computeStructuralAnalysis = (artifact: MapperArtifact): StructuralA
         shape,
     };
 
-    structuralDbg("analysis", {
+    structuralDbg("analysis complete", {
         claimCount: landscape.claimCount,
         edgeCount: edges.length,
         modelCount: landscape.modelCount,
@@ -2715,24 +2662,20 @@ export const computeProblemStructureFromArtifact = (artifact: MapperArtifact): P
 /**
  * Compute full analysis including Shadow Mapper.
  * Call this after batch responses AND mapper artifact are available.
- * 
- * @param batchResponses - Raw batch responses with modelIndex and content
- * @param primaryArtifact - MapperArtifact from primary mapper
- * @param userQuery - Original user query for relevance scoring
  */
 export const computeFullAnalysis = (
     batchResponses: Array<{ modelIndex: number; content: string }>,
     primaryArtifact: MapperArtifact,
     userQuery: string
 ): StructuralAnalysis & {
-    shadow: {
+    shadow?: {
         audit: ShadowAudit;
         unindexed: UnindexedStatement[];
         topUnindexed: UnindexedStatement[];
         processingTime: number;
     }
 } => {
-    // 1. Run existing structural analysis (unchanged)
+    // 1. Run existing structural analysis
     const baseAnalysis = computeStructuralAnalysis(primaryArtifact);
 
     // 2. Run Shadow two-pass extraction
@@ -2745,9 +2688,7 @@ export const computeFullAnalysis = (
         userQuery
     );
 
-    // ═════════════════════════════════════════════════════════════════
-    // DEBUG LOGGING (Shadow Mapper)
-    // ═════════════════════════════════════════════════════════════════
+    // Debug logging
     console.groupCollapsed(`[Shadow] Audit: ${shadowDelta.unindexed.length} unindexed gaps found`);
     console.log("Stats:", shadowDelta.audit.extraction);
     console.log("Gaps:", shadowDelta.audit.gaps);

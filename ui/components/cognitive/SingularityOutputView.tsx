@@ -22,7 +22,16 @@ interface SingularityError {
 }
 
 const isSingularityError = (value: unknown): value is SingularityError => {
-    return typeof value === 'object' && value !== null && ('message' in value || 'error' in value || 'code' in value);
+    if (typeof value !== 'object' || value === null) return false;
+    const v = value as any;
+    // Check types
+    const hasMessage = typeof v.message === 'string';
+    const hasError = typeof v.error === 'string';
+    const hasCode = typeof v.code === 'string';
+    // requiresReauth is optional boolean
+    if ('requiresReauth' in v && typeof v.requiresReauth !== 'boolean') return false;
+    // Must have at least one of the string fields
+    return hasMessage || hasError || hasCode;
 };
 
 const getErrorMessage = (error: unknown): string => {
@@ -58,9 +67,13 @@ const SingularityOutputView: React.FC<SingularityOutputViewProps> = ({
 
     // Unified Handler
     const handleProviderSelect = (pid: string) => {
-        const hasResponse = (aiTurn.singularityResponses?.[pid]?.length || 0) > 0;
+        const responses = aiTurn.singularityResponses?.[pid] || [];
+        const latest = responses[responses.length - 1];
+        // Check for completed status OR presence of text (even if partial)
+        // If status is error, we force recompute unless text is present (sometimes error comes with partial text)
+        const hasUsableResponse = latest && (latest.status === 'completed' || (latest.text && latest.text.trim().length > 0));
 
-        if (hasResponse) {
+        if (hasUsableResponse) {
             singularityState.setPinnedProvider(pid);
         } else {
             // New compute, will auto-pin via parent
@@ -97,7 +110,10 @@ const SingularityOutputView: React.FC<SingularityOutputViewProps> = ({
                             <div className="max-h-64 overflow-y-auto custom-scrollbar">
                                 {LLM_PROVIDERS_CONFIG.map((provider) => {
                                     const isCurrent = output?.providerId === provider.id;
-                                    const hasResponse = (aiTurn.singularityResponses?.[provider.id]?.length || 0) > 0;
+                                    const responses = aiTurn.singularityResponses?.[provider.id] || [];
+                                    const latest = responses[responses.length - 1];
+                                    // Only show green dot if we have usable content
+                                    const hasResponse = latest && (latest.status === 'completed' || (latest.text && latest.text.trim().length > 0));
 
                                     return (
                                         <button
@@ -186,6 +202,11 @@ const SingularityOutputView: React.FC<SingularityOutputViewProps> = ({
                 <div className="relative z-10 px-6 py-4 border-t border-border-subtle/50 bg-surface-highlight/5 flex items-center justify-between">
                     <div className="flex items-center gap-2 text-xs text-text-muted">
                         {renderSwitcher('rect')}
+                        {requestedProviderId && requestedProviderId !== providerId && (
+                            <div className="text-[10px] text-amber-400">
+                                Requested {requestedProviderId}, showing {providerId}
+                            </div>
+                        )}
                     </div>
 
                     <div className="flex items-center gap-2">
@@ -196,7 +217,10 @@ const SingularityOutputView: React.FC<SingularityOutputViewProps> = ({
                         />
                         {/* Re-run current (Refresher) - Optional but useful since main click doesn't re-run anymore */}
                         <button
-                            onClick={() => onRecompute({ providerId: output?.providerId })}
+                            onClick={() => {
+                                const pid = output?.providerId ?? singularityState.requestedProviderId ?? singularityState.providerId;
+                                if (pid) onRecompute({ providerId: pid });
+                            }}
                             title="Regenerate this response"
                             className="flex items-center justify-center w-8 h-8 rounded-lg text-text-secondary hover:text-text-primary hover:bg-surface-highlight border border-transparent hover:border-border-subtle transition-all"
                         >

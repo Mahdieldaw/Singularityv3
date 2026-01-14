@@ -130,7 +130,7 @@ export function generateInsightsFromAnalysis(
                             metadata: {
                                 supportRatio: data.strongestVoice.supportRatio,
                                 whyItMatters: data.strongestVoice.whyItMatters,
-                                insightType: data.voices[0]?.insightType,
+                                insightType: data.strongestVoice.insightType || data.voices.find(v => v.id === data.strongestVoice?.id)?.insightType,
                                 suppressedDimensions: data.suppressedDimensions,
                                 voiceCount: data.voices.length,
                             },
@@ -422,14 +422,31 @@ export function generateInsightsFromAnalysis(
         return severityOrder[a.severity] - severityOrder[b.severity];
     });
 
-    graphAdapterDbg("insights generated", {
-        total: insights.length,
-        fromPatterns: insights.filter(i => i.source === 'pattern').length,
-        fromGraph: insights.filter(i => i.source === 'graph').length,
-        fromFlags: insights.filter(i => i.source === 'claim_flag').length,
+    // ═══════════════════════════════════════════════════════════════════════
+    // PHASE 5: DEDUPLICATION
+    // ═══════════════════════════════════════════════════════════════════════
+
+    const uniqueInsights = new Map<string, InsightData>();
+
+    // Process in order - relying on the sort we just did (Source, then Severity)
+    // We want to KEEP the first one we find (highest priority)
+    insights.forEach(insight => {
+        const key = `${insight.type}:${insight.claim.id}`;
+        if (!uniqueInsights.has(key)) {
+            uniqueInsights.set(key, insight);
+        }
     });
 
-    return insights;
+    const finalInsights = Array.from(uniqueInsights.values());
+
+    graphAdapterDbg("insights generated", {
+        total: finalInsights.length,
+        fromPatterns: finalInsights.filter(i => i.source === 'pattern').length,
+        fromGraph: finalInsights.filter(i => i.source === 'graph').length,
+        fromFlags: finalInsights.filter(i => i.source === 'claim_flag').length,
+    });
+
+    return finalInsights;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

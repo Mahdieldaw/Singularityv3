@@ -83,7 +83,10 @@ export function useSingularityOutput(aiTurnId: string | null, forcedProviderId?:
 
         if (!active) return defaultState;
 
-        const latestResponse = active.last;
+        // Return state for the "Active" provider, but reflect the "Requested" state
+        const requestedCandidate = pinnedCandidate || active;
+
+        const latestResponse = requestedCandidate.last;
         const meta: any = latestResponse?.meta || {};
         const metaOutput = meta.singularityOutput as SingularityOutput | undefined;
 
@@ -92,7 +95,7 @@ export function useSingularityOutput(aiTurnId: string | null, forcedProviderId?:
             output = {
                 ...metaOutput,
                 text: metaOutput.text || latestResponse.text,
-                providerId: metaOutput.providerId || active.providerId,
+                providerId: metaOutput.providerId || requestedCandidate.providerId,
                 timestamp: metaOutput.timestamp || latestResponse.createdAt || Date.now(),
                 leakageDetected: metaOutput.leakageDetected ?? meta.leakageDetected,
                 leakageViolations: metaOutput.leakageViolations ?? meta.leakageViolations
@@ -100,19 +103,17 @@ export function useSingularityOutput(aiTurnId: string | null, forcedProviderId?:
         } else {
             output = {
                 text: latestResponse.text,
-                providerId: active.providerId,
+                providerId: requestedCandidate.providerId,
                 timestamp: latestResponse.createdAt || Date.now(),
                 leakageDetected: meta?.leakageDetected,
                 leakageViolations: meta?.leakageViolations
             };
         }
 
-        // Return state for the "Active" provider, but reflect the "Requested" state
-        const requestedCandidate = pinnedCandidate || active;
         return {
             output,
             isLoading: requestedCandidate.isLoading,
-            isError: active.isError,
+            isError: requestedCandidate.isError,
             providerId: active.providerId,
             requestedProviderId: pinnedId || active.providerId,
             rawText: latestResponse.text,

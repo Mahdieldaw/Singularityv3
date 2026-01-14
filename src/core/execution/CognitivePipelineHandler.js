@@ -63,11 +63,11 @@ export class CognitivePipelineHandler {
               if (citationOrder && typeof citationOrder === 'object') {
                 mapperArtifact.model_count = Object.keys(citationOrder).length;
               } else {
-                // Fallback: count unique supporters across claims
+                // Fallback: count unique supporters across claims (including string IDs)
                 const supporterSet = new Set();
                 (mapperArtifact.claims || []).forEach(c => {
                   (c.supporters || []).forEach(s => {
-                    if (typeof s === 'number') supporterSet.add(s);
+                    supporterSet.add(s);
                   });
                 });
                 mapperArtifact.model_count = supporterSet.size > 0 ? supporterSet.size : 1;
@@ -137,10 +137,33 @@ export class CognitivePipelineHandler {
             const batchResults = promptResult?.result?.results || null;
 
             if (batchResults && Object.keys(batchResults).length > 0) {
-              const batchResponses = Object.entries(batchResults).map(([_, resp], idx) => ({
-                modelIndex: idx,
-                content: resp.text || ""
-              }));
+              // Fix unstable ordering: use citationSourceOrder if available
+              const citationOrder = mapperArtifact?.options?.citationSourceOrder || mapperArtifact?.metadata?.citationSourceOrder;
+              let batchResponses = [];
+
+              if (citationOrder && typeof citationOrder === 'object') {
+                const sortedProviders = Object.entries(citationOrder)
+                  .sort(([, a], [, b]) => a - b)
+                  .map(([provider]) => provider);
+
+                batchResponses = sortedProviders.map((provider) => {
+                  const supporterIndex = citationOrder[provider];
+                  const resp = batchResults[provider];
+                  return {
+                    modelIndex: supporterIndex,
+                    content: resp ? (resp.text || "") : ""
+                  };
+                });
+
+                // Ensure we captured all batch results even if not in citation order (rare)
+                // For now, assume citationOrder covers relevant supporters.
+              } else {
+                // Fallback: iterate object entries (unstable but better than nothing)
+                batchResponses = Object.entries(batchResults).map(([_, resp], idx) => ({
+                  modelIndex: idx + 1,
+                  content: resp.text || ""
+                }));
+              }
               console.log(`[CognitiveHandler] Running FULL analysis with Shadow Mapper (${batchResponses.length} models)`);
               structuralAnalysis = computeFullAnalysis(batchResponses, mapperArtifact, userMessageForSingularity);
             } else {
@@ -157,14 +180,7 @@ export class CognitivePipelineHandler {
             mapperArtifact.problemStructure = structuralAnalysis.shape;
             mapperArtifact.fullAnalysis = structuralAnalysis; // Add this for UI components
           }
-          let stanceSelection = null;
-          try {
-            const mod = await import('../ConciergeService');
-            const ConciergeService = mod.ConciergeService;
-            if (ConciergeService?.selectStance && structuralAnalysis?.shape) {
-              stanceSelection = ConciergeService.selectStance(userMessageForSingularity, structuralAnalysis.shape);
-            }
-          } catch (_) { }
+
 
           // ══════════════════════════════════════════════════════════════════
           // HANDOFF V2: Determine if fresh instance needed
@@ -234,11 +250,20 @@ export class CognitivePipelineHandler {
               // Turn 1: Full buildConciergePrompt with prior context if fresh spawn after COMMIT
               conciergePromptType = "full";
               conciergePromptSeed = {
-                stance: stanceSelection?.stance || undefined,
                 isFirstTurn: true,
                 activeWorkflow: conciergeState?.activeWorkflow || undefined,
                 priorContext: undefined, // Fix inferred type error
-                shadow: structuralAnalysis?.shadow || undefined,
+                shadow: structuralAnalysis?.shadow
+                  ? {
+                    audit: structuralAnalysis.shadow.audit,
+                    topUnindexed: structuralAnalysis.shadow.topUnindexed.map(u => ({
+                      text: u.text,
+                      type: u.type,
+                      sourceModels: u.sourceModels,
+                      adjustedScore: u.adjustedScore,
+                    })),
+                  }
+                  : undefined,
               };
 
               // If fresh spawn after COMMIT, inject prior context
@@ -321,7 +346,6 @@ export class CognitivePipelineHandler {
               mappingText: mappingResult?.text || "",
               mappingMeta: mappingResult?.meta || {},
               structuralAnalysis,
-              stance: stanceSelection?.stance || null,
               conciergePrompt,
               conciergePromptType,
               conciergePromptSeed,
@@ -563,7 +587,6 @@ export class CognitivePipelineHandler {
           mappingText: latestMappingText,
           mappingMeta: latestMappingMeta,
           selectedArtifacts: Array.isArray(selectedArtifacts) ? selectedArtifacts : [],
-          stance: payload.stance || null,
           useThinking: payload.useThinking || false,
         },
       };

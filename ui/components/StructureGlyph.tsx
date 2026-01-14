@@ -1,12 +1,5 @@
 import React from "react";
-import { ProblemStructure } from "../../shared/contract";
-
-// Secondary pattern type - should match your contract.ts
-interface SecondaryPattern {
-    type: 'dissent' | 'challenged' | 'keystone' | 'chain' | 'fragile' | 'conditional' | 'orphaned';
-    data?: unknown;
-    confidence?: number;
-}
+import { ProblemStructure, SecondaryPattern } from "../../shared/contract";
 
 interface StructureGlyphProps {
     pattern: ProblemStructure["primary"];
@@ -25,8 +18,14 @@ const StructureGlyph: React.FC<StructureGlyphProps> = ({
     height = 80,
     onClick,
 }) => {
+
     const cx = width / 2;
     const cy = height / 2;
+    const markerIdPrefix = React.useId().replace(/:/g, '');
+    const arrowBlueId = `${markerIdPrefix}arrowBlue`;
+    const arrowRedId = `${markerIdPrefix}arrowRed`;
+    const arrowOrangeId = `${markerIdPrefix}arrowOrange`;
+    const arrowGreenId = `${markerIdPrefix}arrowGreen`;
 
     // ═══════════════════════════════════════════════════════════════════════════
     // SECONDARY PATTERN DETECTION
@@ -48,12 +47,12 @@ const StructureGlyph: React.FC<StructureGlyphProps> = ({
         // Hub indicator - central node with radiating importance
         return (
             <g className="keystone-overlay">
-                <circle 
-                    cx={cx} 
-                    cy={cy} 
-                    r={10} 
-                    fill="none" 
-                    stroke="rgba(139, 92, 246, 0.6)" 
+                <circle
+                    cx={cx}
+                    cy={cy}
+                    r={10}
+                    fill="none"
+                    stroke="rgba(139, 92, 246, 0.6)"
                     strokeWidth={2}
                     strokeDasharray="4,2"
                 />
@@ -75,7 +74,7 @@ const StructureGlyph: React.FC<StructureGlyphProps> = ({
                     y2={arrowY}
                     stroke="rgba(59, 130, 246, 0.5)"
                     strokeWidth={1.5}
-                    markerEnd="url(#arrowBlue)"
+                    markerEnd={`url(#${arrowBlueId})`}
                 />
                 {/* Chain links */}
                 {[0.3, 0.5, 0.7].map((ratio, i) => (
@@ -97,10 +96,10 @@ const StructureGlyph: React.FC<StructureGlyphProps> = ({
         return (
             <g className="dissent-overlay">
                 {/* Dissent indicator in corner */}
-                <circle 
-                    cx={width * 0.85} 
-                    cy={height * 0.15} 
-                    r={5} 
+                <circle
+                    cx={width * 0.85}
+                    cy={height * 0.15}
+                    r={5}
                     fill="rgba(251, 191, 36, 0.8)"
                     stroke="rgba(251, 191, 36, 1)"
                     strokeWidth={1}
@@ -149,7 +148,7 @@ const StructureGlyph: React.FC<StructureGlyphProps> = ({
                     y2={height * 0.55}
                     stroke="rgba(239, 68, 68, 0.5)"
                     strokeWidth={1.5}
-                    markerEnd="url(#arrowRed)"
+                    markerEnd={`url(#${arrowRedId})`}
                 />
             </g>
         );
@@ -185,12 +184,12 @@ const StructureGlyph: React.FC<StructureGlyphProps> = ({
         switch (pattern) {
             // ─────────────────────────────────────────────────────────────────────
             // CONVERGENT: Consensus ring with central gravity
-            // Maps from: settled, contextual
+            // Consensus/agreement structure
             // ─────────────────────────────────────────────────────────────────────
             case "convergent": {
                 const nodes = Math.min(claimCount, 6);
                 const radius = Math.min(width, height) * 0.3;
-                
+
                 // If keystone secondary pattern, render as hub-centric instead
                 if (hasKeystone) {
                     const satellites = Math.max(0, Math.min(claimCount - 1, 6));
@@ -239,8 +238,7 @@ const StructureGlyph: React.FC<StructureGlyphProps> = ({
                                                 x2={x + spacing - 4}
                                                 y2={cy}
                                                 stroke="rgba(59, 130, 246, 0.3)"
-                                                strokeWidth={1.5}
-                                                markerEnd="url(#arrowBlue)"
+                                                markerEnd={`url(#${arrowBlueId})`}
                                             />
                                         )}
                                     </g>
@@ -284,7 +282,7 @@ const StructureGlyph: React.FC<StructureGlyphProps> = ({
                                 y2={cy}
                                 stroke="rgba(16, 185, 129, 0.3)"
                                 strokeWidth={1.5}
-                                markerEnd="url(#arrowGreen)"
+                                markerEnd={`url(#${arrowGreenId})`}
                             />
                         </>
                     );
@@ -311,14 +309,14 @@ const StructureGlyph: React.FC<StructureGlyphProps> = ({
                                 </g>
                             );
                         })}
-                        <circle 
-                            cx={cx} 
-                            cy={cy} 
-                            r={radius * 1.5} 
-                            fill="none" 
-                            stroke="rgba(16, 185, 129, 0.1)" 
-                            strokeWidth={1} 
-                            strokeDasharray="2,2" 
+                        <circle
+                            cx={cx}
+                            cy={cy}
+                            r={radius * 1.5}
+                            fill="none"
+                            stroke="rgba(16, 185, 129, 0.1)"
+                            strokeWidth={1}
+                            strokeDasharray="2,2"
                         />
                     </>
                 );
@@ -326,7 +324,7 @@ const StructureGlyph: React.FC<StructureGlyphProps> = ({
 
             // ─────────────────────────────────────────────────────────────────────
             // FORKED: Conflicting positions - genuine disagreement
-            // Maps from: contested
+            // Genuine disagreement/conflict structure
             // ─────────────────────────────────────────────────────────────────────
             case "forked": {
                 const leftX = width * 0.25;
@@ -347,8 +345,8 @@ const StructureGlyph: React.FC<StructureGlyphProps> = ({
                             stroke="#ef4444"
                             strokeWidth={2}
                             strokeDasharray="3,2"
-                            markerStart="url(#arrowRed)"
-                            markerEnd="url(#arrowRed)"
+                            markerStart={`url(#${arrowRedId})`}
+                            markerEnd={`url(#${arrowRedId})`}
                         />
 
                         {/* Group B (Position 2) */}
@@ -361,7 +359,7 @@ const StructureGlyph: React.FC<StructureGlyphProps> = ({
 
             // ─────────────────────────────────────────────────────────────────────
             // CONSTRAINED: Trade-off between options
-            // Maps from: tradeoff
+            // Trade-off/optimization structure
             // ─────────────────────────────────────────────────────────────────────
             case "constrained": {
                 const leftX = width * 0.3;
@@ -377,8 +375,8 @@ const StructureGlyph: React.FC<StructureGlyphProps> = ({
                             stroke="#f97316"
                             strokeWidth={2}
                             strokeDasharray="2,2"
-                            markerStart="url(#arrowOrange)"
-                            markerEnd="url(#arrowOrange)"
+                            markerStart={`url(#${arrowOrangeId})`}
+                            markerEnd={`url(#${arrowOrangeId})`}
                         />
                         <circle cx={rightX} cy={cy} r={6} fill="rgba(249, 115, 22, 0.6)" />
                         {/* Optimization boundary indicator */}
@@ -397,28 +395,28 @@ const StructureGlyph: React.FC<StructureGlyphProps> = ({
 
             // ─────────────────────────────────────────────────────────────────────
             // PARALLEL: Independent dimensions
-            // Maps from: dimensional
+            // Multi-dimensional/independent structure
             // ─────────────────────────────────────────────────────────────────────
             case "parallel": {
                 const ratios = [0.3, 0.5, 0.7];
                 return (
                     <>
                         {/* Axis lines showing independence */}
-                        <line 
-                            x1={width * 0.1} 
-                            y1={height * 0.5} 
-                            x2={width * 0.9} 
-                            y2={height * 0.5} 
-                            stroke="rgba(255,255,255,0.1)" 
-                            strokeWidth={1} 
+                        <line
+                            x1={width * 0.1}
+                            y1={height * 0.5}
+                            x2={width * 0.9}
+                            y2={height * 0.5}
+                            stroke="rgba(255,255,255,0.1)"
+                            strokeWidth={1}
                         />
-                        <line 
-                            x1={width * 0.5} 
-                            y1={height * 0.1} 
-                            x2={width * 0.5} 
-                            y2={height * 0.9} 
-                            stroke="rgba(255,255,255,0.1)" 
-                            strokeWidth={1} 
+                        <line
+                            x1={width * 0.5}
+                            y1={height * 0.1}
+                            x2={width * 0.5}
+                            y2={height * 0.9}
+                            stroke="rgba(255,255,255,0.1)"
+                            strokeWidth={1}
                         />
                         {/* Claims distributed across dimensions */}
                         {ratios.map((xRatio, i) =>
@@ -438,7 +436,7 @@ const StructureGlyph: React.FC<StructureGlyphProps> = ({
 
             // ─────────────────────────────────────────────────────────────────────
             // SPARSE: Insufficient signal, exploratory
-            // Maps from: exploratory
+            // Exploratory/preliminary structure
             // ─────────────────────────────────────────────────────────────────────
             case "sparse":
             default: {
@@ -483,7 +481,7 @@ const StructureGlyph: React.FC<StructureGlyphProps> = ({
             return pattern;
         }
         // Show most important secondary pattern
-        const importantSecondary = secondaryPatterns.find(p => 
+        const importantSecondary = secondaryPatterns.find(p =>
             p.type === 'dissent' || p.type === 'keystone' || p.type === 'chain'
         );
         if (importantSecondary) {
@@ -500,68 +498,64 @@ const StructureGlyph: React.FC<StructureGlyphProps> = ({
         >
             <svg width={width} height={height} className="overflow-visible">
                 <defs>
-                    <marker 
-                        id="arrowBlue" 
-                        viewBox="0 0 10 10" 
-                        refX="9" 
-                        refY="5" 
-                        markerWidth="4" 
-                        markerHeight="4" 
+                    <marker
+                        id={arrowBlueId}
+                        viewBox="0 0 10 10"
+                        refX="9"
+                        refY="5"
+                        markerWidth="4"
+                        markerHeight="4"
                         orient="auto"
                     >
                         <path d="M 0 0 L 10 5 L 0 10 z" fill="rgba(59, 130, 246, 0.6)" />
                     </marker>
-                    <marker 
-                        id="arrowRed" 
-                        viewBox="0 0 10 10" 
-                        refX="9" 
-                        refY="5" 
-                        markerWidth="4" 
-                        markerHeight="4" 
+                    <marker
+                        id={arrowRedId}
+                        viewBox="0 0 10 10"
+                        refX="9"
+                        refY="5"
+                        markerWidth="4"
+                        markerHeight="4"
                         orient="auto"
                     >
                         <path d="M 0 0 L 10 5 L 0 10 z" fill="#ef4444" />
                     </marker>
-                    <marker 
-                        id="arrowOrange" 
-                        viewBox="0 0 10 10" 
-                        refX="9" 
-                        refY="5" 
-                        markerWidth="4" 
-                        markerHeight="4" 
+                    <marker
+                        id={arrowOrangeId}
+                        viewBox="0 0 10 10"
+                        refX="9"
+                        refY="5"
+                        markerWidth="4"
+                        markerHeight="4"
                         orient="auto"
                     >
                         <path d="M 0 0 L 10 5 L 0 10 z" fill="#f97316" />
                     </marker>
-                    <marker 
-                        id="arrowGreen" 
-                        viewBox="0 0 10 10" 
-                        refX="9" 
-                        refY="5" 
-                        markerWidth="4" 
-                        markerHeight="4" 
+                    <marker
+                        id={arrowGreenId}
+                        viewBox="0 0 10 10"
+                        refX="9"
+                        refY="5"
+                        markerWidth="4"
+                        markerHeight="4"
                         orient="auto"
                     >
                         <path d="M 0 0 L 10 5 L 0 10 z" fill="rgba(16, 185, 129, 0.6)" />
                     </marker>
                 </defs>
-                
+
                 {/* Primary pattern base layer */}
                 {renderPrimaryPattern()}
-                
-                {/* Secondary pattern overlays (only if not already incorporated into primary) */}
-                {!hasKeystone && !hasChain && !hasConditional && (
-                    <>
-                        {renderKeystoneOverlay()}
-                        {renderChainOverlay()}
-                        {renderConditionalOverlay()}
-                    </>
-                )}
+
+                {/* Secondary overlays */}
+                {renderKeystoneOverlay()}
+                {renderChainOverlay()}
+                {renderConditionalOverlay()}
                 {renderDissentOverlay()}
                 {renderFragileOverlay()}
                 {renderChallengedOverlay()}
             </svg>
-            
+
             <div className="absolute inset-0 bg-brand-500/5 opacity-0 group-hover:opacity-100 transition-opacity rounded-lg flex items-center justify-center">
                 <span className="text-xs font-medium text-brand-400">
                     Click to explore →

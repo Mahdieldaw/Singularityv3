@@ -1,4 +1,4 @@
-import { Claim, Edge, MapperArtifact, ParsedMapperOutput, GraphTopology, GraphNode, GraphEdge, ConciergeDelta } from './contract';
+import { Claim, Edge, MapperArtifact, ParsedMapperOutput, GraphTopology, ConciergeDelta } from './contract';
 
 /**
  * Shared Parsing Utilities
@@ -997,6 +997,12 @@ export function formatHandoffEcho(handoff: ConciergeDelta | null | undefined): s
     const eliminated = handoff.eliminated ?? [];
     const preferences = handoff.preferences ?? [];
     const context = handoff.context ?? [];
+    const commit = handoff.commit ?? null;
+
+    // Fix: Return empty string if no meaningful content
+    if (constraints.length === 0 && eliminated.length === 0 && preferences.length === 0 && context.length === 0 && commit === null) {
+        return '';
+    }
 
     if (constraints.length > 0) {
         lines.push(`constraints: ${constraints.join('; ')}`);

@@ -84,9 +84,8 @@ const StructuralDebugPanel: React.FC<StructuralDebugPanelProps> = ({ analysis })
   // Peaks & Hills detection (for display in Phase 6)
   // ─────────────────────────────────────────────────────────────────────────
   const peaksAndHills = useMemo(() => {
-    const modelCount = analysis.landscape.modelCount || 1;
     const peakThreshold = 0.5; // >50% support
-    const hillThreshold = modelCount > 1 ? 2 / modelCount : 0.3;
+    const hillThreshold = 0.25;
 
     const peaks = analysis.claimsWithLeverage.filter(c => c.supportRatio > peakThreshold);
     const hills = analysis.claimsWithLeverage.filter(c =>
@@ -110,14 +109,18 @@ const StructuralDebugPanel: React.FC<StructuralDebugPanelProps> = ({ analysis })
       .filter(c => c.isChallenger && c.supportRatio < 0.3)
       .slice(0, 5)
       .map(c => ({
-        claimId: c.id,
+        id: c.id,
         label: c.label,
+        text: c.text,
         supportRatio: c.supportRatio,
-        challenges: c.label,
+        insightType: 'edge_case' as const,
+        insightScore: 0.5,
+        whyItMatters: 'Challenging minority voice',
+        challenges: c.label
       }));
   }, [analysis]);
 
-  const ratioBadge = (value: number | undefined) => {
+  const ratioBadge = (value: number | null | undefined) => {
     if (value == null || Number.isNaN(value)) return "";
     if (value > 0.7) return "🟢";
     if (value >= 0.3) return "🟡";
@@ -382,7 +385,7 @@ const StructuralDebugPanel: React.FC<StructuralDebugPanelProps> = ({ analysis })
               <div>
                 <div className="text-text-muted">Alignment</div>
                 <div className="font-mono">
-                  {analysis.ratios.alignment.toFixed(2)} {ratioBadge(analysis.ratios.alignment)}
+                  {analysis.ratios.alignment != null ? analysis.ratios.alignment.toFixed(2) : '—'} {ratioBadge(analysis.ratios.alignment || undefined)}
                 </div>
               </div>
               <div>
@@ -630,7 +633,7 @@ const StructuralDebugPanel: React.FC<StructuralDebugPanelProps> = ({ analysis })
                         <span className="font-mono text-yellow-400">
                           {v.supportRatio != null ? `${(v.supportRatio * 100).toFixed(0)}%` : '?'}
                         </span>
-                        <span className="truncate max-w-[300px]">{v.label || v.claimId}</span>
+                        <span className="truncate max-w-[300px]">{v.label || v.id}</span>
                       </div>
                     ))}
                   </div>
@@ -692,8 +695,11 @@ const ConciergePipelinePanel: React.FC<ConciergePipelinePanelProps> = ({ state, 
     if (!analysis || !userMessage || !state.output) return null;
 
     try {
-      const selection = ConciergeService.selectStance(userMessage, analysis.shape);
-      const prompt = ConciergeService.buildConciergePrompt(userMessage, analysis, { stance: selection.stance });
+      // Stance selection is now implicit/universal in the prompt
+      const selection = { stance: 'default' as const, reason: 'universal', confidence: 1.0 };
+
+      // Build prompt without stance option
+      const prompt = ConciergeService.buildConciergePrompt(userMessage, analysis, {});
 
       let leakageDetected = !!state.output.leakageDetected;
       let leakageViolations = state.output.leakageViolations || [];
@@ -711,7 +717,7 @@ const ConciergePipelinePanel: React.FC<ConciergePipelinePanelProps> = ({ state, 
         stanceReason: selection.reason,
         stanceConfidence: selection.confidence,
         structuralShape: {
-          // Use `primary` for peaks/hills model
+          primaryPattern: analysis.shape.primary,
           primary: analysis.shape.primary,
           patterns: analysis.shape.patterns || [],
           confidence: analysis.shape.confidence,
@@ -1879,26 +1885,33 @@ export const DecisionMapSheet = React.memo(() => {
     if (structuralTurnId === openState.turnId && structuralAnalysis) return;
     let cancelled = false;
     setStructuralLoading(true);
-    try {
-      const analysis = computeStructuralAnalysis(artifactForStructure as any);
-      if (!cancelled) {
-        setStructuralAnalysis(analysis);
-        setStructuralTurnId(openState.turnId);
+
+    // Defer heavy computation to next tick
+    setTimeout(() => {
+      if (cancelled) return;
+      try {
+        const analysis = computeStructuralAnalysis(artifactForStructure as any);
+        if (!cancelled) {
+          setStructuralAnalysis(analysis);
+          setStructuralTurnId(openState.turnId);
+        }
+      } catch (e) {
+        console.warn("[DecisionMapSheet] structuralAnalysis compute failed", e);
+        if (!cancelled) {
+          setStructuralAnalysis(null);
+          setStructuralTurnId(openState.turnId);
+        }
+      } finally {
+        if (!cancelled) {
+          setStructuralLoading(false);
+        }
       }
-    } catch (e) {
-      console.warn("[DecisionMapSheet] structuralAnalysis compute failed", e);
-      if (!cancelled) {
-        setStructuralAnalysis(null);
-        setStructuralTurnId(openState.turnId);
-      }
-    } finally {
-      if (!cancelled) {
-        setStructuralLoading(false);
-      }
-    }
+    }, 0);
+
     return () => {
       cancelled = true;
     };
+
   }, [activeTab, artifactForStructure, openState?.turnId, structuralTurnId, structuralAnalysis]);
 
   const problemStructure = useMemo(() => {
@@ -1931,11 +1944,11 @@ export const DecisionMapSheet = React.memo(() => {
     return parsedMapping.options ?? null;
   }, [latestMapping, parsedMapping.options]);
 
-  // Options now built directly from claims - no separate parsing needed
+  // Options now built directly from claims - no separate parsing needed, but fallback to text parsing if needed
   const parsedThemes = useMemo(() => {
     if (claimThemes.length > 0) return claimThemes;
-    return [];
-  }, [claimThemes]);
+    return parseOptionsIntoThemes(optionsText);
+  }, [claimThemes, optionsText]);
 
   // Extract citation source order from mapping metadata for correct citation-to-model mapping
   const citationSourceOrder = useMemo(() => {

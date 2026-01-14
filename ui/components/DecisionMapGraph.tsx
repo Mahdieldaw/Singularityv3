@@ -3,7 +3,7 @@ import * as d3 from 'd3-force';
 import {
     Claim, Edge, ProblemStructure, GraphAnalysis, EnrichedClaim,
     DissentPatternData, KeystonePatternData, ChainPatternData,
-    FragilePatternData, SecondaryPattern
+    FragilePatternData
 } from '../../shared/contract';
 
 const DEBUG_DECISION_MAP_GRAPH = false;
@@ -71,65 +71,7 @@ function getNodeRadius(supportCount: number): number {
     return base + Math.max(1, supportCount) * scale;
 }
 
-// Helper to get secondary pattern for a claim
-const getClaimSecondaryPatterns = (
-    claimId: string,
-    patterns?: SecondaryPattern[]
-): SecondaryPattern[] => {
-    if (!patterns) return [];
-
-    return patterns.filter(p => {
-        switch (p.type) {
-            case 'dissent':
-                return (p.data as DissentPatternData).voices.some(v => v.id === claimId) ||
-                    (p.data as DissentPatternData).strongestVoice?.id === claimId;
-            case 'keystone':
-                return (p.data as KeystonePatternData).keystone.id === claimId;
-            case 'chain':
-                return (p.data as ChainPatternData).chain.includes(claimId);
-            case 'fragile':
-                return (p.data as FragilePatternData).fragilities.some(
-                    f => f.peak.id === claimId || f.weakFoundation.id === claimId
-                );
-            default:
-                return false;
-        }
-    });
-};
-
-// Helper to check if claim is a peak
-const isPeakClaim = (claimId: string, shape?: ProblemStructure): boolean => {
-    return shape?.peaks?.some(p => p.id === claimId) ?? false;
-};
-
-// Helper to get chain position
-const getChainPosition = (claimId: string, shape?: ProblemStructure): number | null => {
-    const chainPattern = shape?.patterns?.find(p => p.type === 'chain');
-    if (!chainPattern) return null;
-
-    const chainData = chainPattern.data as ChainPatternData;
-    const index = chainData.chain.indexOf(claimId);
-    return index >= 0 ? index : null;
-};
-
-// Helper to check if claim is dissenting
-const isDissentingClaim = (claimId: string, shape?: ProblemStructure): boolean => {
-    const dissentPattern = shape?.patterns?.find(p => p.type === 'dissent');
-    if (!dissentPattern) return false;
-
-    const data = dissentPattern.data as DissentPatternData;
-    return data.strongestVoice?.id === claimId ||
-        data.voices.some(v => v.id === claimId);
-};
-
-// Helper to check if claim has fragile foundation
-const hasFragileFoundation = (claimId: string, shape?: ProblemStructure): boolean => {
-    const fragilePattern = shape?.patterns?.find(p => p.type === 'fragile');
-    if (!fragilePattern) return false;
-
-    const data = fragilePattern.data as FragilePatternData;
-    return data.fragilities.some(f => f.peak.id === claimId);
-};
+// Helper logic moved inside component with O(1) lookups
 
 const DecisionMapGraph: React.FC<Props> = ({
     claims: inputClaims,
@@ -157,6 +99,34 @@ const DecisionMapGraph: React.FC<Props> = ({
 
     // ...
 
+    // OPTIMIZATION: Precompute lookups for O(1) access
+    const lookups = React.useMemo(() => {
+        const peakSet = new Set(problemStructure?.peaks?.map(p => p.id));
+        const dissentSet = new Set<string>();
+        const fragileSet = new Set<string>();
+        const keystoneSet = new Set<string>();
+        const chainMap = new Map<string, number>();
+
+        problemStructure?.patterns?.forEach(p => {
+            if (p.type === 'dissent') {
+                const data = p.data as DissentPatternData;
+                if (data.strongestVoice) dissentSet.add(data.strongestVoice.id);
+                data.voices.forEach(v => dissentSet.add(v.id));
+            } else if (p.type === 'keystone') {
+                const data = p.data as KeystonePatternData;
+                keystoneSet.add(data.keystone.id);
+            } else if (p.type === 'chain') {
+                const data = p.data as ChainPatternData;
+                data.chain.forEach((id, idx) => chainMap.set(id, idx));
+            } else if (p.type === 'fragile') {
+                const data = p.data as FragilePatternData;
+                data.fragilities.forEach(f => fragileSet.add(f.peak.id));
+            }
+        });
+
+        return { peakSet, dissentSet, fragileSet, keystoneSet, chainMap };
+    }, [problemStructure]);
+
     useEffect(() => {
         if (!inputClaims.length) {
             setNodes([]);
@@ -169,7 +139,6 @@ const DecisionMapGraph: React.FC<Props> = ({
         );
 
         const nodeIds = inputClaims.map((c) => c.id);
-        // const hasPrereqs = inputEdges.some((e) => e.type === 'prerequisite');
         const targets = new Map<string, { x: number; y: number }>();
 
         const padding = 60;
@@ -178,10 +147,28 @@ const DecisionMapGraph: React.FC<Props> = ({
 
         // Layout based on PRIMARY SHAPE (peaks/hills model)
         const primaryShape = problemStructure?.primary;
+        let layoutMode: 'chain' | 'keystone' | 'convergent' | 'forked' | 'constrained' | 'parallel' | 'force' = 'force';
 
+        // Determine Layout Mode
         if (graphAnalysis?.longestChain && graphAnalysis.longestChain.length >= 3) {
+            layoutMode = 'chain';
+        } else if (graphAnalysis?.hubClaim && lookups.keystoneSet.size > 0) {
+            layoutMode = 'keystone';
+        } else if (primaryShape === 'convergent') {
+            layoutMode = 'convergent';
+        } else if (primaryShape === 'forked') {
+            layoutMode = 'forked';
+        } else if (primaryShape === 'constrained') {
+            layoutMode = 'constrained';
+        } else if (primaryShape === 'parallel') {
+            layoutMode = 'parallel';
+        } else if (primaryShape === 'sparse') {
+            layoutMode = 'force';
+        }
+
+        if (layoutMode === 'chain') {
             // CHAIN secondary pattern takes precedence for layout
-            const longestChain = graphAnalysis.longestChain;
+            const longestChain = graphAnalysis!.longestChain;
             const chainPositions = new Map<string, number>();
             longestChain.forEach((id: string, idx: number) => chainPositions.set(id, idx));
             const maxPos = longestChain.length - 1;
@@ -198,9 +185,9 @@ const DecisionMapGraph: React.FC<Props> = ({
                     y: padding + (idx / Math.max(1, nodeIds.length - longestChain.length)) * usableH
                 });
             });
-        } else if (graphAnalysis?.hubClaim && problemStructure?.patterns?.some(p => p.type === 'keystone')) {
+        } else if (layoutMode === 'keystone') {
             // KEYSTONE secondary pattern - radial layout around hub
-            const keystoneId = graphAnalysis.hubClaim;
+            const keystoneId = graphAnalysis!.hubClaim!;
             targets.set(keystoneId, { x: width / 2, y: height / 2 });
 
             const neighbors = inputEdges
@@ -217,16 +204,15 @@ const DecisionMapGraph: React.FC<Props> = ({
                     y: height / 2 + Math.sin(a) * radius,
                 });
             });
-        } else if (primaryShape === 'convergent') {
+        } else if (layoutMode === 'convergent') {
             // CONVERGENT - tight cluster in center
             const centerX = width / 2;
             const centerY = height / 2;
             const radius = Math.min(usableW, usableH) * 0.25;
 
             // Peaks go in inner ring
-            const peakIds = new Set(problemStructure?.peaks?.map(p => p.id) || []);
-            const peaks = nodeIds.filter(id => peakIds.has(id));
-            const others = nodeIds.filter(id => !peakIds.has(id));
+            const peaks = nodeIds.filter(id => lookups.peakSet.has(id));
+            const others = nodeIds.filter(id => !lookups.peakSet.has(id));
 
             peaks.forEach((id, idx) => {
                 const angle = (idx / peaks.length) * Math.PI * 2;
@@ -243,7 +229,7 @@ const DecisionMapGraph: React.FC<Props> = ({
                     y: centerY + Math.sin(angle) * radius * 0.8,
                 });
             });
-        } else if (primaryShape === 'forked') {
+        } else if (layoutMode === 'forked') {
             // FORKED - two clusters on opposite sides
             const peaks = problemStructure?.peaks || [];
             const leftPeaks = peaks.slice(0, Math.ceil(peaks.length / 2));
@@ -262,7 +248,7 @@ const DecisionMapGraph: React.FC<Props> = ({
                     y: height / 2 + (idx - rightPeaks.length / 2) * 60,
                 });
             });
-        } else if (primaryShape === 'constrained') {
+        } else if (layoutMode === 'constrained') {
             // CONSTRAINED - horizontal spread showing tradeoff
             const peaks = problemStructure?.peaks || [];
             const spacing = usableW / (peaks.length + 1);
@@ -273,7 +259,7 @@ const DecisionMapGraph: React.FC<Props> = ({
                     y: height / 2,
                 });
             });
-        } else if (primaryShape === 'parallel') {
+        } else if (layoutMode === 'parallel') {
             // PARALLEL - separate clusters for each dimension
             const components = graphAnalysis?.components || [nodeIds];
             const colWidth = usableW / components.length;
@@ -326,6 +312,7 @@ const DecisionMapGraph: React.FC<Props> = ({
             pattern: problemStructure?.primary || null,
             confidence: problemStructure?.confidence ?? null,
             targets: targets.size,
+            layoutMode
         });
 
         // Stop existing simulation
@@ -338,9 +325,8 @@ const DecisionMapGraph: React.FC<Props> = ({
         const isWideLayout = aspectRatio > 1.5;
         const nodePadding = 80; // Keep nodes away from edges (increased for larger spread)
 
-        const isLinear = (graphAnalysis?.longestChain && graphAnalysis.longestChain.length >= 3 && targets.size > 0) || false;
-        const isKeystone = (!!graphAnalysis?.hubClaim && targets.size > 0) || false;
-        // const isSettled = (problemStructure as any)?.primaryPattern === 'settled' || (problemStructure as any)?.primaryPattern === 'contextual';
+        const isLinear = layoutMode === 'chain';
+        const isKeystone = layoutMode === 'keystone';
 
         const simulation = d3.forceSimulation<GraphNode>(simNodes)
             .force('charge', d3.forceManyBody().strength(isLinear ? -700 : -1000))
@@ -420,7 +406,7 @@ const DecisionMapGraph: React.FC<Props> = ({
         return () => {
             simulation.stop();
         };
-    }, [inputClaims, inputEdges, width, height, problemStructure, graphAnalysis]);
+    }, [inputClaims, inputEdges, width, height, problemStructure, graphAnalysis, lookups]);
 
     // Get edge coordinates
     const getEdgeCoords = useCallback((edge: GraphEdge) => {
@@ -816,12 +802,12 @@ const DecisionMapGraph: React.FC<Props> = ({
                         const enriched = enrichedClaims?.find(c => c.id === node.id);
 
                         // NEW: Get patterns for this claim
-                        const claimPatterns = getClaimSecondaryPatterns(node.id, problemStructure?.patterns);
-                        const isPeak = isPeakClaim(node.id, problemStructure);
-                        const isKeystone = claimPatterns.some(p => p.type === 'keystone');
-                        const isDissent = isDissentingClaim(node.id, problemStructure);
-                        const isFragile = hasFragileFoundation(node.id, problemStructure);
-                        const chainPosition = getChainPosition(node.id, problemStructure);
+                        // Use O(1) lookups
+                        const isPeak = lookups.peakSet.has(node.id);
+                        const isKeystone = lookups.keystoneSet.has(node.id);
+                        const isDissent = lookups.dissentSet.has(node.id);
+                        const isFragile = lookups.fragileSet.has(node.id);
+                        const chainPosition = lookups.chainMap.get(node.id) ?? null;
 
                         // Determine color based on patterns (priority order)
                         const color =

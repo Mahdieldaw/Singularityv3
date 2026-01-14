@@ -59,6 +59,13 @@ export class ResponseProcessor {
     }
 
     parseOptionTitles(text: string): string[] {
-        return [];
+        // Extract option titles from structured text (e.g., numbered lists, headers)
+        const optionPattern = /(?:^|\n)\s*(?:\d+[.)]\s*|[-•]\s*|Option\s+\d+:\s*)([^\n]+)/gi;
+        const matches: string[] = [];
+        let match;
+        while ((match = optionPattern.exec(text)) !== null) {
+            if (match[1]) matches.push(match[1].trim());
+        }
+        return matches;
     }
 }

@@ -1,12 +1,11 @@
 import {
     ShadowStatement,
-    ShadowMap,
     TwoPassResult,
     flattenValidated,
     countByType
 } from './ShadowExtractor';
 import { StatementType } from './StatementTypes';
-import { MapperArtifact, Claim, Edge } from '../../../shared/contract';
+import { MapperArtifact, Claim } from '../../../shared/contract';
 
 // ═══════════════════════════════════════════════════════════════════
 // OUTPUT TYPES
@@ -273,7 +272,7 @@ export function executeShadowDelta(
 
     const unindexed: UnindexedStatement[] = [];
 
-    for (const [, statements] of textGroups) {
+    textGroups.forEach((statements) => {
         const representative = statements[0];
 
         // Check if Primary has this
@@ -296,7 +295,7 @@ export function executeShadowDelta(
                 reason: 'validated_by_shadow_not_in_primary'
             });
         }
-    }
+    });
 
     // Sort by adjusted score (highest first)
     unindexed.sort((a, b) => b.adjustedScore - a.adjustedScore);

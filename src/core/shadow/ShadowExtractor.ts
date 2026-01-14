@@ -1,10 +1,8 @@
 import {
     StatementType,
-    INCLUSION_PATTERNS,
-    getPriority
+    INCLUSION_PATTERNS
 } from './StatementTypes';
 import {
-    EXCLUSION_RULES,
     ExclusionRule,
     getRulesForType
 } from './ExclusionRules';

@@ -1,0 +1,263 @@
+Fix the following issues. The issues can be from different files or can overlap on same lines in one file.
+
+- In @src/core/ConciergeService.ts around lines 618 - 628, The chain rendering loop in ConciergeService (the block iterating chain.chain) silently skips stepIds that have no matching claim, causing missing/renumbered steps; modify the loop in ConciergeService.ts to detect when claims.find(...) returns undefined and either (a) append a numbered placeholder like `${idx + 1}. **[Missing claim: ${stepId}]` to the flow string (including the ⚠️ marker if chain.weakLinks includes the stepId) or (b) emit a warning via the service logger (e.g., processLogger.warn or this.logger.warn) that includes the missing stepId and chain id, so the output sequence remains consistent and missing references are observable. Ensure numbering remains based on idx+1 and keep existing weak-link handling.
+
+- In @src/core/PromptMethods.ts around lines 1028 - 1031, The alignment fallback currently sets alignment = 0.5 when topEdges.length === 0, which embeds a misleading “moderate” score; change the fallback to a neutral/empty value (e.g., 0 or null) instead by updating the alignment assignment that uses topEdges and reinforcingEdges (the const alignment variable) and then update any callers/consumers of alignment to handle the new sentinel (null or 0) appropriately so dashboards can distinguish “no data” from a computed score.
+
+- In @src/core/PromptMethods.ts around lines 1641 - 1644, The coverage check uses claims[0]?.supporters?.length as the denominator which is incorrect; change the logic to compare floorSupporters.size against the total model count (e.g., modelCount * 0.5) instead, so modify the condition in the block that computes floorSupporters/floorAssumptions to use a passed-in modelCount value; thread a modelCount parameter into the builder/creator that constructs floorClaims/floorAssumptions (and update all call sites to supply the correct modelCount) so the assumption "Relies on a subset of model perspectives" is based on the total number of models rather than a single claim's supporters length.
+
+CodeRabbit
+Bug: TradeoffShapeData.tradeoffs[].symmetry is being cast to the wrong enum.
+
+TradeoffPair.symmetry is "both_consensus" | "both_singular" | "asymmetric", but TradeoffShapeData expects "both_high" | "both_low" | "asymmetric". Casting will hide the mismatch and likely break UI logic.
+
+ return {
+@@
+-  symmetry: t.symmetry as 'both_high' | 'both_low' | 'asymmetric',
++  symmetry:
++    t.symmetry === 'both_consensus'
++      ? 'both_high'
++      : t.symmetry === 'both_singular'
++        ? 'both_low'
++        : 'asymmetric',
+   governingFactor: null
+ };
+- 
+
+- In @ui/components/DecisionMapGraph.tsx around lines 201 - 219, The current block sets targets whenever graphAnalysis.hubClaim exists which causes isKeystone to become true even if the active layout isn't the keystone layout; change the conditional so this block only runs when the chosen layout/mode is the keystone layout (e.g., check selectedLayout === 'keystone' or the same flag used elsewhere) in addition to graphAnalysis.hubClaim and the keystone pattern (problemStructure.patterns). Update both the hubClaim radial-targeting block (the code using graphAnalysis.hubClaim, targets.set, neighbors/uniq/radius) and the other similar spot later (the second hubClaim usage) so they don’t set targets or flip isKeystone unless the active layout equals 'keystone'.
+
+- In @ui/components/DecisionMapSheet.tsx around lines 713 - 718, The UI is sending structuralShape with fields primary and patterns but the shared contract expects primaryPattern; update the payload to match the contract by mapping analysis.shape.primary and analysis.shape.patterns into structuralShape.primaryPattern (e.g., set primaryPattern = analysis.shape.primary and ensure patterns still included or renamed accordingly), or preferably update shared/contract.ts to accept primary and patterns instead of primaryPattern so both sides align; locate the structuralShape construction in DecisionMapSheet.tsx and either add/populate structuralShape.primaryPattern from analysis.shape.primary or change the contract definition to include primary and patterns.
+
+- In @ui/components/DecisionMapSheet.tsx around lines 103 - 118, The fallback branch of the useMemo for dissentVoices returns objects with claimId instead of the same shape as the DissentPatternData path, causing the UI (which reads v.label || v.claimId) to behave inconsistently; update the fallback mapping in the dissentVoices useMemo (the code that iterates analysis.claimsWithLeverage) to return objects matching the DissentPatternData shape — e.g., use keys id (or claimId consistently), label, and supportRatio (and any other fields the UI expects) so both branches produce the same schema as the dissentPattern.data path.
+
+- In @ui/components/DecisionMapSheet.tsx around lines 83 - 99, The debug panel's peaks/hills logic (useMemo producing peaksAndHills) computes hillThreshold differently than core; replace the computed hillThreshold (currently modelCount > 1 ? 2 / modelCount : 0.3) with the core constant value (0.25) so the debug counts match the classifier; keep peakThreshold as-is if core uses 0.5, and ensure peaks/hills/floor filtering still uses the updated hillThreshold when deriving peaks/hills/floor from analysis.claimsWithLeverage.
+
+- In @ui/components/StructureGlyph.tsx around lines 503 - 546, The marker IDs in StructureGlyph (arrowBlue/arrowRed/arrowOrange/arrowGreen) are static and will collide when multiple components render; change StructureGlyph to generate unique IDs (e.g., via React.useId() or a passed-in idPrefix) and append that suffix to each marker id and to any references using those markers (e.g., markerEnd="url(#arrowBlue)"). Alternatively move the <marker> defs to a shared top-level SVG/Defs and reference them from the components; ensure every reference string is updated to match the generated unique id.
+
+- In @ui/utils/graphAdapter.ts around lines 115 - 159, The dissent block uses data.voices[0]?.insightType for the strongest voice which is wrong; change the metadata for the strongestVoice inside the pattern handling to get the insightType from the actual strongest voice (either add insightType to data.strongestVoice in the contract or lookup the matching voice in data.voices by id, e.g. find(v => v.id === data.strongestVoice.id)) and use that value for metadata.insightType (and any other per-voice fields) instead of data.voices[0]?.insightType so the strongest voice's metadata matches the correct voice.
+
+conciergeservice.ts
+Silent skip when chain step references unknown claim.
+
+If chain.chain contains a stepId that doesn't exist in claims, the step is silently omitted from the output. This could produce confusing sequences (e.g., "1. Step A, 3. Step C" with step 2 missing).
+
+Consider logging a warning or including a placeholder for missing claims.
+
+                    chain.chain.forEach((stepId: string, idx: number) => {
+                        const claim = claims.find(c => c.id === stepId);
+                        if (claim) {
+                            const isWeak = chain.weakLinks && chain.weakLinks.includes(stepId);
+                            const weak = isWeak ? ' ⚠️' : '';
+                            flow += `${idx + 1}. **${claim.label}**${weak}\n`;
++                       } else {
++                           console.warn(`[buildFlowFromComposite] Chain step ${stepId} not found in claims`);
++                           flow += `${idx + 1}. *(unknown step)*\n`;
+                        }
+                    });
+
+
+
+errors
+
+PS C:\Users\Mahdi\Desktop\Singularityv3> npx tsc --noEmit --allowJs --checkJs --noUnusedLocals --noUnusedParameters                                                                                         
+shared/parsing-utils.ts:1:74 - error TS6133: 'GraphNode' is declared but its value is never read.
+
+1 import { Claim, Edge, MapperArtifact, ParsedMapperOutput, GraphTopology, GraphNode, GraphEdge, ConciergeDelta } from './contract';
+                                                                           ~~~~~~~~~
+
+shared/parsing-utils.ts:1:85 - error TS6133: 'GraphEdge' is declared but its value is never read.
+
+1 import { Claim, Edge, MapperArtifact, ParsedMapperOutput, GraphTopology, GraphNode, GraphEdge, ConciergeDelta } from './contract';
+                                                                                      ~~~~~~~~~       
+
+src/core/ConciergeService.ts:719:10 - error TS6133: 'buildFrictionFromComposite' is declared but its value is never read.
+
+719 function buildFrictionFromComposite(
+             ~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+src/core/ConciergeService.ts:858:10 - error TS6133: 'buildFlowSection' is declared but its value is never read.
+
+858 function buildFlowSection(analysis: StructuralAnalysis): string {
+             ~~~~~~~~~~~~~~~~
+
+src/core/ConciergeService.ts:863:10 - error TS6133: 'collectFragilities' is declared but its value is never read.
+
+863 function collectFragilities(analysis: StructuralAnalysis): string[] {
+             ~~~~~~~~~~~~~~~~~~
+
+src/core/ConciergeService.ts:916:10 - error TS6133: 'buildTransferSection' is declared but its value is never read.
+
+916 function buildTransferSection(analysis: StructuralAnalysis): string {
+             ~~~~~~~~~~~~~~~~~~~~
+
+src/core/PromptMethods.ts:2362:5 - error TS6133: 'landscape' is declared but its value is never read. 
+
+2362     landscape: { modelCount: number }
+         ~~~~~~~~~
+
+src/core/PromptMethods.ts:2421:5 - error TS6133: 'claims' is declared but its value is never read.    
+
+2421     claims: EnrichedClaim[]
+         ~~~~~~
+
+src/core/ResponseProcessor.ts:61:23 - error TS6133: 'text' is declared but its value is never read.   
+
+61     parseOptionTitles(text: string): string[] {
+                         ~~~~
+
+src/core/shadow/ShadowDelta.ts:3:5 - error TS6133: 'ShadowMap' is declared but its value is never read.
+
+3     ShadowMap,
+      ~~~~~~~~~
+
+src/core/shadow/ShadowDelta.ts:9:33 - error TS6133: 'Edge' is declared but its value is never read.   
+
+9 import { MapperArtifact, Claim, Edge } from '../../../shared/contract';
+                                  ~~~~
+
+src/core/shadow/ShadowExtractor.ts:4:5 - error TS6133: 'getPriority' is declared but its value is never read.
+
+4     getPriority
+      ~~~~~~~~~~~
+
+src/core/shadow/ShadowExtractor.ts:7:5 - error TS6133: 'EXCLUSION_RULES' is declared but its value is never read.
+
+7     EXCLUSION_RULES,
+      ~~~~~~~~~~~~~~~
+
+ui/components/cognitive/SingularityOutputView.tsx:49:49 - error TS6133: 'requestedProviderId' is declared but its value is never read.
+
+49     const { output, isError, error, providerId, requestedProviderId } = singularityState;
+                                                   ~~~~~~~~~~~~~~~~~~~
+
+ui/components/DecisionMapSheet.tsx:977:10 - error TS6133: 'parseOptionsIntoThemes' is declared but its value is never read.
+
+977 function parseOptionsIntoThemes(optionsText: string | null): ParsedTheme[] {
+             ~~~~~~~~~~~~~~~~~~~~~~
+
+
+Found 15 errors in 8 files.
+
+Errors  Files
+     2  shared/parsing-utils.ts:1
+     4  src/core/ConciergeService.ts:719
+     2  src/core/PromptMethods.ts:2362
+     1  src/core/ResponseProcessor.ts:61
+     2  src/core/shadow/ShadowDelta.ts:3
+     2  src/core/shadow/ShadowExtractor.ts:4
+     1  ui/components/cognitive/SingularityOutputView.tsx:49
+     1  ui/components/DecisionMapSheet.tsx:977
+PS C:\Users\Mahdi\Desktop\Singularityv3> 
+
+PS C:\Users\Mahdi\Desktop\Singularityv3> npx tsc --noEmit --allowJs --checkJs --noUnusedLocals --noUnusedParameters (Get-ChildItem -Path "src" -Filter *.js -Recurse | ForEach-Object { $_.FullName })      
+shared/parsing-utils.ts:1:74 - error TS6133: 'GraphNode' is declared but its value is never read.
+
+1 import { Claim, Edge, MapperArtifact, ParsedMapperOutput, GraphTopology, GraphNode, GraphEdge, ConciergeDelta } from './contract';
+                                                                           ~~~~~~~~~
+
+shared/parsing-utils.ts:1:85 - error TS6133: 'GraphEdge' is declared but its value is never read.
+
+1 import { Claim, Edge, MapperArtifact, ParsedMapperOutput, GraphTopology, GraphNode, GraphEdge, ConciergeDelta } from './contract';
+                                                                                      ~~~~~~~~~       
+
+src/core/ConciergeService.ts:719:10 - error TS6133: 'buildFrictionFromComposite' is declared but its value is never read.
+
+719 function buildFrictionFromComposite(
+             ~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+src/core/ConciergeService.ts:858:10 - error TS6133: 'buildFlowSection' is declared but its value is never read.
+
+858 function buildFlowSection(analysis: StructuralAnalysis): string {
+             ~~~~~~~~~~~~~~~~
+
+src/core/ConciergeService.ts:863:10 - error TS6133: 'collectFragilities' is declared but its value is never read.
+
+863 function collectFragilities(analysis: StructuralAnalysis): string[] {
+             ~~~~~~~~~~~~~~~~~~
+
+src/core/ConciergeService.ts:916:10 - error TS6133: 'buildTransferSection' is declared but its value is never read.
+
+916 function buildTransferSection(analysis: StructuralAnalysis): string {
+             ~~~~~~~~~~~~~~~~~~~~
+
+src/core/execution/CognitivePipelineHandler.js:257:19 - error TS2345: Argument of type '{ stance: ConciergeStance; isFirstTurn: boolean; activeWorkflow: any; priorContext: undefined; shadow: { audit: any; unindexed: Array<{ text: string; type: string; sourceModels: number[]; adjustedScore: number; }>; topUnindexed: Array<{ text: string; type: string; sourceModels: number[]; adjustedScore: number; }>; p...' is not assignable to parameter of type 'ConciergePromptOptions'.
+  The types of 'shadow.topUnindexed' are incompatible between these types.
+    Type '{ text: string; type: string; sourceModels: number[]; adjustedScore: number; }[]' is not assignable to type 'UnindexedStatement[]'.
+      Type '{ text: string; type: string; sourceModels: number[]; adjustedScore: number; }' is missing the following properties from type 'UnindexedStatement': secondaryTypes, confidence, queryRelevance, reason
+
+257                   conciergePromptSeed,
+                      ~~~~~~~~~~~~~~~~~~~
+
+src/core/execution/StepExecutor.js:964:9 - error TS2448: Block-scoped variable 'pipeline' used before its declaration.
+
+964         pipeline,
+            ~~~~~~~~
+
+  src/core/execution/StepExecutor.js:952:13
+    952       const pipeline = {
+                    ~~~~~~~~
+    'pipeline' is declared here.
+
+src/core/PromptMethods.ts:1836:67 - error TS2802: Type 'Set<string>' can only be iterated through when using the '--downlevelIteration' flag or with a '--target' of 'es2015' or higher.
+
+1836     const keystoneConnectedIds = new Set<string>([keystoneId!, ...dependentIds]);
+                                                                       ~~~~~~~~~~~~
+
+src/core/PromptMethods.ts:2081:24 - error TS2802: Type 'MapIterator<[T, number]>' can only be iterated through when using the '--downlevelIteration' flag or with a '--target' of 'es2015' or higher.       
+
+2081     const sorted = [...counts.entries()].sort((a, b) => b[1] - a[1]);
+                            ~~~~~~~~~~~~~~~~
+
+src/core/PromptMethods.ts:2362:5 - error TS6133: 'landscape' is declared but its value is never read. 
+
+2362     landscape: { modelCount: number }
+         ~~~~~~~~~
+
+src/core/PromptMethods.ts:2421:5 - error TS6133: 'claims' is declared but its value is never read.    
+
+2421     claims: EnrichedClaim[]
+         ~~~~~~
+
+src/core/ResponseProcessor.ts:61:23 - error TS6133: 'text' is declared but its value is never read.   
+
+61     parseOptionTitles(text: string): string[] {
+                         ~~~~
+
+src/core/shadow/ShadowDelta.ts:3:5 - error TS6133: 'ShadowMap' is declared but its value is never read.
+
+3     ShadowMap,
+      ~~~~~~~~~
+
+src/core/shadow/ShadowDelta.ts:9:33 - error TS6133: 'Edge' is declared but its value is never read.   
+
+9 import { MapperArtifact, Claim, Edge } from '../../../shared/contract';
+                                  ~~~~
+
+src/core/shadow/ShadowDelta.ts:276:34 - error TS2802: Type 'Map<string, ShadowStatement[]>' can only be iterated through when using the '--downlevelIteration' flag or with a '--target' of 'es2015' or higher.
+
+276     for (const [, statements] of textGroups) {
+                                     ~~~~~~~~~~
+
+src/core/shadow/ShadowExtractor.ts:4:5 - error TS6133: 'getPriority' is declared but its value is never read.
+
+4     getPriority
+      ~~~~~~~~~~~
+
+src/core/shadow/ShadowExtractor.ts:7:5 - error TS6133: 'EXCLUSION_RULES' is declared but its value is never read.
+
+7     EXCLUSION_RULES,
+      ~~~~~~~~~~~~~~~
+
+
+Found 18 errors in 8 files.
+
+Errors  Files
+     2  shared/parsing-utils.ts:1
+     4  src/core/ConciergeService.ts:719
+     1  src/core/execution/CognitivePipelineHandler.js:257
+     1  src/core/execution/StepExecutor.js:964
+     4  src/core/PromptMethods.ts:1836
+     1  src/core/ResponseProcessor.ts:61
+     3  src/core/shadow/ShadowDelta.ts:3
+     2  src/core/shadow/ShadowExtractor.ts:4
+PS C:\Users\Mahdi\Desktop\Singularityv3> 

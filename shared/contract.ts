@@ -23,7 +23,9 @@ export interface SingularityPipelineSnapshot {
   stanceReason?: string;
   stanceConfidence?: number;
   structuralShape?: {
-    primaryPattern?: string;
+    primaryPattern?: string; // Legacy
+    primary?: PrimaryShape;
+    patterns?: SecondaryPattern[];
     confidence?: number;
   } | null;
   leakageDetected?: boolean;
@@ -102,16 +104,30 @@ export interface GraphTopology {
   edges: GraphEdge[];
 }
 
+export interface PeakPairRelationship {
+  aId: string;
+  bId: string;
+  conflicts: boolean;
+  tradesOff: boolean;
+  supports: boolean;
+  prerequisites: boolean;
+}
+
 export interface ProblemStructure {
   primary: PrimaryShape;
   confidence: number;
   patterns: SecondaryPattern[];
   peaks: Array<{ id: string; label: string; supportRatio: number }>;
   peakRelationship: "conflicting" | "trading-off" | "supporting" | "independent" | "none";
+  peakPairRelations?: PeakPairRelationship[];
   evidence: string[];
   transferQuestion: string;
   data?: ShapeData;
   signalStrength?: number;
+  // Optional convenience fields for cleaner access
+  floorAssumptions?: string[];
+  centralConflict?: string | undefined; // Or CentralConflict object if that's what's needed, conforming to request "string | undefined"
+  tradeoffs?: string[] | undefined;
 }
 
 export type CompositeShape = ProblemStructure;
@@ -534,6 +550,7 @@ export interface DissentPatternData {
     text: string;
     supportRatio: number;
     whyItMatters: string;
+    insightType?: 'leverage_inversion' | 'explicit_challenger' | 'unique_perspective' | 'edge_case';
   } | null;
   suppressedDimensions: string[];
 }
@@ -551,7 +568,7 @@ export interface PeakAnalysis {
 
 export interface CoreRatios {
   concentration: number;
-  alignment: number;
+  alignment: number | null;
   tension: number;
   fragmentation: number;
   depth: number;
