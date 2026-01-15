@@ -447,7 +447,15 @@ function buildPrerequisiteChains(
         const chain = [id];
         const next = prereqEdges.filter(e => e.from === id);
         if (next.length > 0) {
-            chain.push(...follow(next[0].to));
+            // Explore all branches and pick the longest one
+            let longestBranch: string[] = [];
+            for (const edge of next) {
+                const branch = follow(edge.to);
+                if (branch.length > longestBranch.length) {
+                    longestBranch = branch;
+                }
+            }
+            chain.push(...longestBranch);
         }
         return chain;
     }

@@ -937,8 +937,7 @@ export class StepExecutor {
         }
       }
 
-      let pipeline = null;
-      pipeline = {
+      const pipeline = {
         userMessage: payload.originalPrompt,
         prompt: singularityPrompt,
         structuralShape: analysis && analysis.shape ? {

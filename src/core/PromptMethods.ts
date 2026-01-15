@@ -981,14 +981,7 @@ const detectOrphanedPattern = (
 // Called ONCE in detectCompositeShape() after primary is determined
 // ═══════════════════════════════════════════════════════════════════════════
 
-/**
- * Detect ALL secondary patterns regardless of primary shape.
- * This is the universal pattern detection function per instructions.
- */
-/**
- * Detect ALL secondary patterns regardless of primary shape.
- * This is the universal pattern detection function per instructions.
- */
+
 /**
  * Detect ALL secondary patterns regardless of primary shape.
  * This is the universal pattern detection function per instructions.
@@ -1024,11 +1017,31 @@ function detectAllSecondaryPatterns(
     }
 
     // 4. FRAGILE (if peaks on weak foundation)
-    const fragilePattern = detectFragilePattern({ peaks } as any, claims, edges);
+    const peakAnalysisForFragile: PeakAnalysis = {
+        peaks,
+        hills: [],
+        floor: [],
+        peakIds: peaks.map(p => p.id),
+        peakConflicts: [],
+        peakTradeoffs: [],
+        peakSupports: [],
+        peakUnconnected: false
+    };
+    const fragilePattern = detectFragilePattern(peakAnalysisForFragile, claims, edges);
     if (fragilePattern) patterns.push(fragilePattern);
 
     // 5. CHALLENGED (if floor under attack)
-    const challengedPattern = detectChallengedPattern({ peakIds, floor } as any, claims, edges);
+    const peakAnalysisForChallenged: PeakAnalysis = {
+        peaks,
+        hills: [],
+        floor: [],
+        peakIds: peaks.map(p => p.id),
+        peakConflicts: [],
+        peakTradeoffs: [],
+        peakSupports: [],
+        peakUnconnected: false
+    };
+    const challengedPattern = detectChallengedPattern(peakAnalysisForChallenged, claims, edges);
     if (challengedPattern) patterns.push(challengedPattern);
 
     // 6. CONDITIONAL (if context-dependent branches)
@@ -2706,13 +2719,15 @@ export const computeFullAnalysis = (
     console.log("Survival by Type:", shadowDelta.audit.typeSurvival);
     console.groupEnd();
 
-    // 4. Combine
+    // 4. Combine (Capping only the prompt-seed 'topUnindexed' for context limits)
+    const MAX_SHADOW_TOP = 5;
+
     return {
         ...baseAnalysis,
         shadow: {
             audit: shadowDelta.audit,
             unindexed: shadowDelta.unindexed,
-            topUnindexed: shadowDelta.unindexed.slice(0, 5),
+            topUnindexed: shadowDelta.unindexed.slice(0, MAX_SHADOW_TOP),
             processingTime: shadowExtraction.processingTime + shadowDelta.processingTime
         }
     };

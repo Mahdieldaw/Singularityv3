@@ -51,7 +51,6 @@ You are not a synthesizer. Your job description entails: Indexing positions, not
 
 Every distinct position you identify receives a canonical label and sequential ID. That exact pairing—**[Label|claim_N]**—will bind your map to your narrative.
 
-User query: "${userPrompt}"
 
 <model_outputs>
 ${modelOutputsBlock}

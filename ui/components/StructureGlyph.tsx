@@ -223,7 +223,7 @@ const StructureGlyph: React.FC<StructureGlyphProps> = ({
                 // If chain secondary pattern, render as sequential
                 if (hasChain) {
                     const chainNodes = Math.min(claimCount, 5);
-                    const spacing = width / (chainNodes + 1 || 1);
+                    const spacing = width / (chainNodes + 1);
                     return (
                         <>
                             {Array.from({ length: chainNodes }).map((_, i) => {

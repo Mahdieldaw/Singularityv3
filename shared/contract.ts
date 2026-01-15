@@ -126,8 +126,8 @@ export interface ProblemStructure {
   signalStrength?: number;
   // Optional convenience fields for cleaner access
   floorAssumptions?: string[];
-  centralConflict?: string | undefined; // Or CentralConflict object if that's what's needed, conforming to request "string | undefined"
-  tradeoffs?: string[] | undefined;
+  centralConflict?: string;
+  tradeoffs?: string[];
 }
 
 export type CompositeShape = ProblemStructure;

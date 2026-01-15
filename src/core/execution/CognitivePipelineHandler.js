@@ -137,34 +137,63 @@ export class CognitivePipelineHandler {
             const batchResults = promptResult?.result?.results || null;
 
             if (batchResults && Object.keys(batchResults).length > 0) {
-              // Fix unstable ordering: use citationSourceOrder if available
-              const citationOrder = mapperArtifact?.options?.citationSourceOrder || mapperArtifact?.metadata?.citationSourceOrder;
-              let batchResponses = [];
+              const rawCitationOrder = mapperArtifact?.options?.citationSourceOrder || mapperArtifact?.metadata?.citationSourceOrder;
+              let normalizedCitationOrder = {}; // providerId -> numericIndex
 
-              if (citationOrder && typeof citationOrder === 'object') {
-                const sortedProviders = Object.entries(citationOrder)
-                  .sort(([, a], [, b]) => a - b)
-                  .map(([provider]) => provider);
+              if (rawCitationOrder && typeof rawCitationOrder === 'object') {
+                const entries = Object.entries(rawCitationOrder);
+                if (entries.length > 0) {
+                  const [firstKey, firstVal] = entries[0];
+                  // If values are numbers AND key is not numeric, treat as provider -> index
+                  const isProviderToIndex = typeof firstVal === 'number' && isNaN(Number(firstKey));
 
-                batchResponses = sortedProviders.map((provider) => {
-                  const supporterIndex = citationOrder[provider];
-                  const resp = batchResults[provider];
-                  return {
-                    modelIndex: supporterIndex,
-                    content: resp ? (resp.text || "") : ""
-                  };
-                });
-
-                // Ensure we captured all batch results even if not in citation order (rare)
-                // For now, assume citationOrder covers relevant supporters.
-              } else {
-                // Fallback: iterate object entries (unstable but better than nothing)
-                batchResponses = Object.entries(batchResults).map(([_, resp], idx) => ({
-                  modelIndex: idx + 1,
-                  content: resp.text || ""
-                }));
+                  if (isProviderToIndex) {
+                    normalizedCitationOrder = { ...rawCitationOrder };
+                  } else {
+                    // Treat as index -> provider and invert
+                    entries.forEach(([k, v]) => {
+                      if (v && typeof v === 'string') {
+                        normalizedCitationOrder[v] = Number(k);
+                      }
+                    });
+                  }
+                }
               }
-              console.log(`[CognitiveHandler] Running FULL analysis with Shadow Mapper (${batchResponses.length} models)`);
+
+              const batchResponses = [];
+              const providersInResults = Object.keys(batchResults);
+              const processedProviders = new Set();
+
+              // 1. Process providers that exist in our citation order
+              const sortedByCitation = Object.entries(normalizedCitationOrder)
+                .sort(([, a], [, b]) => (a || 0) - (b || 0));
+
+              sortedByCitation.forEach(([providerId, index]) => {
+                const resp = batchResults[providerId];
+                if (resp) {
+                  batchResponses.push({
+                    modelIndex: Number(index),
+                    content: resp.text || ""
+                  });
+                  processedProviders.add(providerId);
+                }
+              });
+
+              // 2. Append any providers present in batchResults but missing from citationOrder
+              let fallbackIndex = batchResponses.length > 0
+                ? Math.max(...batchResponses.map(r => r.modelIndex)) + 1
+                : 1;
+
+              providersInResults.forEach(providerId => {
+                if (!processedProviders.has(providerId)) {
+                  batchResponses.push({
+                    modelIndex: fallbackIndex++,
+                    content: batchResults[providerId]?.text || ""
+                  });
+                }
+              });
+
+              console.log(`[CognitiveHandler] Normalized batchResponses (${batchResponses.length} models) from ${providersInResults.length} raw results`);
               structuralAnalysis = computeFullAnalysis(batchResponses, mapperArtifact, userMessageForSingularity);
             } else {
               console.log(`[CognitiveHandler] Running base structural analysis (no batch responses found)`);

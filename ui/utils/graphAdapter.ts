@@ -119,18 +119,19 @@ export function generateInsightsFromAnalysis(
                     const data = pattern.data as DissentPatternData;
 
                     // Strongest voice gets its own insight
-                    if (data.strongestVoice) {
+                    const strongest = data.strongestVoice;
+                    if (strongest) {
                         insights.push({
                             type: 'dissent',
                             claim: {
-                                id: data.strongestVoice.id,
-                                label: data.strongestVoice.label,
+                                id: strongest.id,
+                                label: strongest.label,
                                 supporters: []
                             },
                             metadata: {
-                                supportRatio: data.strongestVoice.supportRatio,
-                                whyItMatters: data.strongestVoice.whyItMatters,
-                                insightType: data.strongestVoice.insightType || data.voices.find(v => v.id === data.strongestVoice?.id)?.insightType,
+                                supportRatio: strongest.supportRatio,
+                                whyItMatters: strongest.whyItMatters,
+                                insightType: strongest.insightType || data.voices.find(v => v.id === strongest.id)?.insightType,
                                 suppressedDimensions: data.suppressedDimensions,
                                 voiceCount: data.voices.length,
                             },

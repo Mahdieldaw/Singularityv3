@@ -59,6 +59,10 @@ const SingularityOutputView: React.FC<SingularityOutputViewProps> = ({
     const effectiveIsLoading = singularityState.isLoading || !!isLoading;
     const hasRenderableText = !!String(output?.text || "").trim();
 
+    const isUsableResponse = (resp: any) => {
+        return resp && (resp.status === 'completed' || (resp.text && resp.text.trim().length > 0));
+    };
+
 
 
     const currentProviderName = output?.providerId
@@ -69,9 +73,7 @@ const SingularityOutputView: React.FC<SingularityOutputViewProps> = ({
     const handleProviderSelect = (pid: string) => {
         const responses = aiTurn.singularityResponses?.[pid] || [];
         const latest = responses[responses.length - 1];
-        // Check for completed status OR presence of text (even if partial)
-        // If status is error, we force recompute unless text is present (sometimes error comes with partial text)
-        const hasUsableResponse = latest && (latest.status === 'completed' || (latest.text && latest.text.trim().length > 0));
+        const hasUsableResponse = isUsableResponse(latest);
 
         if (hasUsableResponse) {
             singularityState.setPinnedProvider(pid);
@@ -113,7 +115,7 @@ const SingularityOutputView: React.FC<SingularityOutputViewProps> = ({
                                     const responses = aiTurn.singularityResponses?.[provider.id] || [];
                                     const latest = responses[responses.length - 1];
                                     // Only show green dot if we have usable content
-                                    const hasResponse = latest && (latest.status === 'completed' || (latest.text && latest.text.trim().length > 0));
+                                    const hasResponse = isUsableResponse(latest);
 
                                     return (
                                         <button

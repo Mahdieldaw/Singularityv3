@@ -39,6 +39,21 @@ const decisionMapSheetDbg = (...args: any[]) => {
 };
 
 // ============================================================================
+// TYPES
+// ============================================================================
+
+export interface DissentVoice {
+  id: string;
+  label: string;
+  text: string;
+  supportRatio: number;
+  insightType: string;
+  insightScore: number;
+  whyItMatters: string;
+  challenges: string;
+}
+
+// ============================================================================
 // STRUCTURAL DEBUG PANEL - Shows peaks/hills analysis pipeline
 // ============================================================================
 
@@ -99,10 +114,22 @@ const StructuralDebugPanel: React.FC<StructuralDebugPanelProps> = ({ analysis })
   // ─────────────────────────────────────────────────────────────────────────
   // Dissent voices (minority with high insight potential)
   // ─────────────────────────────────────────────────────────────────────────
-  const dissentVoices = useMemo(() => {
+  const dissentVoices = useMemo((): DissentVoice[] => {
     const dissentPattern = analysis.shape.patterns?.find(p => p.type === 'dissent');
-    if (dissentPattern?.data && Array.isArray((dissentPattern.data as any).voices)) {
-      return (dissentPattern.data as any).voices;
+    if (dissentPattern?.data) {
+      const data = dissentPattern.data as any; // Temporary cast to access possibly missing fields safely
+      const rawVoices = Array.isArray(data.voices) ? data.voices : [];
+
+      return rawVoices.map((v: any) => ({
+        id: v.id,
+        label: v.label,
+        text: v.text,
+        supportRatio: v.supportRatio,
+        insightType: v.insightType || 'edge_case',
+        insightScore: v.insightScore || 0.5,
+        whyItMatters: v.whyItMatters || (v.id === data.strongestVoice?.id ? data.strongestVoice.whyItMatters : 'Challenging minority voice'),
+        challenges: v.challenges || (Array.isArray(v.targets) ? v.targets.join(', ') : 'consensus')
+      }));
     }
     // Fallback: find low-support claims that challenge high-support claims
     return analysis.claimsWithLeverage
@@ -113,7 +140,7 @@ const StructuralDebugPanel: React.FC<StructuralDebugPanelProps> = ({ analysis })
         label: c.label,
         text: c.text,
         supportRatio: c.supportRatio,
-        insightType: 'edge_case' as const,
+        insightType: 'edge_case',
         insightScore: 0.5,
         whyItMatters: 'Challenging minority voice',
         challenges: c.label
@@ -628,7 +655,7 @@ const StructuralDebugPanel: React.FC<StructuralDebugPanelProps> = ({ analysis })
                     📢 Dissent Voices — Minority views with potential insight
                   </div>
                   <div className="space-y-1">
-                    {dissentVoices.slice(0, 5).map((v: any, idx: number) => (
+                    {dissentVoices.slice(0, 5).map((v: DissentVoice, idx: number) => (
                       <div key={idx} className="flex items-center gap-2 text-[11px]">
                         <span className="font-mono text-yellow-400">
                           {v.supportRatio != null ? `${(v.supportRatio * 100).toFixed(0)}%` : '?'}
@@ -1887,7 +1914,7 @@ export const DecisionMapSheet = React.memo(() => {
     setStructuralLoading(true);
 
     // Defer heavy computation to next tick
-    setTimeout(() => {
+    const timeoutId = window.setTimeout(() => {
       if (cancelled) return;
       try {
         const analysis = computeStructuralAnalysis(artifactForStructure as any);
@@ -1910,6 +1937,7 @@ export const DecisionMapSheet = React.memo(() => {
 
     return () => {
       cancelled = true;
+      window.clearTimeout(timeoutId);
     };
 
   }, [activeTab, artifactForStructure, openState?.turnId, structuralTurnId, structuralAnalysis]);
