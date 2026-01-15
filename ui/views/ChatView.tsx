@@ -18,9 +18,12 @@ import ChatInput from "../components/ChatInput";
 import WelcomeScreen from "../components/WelcomeScreen";
 import { useChat } from "../hooks/chat/useChat";
 import { SplitPaneRightPanel } from "../components/SplitPaneRightPanel";
-import { CouncilOrbsVertical } from "../components/CouncilOrbsVertical";
 import { useSmartProviderDefaults } from "../hooks/providers/useSmartProviderDefaults";
 import { safeLazy } from "../utils/safeLazy";
+
+// Lazy load CouncilOrbsVertical - defers orb machinery for faster initial load
+const CouncilOrbsVertical = safeLazy(() => import("../components/CouncilOrbsVertical").then(m => ({ default: m.CouncilOrbsVertical })));
+
 // Lazy load DecisionMapSheet (named export adapter)
 // Uses safeLazy for robust loading
 const DecisionMapSheet = safeLazy(() =>
@@ -231,7 +234,15 @@ export default function ChatView() {
           rightPane={<SplitPaneRightPanel />}
           dividerContent={
             <div className="orb-bar pointer-events-auto cursor-default bg-surface-raised border-y border-l border-border-subtle rounded-l-xl shadow-sm p-1 flex flex-col items-center justify-center gap-2" style={{ cursor: 'default' }}>
-              <CouncilOrbsVertical />
+              <Suspense fallback={
+                <div className="flex flex-col items-center gap-3 py-4 w-full">
+                  {[1, 2, 3].map(i => (
+                    <div key={i} className="w-2 h-2 rounded-full bg-text-secondary/30 animate-pulse" />
+                  ))}
+                </div>
+              }>
+                <CouncilOrbsVertical />
+              </Suspense>
             </div>
           }
         />

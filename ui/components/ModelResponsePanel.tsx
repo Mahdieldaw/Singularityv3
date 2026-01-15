@@ -2,7 +2,7 @@
 // Key change: overflow-x-auto moved from PreBlock to content wrapper
 // This makes the scrollbar visible at the top level, not buried in code blocks
 
-import React, { useEffect, useRef, useState, useCallback, useMemo } from "react";
+import React, { useEffect, useRef, useState, useCallback, useMemo, Suspense } from "react";
 import { useAtomValue } from "jotai";
 import {
     providerEffectiveStateFamily,
@@ -15,11 +15,15 @@ import {
 import { LLM_PROVIDERS_CONFIG } from "../constants";
 import { useProviderActions } from "../hooks/providers/useProviderActions";
 import MarkdownDisplay from "./MarkdownDisplay";
-import { ArtifactOverlay, Artifact } from "./ArtifactOverlay";
+import type { Artifact } from "./ArtifactOverlay";
 import { ChevronDownIcon, ChevronUpIcon } from "./Icons";
 import { CopyButton } from "./CopyButton";
 import { formatProviderResponseForMd } from "../utils/copy-format-utils";
 import clsx from "clsx";
+import { safeLazy } from "../utils/safeLazy";
+
+// Lazy load ArtifactOverlay - only shown when user clicks artifact badge
+const ArtifactOverlay = safeLazy(() => import("./ArtifactOverlay").then(m => ({ default: m.ArtifactOverlay })));
 
 interface ModelResponsePanelProps {
     turnId: string;
@@ -442,10 +446,16 @@ export const ModelResponsePanel: React.FC<ModelResponsePanelProps> = React.memo(
 
             {/* Artifact Overlay */}
             {selectedArtifact && (
-                <ArtifactOverlay
-                    artifact={selectedArtifact}
-                    onClose={() => setSelectedArtifact(null)}
-                />
+                <Suspense fallback={
+                    <div className="fixed inset-0 bg-overlay-backdrop z-[9999] flex items-center justify-center">
+                        <div className="w-8 h-8 border-2 border-brand-500/30 border-t-brand-500 rounded-full animate-spin" />
+                    </div>
+                }>
+                    <ArtifactOverlay
+                        artifact={selectedArtifact}
+                        onClose={() => setSelectedArtifact(null)}
+                    />
+                </Suspense>
             )}
         </div>
     );

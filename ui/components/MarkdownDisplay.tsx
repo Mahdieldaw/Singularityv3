@@ -1,7 +1,7 @@
 import React, { useCallback, useState, useEffect } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { containsMath } from "../utils/math-renderer";
+import { containsMath } from "../utils/math-utils";
 
 // --- 1. HELPER: Language Extractor ---
 const ListContext = React.createContext(false);

@@ -1,30 +1,45 @@
-import { unified } from 'unified';
-import remarkParse from 'remark-parse';
-import remarkRehype from 'remark-rehype';
-import rehypeStringify from 'rehype-stringify';
+/**
+ * Math Renderer - FULLY LAZY LOADED
+ * 
+ * This module has ZERO static imports for the unified/KaTeX ecosystem.
+ * All dependencies (~650KB) are loaded dynamically only when math is detected.
+ */
 
 // Cache the processor to avoid recreating it
 let processor: any = null;
 
 /**
- * Lazy-loads KaTeX and related plugins.
+ * Lazy-loads KaTeX and ALL related plugins.
  * This function is only called when math is detected in the content.
+ * Returns the full plugin set needed to build a processor.
  */
 export async function loadMathPlugins() {
-    // Parallel load all necessary modules
+    // Parallel load ALL necessary modules - nothing is statically imported
     const [
+        { unified },
+        { default: remarkParse },
         { default: remarkMath },
+        { default: remarkRehype },
         { default: rehypeKatex },
-        _katex // Loaded for side effects
+        { default: rehypeStringify },
+        _katex // Loaded for KaTeX CSS side effects
     ] = await Promise.all([
+        import('unified'),
+        import('remark-parse'),
         import('remark-math'),
+        import('remark-rehype'),
         import('rehype-katex'),
+        import('rehype-stringify'),
         import('katex')
     ]);
 
     return {
+        unified,
+        remarkParse,
         remarkMath,
-        rehypeKatex
+        remarkRehype,
+        rehypeKatex,
+        rehypeStringify
     };
 }
 
@@ -35,7 +50,14 @@ export async function loadMathPlugins() {
 export async function renderMathInMarkdown(content: string): Promise<string> {
     // 1. Initialize processor if needed
     if (!processor) {
-        const { remarkMath, rehypeKatex } = await loadMathPlugins();
+        const {
+            unified,
+            remarkParse,
+            remarkMath,
+            remarkRehype,
+            rehypeKatex,
+            rehypeStringify
+        } = await loadMathPlugins();
 
         processor = unified()
             .use(remarkParse)
@@ -55,11 +77,4 @@ export async function renderMathInMarkdown(content: string): Promise<string> {
     }
 }
 
-/**
- * Checks if the content contains math syntax ($...$ or $$...$$)
- */
-export function containsMath(content: string): boolean {
-    // Simple heuristic: check for $ delimiters
-    // This is a fast check to decide if we should load the heavy math machinery
-    return /\$\$[\s\S]+?\$\$/.test(content) || /\$[\s\S]+?\$/.test(content);
-}
+
