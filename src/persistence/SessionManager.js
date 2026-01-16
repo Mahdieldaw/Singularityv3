@@ -254,20 +254,9 @@ export class SessionManager {
     await this.adapter.put("turns", aiTurnRecord);
 
     if (mapperArtifact) {
-      try {
-        /*
-        const minimal = buildMinimalMapperArtifact(request.mapperArtifact);
-        const bridge = {
-          query: String(request.userMessage || ""),
-          established: { positive: [], negative: [] },
-          openEdges: [],
-          nextStep: null,
-          landscape: minimal,
-          turnId: aiTurnId,
-        };
-        await this.persistContextBridge(sessionId, aiTurnId, bridge);
-        */
-      } catch (_) { }
+      // Context bridge persistence removed - now handled by dedicated modules
+
+
     }
 
     if (request?.artifactCuration?.edits) {
@@ -402,20 +391,8 @@ export class SessionManager {
     await this.adapter.put("turns", aiTurnRecord);
 
     if (mapperArtifact) {
-      try {
-        /*
-        const minimal = buildMinimalMapperArtifact(request.mapperArtifact);
-        const bridge = {
-          query: String(request.userMessage || ""),
-          established: { positive: [], negative: [] },
-          openEdges: [],
-          nextStep: null,
-          landscape: minimal,
-          turnId: aiTurnId,
-        };
-        await this.persistContextBridge(sessionId, aiTurnId, bridge);
-        */
-      } catch (_) { }
+
+
     }
 
     if (request?.artifactCuration?.edits) {
@@ -1216,7 +1193,6 @@ export class SessionManager {
       length: finalSummary.length,
       preview: finalSummary.slice(0, 100).replace(/\n/g, "\\n") + "...",
       hasPreviousAnswer: finalSummary.includes("<previous_answer>"),
-      hasMapping: finalSummary.includes("<council_views>")
     });
 
     return finalSummary;

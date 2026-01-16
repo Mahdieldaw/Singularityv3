@@ -17,11 +17,25 @@ import {
     ExploratoryShapeData,
     KeystoneShapeData,
     LinearShapeData,
-    ChainStep
+    ChainStep,
+    CascadeRisk,
+    DissentPatternData,
+    PrimaryShape,
+    SecondaryPattern
 } from "../../../shared/contract";
 
+export interface DissentVoice {
+    id: string;
+    label: string;
+    text: string;
+    supportRatio: number;
+    insightType: 'leverage_inversion' | 'explicit_challenger' | 'unique_perspective' | 'edge_case';
+    targets?: string[];
+    insightScore?: number;
+}
+
 export const generateWhyItMatters = (
-    voice: any,
+    voice: DissentVoice,
     peaks: EnrichedClaim[]
 ): string => {
     switch (voice.insightType) {
@@ -43,15 +57,15 @@ export const generateWhyItMatters = (
 };
 
 export const generateTransferQuestion = (
-    primary: any,
-    patterns: any[],
+    primary: PrimaryShape,
+    patterns: SecondaryPattern[],
     peaks: EnrichedClaim[]
 ): string => {
     const dissentPattern = patterns.find(p => p.type === 'dissent');
     switch (primary) {
         case 'convergent':
             if (dissentPattern) {
-                const dissent = dissentPattern.data as any;
+                const dissent = dissentPattern.data as DissentPatternData;
                 if (dissent.strongestVoice) {
                     return `The consensus may be missing something. Is "${dissent.strongestVoice.label}" onto something the majority missed?`;
                 }
@@ -66,7 +80,7 @@ export const generateTransferQuestion = (
             return "Which dimension is most relevant to your situation?";
         case 'sparse':
             if (dissentPattern) {
-                const dissent = dissentPattern.data as any;
+                const dissent = dissentPattern.data as DissentPatternData;
                 if (dissent.strongestVoice) {
                     return `Signal is weak, but "${dissent.strongestVoice.label}" may be the answer despite low support. What's your context?`;
                 }
@@ -119,7 +133,12 @@ export const buildConvergentData = (
         : 0;
     const floorStrength: "strong" | "moderate" | "weak" =
         avgSupport > 0.6 ? "strong" : avgSupport > 0.4 ? "moderate" : "weak";
-    const challengers = claims.filter(c => c.role === "challenger" || c.isChallenger);
+    const challengers = claims.filter(c =>
+        // c.role === "challenger" is the explicit structural role assigned during extraction.
+        // c.isChallenger is a secondary flag that might be true if the claim is identified as a challenge 
+        // even if its primary role was different (e.g. a supplementary claim that also challenges).
+        c.role === "challenger" || c.isChallenger
+    );
     const challengerInfos: ChallengerInfo[] = challengers.map(c => ({
         id: c.id,
         label: c.label,
@@ -677,18 +696,18 @@ export const buildChainPatternData = (
     claims: EnrichedClaim[],
     edges: Edge[],
     graph: GraphAnalysis,
-    cascadeRisks: any[]
+    cascadeRisks: CascadeRisk[],
 ): LinearShapeData => {
     const prereqEdges = edges.filter(e => e.type === "prerequisite");
     const chainIds = graph.longestChain;
     const chain: ChainStep[] = chainIds.map((id, idx) => {
         const claim = claims.find(c => c.id === id);
-        if (!claim) return null as any;
+        if (!claim) return null;
         const enables = prereqEdges
             .filter(e => e.from === id)
             .map(e => e.to);
         const isWeakLink = claim.supporters.length === 1;
-        const cascade = cascadeRisks.find((r: any) => r.sourceId === id);
+        const cascade = cascadeRisks.find((r: CascadeRisk) => r.sourceId === id);
         return {
             id: claim.id,
             label: claim.label,
@@ -702,11 +721,11 @@ export const buildChainPatternData = (
                 ? `Only 1 supporter - cascade affects ${cascade?.dependentIds.length || 0} claims`
                 : null
         };
-    }).filter(Boolean) as ChainStep[];
+    }).filter((step): step is ChainStep => step !== null)
     const weakLinks = chain
         .filter(step => step.isWeakLink)
         .map(step => {
-            const cascade = cascadeRisks.find((r: any) => r.sourceId === step.id);
+            const cascade = cascadeRisks.find((r: CascadeRisk) => r.sourceId === step.id);
             return {
                 step,
                 cascadeSize: cascade?.dependentIds.length || 0

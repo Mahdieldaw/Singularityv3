@@ -197,19 +197,19 @@ export const assignPercentileFlags = (
         connectedIds.add(e.from);
         connectedIds.add(e.to);
     });
-
+    const allEvidenceGaps = claims.map(c => {
+        const cCascade = cascadeBySource.get(c.id);
+        return cCascade && c.supporters.length > 0
+            ? cCascade.dependentIds.length / c.supporters.length
+            : 0;
+    });
     return claims.map(claim => {
         const cascade = cascadeBySource.get(claim.id);
         const evidenceGapScore = cascade && claim.supporters.length > 0
             ? cascade.dependentIds.length / claim.supporters.length
             : 0;
 
-        const allEvidenceGaps = claims.map(c => {
-            const cCascade = cascadeBySource.get(c.id);
-            return cCascade && c.supporters.length > 0
-                ? cCascade.dependentIds.length / c.supporters.length
-                : 0;
-        });
+
 
         const isHighSupport = isInTopPercentile(claim.supportRatio, allSupportRatios, 0.3);
         const isLowSupport = isInBottomPercentile(claim.supportRatio, allSupportRatios, 0.3);

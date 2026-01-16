@@ -120,13 +120,19 @@ export const computeStructuralAnalysis = (artifact: MapperArtifact): StructuralA
         });
         shapeData = buildSparseData(claimsWithLeverage, graph, ghosts, signalStrength);
     }
-    const floorAssumptions = (shapeData as SettledShapeData)?.floorAssumptions;
-    const centralConflict = (shapeData as ContestedShapeData)?.centralConflict
-        ? (shapeData as ContestedShapeData).collapsingQuestion || undefined
-        : undefined;
-    const tradeoffsList = (shapeData as TradeoffShapeData)?.tradeoffs?.map(t =>
-        t.governingFactor || `${t.optionA.label} vs ${t.optionB.label}`
-    );
+    let floorAssumptions: string[] | undefined;
+    let centralConflict: string | undefined;
+    let tradeoffsList: string[] | undefined;
+
+    if (shapeData?.pattern === 'settled') {
+        floorAssumptions = (shapeData as SettledShapeData).floorAssumptions;
+    } else if (shapeData?.pattern === 'contested') {
+        centralConflict = (shapeData as ContestedShapeData).collapsingQuestion || undefined;
+    } else if (shapeData?.pattern === 'tradeoff') {
+        tradeoffsList = (shapeData as TradeoffShapeData).tradeoffs?.map(t =>
+            t.governingFactor || `${t.optionA.label} vs ${t.optionB.label}`
+        );
+    }
     const shape: ProblemStructure = {
         primary: compositeShape.primary,
         confidence: compositeShape.confidence,

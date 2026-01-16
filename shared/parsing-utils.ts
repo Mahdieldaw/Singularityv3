@@ -1052,37 +1052,12 @@ export function parseSemanticMapperOutput(
     const warnings: string[] = [];
 
     // Extract JSON from response
-    let jsonText: string;
+    const { json: parsed, path: _path } = extractJsonObject(rawResponse);
 
-    // Try to find JSON in markdown code fences
-    const fenceMatch = rawResponse.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
-    if (fenceMatch) {
-        jsonText = fenceMatch[1];
-    } else {
-        // Try to find raw JSON object
-        const rawMatch = rawResponse.match(/(\{[\s\S]*\})/);
-        if (rawMatch) {
-            jsonText = rawMatch[1];
-        } else {
-            return {
-                success: false,
-                errors: [{ field: 'response', issue: 'No JSON object found in response' }],
-            };
-        }
-    }
-
-    // Parse JSON
-    let parsed: any;
-    try {
-        parsed = JSON.parse(jsonText);
-    } catch (e) {
+    if (!parsed) {
         return {
             success: false,
-            errors: [{
-                field: 'json',
-                issue: 'Failed to parse JSON',
-                context: e instanceof Error ? e.message : String(e)
-            }],
+            errors: [{ field: 'response', issue: 'No valid JSON object found in response' }],
         };
     }
 

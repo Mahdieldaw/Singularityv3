@@ -863,7 +863,7 @@ export class StepExecutor {
 
     let ConciergeService;
     try {
-      const module = await import('../ConciergeService');
+      const module = await import('../../ConciergeService/ConciergeService');
       ConciergeService = module.ConciergeService;
     } catch (e) {
       console.warn("[StepExecutor] Failed to import ConciergeService:", e);

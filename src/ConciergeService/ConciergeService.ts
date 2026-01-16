@@ -215,6 +215,17 @@ export interface ShadowData {
     topUnindexed: UnindexedStatement[];
 }
 
+const SHADOW_CONFIG = {
+    HAS_GAPS_SCORE_THRESHOLD: 0.3,
+    RELEVANCE_SCORE_THRESHOLD: 0.25,
+    MAX_RELEVANT_ITEMS: 3,
+    TEXT_TRUNCATE_LENGTH: 100,
+    TEXT_TRUNCATE_SUFFIX_LENGTH: 97,
+    SURVIVAL_RATE_WARNING_THRESHOLD: 0.5,
+    MIN_CANDIDATES_FOR_WARNING: 20,
+    MIN_CLAIMS_FOR_PRESCRIPTIVE_ALARM: 10,
+};
+
 /**
  * Build shadow section for Concierge brief.
  * Surfaces gaps detected by mechanical extraction that Primary missed.
@@ -227,7 +238,7 @@ function buildShadowSection(shadow: ShadowData): string {
     const hasGaps =
         audit.gaps.conflicts > 0 ||
         audit.gaps.prerequisites > 0 ||
-        topUnindexed.some(u => u.adjustedScore > 0.3);
+        topUnindexed.some(u => u.adjustedScore > SHADOW_CONFIG.HAS_GAPS_SCORE_THRESHOLD);
 
     if (!hasGaps) {
         return '';  // Nothing significant to add
@@ -246,22 +257,22 @@ function buildShadowSection(shadow: ShadowData): string {
             `• ${audit.gaps.prerequisites} potential dependency(ies) not surfaced above`
         );
     }
-    if (audit.gaps.prescriptive > 0 && audit.primaryCounts.claims < 10) {
+    if (audit.gaps.prescriptive > 0 && audit.primaryCounts.claims < SHADOW_CONFIG.MIN_CLAIMS_FOR_PRESCRIPTIVE_ALARM) {
         parts.push(
             `• ${audit.gaps.prescriptive} prescriptive statement(s) detected (should/must/always)`
         );
     }
 
     // Top unindexed (query-relevant)
-    const relevant = topUnindexed.filter(u => u.adjustedScore > 0.25);
+    const relevant = topUnindexed.filter(u => u.adjustedScore > SHADOW_CONFIG.RELEVANCE_SCORE_THRESHOLD);
     if (relevant.length > 0) {
         parts.push('');
         parts.push('**Potentially missed (sorted by relevance):**');
-        for (const item of relevant.slice(0, 3)) {
+        for (const item of relevant.slice(0, SHADOW_CONFIG.MAX_RELEVANT_ITEMS)) {
             const { statement } = item;
             const typeLabel = statement.stance.charAt(0).toUpperCase() + statement.stance.slice(1);
-            const truncatedText = statement.text.length > 100
-                ? statement.text.slice(0, 97) + '...'
+            const truncatedText = statement.text.length > SHADOW_CONFIG.TEXT_TRUNCATE_LENGTH
+                ? statement.text.slice(0, SHADOW_CONFIG.TEXT_TRUNCATE_SUFFIX_LENGTH) + '...'
                 : statement.text;
             let line = `• [${typeLabel}] "${truncatedText}"`;
             // V2 uses single modelIndex per statement, but we can mention it
@@ -271,7 +282,7 @@ function buildShadowSection(shadow: ShadowData): string {
     }
 
     // Survival rate warning (if lots got filtered, patterns may be too aggressive)
-    if (audit.extraction.survivalRate < 0.5 && audit.extraction.pass1Candidates > 20) {
+    if (audit.extraction.survivalRate < SHADOW_CONFIG.SURVIVAL_RATE_WARNING_THRESHOLD && audit.extraction.pass1Candidates > SHADOW_CONFIG.MIN_CANDIDATES_FOR_WARNING) {
         parts.push('');
         parts.push(
             `*Note: Some potential signals were filtered as likely noise.*`

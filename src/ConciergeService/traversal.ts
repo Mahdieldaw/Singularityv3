@@ -163,7 +163,9 @@ function computeTiers(
         const deps = dependsOn.get(claimId) || [];
 
         const newPath = [...path, claimId];
-        const maxDepTier = Math.max(...deps.map(d => computeClaimTier(d, newPath)));
+        const maxDepTier = deps.length > 0
+            ? Math.max(...deps.map(d => computeClaimTier(d, newPath)))
+            : -1;
         const tier = maxDepTier + 1;
 
         tierAssignment.set(claimId, tier);
@@ -199,12 +201,13 @@ export function getCascade(
     graph: TraversalGraph
 ): string[] {
     const affected = new Set<string>();
+    const claimMap = new Map(graph.claims.map(c => [c.id, c]));
     const queue = [claimId];
 
     while (queue.length > 0) {
         const current = queue.shift()!;
 
-        const claim = graph.claims.find(c => c.id === current);
+        const claim = claimMap.get(current);
         if (!claim) continue;
 
         for (const enabledId of claim.enables) {

@@ -41,7 +41,7 @@ export class WorkflowEngine {
         this.stepExecutor.executePromptStep(step, ctx, opts),
       mapping: (step, ctx, results, wfCtx, _resolved, opts) =>
         this.stepExecutor.executeMappingStep(step, ctx, results, wfCtx, opts),
-      singularity: (step, ctx, results, _wfCtx, resolved, opts) =>
+      singularity: (step, ctx, results, _wfCtx, resolved, _opts) =>
         this.cognitiveHandler.orchestrateSingularityPhase(
           this.currentRequest || {},
           ctx,

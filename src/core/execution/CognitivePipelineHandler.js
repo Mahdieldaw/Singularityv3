@@ -226,7 +226,7 @@ export class CognitivePipelineHandler {
           // Guarded dynamic import for resilience during partial deploys
           let ConciergeModule;
           try {
-            ConciergeModule = await import('../ConciergeService');
+            ConciergeModule = await import('../../ConciergeService/ConciergeService');
           } catch (err) {
             console.error("[CognitiveHandler] Critical error: ConciergeService module could not be loaded", err);
           }
@@ -247,12 +247,7 @@ export class CognitivePipelineHandler {
                 shadow: structuralAnalysis?.shadow
                   ? {
                     audit: structuralAnalysis.shadow.audit,
-                    topUnindexed: structuralAnalysis.shadow.topUnindexed.map(u => ({
-                      text: u.text,
-                      type: u.type,
-                      sourceModels: u.sourceModels,
-                      adjustedScore: u.adjustedScore,
-                    })),
+                    topUnindexed: structuralAnalysis.shadow.topUnindexed,
                   }
                   : undefined,
               };

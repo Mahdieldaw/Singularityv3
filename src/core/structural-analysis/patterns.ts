@@ -21,9 +21,11 @@ import {
     TradeoffPair
 } from "../../../shared/contract";
 import { MIN_CHAIN_LENGTH } from "./classification";
-import { buildKeystonePatternData, buildChainPatternData, generateWhyItMatters } from "./builders";
+import { buildKeystonePatternData, buildChainPatternData, generateWhyItMatters, DissentVoice } from "./builders";
 import { determineTensionDynamics } from "./utils";
- 
+
+type Voice = DissentVoice;
+
 
 export const detectDissentPattern = (
     claims: EnrichedClaim[],
@@ -56,7 +58,7 @@ export const detectDissentPattern = (
         return chalList.some((id: string) => peakIdsSet.has(id));
     });
     for (const claim of challengers) {
-        if (dissentVoices.some((v: any) => v.id === claim.id)) continue;
+        if (dissentVoices.some((v: Voice) => v.id === claim.id)) continue;
         const chalList: string[] = Array.isArray(claim.challenges)
             ? claim.challenges
             : (claim.challenges ? [claim.challenges] : []);
@@ -90,7 +92,7 @@ export const detectDissentPattern = (
             return outsiderSupport > c.supporters.length * 0.5 && !peakIdsSet.has(c.id);
         });
         for (const claim of outsiderClaims) {
-            if (dissentVoices.some((v: any) => v.id === claim.id)) continue;
+            if (dissentVoices.some((v: Voice) => v.id === claim.id)) continue;
             dissentVoices.push({
                 id: claim.id,
                 label: claim.label,
@@ -105,7 +107,7 @@ export const detectDissentPattern = (
     const edgeCases = claims.filter((c: EnrichedClaim) =>
         c.type === 'conditional' &&
         c.supportRatio < 0.4 &&
-        !dissentVoices.some((v: any) => v.id === c.id)
+        !dissentVoices.some((v: Voice) => v.id === c.id)
     );
     for (const claim of edgeCases) {
         dissentVoices.push({
@@ -119,9 +121,9 @@ export const detectDissentPattern = (
         });
     }
     if (dissentVoices.length === 0) return null;
-    const rankedVoices = [...dissentVoices].sort((a: any, b: any) => b.insightScore - a.insightScore);
+    const rankedVoices = [...dissentVoices].sort((a: Voice, b: Voice) => (b.insightScore || 0) - (a.insightScore || 0));
     const peakTypes = new Set(peaks.map(p => p.type));
-    const minorityOnlyTypes = Array.from(new Set(rankedVoices.map((v: any) => {
+    const minorityOnlyTypes = Array.from(new Set(rankedVoices.map((v: Voice) => {
         const claim = claims.find((c: EnrichedClaim) => c.id === v.id);
         return claim?.type;
     }))).filter(t => t && !peakTypes.has(t));
@@ -317,29 +319,19 @@ export const detectAllSecondaryPatterns = (
         const chainPattern = detectChainPattern(graph, claims, edges, patternsObj.cascadeRisks);
         if (chainPattern) patterns.push(chainPattern);
     }
-    const peakAnalysisForFragile: PeakAnalysis = {
+    const sharedPeakAnalysis: PeakAnalysis = {
         peaks,
         hills: [],
         floor,
-        peakIds: peaks.map(p => p.id),
+        peakIds,
         peakConflicts: [],
         peakTradeoffs: [],
         peakSupports: [],
         peakUnconnected: false
     };
-    const fragilePattern = detectFragilePattern(peakAnalysisForFragile, claims, edges);
+    const fragilePattern = detectFragilePattern(sharedPeakAnalysis, claims, edges);
     if (fragilePattern) patterns.push(fragilePattern);
-    const peakAnalysisForChallenged: PeakAnalysis = {
-        peaks,
-        hills: [],
-        floor,
-        peakIds: peaks.map(p => p.id),
-        peakConflicts: [],
-        peakTradeoffs: [],
-        peakSupports: [],
-        peakUnconnected: false
-    };
-    const challengedPattern = detectChallengedPattern(peakAnalysisForChallenged, claims, edges);
+    const challengedPattern = detectChallengedPattern(sharedPeakAnalysis, claims, edges);
     if (challengedPattern) patterns.push(challengedPattern);
     const conditionalPattern = detectConditionalPattern(claims, edges);
     if (conditionalPattern) patterns.push(conditionalPattern);
@@ -539,7 +531,7 @@ export const analyzeGhosts = (ghosts: string[], claims: EnrichedClaim[]): Struct
 export const detectEnrichedConflicts = (
     edges: Edge[],
     claims: EnrichedClaim[],
-    _landscape: { modelCount: number }
+    _landscape: { modelCount: number } // reserved for future use by landscape-aware conflict detection
 ): ConflictInfo[] => {
     const claimMap = new Map(claims.map(c => [c.id, c]));
     const conflictEdges = edges.filter(e => e.type === "conflicts");
@@ -592,8 +584,9 @@ export const detectEnrichedConflicts = (
 
 export const detectConflictClusters = (
     conflicts: ConflictInfo[],
-    _claims: EnrichedClaim[]
+    claims: EnrichedClaim[]
 ): ConflictCluster[] => {
+    const claimMap = new Map(claims.map(c => [c.id, c.label]));
     const clusters: ConflictCluster[] = [];
     const conflictsByClaim = new Map<string, string[]>();
     for (const c of conflicts) {
@@ -620,9 +613,10 @@ export const detectConflictClusters = (
     let clusterIdx = 0;
     for (const [targetId, challengers] of Array.from(conflictsByClaim.entries())) {
         if (challengers.length >= 2) {
+            const targetLabel = claimMap.get(targetId) || targetId;
             clusters.push({
                 id: `cluster_${clusterIdx++}`,
-                axis: `Multiple challenges to ${targetId}`,
+                axis: `Multiple challenges to ${targetLabel}`,
                 targetId,
                 challengerIds: challengers,
                 theme: "Dissent against consensus"

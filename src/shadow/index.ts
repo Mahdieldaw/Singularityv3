@@ -35,9 +35,9 @@ export function initializeShadowMapper(): void {
         Object.freeze(patterns);
     }
 
-    Object.freeze(SIGNAL_PATTERNS.sequence);
-    Object.freeze(SIGNAL_PATTERNS.tension);
-    Object.freeze(SIGNAL_PATTERNS.conditional);
+    for (const patterns of Object.values(SIGNAL_PATTERNS)) {
+        Object.freeze(patterns);
+    }
 
     // Freeze individual exclusion rules
     for (const rule of EXCLUSION_RULES) {
@@ -46,7 +46,9 @@ export function initializeShadowMapper(): void {
     }
 
     _initialized = true;
-    console.log('[Shadow] Pattern definitions locked. Guardrail 1 active.');
+    if (process.env.NODE_ENV !== 'production') {
+        console.log('[Shadow] Pattern definitions locked. Guardrail 1 active.');
+    }
 }
 
 // Auto-initialize on import

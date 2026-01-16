@@ -141,7 +141,7 @@ export function computeShadowDelta(
         unreferenced,
         audit: {
             shadowStatementCount,
-            referencedCount: referencedStatementIds.size,
+            referencedCount: shadowStatementCount - unreferenced.length,
             unreferencedCount: unreferenced.length,
             highSignalUnreferencedCount,
             byStance,
@@ -180,7 +180,9 @@ function computeQueryRelevance(statementText: string, queryText: string): number
     });
 
     // Jaccard: intersection / union
-    const unionSize = new Set([...wordsA, ...wordsB]).size;
+    const union = new Set(wordsA);
+    wordsB.forEach(word => union.add(word));
+    const unionSize = union.size;
     return overlap / unionSize;
 }
 
@@ -194,20 +196,20 @@ function extractSignificantWords(text: string): Set<string> {
         .replace(/\s+/g, ' ')
         .trim();
 
+    // Filter common stop words
+    const stopWords = new Set([
+        'the', 'and', 'for', 'are', 'but', 'not', 'you', 'with',
+        'this', 'that', 'can', 'will', 'what', 'when', 'where',
+        'how', 'why', 'who', 'which', 'their', 'there', 'than',
+        'then', 'them', 'these', 'those', 'have', 'has', 'had',
+        'was', 'were', 'been', 'being', 'from', 'they', 'she',
+        'would', 'could', 'should', 'about', 'into', 'through',
+    ]);
+
     const words = normalized.split(' ');
     const significant = words.filter(w => {
         // Filter short words
         if (w.length < 3) return false;
-
-        // Filter common stop words
-        const stopWords = new Set([
-            'the', 'and', 'for', 'are', 'but', 'not', 'you', 'with',
-            'this', 'that', 'can', 'will', 'what', 'when', 'where',
-            'how', 'why', 'who', 'which', 'their', 'there', 'than',
-            'then', 'them', 'these', 'those', 'have', 'has', 'had',
-            'was', 'were', 'been', 'being', 'from', 'they', 'she',
-            'would', 'could', 'should', 'about', 'into', 'through',
-        ]);
 
         return !stopWords.has(w);
     });

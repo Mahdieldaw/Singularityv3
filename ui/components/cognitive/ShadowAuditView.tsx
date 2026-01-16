@@ -70,26 +70,35 @@ export const ShadowAuditView: React.FC<ShadowAuditViewProps> = ({ analysis }) =>
                                 TOP UNREFERENCED STATEMENTS
                             </div>
                             <div className="space-y-2">
-                                {topUnindexed.map((item, i) => (
-                                    <div key={i} className="p-3 rounded-xl bg-surface-raised border border-border-subtle flex flex-col gap-2">
-                                        <div className="flex items-center justify-between">
-                                            <span className="px-1.5 py-0.5 rounded bg-surface-highlight border border-border-subtle text-[10px] font-mono uppercase text-text-muted">
-                                                {item.statement.stance}
-                                            </span>
-                                            <div className="flex items-center gap-2">
-                                                <span className="text-[10px] text-text-muted italic">Score: {item.adjustedScore.toFixed(2)}</span>
-                                                <div className="flex -space-x-1">
-                                                    <div className="w-4 h-4 rounded-full bg-surface-highlight border border-surface flex items-center justify-center text-[8px] font-bold text-text-muted">
-                                                        {item.statement.modelIndex}
+                                {topUnindexed.map((item, i) => {
+                                    if (!item) return null;
+                                    const { statement, adjustedScore } = item;
+                                    const stance = statement?.stance || 'unknown';
+                                    const text = statement?.text || 'Missing statement text';
+                                    const modelIndex = statement?.modelIndex ?? '?';
+                                    const scoreText = typeof adjustedScore === 'number' ? adjustedScore.toFixed(2) : '0.00';
+
+                                    return (
+                                        <div key={i} className="p-3 rounded-xl bg-surface-raised border border-border-subtle flex flex-col gap-2">
+                                            <div className="flex items-center justify-between">
+                                                <span className="px-1.5 py-0.5 rounded bg-surface-highlight border border-border-subtle text-[10px] font-mono uppercase text-text-muted">
+                                                    {stance}
+                                                </span>
+                                                <div className="flex items-center gap-2">
+                                                    <span className="text-[10px] text-text-muted italic">Score: {scoreText}</span>
+                                                    <div className="flex -space-x-1">
+                                                        <div className="w-4 h-4 rounded-full bg-surface-highlight border border-surface flex items-center justify-center text-[8px] font-bold text-text-muted">
+                                                            {modelIndex}
+                                                        </div>
                                                     </div>
                                                 </div>
                                             </div>
+                                            <div className="text-sm text-text-primary leading-relaxed">
+                                                "{text}"
+                                            </div>
                                         </div>
-                                        <div className="text-sm text-text-primary leading-relaxed">
-                                            "{item.statement.text}"
-                                        </div>
-                                    </div>
-                                ))}
+                                    );
+                                })}
                             </div>
                         </div>
                     )}

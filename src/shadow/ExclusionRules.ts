@@ -23,42 +23,44 @@ export interface ExclusionRule {
     severity: 'hard' | 'soft';
 }
 
+export const ALL_STANCES: Stance[] = ['prescriptive', 'cautionary', 'prerequisite', 'dependent', 'assertive', 'uncertain'];
+
 export const EXCLUSION_RULES: ExclusionRule[] = [
     // ═══════════════════════════════════════════════════════════════════
     // UNIVERSAL EXCLUSIONS (apply to all stances)
     // ═══════════════════════════════════════════════════════════════════
     {
         id: 'question_mark',
-        appliesTo: ['prescriptive', 'cautionary', 'prerequisite', 'dependent', 'assertive', 'uncertain'],
+        appliesTo: ALL_STANCES,
         pattern: /\?$/,
         reason: 'Question, not statement',
         severity: 'hard'
     },
     {
         id: 'too_short',
-        appliesTo: ['prescriptive', 'cautionary', 'prerequisite', 'dependent', 'assertive', 'uncertain'],
+        appliesTo: ALL_STANCES,
         pattern: /^.{0,15}$/,
         reason: 'Too short to be substantive',
         severity: 'hard'
     },
     {
         id: 'meta_let_me',
-        appliesTo: ['prescriptive', 'cautionary', 'prerequisite', 'dependent', 'assertive', 'uncertain'],
+        appliesTo: ALL_STANCES,
         pattern: /^(let me|let's|i('ll| will| would)|allow me to)\b/i,
         reason: 'Meta-framing, not claim',
         severity: 'hard'
     },
     {
         id: 'meta_note',
-        appliesTo: ['prescriptive', 'cautionary', 'prerequisite', 'dependent', 'assertive', 'uncertain'],
+        appliesTo: ALL_STANCES,
         pattern: /^(note that|it'?s worth (noting|mentioning)|keep in mind|remember that)\b/i,
         reason: 'Meta-commentary, not claim',
         severity: 'hard'
     },
     {
         id: 'quoted_material',
-        appliesTo: ['prescriptive', 'cautionary', 'prerequisite', 'dependent', 'assertive', 'uncertain'],
-        pattern: /^("[^"]{10,}"|"[^"]{10,}")$/,
+        appliesTo: ALL_STANCES,
+        pattern: /^("[^"]{10,}"|[“\u201C][^”\u201D]{10,}[”\u201D])$/,
         reason: 'Quoted material, not original claim',
         severity: 'hard'
     },
@@ -274,10 +276,10 @@ export const EXCLUSION_RULES: ExclusionRule[] = [
  * Check if text is excluded for given stance
  */
 export function isExcluded(text: string, stance: Stance): boolean {
-    const applicableRules = EXCLUSION_RULES.filter(r => 
+    const applicableRules = EXCLUSION_RULES.filter(r =>
         r.appliesTo.includes(stance)
     );
-    
+
     for (const rule of applicableRules) {
         if (rule.pattern.test(text)) {
             if (rule.severity === 'hard') {
@@ -287,7 +289,7 @@ export function isExcluded(text: string, stance: Stance): boolean {
             // For now, we only implement hard exclusions
         }
     }
-    
+
     return false;
 }
 
@@ -298,12 +300,12 @@ export function getExclusionViolations(
     text: string,
     stance: Stance
 ): Array<{ id: string; reason: string; severity: string }> {
-    const applicableRules = EXCLUSION_RULES.filter(r => 
+    const applicableRules = EXCLUSION_RULES.filter(r =>
         r.appliesTo.includes(stance)
     );
-    
+
     const violations: Array<{ id: string; reason: string; severity: string }> = [];
-    
+
     for (const rule of applicableRules) {
         if (rule.pattern.test(text)) {
             violations.push({
@@ -313,6 +315,6 @@ export function getExclusionViolations(
             });
         }
     }
-    
+
     return violations;
 }

@@ -168,15 +168,26 @@ export const computePeakPairRelationships = (
     peaks: EnrichedClaim[],
     edges: Edge[]
 ): PeakPairRelationship[] => {
+    // Pre-index edges by endpoint pairs for O(1) lookup
+    const edgeMap = new Map<string, Edge[]>();
+    for (const edge of edges) {
+        const key = `${edge.from}-${edge.to}`;
+        const existing = edgeMap.get(key) || [];
+        existing.push(edge);
+        edgeMap.set(key, existing);
+    }
+
     const relations: PeakPairRelationship[] = [];
     for (let i = 0; i < peaks.length; i++) {
         for (let j = i + 1; j < peaks.length; j++) {
             const a = peaks[i];
             const b = peaks[j];
-            const relEdges = edges.filter(e =>
-                (e.from === a.id && e.to === b.id) ||
-                (e.from === b.id && e.to === a.id)
-            );
+
+            // Look up edges in both directions
+            const forward = edgeMap.get(`${a.id}-${b.id}`) || [];
+            const backward = edgeMap.get(`${b.id}-${a.id}`) || [];
+            const relEdges = [...forward, ...backward];
+
             relations.push({
                 aId: a.id,
                 bId: b.id,

@@ -234,7 +234,9 @@ export function getStancePatterns(stance: Stance): RegExp[] {
 }
 
 export function getStancePriority(stance: Stance): number {
-    return STANCE_PRIORITY.length - STANCE_PRIORITY.indexOf(stance);
+    const idx = STANCE_PRIORITY.indexOf(stance);
+    if (idx === -1) return 0; // Default priority for unknown stance
+    return STANCE_PRIORITY.length - idx;
 }
 
 export function getSignalPatterns(signalType: keyof SignalPatterns): RegExp[] {
