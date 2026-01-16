@@ -1100,6 +1100,57 @@ export interface ConvergencePoint {
   edgeType: "prerequisite" | "supports";
 }
 
+export type ShadowStance =
+  | 'prescriptive'
+  | 'cautionary'
+  | 'prerequisite'
+  | 'dependent'
+  | 'assertive'
+  | 'uncertain';
+
+export interface ShadowAudit {
+  shadowStatementCount: number;
+  referencedCount: number;
+  unreferencedCount: number;
+  highSignalUnreferencedCount: number;
+  byStance: Record<ShadowStance, { total: number; unreferenced: number }>;
+  gaps: {
+    conflicts: number;
+    prerequisites: number;
+    prescriptive: number;
+  };
+  extraction: {
+    survivalRate: number;
+    pass1Candidates: number;
+  };
+  primaryCounts: {
+    claims: number;
+  };
+}
+
+export interface ShadowEntry {
+  statement: {
+    id: string;
+    text: string;
+    stance: ShadowStance;
+    modelIndex: number;
+    confidence: number;
+    signals: {
+      sequence: boolean;
+      tension: boolean;
+      conditional: boolean;
+    };
+    location: {
+      paragraphIndex: number;
+      sentenceIndex: number;
+    };
+    fullParagraph: string;
+  };
+  queryRelevance: number;
+  signalWeight: number;
+  adjustedScore: number;
+}
+
 export interface StructuralAnalysis {
   edges: Edge[];
   landscape: {
@@ -1132,9 +1183,9 @@ export interface StructuralAnalysis {
   ratios: CoreRatios;
   shape: ProblemStructure;
   shadow?: {
-    audit: any;
-    unindexed: any[];
-    topUnindexed: any[];
+    audit: ShadowAudit;
+    unindexed: ShadowEntry[];
+    topUnindexed: ShadowEntry[];
     processingTime: number;
   };
 }
