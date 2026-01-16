@@ -17,6 +17,9 @@ import {
   selectedModeAtom,
   singularityProviderAtom,
   batchAutoRunEnabledAtom,
+  uiPhaseAtom,
+  isHistoryPanelOpenAtom,
+  turnIdsAtom,
 } from "../state/atoms";
 import { useChat } from "../hooks/chat/useChat";
 import api from "../services/extension-api";
@@ -55,15 +58,18 @@ const ChatInput = ({
   const [prompt, setPrompt] = useAtom(chatInputValueAtom);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
-  const setToast = useSetAtom(toastAtom);
-
-  const { sendMessage, abort } = useChat();
-
-  const [activeTarget, setActiveTarget] = useAtom(activeProviderTargetAtom);
+  const setUiPhase = useSetAtom(uiPhaseAtom);
+  const setIsHistoryPanelOpen = useSetAtom(isHistoryPanelOpenAtom);
+  const [activeTarget, setActiveTarget] = useAtom(activeProviderTargetAtom); // Keep this as useAtom to read activeTarget
+  const turnIds = useAtomValue(turnIdsAtom);
   const [currentSessionId] = useAtom(currentSessionIdAtom);
   const setActiveRecomputeState = useSetAtom(activeRecomputeStateAtom);
   const [singularityProvider, setSingularityProvider] = useAtom(singularityProviderAtom);
   const [batchAutoRunEnabled, setBatchAutoRunEnabled] = useAtom(batchAutoRunEnabledAtom);
+
+  const setToast = useSetAtom(toastAtom);
+
+  const { sendMessage, abort } = useChat();
 
   const toggleBatchGating = useCallback(() => {
     setBatchAutoRunEnabled(prev => !prev);
@@ -222,6 +228,7 @@ const ChatInput = ({
           variant="active"
           workflowProgress={workflowProgress as any}
           isSingularityMode={!batchAutoRunEnabled}
+          forceGating={!batchAutoRunEnabled && turnIds.length > 0}
           collapsed={!isRoundActive} // Collapse when NOT streaming (idle/finished)
           onCrownMove={(pid) => {
             setSingularityProvider(pid);

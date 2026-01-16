@@ -154,8 +154,11 @@ export function useChat() {
             type: "extend",
             sessionId: currentSessionId as string,
             userMessage: prompt,
-            providers: activeProviders,
-            includeMapping: shouldUseMapping,
+            // If gating is active (auto-run disabled), only send the singularity provider
+            providers: !batchAutoRunEnabled && effectiveSingularityProvider
+              ? [effectiveSingularityProvider as ProviderKey]
+              : activeProviders,
+            includeMapping: !batchAutoRunEnabled ? false : shouldUseMapping,
             mapper: shouldUseMapping
               ? (effectiveMappingProvider as ProviderKey)
               : undefined,

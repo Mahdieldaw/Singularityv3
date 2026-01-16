@@ -1,0 +1,128 @@
+Phase 1: Shadow Mapper Refactor - COMPLETE ✓
+What Was Delivered
+A complete rewrite of the shadow mapper with all critical gaps from the review addressed.
+Files Delivered
+shadow/
+├── README.md              # Comprehensive usage guide
+├── CHANGELOG.md           # V1 → V2 changes documented
+├── index.ts               # Module entry with pattern freezing
+├── StatementTypes.ts      # 6 stances + 3 signals + helpers
+├── ExclusionRules.ts      # Rules for all 6 stances
+├── ShadowExtractor.ts     # Main extraction with provenance
+├── ShadowDelta.ts         # Audit layer with scoring
+└── test.ts                # Usage examples & tests
+Critical Gaps Addressed
+✓ Gap #4: Dependent Stance Missing
+Fixed: Added dependent stance separate from prerequisite
+
+prerequisite patterns: before, first, requires
+dependent patterns: after, once, then you can
+Priority: dependent (4) > prescriptive (3)
+Why: "Before X" vs "After X" are structural opposites; direction matters for traversal graph
+
+✓ Gap #2: Shadow→Semantic Delta Not Computed
+Fixed: Complete ShadowDelta.ts implementation
+
+computeShadowDelta() compares shadow vs semantic mapper output
+Scores unreferenced by: confidence × (1 + queryRelevance) × (1 + signalWeight × 0.2)
+Query relevance via Jaccard word overlap
+Signal weight: sequence=2, tension=2, conditional=1
+Returns top unreferenced sorted by adjusted score
+
+✓ Gap #7: Provenance Fidelity Check (Preparation)
+Fixed: Full provenance tracking in ShadowStatement
+
+location.paragraphIndex: paragraph position (0-indexed)
+location.sentenceIndex: sentence position within paragraph
+fullParagraph: complete paragraph text for context
+Enables Phase 2 to verify claims derive from source statements
+
+Architecture
+Stance System (6 types in 3 pairs)
+Positive        Negative        Description
+────────────    ────────────    ────────────────────
+Prescriptive    Cautionary      do X / don't do X
+Prerequisite    Dependent       before X / after X
+Assertive       Uncertain       is X / might be X
+Priority: cautionary (6) > prerequisite (5) > dependent (4) > prescriptive (3) > uncertain (2) > assertive (1)
+Signal System (3 boolean flags)
+
+sequence: Order/dependency (before, after, requires, then)
+tension: Conflict/tradeoff (but, however, vs, trade-off)
+conditional: Context-dependency (if, when, unless, given that)
+
+Key Insight: Signals are independent of stance. A prescriptive can have sequence signals, a cautionary can have conditional signals, etc.
+Output Schema
+typescriptinterface ShadowStatement {
+    id: string;                    // "s_0", "s_1", ...
+    modelIndex: number;            // Which model produced this
+    text: string;                  // Extracted sentence
+    
+    stance: Stance;                // 1 of 6 stances
+    confidence: number;            // 0.0-1.0 from pattern strength
+    
+    signals: {
+        sequence: boolean;
+        tension: boolean;
+        conditional: boolean;
+    };
+    
+    location: {
+        paragraphIndex: number;
+        sentenceIndex: number;
+    };
+    fullParagraph: string;         // Full context
+}
+
+interface ShadowExtractionResult {
+    statements: ShadowStatement[];
+    meta: {
+        totalStatements: number;
+        byModel: Record<number, number>;
+        byStance: Record<Stance, number>;
+        bySignal: { sequence: number; tension: number; conditional: number };
+        processingTimeMs: number;
+        candidatesProcessed: number;
+        candidatesExcluded: number;
+        sentencesProcessed: number;
+    };
+}
+Usage Example
+typescriptimport { 
+    extractShadowStatements, 
+    computeShadowDelta,
+    extractReferencedIds,
+    getTopUnreferenced 
+} from './shadow';
+
+// Step 1: Extract shadow statements
+const shadow = extractShadowStatements(modelResponses);
+console.log(`Extracted ${shadow.meta.totalStatements} statements`);
+
+// Step 2: Pass to semantic mapper (Phase 2)
+const semanticPrompt = buildSemanticMapperPrompt(userQuery, shadow.statements);
+const semanticOutput = await callLLM(semanticPrompt);
+
+// Step 3: Compute what shadow caught that semantic didn't use
+const referencedIds = extractReferencedIds(semanticOutput.claims);
+const delta = computeShadowDelta(shadow, referencedIds, userQuery);
+
+// Step 4: Surface high-signal unreferenced
+const potentialGaps = getTopUnreferenced(delta, 5).filter(u => u.signalWeight > 2);
+Performance
+
+Speed: <100ms for typical responses
+No LLM calls: Pure pattern matching
+Deterministic: Same input → same output
+Limits: 500 sentences max, 200 statements max
+
+Testing
+Run the test file to verify:
+bashnpx tsx shadow/test.ts
+Expected output demonstrates:
+
+Basic extraction with metadata
+Statement inspection
+Filtering by stance/signals/confidence
+Shadow delta computation
+Integration pattern

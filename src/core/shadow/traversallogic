@@ -1,0 +1,957 @@
+Part 1: Shadow Mapper Rewrite
+1.1 New Output Schema
+TypeScript
+
+// File: shared/contract.ts (additions)
+
+interface ShadowStatement {
+    id: string;                    // "s_0", "s_1", ...
+    modelIndex: number;            // Which model
+    text: string;                  // The extracted sentence/clause
+    
+    stance: 'prescriptive' | 'cautionary' | 'assertive' | 'uncertain';
+    
+    signals: {
+        sequence: boolean;         // Order/dependency language
+        tension: boolean;          // Friction/contrast language
+        conditional: boolean;      // Gate/condition language
+    };
+    
+    // Provenance
+    location: {
+        paragraphIndex: number;
+        sentenceIndex: number;
+    };
+    fullParagraph: string;         // For enriched synthesis
+}
+
+interface ShadowExtractionResult {
+    statements: ShadowStatement[];
+    meta: {
+        totalStatements: number;
+        byModel: Record<number, number>;
+        byStance: Record<string, number>;
+        bySignal: {
+            sequence: number;
+            tension: number;
+            conditional: number;
+        };
+        processingTimeMs: number;
+    };
+}
+1.2 Extraction Logic
+TypeScript
+
+// File: services/ConciergeService/shadow.ts (rewrite)
+
+const STANCE_PATTERNS = {
+    prescriptive: [
+        /\b(should|must|need to|have to|ought to)\b/i,
+        /\b(recommend|suggest|advise|consider)\b/i,
+        /\b(use|build|implement|create|establish|develop)\b/i,
+        /\b(do|make|ensure|prioritize|focus on)\b/i,
+        /^[A-Z][^.?!]*\b(it|this|you)\b[^.?!]*(important|essential|critical|necessary)/i
+    ],
+    cautionary: [
+        /\b(don't|do not|shouldn't|should not|avoid|never)\b/i,
+        /\b(careful|caution|warning|risk|danger|problem)\b/i,
+        /\b(beware|watch out|be aware)\b/i,
+        /\b(pitfall|trap|mistake|error)\b/i
+    ],
+    uncertain: [
+        /\b(might|may|could|possibly|perhaps|maybe)\b/i,
+        /\b(unclear|unknown|uncertain|ambiguous|depends)\b/i,
+        /\b(not sure|hard to say|difficult to know)\b/i,
+        /\?$/
+    ]
+    // assertive is default when no other stance matches
+};
+
+const SIGNAL_PATTERNS = {
+    sequence: [
+        /\b(before|after|first|then|next|finally|once)\b/i,
+        /\b(requires|depends on|prerequisite|prior to)\b/i,
+        /\b(step \d|phase \d|stage \d)\b/i,
+        /\b(following|preceding|subsequent)\b/i
+    ],
+    tension: [
+        /\b(but|however|although|though|yet)\b/i,
+        /\b(instead|rather than|versus|vs\.?|or)\b/i,
+        /\b(contrast|conflict|contradict|oppose)\b/i,
+        /\b(on the other hand|alternatively)\b/i,
+        /\b(trade-?off|balance|tension)\b/i
+    ],
+    conditional: [
+        /\b(if|when|unless|provided that|assuming)\b/i,
+        /\b(in case|given that|supposing)\b/i,
+        /\b(depends on whether|contingent on)\b/i,
+        /\b(for .+ situations?|in .+ cases?)\b/i
+    ]
+};
+
+function classifyStance(text: string): ShadowStatement['stance'] {
+    for (const pattern of STANCE_PATTERNS.prescriptive) {
+        if (pattern.test(text)) return 'prescriptive';
+    }
+    for (const pattern of STANCE_PATTERNS.cautionary) {
+        if (pattern.test(text)) return 'cautionary';
+    }
+    for (const pattern of STANCE_PATTERNS.uncertain) {
+        if (pattern.test(text)) return 'uncertain';
+    }
+    return 'assertive';
+}
+
+function detectSignals(text: string): ShadowStatement['signals'] {
+    return {
+        sequence: SIGNAL_PATTERNS.sequence.some(p => p.test(text)),
+        tension: SIGNAL_PATTERNS.tension.some(p => p.test(text)),
+        conditional: SIGNAL_PATTERNS.conditional.some(p => p.test(text))
+    };
+}
+
+function splitIntoSentences(paragraph: string): string[] {
+    // Handle common abbreviations to avoid false splits
+    const protected = paragraph
+        .replace(/\b(Mr|Mrs|Ms|Dr|Prof|Inc|Ltd|vs|etc|e\.g|i\.e)\./gi, '$1|||')
+        .replace(/\b(\d)\./g, '$1|||');
+    
+    const sentences = protected
+        .split(/(?<=[.!?])\s+/)
+        .map(s => s.replace(/\|\|\|/g, '.'))
+        .filter(s => s.trim().length > 10);
+    
+    return sentences;
+}
+
+function isSubstantive(sentence: string): boolean {
+    const words = sentence.split(/\s+/).length;
+    if (words < 5) return false;
+    if (words > 100) return false; // Probably a run-on, split issue
+    
+    // Filter meta-commentary
+    const metaPatterns = [
+        /^(sure|okay|yes|no|well|so|now)[,.]?\s/i,
+        /^(let me|I'll|I will|I can|I would)\b/i,
+        /^(here's|here is|this is|that's|that is)\s+(a|an|the|my)\s+(summary|overview|breakdown|list)/i,
+        /\b(as I mentioned|as discussed|as noted)\b/i
+    ];
+    
+    return !metaPatterns.some(p => p.test(sentence));
+}
+
+export function extractShadowStatements(
+    responses: Array<{ modelIndex: number; content: string }>
+): ShadowExtractionResult {
+    const startTime = Date.now();
+    const statements: ShadowStatement[] = [];
+    let idCounter = 0;
+    
+    for (const response of responses) {
+        const paragraphs = response.content.split(/\n\n+/).filter(p => p.trim());
+        
+        for (let pIdx = 0; pIdx < paragraphs.length; pIdx++) {
+            const paragraph = paragraphs[pIdx];
+            const sentences = splitIntoSentences(paragraph);
+            
+            for (let sIdx = 0; sIdx < sentences.length; sIdx++) {
+                const sentence = sentences[sIdx].trim();
+                
+                if (!isSubstantive(sentence)) continue;
+                
+                const stance = classifyStance(sentence);
+                const signals = detectSignals(sentence);
+                
+                statements.push({
+                    id: `s_${idCounter++}`,
+                    modelIndex: response.modelIndex,
+                    text: sentence,
+                    stance,
+                    signals,
+                    location: {
+                        paragraphIndex: pIdx,
+                        sentenceIndex: sIdx
+                    },
+                    fullParagraph: paragraph
+                });
+            }
+        }
+    }
+    
+    // Compute meta
+    const byModel: Record<number, number> = {};
+    const byStance: Record<string, number> = { prescriptive: 0, cautionary: 0, assertive: 0, uncertain: 0 };
+    const bySignal = { sequence: 0, tension: 0, conditional: 0 };
+    
+    for (const s of statements) {
+        byModel[s.modelIndex] = (byModel[s.modelIndex] || 0) + 1;
+        byStance[s.stance]++;
+        if (s.signals.sequence) bySignal.sequence++;
+        if (s.signals.tension) bySignal.tension++;
+        if (s.signals.conditional) bySignal.conditional++;
+    }
+    
+    return {
+        statements,
+        meta: {
+            totalStatements: statements.length,
+            byModel,
+            byStance,
+            bySignal,
+            processingTimeMs: Date.now() - startTime
+        }
+    };
+}
+Part 2: Semantic Mapper Prompt
+2.1 New Prompt Template
+TypeScript
+
+// File: services/ConciergeService/semanticMapper.ts (new file)
+
+export function buildSemanticMapperPrompt(
+    userQuery: string,
+    statements: ShadowStatement[]
+): string {
+    const formattedStatements = statements.map(s => {
+        const signalTags = [
+            s.signals.sequence ? 'SEQ' : null,
+            s.signals.tension ? 'TENS' : null,
+            s.signals.conditional ? 'COND' : null
+        ].filter(Boolean).join(',');
+        
+        const tagStr = signalTags ? ` [${signalTags}]` : '';
+        
+        return `[${s.id}] (model_${s.modelIndex}, ${s.stance}${tagStr}): "${s.text}"`;
+    }).join('\n\n');
+    
+    return `<CONTEXT>
+The user asked: "${userQuery}"
+
+Multiple models responded. Their responses have been decomposed into individual 
+statements. Each statement has:
+- An ID (for reference)
+- A source model
+- A stance (prescriptive/cautionary/assertive/uncertain)
+- Optional signals: SEQ (sequence language), TENS (tension language), COND (conditional language)
+</CONTEXT>
+
+<INSTRUCTIONS>
+Your job is to create a structured map from these statements.
+
+1. CLUSTER: Group statements that express the same essential position.
+   - Statements may use different words but advocate the same thing
+   - A cluster can have 1 statement (unique position) or many (agreed position)
+
+2. CANONICALIZE: For each cluster, write ONE clear claim.
+   - Keep it concise (1-2 sentences max)
+   - Capture the core position, not every nuance
+
+3. EDGES: Identify relationships between claims.
+   - tension: These claims pull against each other (mutually exclusive OR trade-off)
+   - sequence: This claim must be resolved/done before that claim makes sense
+
+4. GATES: For claims derived from conditional statements, extract the activation condition.
+   - The gate is the "if" part that determines when this claim applies
+   - Not all claims have gates
+
+5. EXCLUDE: List statement IDs that are noise, filler, or redundant meta-commentary.
+
+Use the signal tags as hints:
+- TENS signals often indicate tension edges
+- SEQ signals often indicate sequence edges  
+- COND signals often indicate gates to extract
+</INSTRUCTIONS>
+
+<STATEMENTS>
+${formattedStatements}
+</STATEMENTS>
+
+<OUTPUT_FORMAT>
+Respond with valid JSON only:
+{
+  "claims": [
+    {
+      "id": "claim_1",
+      "label": "Short label (3-6 words)",
+      "text": "The canonical claim text.",
+      "stance": "prescriptive|cautionary|assertive|uncertain",
+      "sourceStatements": ["s_0", "s_5", "s_12"],
+      "gate": null
+    },
+    {
+      "id": "claim_2",
+      "label": "Conditional recommendation",
+      "text": "Do X in situation Y.",
+      "stance": "prescriptive",
+      "sourceStatements": ["s_3"],
+      "gate": "You are in situation Y"
+    }
+  ],
+  "edges": [
+    { "from": "claim_1", "to": "claim_3", "type": "tension" },
+    { "from": "claim_2", "to": "claim_1", "type": "sequence" }
+  ],
+  "excluded": ["s_7", "s_22"],
+  "ghosts": [
+    "What about edge case X? (not addressed by any model)"
+  ]
+}
+</OUTPUT_FORMAT>`;
+}
+2.2 Semantic Mapper Output Schema
+TypeScript
+
+// File: shared/contract.ts (additions)
+
+interface SemanticMapperClaim {
+    id: string;
+    label: string;
+    text: string;
+    stance: 'prescriptive' | 'cautionary' | 'assertive' | 'uncertain';
+    sourceStatements: string[];  // IDs referencing ShadowStatements
+    gate: string | null;         // Activation condition, if any
+}
+
+interface SemanticMapperEdge {
+    from: string;
+    to: string;
+    type: 'tension' | 'sequence';
+}
+
+interface SemanticMapperOutput {
+    claims: SemanticMapperClaim[];
+    edges: SemanticMapperEdge[];
+    excluded: string[];
+    ghosts: string[];
+}
+2.3 Parsing and Validation
+TypeScript
+
+// File: services/ConciergeService/semanticMapper.ts (continued)
+
+export function parseSemanticMapperOutput(
+    raw: string,
+    shadowStatements: ShadowStatement[]
+): SemanticMapperOutput | { error: string } {
+    // Extract JSON from response (handle markdown code blocks)
+    const jsonMatch = raw.match(/```(?:json)?\s*([\s\S]*?)```/) || 
+                      raw.match(/(\{[\s\S]*\})/);
+    
+    if (!jsonMatch) {
+        return { error: 'No JSON found in response' };
+    }
+    
+    let parsed: any;
+    try {
+        parsed = JSON.parse(jsonMatch[1]);
+    } catch (e) {
+        return { error: `JSON parse error: ${e}` };
+    }
+    
+    // Validate claims
+    if (!Array.isArray(parsed.claims)) {
+        return { error: 'Missing claims array' };
+    }
+    
+    const validStatementIds = new Set(shadowStatements.map(s => s.id));
+    
+    for (const claim of parsed.claims) {
+        if (!claim.id || !claim.label || !claim.text) {
+            return { error: `Invalid claim: ${JSON.stringify(claim)}` };
+        }
+        
+        // Validate source statement references
+        for (const sid of claim.sourceStatements || []) {
+            if (!validStatementIds.has(sid)) {
+                console.warn(`Unknown statement ID: ${sid}`);
+            }
+        }
+    }
+    
+    // Validate edges
+    const validClaimIds = new Set(parsed.claims.map((c: any) => c.id));
+    
+    for (const edge of parsed.edges || []) {
+        if (!validClaimIds.has(edge.from) || !validClaimIds.has(edge.to)) {
+            console.warn(`Edge references unknown claim: ${edge.from} -> ${edge.to}`);
+        }
+        if (!['tension', 'sequence'].includes(edge.type)) {
+            console.warn(`Unknown edge type: ${edge.type}`);
+        }
+    }
+    
+    return {
+        claims: parsed.claims,
+        edges: parsed.edges || [],
+        excluded: parsed.excluded || [],
+        ghosts: parsed.ghosts || []
+    };
+}
+Part 3: Enriched Claims with Provenance
+3.1 Claim Assembly
+TypeScript
+
+// File: services/ConciergeService/claimAssembly.ts (new file)
+
+interface EnrichedClaimV2 {
+    id: string;
+    label: string;
+    text: string;
+    stance: 'prescriptive' | 'cautionary' | 'assertive' | 'uncertain';
+    gate: string | null;
+    
+    // Provenance (from shadow statements)
+    sourceStatements: ShadowStatement[];
+    supporters: number[];  // Model indices
+    
+    // Graph position (computed after traversal graph built)
+    tier: number;
+    gatedBy: string[];     // Claim IDs that must be resolved first
+    gates: string[];       // Claim IDs that this claim gates
+}
+
+export function assembleClaims(
+    mapperOutput: SemanticMapperOutput,
+    shadowStatements: ShadowStatement[]
+): EnrichedClaimV2[] {
+    const statementMap = new Map(shadowStatements.map(s => [s.id, s]));
+    
+    return mapperOutput.claims.map(claim => {
+        const sources = (claim.sourceStatements || [])
+            .map(id => statementMap.get(id))
+            .filter((s): s is ShadowStatement => s !== undefined);
+        
+        const supporters = [...new Set(sources.map(s => s.modelIndex))];
+        
+        return {
+            id: claim.id,
+            label: claim.label,
+            text: claim.text,
+            stance: claim.stance,
+            gate: claim.gate,
+            sourceStatements: sources,
+            supporters,
+            tier: 0,       // Computed later
+            gatedBy: [],   // Computed later
+            gates: []      // Computed later
+        };
+    });
+}
+Part 4: Traversal Graph
+4.1 Build Traversal Structure
+TypeScript
+
+// File: services/ConciergeService/traversal.ts (new file)
+
+interface TraversalGraph {
+    claims: EnrichedClaimV2[];
+    edges: SemanticMapperEdge[];
+    tiers: Map<number, string[]>;  // tier -> claim IDs at that tier
+    maxTier: number;
+}
+
+export function buildTraversalGraph(
+    claims: EnrichedClaimV2[],
+    edges: SemanticMapperEdge[]
+): TraversalGraph {
+    const claimMap = new Map(claims.map(c => [c.id, c]));
+    
+    // Build gatedBy and gates relationships from sequence edges
+    for (const edge of edges) {
+        if (edge.type === 'sequence') {
+            // edge.from must be resolved before edge.to
+            const downstream = claimMap.get(edge.to);
+            const upstream = claimMap.get(edge.from);
+            
+            if (downstream && upstream) {
+                downstream.gatedBy.push(edge.from);
+                upstream.gates.push(edge.to);
+            }
+        }
+    }
+    
+    // Assign tiers via topological sort
+    const visited = new Set<string>();
+    const tierMap = new Map<string, number>();
+    
+    function computeTier(claimId: string): number {
+        if (tierMap.has(claimId)) return tierMap.get(claimId)!;
+        if (visited.has(claimId)) return 0; // Cycle protection
+        visited.add(claimId);
+        
+        const claim = claimMap.get(claimId);
+        if (!claim || claim.gatedBy.length === 0) {
+            tierMap.set(claimId, 0);
+            return 0;
+        }
+        
+        const maxUpstreamTier = Math.max(...claim.gatedBy.map(computeTier));
+        const tier = maxUpstreamTier + 1;
+        tierMap.set(claimId, tier);
+        return tier;
+    }
+    
+    // Compute all tiers
+    for (const claim of claims) {
+        claim.tier = computeTier(claim.id);
+    }
+    
+    // Group by tier
+    const tiers = new Map<number, string[]>();
+    let maxTier = 0;
+    
+    for (const claim of claims) {
+        const tierClaims = tiers.get(claim.tier) || [];
+        tierClaims.push(claim.id);
+        tiers.set(claim.tier, tierClaims);
+        maxTier = Math.max(maxTier, claim.tier);
+    }
+    
+    return { claims, edges, tiers, maxTier };
+}
+Part 5: Forcing Point Extraction
+5.1 Generate Forcing Points
+TypeScript
+
+// File: services/ConciergeService/forcingPoints.ts (new file)
+
+type ForcingPointType = 'choice' | 'position' | 'gate';
+
+interface ForcingPoint {
+    id: string;
+    type: ForcingPointType;
+    tier: number;
+    
+    // The question to ask
+    question: string;
+    
+    // For choices (tension)
+    options?: { claimId: string; label: string }[];
+    
+    // For position checks (sequence)
+    checkClaim?: { claimId: string; label: string };
+    
+    // For gates (conditional)
+    condition?: string;
+    claimId?: string;
+    
+    // What resolving this affects
+    unlocks: string[];  // Claim IDs that become live after this
+    prunes: string[];   // Claim IDs that get pruned on "no"
+}
+
+export function extractForcingPoints(
+    graph: TraversalGraph
+): ForcingPoint[] {
+    const forcingPoints: ForcingPoint[] = [];
+    const claimMap = new Map(graph.claims.map(c => [c.id, c]));
+    let fpCounter = 0;
+    
+    // 1. Extract CHOICE forcing points from tension edges
+    const tensionEdges = graph.edges.filter(e => e.type === 'tension');
+    const usedInTension = new Set<string>();
+    
+    for (const edge of tensionEdges) {
+        if (usedInTension.has(edge.from) || usedInTension.has(edge.to)) continue;
+        
+        const claimA = claimMap.get(edge.from);
+        const claimB = claimMap.get(edge.to);
+        
+        if (!claimA || !claimB) continue;
+        
+        // Only create forcing point if both are at same tier (live together)
+        if (claimA.tier !== claimB.tier) continue;
+        
+        usedInTension.add(edge.from);
+        usedInTension.add(edge.to);
+        
+        forcingPoints.push({
+            id: `fp_${fpCounter++}`,
+            type: 'choice',
+            tier: claimA.tier,
+            question: `Which matters more to you?`,
+            options: [
+                { claimId: claimA.id, label: claimA.label },
+                { claimId: claimB.id, label: claimB.label }
+            ],
+            unlocks: [...claimA.gates, ...claimB.gates],
+            prunes: [] // Pruning happens based on which option is chosen
+        });
+    }
+    
+    // 2. Extract POSITION forcing points from sequence roots
+    const sequenceRoots = graph.claims.filter(c => 
+        c.tier === 0 && c.gates.length > 0
+    );
+    
+    for (const root of sequenceRoots) {
+        // Skip if already part of a tension forcing point
+        if (usedInTension.has(root.id)) continue;
+        
+        forcingPoints.push({
+            id: `fp_${fpCounter++}`,
+            type: 'position',
+            tier: 0,
+            question: `Do you already have this?`,
+            checkClaim: { claimId: root.id, label: root.label },
+            unlocks: root.gates,
+            prunes: root.gates // If "no", downstream is pruned
+        });
+    }
+    
+    // 3. Extract GATE forcing points from gated claims
+    const gatedClaims = graph.claims.filter(c => c.gate !== null);
+    
+    for (const claim of gatedClaims) {
+        forcingPoints.push({
+            id: `fp_${fpCounter++}`,
+            type: 'gate',
+            tier: claim.tier,
+            question: `Is this true for you?`,
+            condition: claim.gate!,
+            claimId: claim.id,
+            unlocks: claim.gates,
+            prunes: [claim.id, ...claim.gates] // If "no", this claim and its downstream pruned
+        });
+    }
+    
+    // Sort by tier
+    return forcingPoints.sort((a, b) => a.tier - b.tier);
+}
+Part 6: Traversal State Machine
+6.1 State Management
+TypeScript
+
+// File: services/ConciergeService/traversalState.ts (new file)
+
+interface TraversalState {
+    currentTier: number;
+    
+    resolved: Map<string, {
+        answer: 'yes' | 'no' | 'chosen';
+        chosenOption?: string;  // For choice type
+    }>;
+    
+    active: Set<string>;    // Claim IDs still in play
+    pruned: Set<string>;    // Claim IDs removed
+    
+    liveForcingPoints: string[];  // FP IDs that can be answered now
+    
+    isComplete: boolean;
+}
+
+export function initTraversalState(
+    graph: TraversalGraph,
+    forcingPoints: ForcingPoint[]
+): TraversalState {
+    const tier0FPs = forcingPoints.filter(fp => fp.tier === 0).map(fp => fp.id);
+    
+    return {
+        currentTier: 0,
+        resolved: new Map(),
+        active: new Set(graph.claims.map(c => c.id)),
+        pruned: new Set(),
+        liveForcingPoints: tier0FPs,
+        isComplete: tier0FPs.length === 0
+    };
+}
+
+export function applyAnswer(
+    state: TraversalState,
+    fpId: string,
+    answer: 'yes' | 'no' | string,  // string = chosen option ID
+    forcingPoints: ForcingPoint[],
+    graph: TraversalGraph
+): TraversalState {
+    const fp = forcingPoints.find(f => f.id === fpId);
+    if (!fp) return state;
+    
+    const newState: TraversalState = {
+        currentTier: state.currentTier,
+        resolved: new Map(state.resolved),
+        active: new Set(state.active),
+        pruned: new Set(state.pruned),
+        liveForcingPoints: [...state.liveForcingPoints],
+        isComplete: false
+    };
+    
+    // Record resolution
+    if (fp.type === 'choice') {
+        newState.resolved.set(fpId, { answer: 'chosen', chosenOption: answer });
+        
+        // Prune the non-chosen option and its downstream
+        const notChosen = fp.options!.find(o => o.claimId !== answer);
+        if (notChosen) {
+            pruneClaim(notChosen.claimId, newState, graph);
+        }
+    } else {
+        newState.resolved.set(fpId, { answer: answer as 'yes' | 'no' });
+        
+        if (answer === 'no') {
+            for (const claimId of fp.prunes) {
+                pruneClaim(claimId, newState, graph);
+            }
+        }
+    }
+    
+    // Remove this FP from live list
+    newState.liveForcingPoints = newState.liveForcingPoints.filter(id => id !== fpId);
+    
+    // Check if tier is complete
+    const tierComplete = newState.liveForcingPoints.length === 0;
+    
+    if (tierComplete) {
+        // Advance to next tier
+        const nextTier = state.currentTier + 1;
+        newState.currentTier = nextTier;
+        
+        // Find FPs at next tier whose prerequisites are resolved
+        const nextFPs = forcingPoints.filter(fp => {
+            if (fp.tier !== nextTier) return false;
+            
+            // Check if claim is still active
+            if (fp.type === 'choice') {
+                return fp.options!.some(o => newState.active.has(o.claimId));
+            } else if (fp.claimId) {
+                return newState.active.has(fp.claimId);
+            } else if (fp.checkClaim) {
+                return newState.active.has(fp.checkClaim.claimId);
+            }
+            return true;
+        });
+        
+        newState.liveForcingPoints = nextFPs.map(fp => fp.id);
+        newState.isComplete = nextFPs.length === 0;
+    }
+    
+    return newState;
+}
+
+function pruneClaim(
+    claimId: string,
+    state: TraversalState,
+    graph: TraversalGraph
+): void {
+    if (state.pruned.has(claimId)) return;
+    
+    state.active.delete(claimId);
+    state.pruned.add(claimId);
+    
+    // Recursively prune downstream
+    const claim = graph.claims.find(c => c.id === claimId);
+    if (claim) {
+        for (const downstreamId of claim.gates) {
+            pruneClaim(downstreamId, state, graph);
+        }
+    }
+}
+Part 7: Synthesis Prompt Builder
+7.1 Build Enriched Prompt
+TypeScript
+
+// File: services/ConciergeService/synthesisPrompt.ts (new file)
+
+interface SynthesisContext {
+    userQuery: string;
+    traversalState: TraversalState;
+    graph: TraversalGraph;
+    forcingPoints: ForcingPoint[];
+    ghosts: string[];
+}
+
+export function buildSynthesisPrompt(ctx: SynthesisContext): string {
+    const { userQuery, traversalState, graph, forcingPoints, ghosts } = ctx;
+    
+    const claimMap = new Map(graph.claims.map(c => [c.id, c]));
+    
+    // Get active and pruned claims
+    const activeClaims = graph.claims.filter(c => traversalState.active.has(c.id));
+    const prunedClaims = graph.claims.filter(c => traversalState.pruned.has(c.id));
+    
+    // Format user path from resolved forcing points
+    const userPath = formatUserPath(traversalState, forcingPoints, claimMap);
+    
+    // Format active claims with evidence
+    const activeWithEvidence = formatClaimsWithEvidence(activeClaims);
+    
+    // Format pruned as brief notes
+    const prunedNotes = prunedClaims.map(c => `- ${c.label}`).join('\n');
+    
+    // Format ghosts
+    const ghostNotes = ghosts.map(g => `? ${g}`).join('\n');
+    
+    return `<USER_QUERY>
+${userQuery}
+</USER_QUERY>
+
+<USER_PATH>
+${userPath}
+</USER_PATH>
+
+<ACTIVE_CLAIMS_WITH_EVIDENCE>
+${activeWithEvidence}
+</ACTIVE_CLAIMS_WITH_EVIDENCE>
+
+<PRUNED_ALTERNATIVES>
+${prunedNotes || 'None'}
+</PRUNED_ALTERNATIVES>
+
+<BOUNDARIES>
+${ghostNotes || 'None identified'}
+</BOUNDARIES>
+
+<INSTRUCTIONS>
+Synthesize a definitive recommendation for this user given their specific path.
+
+- Reference what they confirmed/prioritized
+- The evidence from the active claims supports your recommendation
+- Briefly acknowledge what they're giving up (pruned alternatives)
+- End with a concrete next step
+
+Be direct. No hedging. They've made their choices; now give them the answer.
+</INSTRUCTIONS>`;
+}
+
+function formatUserPath(
+    state: TraversalState,
+    forcingPoints: ForcingPoint[],
+    claimMap: Map<string, EnrichedClaimV2>
+): string {
+    const lines: string[] = [];
+    
+    for (const [fpId, resolution] of state.resolved) {
+        const fp = forcingPoints.find(f => f.id === fpId);
+        if (!fp) continue;
+        
+        if (fp.type === 'choice' && resolution.chosenOption) {
+            const chosen = claimMap.get(resolution.chosenOption);
+            const notChosen = fp.options!.find(o => o.claimId !== resolution.chosenOption);
+            lines.push(`Chose: "${chosen?.label}" over "${notChosen?.label}"`);
+        } else if (fp.type === 'position') {
+            const label = fp.checkClaim?.label;
+            lines.push(resolution.answer === 'yes' 
+                ? `Confirmed: Has "${label}"`
+                : `Confirmed: Does NOT have "${label}"`
+            );
+        } else if (fp.type === 'gate') {
+            lines.push(resolution.answer === 'yes'
+                ? `Confirmed: "${fp.condition}" applies`
+                : `Confirmed: "${fp.condition}" does NOT apply`
+            );
+        }
+    }
+    
+    return lines.join('\n');
+}
+
+function formatClaimsWithEvidence(claims: EnrichedClaimV2[]): string {
+    return claims.map(claim => {
+        let section = `## ${claim.label}\n${claim.text}\n`;
+        
+        if (claim.sourceStatements.length > 0) {
+            section += '\nEvidence:\n';
+            for (const stmt of claim.sourceStatements.slice(0, 3)) { // Limit to 3
+                section += `> "${stmt.text}" — Model ${stmt.modelIndex}\n`;
+            }
+        }
+        
+        return section;
+    }).join('\n');
+}
+Part 8: Integration
+8.1 Main Pipeline
+TypeScript
+
+// File: services/ConciergeService/pipeline.ts (new file)
+
+import { extractShadowStatements, ShadowExtractionResult } from './shadow';
+import { buildSemanticMapperPrompt, parseSemanticMapperOutput } from './semanticMapper';
+import { assembleClaims } from './claimAssembly';
+import { buildTraversalGraph, TraversalGraph } from './traversal';
+import { extractForcingPoints, ForcingPoint } from './forcingPoints';
+import { initTraversalState, applyAnswer, TraversalState } from './traversalState';
+import { buildSynthesisPrompt } from './synthesisPrompt';
+
+export interface PipelineResult {
+    shadow: ShadowExtractionResult;
+    graph: TraversalGraph;
+    forcingPoints: ForcingPoint[];
+    initialState: TraversalState;
+    ghosts: string[];
+}
+
+export async function runExtractionPipeline(
+    userQuery: string,
+    responses: Array<{ modelIndex: number; content: string }>,
+    callLLM: (prompt: string) => Promise<string>
+): Promise<PipelineResult> {
+    // 1. Shadow extraction (mechanical, <100ms)
+    const shadow = extractShadowStatements(responses);
+    console.log(`[Pipeline] Shadow extracted ${shadow.meta.totalStatements} statements`);
+    
+    // 2. Semantic mapping (LLM)
+    const mapperPrompt = buildSemanticMapperPrompt(userQuery, shadow.statements);
+    const mapperRaw = await callLLM(mapperPrompt);
+    const mapperOutput = parseSemanticMapperOutput(mapperRaw, shadow.statements);
+    
+    if ('error' in mapperOutput) {
+        throw new Error(`Semantic mapper failed: ${mapperOutput.error}`);
+    }
+    
+    console.log(`[Pipeline] Semantic mapper produced ${mapperOutput.claims.length} claims`);
+    
+    // 3. Assemble claims with provenance
+    const claims = assembleClaims(mapperOutput, shadow.statements);
+    
+    // 4. Build traversal graph
+    const graph = buildTraversalGraph(claims, mapperOutput.edges);
+    console.log(`[Pipeline] Traversal graph: ${graph.maxTier + 1} tiers`);
+    
+    // 5. Extract forcing points
+    const forcingPoints = extractForcingPoints(graph);
+    console.log(`[Pipeline] ${forcingPoints.length} forcing points extracted`);
+    
+    // 6. Initialize traversal state
+    const initialState = initTraversalState(graph, forcingPoints);
+    
+    return {
+        shadow,
+        graph,
+        forcingPoints,
+        initialState,
+        ghosts: mapperOutput.ghosts
+    };
+}
+
+export function getNextForcingPoints(
+    forcingPoints: ForcingPoint[],
+    state: TraversalState
+): ForcingPoint[] {
+    return forcingPoints.filter(fp => state.liveForcingPoints.includes(fp.id));
+}
+
+export function answerForcingPoint(
+    fpId: string,
+    answer: 'yes' | 'no' | string,
+    state: TraversalState,
+    forcingPoints: ForcingPoint[],
+    graph: TraversalGraph
+): TraversalState {
+    return applyAnswer(state, fpId, answer, forcingPoints, graph);
+}
+
+export function synthesize(
+    userQuery: string,
+    state: TraversalState,
+    graph: TraversalGraph,
+    forcingPoints: ForcingPoint[],
+    ghosts: string[]
+): string {
+    return buildSynthesisPrompt({
+        userQuery,
+        traversalState: state,
+        graph,
+        forcingPoints,
+        ghosts
+    });
+}

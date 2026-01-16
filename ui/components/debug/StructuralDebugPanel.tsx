@@ -46,7 +46,8 @@ export const StructuralDebugPanel: React.FC<StructuralDebugPanelProps> = ({ anal
         const variance = normalized.reduce((sum, v) => sum + Math.pow(v - mean, 2), 0) / normalized.length;
         const supportSignal = clamp01(variance * 5);
         const uniqueModelCount = new Set(supporters.flat()).size;
-        const coverageSignal = modelCount > 0 ? uniqueModelCount / modelCount : 0;
+        const coverageSignal = modelCount > 0 ? clamp01(uniqueModelCount / modelCount) : 0;
+
         const final = edgeSignal * 0.4 + supportSignal * 0.3 + coverageSignal * 0.3;
         return { edgeSignal, supportSignal, coverageSignal, final };
     }, [analysis]);
@@ -62,9 +63,8 @@ export const StructuralDebugPanel: React.FC<StructuralDebugPanelProps> = ({ anal
         const hills = analysis.claimsWithLeverage.filter(c =>
             c.supportRatio > hillThreshold && c.supportRatio <= peakThreshold
         );
-        const floor = analysis.claimsWithLeverage.filter(c => c.supportRatio <= hillThreshold);
 
-        return { peaks, hills, floor, peakThreshold, hillThreshold };
+        return { peaks, hills, peakThreshold, hillThreshold };
     }, [analysis]);
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -76,14 +76,14 @@ export const StructuralDebugPanel: React.FC<StructuralDebugPanelProps> = ({ anal
             const data = dissentPattern.data as any;
             const rawVoices = Array.isArray(data.voices) ? data.voices : [];
 
-            return rawVoices.map((v: any) => ({
-                id: v.id,
-                label: v.label,
-                text: v.text,
+            return rawVoices.map((v: any, idx: number) => ({
+                id: v.id || `voice-${idx}`,
+                label: v.label || "",
+                text: v.text || "",
                 supportRatio: v.supportRatio,
                 insightType: v.insightType || 'edge_case',
                 insightScore: v.insightScore || 0.5,
-                whyItMatters: v.whyItMatters || (v.id === data.strongestVoice?.id ? data.strongestVoice.whyItMatters : 'Challenging minority voice'),
+                whyItMatters: v.whyItMatters || (data?.strongestVoice?.id && v.id === data.strongestVoice.id ? data.strongestVoice.whyItMatters : 'Challenging minority voice'),
                 challenges: v.challenges || (Array.isArray(v.targets) ? v.targets.join(', ') : 'consensus')
             }));
         }
@@ -113,6 +113,7 @@ export const StructuralDebugPanel: React.FC<StructuralDebugPanelProps> = ({ anal
     // Get primary pattern - support both old and new field names
     const primaryPattern = analysis.shape.primary || (analysis.shape as any).primaryPattern || 'unknown';
     const secondaryPatterns = analysis.shape.patterns || [];
+    const evidenceList = analysis.shape?.evidence ?? [];
 
     return (
         <div className="h-full overflow-y-auto relative custom-scrollbar p-6">
@@ -572,9 +573,9 @@ export const StructuralDebugPanel: React.FC<StructuralDebugPanelProps> = ({ anal
                                 </div>
                                 <div>
                                     <div className="text-[11px] text-text-muted mb-1">Evidence list</div>
-                                    {(analysis.shape?.evidence ?? []).length > 0 ? (
+                                    {evidenceList.length > 0 ? (
                                         <ul className="list-disc list-inside space-y-1">
-                                            {(analysis.shape?.evidence ?? []).map((e, idx) => (
+                                            {evidenceList.map((e, idx) => (
                                                 <li key={idx} className="text-[11px]">{e}</li>
                                             ))}
                                         </ul>

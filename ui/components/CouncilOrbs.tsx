@@ -23,6 +23,8 @@ interface CouncilOrbsProps {
     workflowProgress?: Record<string, { stage: WorkflowStage; progress?: number }>;
     // New: collapsed state (only show active/crown orb, expand on hover)
     collapsed?: boolean;
+    // New: strictly hide orbs for gated turns (after Turn 1)
+    forceGating?: boolean;
 }
 
 // Workflow stage type for progress indicator used by Orbs
@@ -46,6 +48,7 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
     workflowProgress = {},
     isSingularityMode = false,
     collapsed = false, // Default to expanded
+    forceGating = false,
 }) => {
     const [hoveredOrb, setHoveredOrb] = useState<string | null>(null);
     const [isCrownMode, setIsCrownMode] = useState(false);
@@ -294,6 +297,7 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
                                 workflowStage={workflowProgress[pid]?.stage}
                                 workflowProgress={workflowProgress[pid]?.progress}
                                 isDimmed={isSingularityMode}
+                                forceHide={forceGating}
                             />
                         );
                     })}
@@ -357,6 +361,7 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
                                 workflowStage={workflowProgress[pid]?.stage}
                                 workflowProgress={workflowProgress[pid]?.progress}
                                 isDimmed={isSingularityMode}
+                                forceHide={forceGating}
                             />
                         );
                     })}
@@ -508,6 +513,7 @@ interface OrbProps {
     workflowStage?: WorkflowStage;
     workflowProgress?: number; // 0-100
     isDimmed?: boolean;
+    forceHide?: boolean;
 }
 
 const Orb: React.FC<OrbProps> = ({
@@ -528,6 +534,7 @@ const Orb: React.FC<OrbProps> = ({
     workflowStage = 'idle',
     workflowProgress = 0,
     isDimmed = false,
+    forceHide = false,
 }) => {
     const pid = String(provider.id);
     const state = useAtomValue(providerEffectiveStateFamily({ turnId, providerId: pid }));
@@ -589,8 +596,10 @@ const Orb: React.FC<OrbProps> = ({
                 "council-orb-wrapper",
                 isVoice && "council-orb-wrapper--voice",
                 isActiveVariant && !showAsActive && !isVoice && "council-orb-wrapper--inactive",
-                isDimmed && "opacity-30 grayscale pointer-events-none"
+                isDimmed && !forceHide && "opacity-30 grayscale pointer-events-none",
+                forceHide && "opacity-0 scale-0 pointer-events-none w-0 !mx-0"
             )}
+            style={forceHide ? { width: 0, margin: 0, padding: 0 } : {}}
         >
             {/* Crown Icon for Voice Provider */}
             {isVoice && showCrown && (

@@ -1,0 +1,687 @@
+# Implementation Instructions: Position Brief Rewrite
+
+## Overview
+
+Replace the current shape-specific position brief system with a unified geometry-preserving, hierarchy-inverting brief builder.
+
+---
+
+## Files to Modify
+
+1. `positionBrief.ts` — Complete rewrite
+2. `ConciergeService.ts` — Update prompt, simplify imports
+
+---
+
+## File 1: `positionBrief.ts`
+
+### Delete Everything
+
+Remove all existing code. The new file is a single unified implementation.
+
+### New Implementation
+
+```typescript
+// ═══════════════════════════════════════════════════════════════════════════
+// POSITION BRIEF - Geometry-Preserving, Hierarchy-Inverting Brief Builder
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Philosophy:
+// - Edges describe the PROBLEM (logical relationships)
+// - Support counts describe the MODELS (voting behavior)
+// - We transmit geometry, not hierarchy
+// - Outliers anchor buckets (inverted privilege)
+// - Mainstream claims scatter into outlier buckets
+// - Order within buckets is randomized (no primacy)
+// - Bucket order is randomized (no primacy)
+// - Ghosts are categorically separate (unknowns, not suggestions)
+//
+// The concierge receives structure without interpretation.
+// The concierge interprets in context of the user's question.
+// ═══════════════════════════════════════════════════════════════════════════
+
+import type {
+    StructuralAnalysis,
+    EnrichedClaim,
+    Edge,
+} from '../../shared/contract';
+
+// ═══════════════════════════════════════════════════════════════════════════
+// UTILITY FUNCTIONS
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Fisher-Yates shuffle - mutates array in place
+ */
+function shuffle<T>(array: T[]): T[] {
+    for (let i = array.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [array[i], array[j]] = [array[j], array[i]];
+    }
+    return array;
+}
+
+/**
+ * Check if two claims have any edge relationship
+ */
+function hasEdgeRelationship(
+    claimA: EnrichedClaim,
+    claimB: EnrichedClaim,
+    edges: Edge[]
+): boolean {
+    return edges.some(e =>
+        (e.from === claimA.id && e.to === claimB.id) ||
+        (e.from === claimB.id && e.to === claimA.id)
+    );
+}
+
+/**
+ * Find tension pairs (conflicts or tradeoffs) within a set of claims
+ */
+function findTensionPairs(
+    claims: EnrichedClaim[],
+    edges: Edge[]
+): Array<[EnrichedClaim, EnrichedClaim]> {
+    const pairs: Array<[EnrichedClaim, EnrichedClaim]> = [];
+    const usedIds = new Set<string>();
+    const claimIds = new Set(claims.map(c => c.id));
+
+    const tensionEdges = edges.filter(e =>
+        (e.type === 'conflicts' || e.type === 'tradeoff') &&
+        claimIds.has(e.from) &&
+        claimIds.has(e.to)
+    );
+
+    for (const edge of tensionEdges) {
+        if (usedIds.has(edge.from) || usedIds.has(edge.to)) continue;
+
+        const claimA = claims.find(c => c.id === edge.from);
+        const claimB = claims.find(c => c.id === edge.to);
+
+        if (claimA && claimB) {
+            pairs.push([claimA, claimB]);
+            usedIds.add(claimA.id);
+            usedIds.add(claimB.id);
+        }
+    }
+
+    return pairs;
+}
+
+/**
+ * Wrap text to specified width, returning array of lines
+ */
+function wrapText(text: string, width: number): string[] {
+    const words = text.split(' ');
+    const lines: string[] = [];
+    let current = '';
+
+    for (const word of words) {
+        if ((current + ' ' + word).trim().length <= width) {
+            current = (current + ' ' + word).trim();
+        } else {
+            if (current) lines.push(current);
+            current = word;
+        }
+    }
+    if (current) lines.push(current);
+    return lines;
+}
+
+/**
+ * Format two claims side-by-side in box format
+ * Visual implies tension without labeling it
+ */
+function formatSideBySide(a: EnrichedClaim, b: EnrichedClaim): string {
+    const width = 38;
+    const aLines = wrapText(a.text, width);
+    const bLines = wrapText(b.text, width);
+    const maxLines = Math.max(aLines.length, bLines.length);
+
+    let result = "┌" + "─".repeat(width + 2) + "┬" + "─".repeat(width + 2) + "┐\n";
+    for (let i = 0; i < maxLines; i++) {
+        const aLine = (aLines[i] || "").padEnd(width);
+        const bLine = (bLines[i] || "").padEnd(width);
+        result += `│ ${aLine} │ ${bLine} │\n`;
+    }
+    result += "└" + "─".repeat(width + 2) + "┴" + "─".repeat(width + 2) + "┘\n\n";
+    return result;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// MAIN BUILDER
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Build position brief using inverted hierarchy approach.
+ *
+ * Algorithm:
+ * 1. Sort claims by support ratio
+ * 2. Split at midpoint: bottom half = outliers (anchors), top half = mainstream
+ * 3. Each outlier becomes a bucket anchor
+ * 4. Distribute mainstream into buckets:
+ *    - First by edge relationship (if outlier connects to mainstream claim)
+ *    - Then round-robin for unassigned
+ * 5. Shuffle bucket order (no primacy between buckets)
+ * 6. Within each bucket: anchor first, then find tension pairs, then rest randomized
+ * 7. Ghosts separate with ? prefix (categorically different)
+ */
+export function buildPositionBrief(analysis: StructuralAnalysis): string {
+    const { edges, claimsWithLeverage, ghostAnalysis } = analysis;
+
+    // Handle empty case
+    if (claimsWithLeverage.length === 0) {
+        return '';
+    }
+
+    // Get ghost texts from analysis
+    const ghosts = getGhostTexts(analysis);
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Step 1: Sort claims by support ratio (descending)
+    // ═══════════════════════════════════════════════════════════════════════
+    const sorted = [...claimsWithLeverage].sort(
+        (a, b) => b.supportRatio - a.supportRatio
+    );
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Step 2: Split at midpoint
+    // ═══════════════════════════════════════════════════════════════════════
+    const midpoint = Math.ceil(sorted.length / 2);
+    const topHalf = sorted.slice(0, midpoint);      // mainstream
+    const bottomHalf = sorted.slice(midpoint);       // outliers (anchors)
+
+    // Handle edge case: all claims have same support (no real outliers)
+    if (bottomHalf.length === 0) {
+        // Treat all as one bucket, randomized
+        shuffle(topHalf);
+        let brief = '';
+        for (const claim of topHalf) {
+            brief += `${claim.text}\n\n`;
+        }
+        if (ghosts.length > 0) {
+            brief += '\n';
+            shuffle(ghosts);
+            for (const g of ghosts) {
+                brief += `? ${g}\n`;
+            }
+        }
+        return brief.trim();
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Step 3: Each outlier becomes a bucket anchor
+    // ═══════════════════════════════════════════════════════════════════════
+    const buckets: EnrichedClaim[][] = bottomHalf.map(outlier => [outlier]);
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Step 4a: Distribute mainstream by edge relationship
+    // ═══════════════════════════════════════════════════════════════════════
+    const assigned = new Set<string>();
+
+    for (const mainstream of topHalf) {
+        // Find bucket where anchor has edge relationship to this mainstream claim
+        const targetBucketIndex = buckets.findIndex(bucket => {
+            const anchor = bucket[0];
+            return hasEdgeRelationship(anchor, mainstream, edges);
+        });
+
+        if (targetBucketIndex !== -1 && !assigned.has(mainstream.id)) {
+            buckets[targetBucketIndex].push(mainstream);
+            assigned.add(mainstream.id);
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Step 4b: Distribute remaining mainstream round-robin
+    // ═══════════════════════════════════════════════════════════════════════
+    const unassigned = topHalf.filter(c => !assigned.has(c.id));
+    shuffle(unassigned);
+
+    unassigned.forEach((claim, i) => {
+        buckets[i % buckets.length].push(claim);
+    });
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Step 5: Shuffle bucket order (no primacy between buckets)
+    // ═══════════════════════════════════════════════════════════════════════
+    shuffle(buckets);
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Step 6: Build brief - format each bucket
+    // ═══════════════════════════════════════════════════════════════════════
+    let brief = '';
+
+    for (let bucketIndex = 0; bucketIndex < buckets.length; bucketIndex++) {
+        const bucket = buckets[bucketIndex];
+        const [anchor, ...rest] = bucket;
+
+        // Track what's been output in this bucket
+        const outputIds = new Set<string>();
+
+        // Anchor always first
+        brief += `${anchor.text}\n\n`;
+        outputIds.add(anchor.id);
+
+        // Find tension pairs within the rest of this bucket
+        const tensions = findTensionPairs(rest, edges);
+        const tensionIds = new Set(tensions.flat().map(c => c.id));
+
+        // Output tension pairs side-by-side
+        for (const [claimA, claimB] of tensions) {
+            brief += formatSideBySide(claimA, claimB);
+            outputIds.add(claimA.id);
+            outputIds.add(claimB.id);
+        }
+
+        // Remaining claims (not anchor, not in tension pairs)
+        const remaining = rest.filter(c => !tensionIds.has(c.id));
+        shuffle(remaining);
+
+        for (const claim of remaining) {
+            brief += `${claim.text}\n\n`;
+            outputIds.add(claim.id);
+        }
+
+        // Add divider between buckets (but not after last bucket)
+        if (bucketIndex < buckets.length - 1) {
+            brief += '───\n\n';
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Step 7: Ghosts separate (categorically different from suggestions)
+    // ═══════════════════════════════════════════════════════════════════════
+    if (ghosts.length > 0) {
+        brief += '\n';
+        shuffle(ghosts);
+        for (const g of ghosts) {
+            brief += `? ${g}\n`;
+        }
+    }
+
+    return brief.trim();
+}
+
+/**
+ * Extract ghost texts from analysis
+ */
+function getGhostTexts(analysis: StructuralAnalysis): string[] {
+    // Ghosts may be stored in different places depending on implementation
+    // Check ghostAnalysis first, then fall back to shape.data if needed
+
+    // Option 1: Direct ghost array on analysis (if exists)
+    if ('ghosts' in analysis && Array.isArray((analysis as any).ghosts)) {
+        return (analysis as any).ghosts.filter(Boolean).map(String);
+    }
+
+    // Option 2: From shape.data (varies by shape type)
+    const shapeData = analysis.shape?.data;
+    if (shapeData) {
+        // SettledShapeData has blindSpots
+        if ('blindSpots' in shapeData && Array.isArray(shapeData.blindSpots)) {
+            return shapeData.blindSpots.filter(Boolean).map(String);
+        }
+        // DimensionalShapeData and ExploratoryShapeData have gaps
+        if ('gaps' in shapeData && Array.isArray(shapeData.gaps)) {
+            return shapeData.gaps.filter(Boolean).map(String);
+        }
+    }
+
+    // Option 3: ghostAnalysis just has count, need to get from original artifact
+    // This would require passing ghosts separately - return empty for now
+    // and document that ghosts should be passed to buildPositionBrief
+
+    return [];
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ALTERNATIVE ENTRY POINT (if ghosts not accessible from analysis)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Build position brief with explicit ghost list
+ * Use this if ghosts aren't accessible from StructuralAnalysis
+ */
+export function buildPositionBriefWithGhosts(
+    analysis: StructuralAnalysis,
+    ghosts: string[]
+): string {
+    // Clone analysis and inject ghosts
+    const analysisWithGhosts = {
+        ...analysis,
+        ghosts
+    };
+
+    return buildPositionBrief(analysisWithGhosts as StructuralAnalysis);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// EXPORTS
+// ═══════════════════════════════════════════════════════════════════════════
+
+export default buildPositionBrief;
+```
+
+---
+
+## File 2: `ConciergeService.ts`
+
+### Changes Required
+
+#### 2.1 Update Imports
+
+Find the import section and update:
+
+```typescript
+// REMOVE this line:
+import { buildPositionBrief } from './positionBrief';
+
+// REPLACE with:
+import { buildPositionBrief, buildPositionBriefWithGhosts } from './positionBrief';
+```
+
+#### 2.2 Update `buildConciergePrompt` Function
+
+Find the `buildConciergePrompt` function and replace it entirely:
+
+```typescript
+export function buildConciergePrompt(
+    userMessage: string,
+    analysis: StructuralAnalysis,
+    ghosts: string[],
+    options?: ConciergePromptOptions
+): string {
+    // Build positions using inverted hierarchy approach
+    const positions = buildPositionBriefWithGhosts(analysis, ghosts);
+
+    // Handoff V2: Prior context for fresh spawns after COMMIT or batch re-invoke
+    const priorContextSection = options?.priorContext
+        ? buildPriorContextSection(options.priorContext)
+        : '';
+
+    const historySection = options?.conversationHistory
+        ? `## Prior Exchange\n\n${options.conversationHistory}\n\n`
+        : '';
+
+    const workflowSection = options?.activeWorkflow
+        ? `## Active Workflow\n${formatActiveWorkflow(options.activeWorkflow)}\n`
+        : '';
+
+    // Build context block if there's prior context or history
+    const contextBlock = (priorContextSection || historySection)
+        ? `<CONTEXT non_authoritative="true">\n${priorContextSection}${historySection}</CONTEXT>\n\n`
+        : '';
+
+    return `<SYSTEM_IDENTITY>
+You are Singularity —
+the point where human instinct meets machine intelligence,
+and thinking becomes a decision.
+</SYSTEM_IDENTITY>
+
+<SYSTEM_DIRECTIVE>
+You are given a set of suggestions a thoughtful person has been considering.
+They may agree, contradict, or talk past each other.
+They are not ranked, labeled, or resolved for you.
+
+Your responsibility is not to explain them.
+Your responsibility is to decide what a person in this situation should do next — and why.
+
+You may go beyond what's given if the situation demands it.
+The suggestions are a starting point, not a boundary.
+</SYSTEM_DIRECTIVE>
+
+<USER_QUERY>
+${userMessage}
+</USER_QUERY>
+
+${contextBlock}${workflowSection}<SUGGESTIONS>
+${positions}
+</SUGGESTIONS>
+
+<RESPONSE_INSTRUCTIONS>
+Answer the question directly.
+
+Choose a path that fits the user's reality, not the elegance of an idea.
+
+If there is a dominant path, take it plainly.
+
+If a tradeoff is unavoidable, name it and commit anyway.
+
+If something crucial is missing, say what it is and why it matters now.
+
+Do not reconcile for the sake of balance.
+Do not preserve ideas that don't change the decision.
+Do not flatten tension that should be felt.
+
+You are allowed to be decisive.
+You are allowed to be conditional.
+You are not allowed to be vague.
+
+Speak like someone who has to live with the consequences.
+
+No meta-commentary. No narration of your process.
+
+Confidence where the situation allows it.
+Precision where it doesn't.
+
+End with one of:
+- a clear recommendation
+- a concrete next step
+- or the single question that would most change the decision
+
+Never:
+- Refer to how the information was produced
+- Mention agreement, disagreement, frequency, or distribution
+- Explain structure, layout, or representation
+- Say "it depends" without saying what it depends on and why that matters now
+</RESPONSE_INSTRUCTIONS>
+
+Respond.`;
+}
+```
+
+#### 2.3 Update `handleTurn` Function
+
+Find where `buildConciergePrompt` is called and update to pass ghosts:
+
+```typescript
+// Find this section in handleTurn:
+const prompt = buildConciergePrompt(userMessage, analysis, {
+    conversationHistory: options?.conversationHistory,
+    activeWorkflow: options?.activeWorkflow,
+    isFirstTurn: options?.isFirstTurn,
+});
+
+// REPLACE with:
+// Extract ghosts from the original artifact (you may need to pass this in)
+const ghosts = options?.ghosts ?? [];
+
+const prompt = buildConciergePrompt(userMessage, analysis, ghosts, {
+    conversationHistory: options?.conversationHistory,
+    activeWorkflow: options?.activeWorkflow,
+    isFirstTurn: options?.isFirstTurn,
+});
+```
+
+#### 2.4 Update `handleTurn` Options Type
+
+Find the options type and add ghosts:
+
+```typescript
+export async function handleTurn(
+    userMessage: string,
+    analysis: StructuralAnalysis,
+    callLLM: (prompt: string) => Promise<string>,
+    options?: {
+        stanceOverride?: ConciergeStance;
+        conversationHistory?: string;
+        activeWorkflow?: ActiveWorkflow;
+        isFirstTurn?: boolean;
+        ghosts?: string[];  // ADD THIS LINE
+    }
+): Promise<HandleTurnResult> {
+```
+
+#### 2.5 Remove Unused Code
+
+Delete these functions as they are no longer needed:
+- `buildShadowSection` 
+- `getDefaultActionForShape`
+- Any shape-specific formatting helpers that were only used in the old brief
+
+Delete or simplify the `MACHINERY_SWAPS` array if the new prompt doesn't leak machinery terms.
+
+#### 2.6 Update Exports
+
+Update the exports at the bottom:
+
+```typescript
+export const ConciergeService = {
+    buildConciergePrompt,
+    buildPositionBrief,  // Now from new module
+    buildPositionBriefWithGhosts,  // New export
+    postProcess,
+    detectMachineryLeakage,
+    isMetaQuery,
+    buildMetaResponse,
+    handleTurn,
+    parseConciergeOutput,
+    validateBatchPrompt,
+    HANDOFF_PROTOCOL,
+    buildTurn2Message,
+    buildTurn3PlusMessage,
+};
+```
+
+---
+
+## File 3: Caller Updates (Where Concierge Is Invoked)
+
+Wherever `handleTurn` or `buildConciergePrompt` is called, ensure ghosts are passed:
+
+```typescript
+// Example: wherever you call handleTurn
+const result = await handleTurn(
+    userMessage,
+    structuralAnalysis,
+    callLLM,
+    {
+        conversationHistory: history,
+        isFirstTurn: true,
+        ghosts: mapperArtifact.ghosts ?? [],  // ADD THIS
+    }
+);
+```
+
+---
+
+## Verification Checklist
+
+After implementation, verify:
+
+### 1. No Generated Content
+The brief should contain ONLY:
+- Claim texts (verbatim from mapper)
+- Dividers (`───`)
+- Ghost prefix (`?`)
+- Side-by-side boxes for tensions
+
+It should NOT contain:
+- "Assumes context-independence"
+- "Coverage is thin."
+- Any generated meta-commentary
+
+### 2. Correct Split
+For 10 claims:
+- Top 5 = mainstream (scattered)
+- Bottom 5 = outliers (anchors)
+
+### 3. Edge Relationships Respected
+If claim_6 has prerequisite edge to claim_2:
+- claim_6 (outlier) anchors a bucket
+- claim_2 (mainstream) goes into that bucket
+
+### 4. Randomization Working
+Run twice with same input. Bucket order should differ. Within-bucket order (after anchor) should differ.
+
+### 5. Ghosts Separate
+Ghosts appear at end with `?` prefix, not mixed with suggestions.
+
+### 6. Prompt Correct
+- Uses `<SUGGESTIONS>` not `<POSITIONS>`
+- No instructions about what spatial arrangement means
+- Includes transcendence permission ("go beyond what's given")
+
+---
+
+## Test With Your Data
+
+Input:
+```json
+{
+  "claims": [...10 claims...],
+  "edges": [
+    {"from": "claim_6", "to": "claim_2", "type": "prerequisite"},
+    {"from": "claim_2", "to": "claim_4", "type": "supports"},
+    {"from": "claim_8", "to": "claim_1", "type": "supports"},
+    {"from": "claim_9", "to": "claim_5", "type": "supports"}
+  ],
+  "ghosts": [
+    "The latency and cost penalty...",
+    "The privacy implications...",
+    "The hardware/compute ceiling..."
+  ]
+}
+```
+
+Expected output structure (order will vary due to randomization):
+
+```
+[claim_6 text - anchor, has edge to claim_2]
+
+[claim_2 text - mainstream, connected to anchor]
+
+[claim_4 text - mainstream, randomly assigned or connected]
+
+───
+
+[claim_8 text - anchor, has edge to claim_1]
+
+[claim_1 text - mainstream, connected to anchor]
+
+[another mainstream claim - randomly assigned]
+
+───
+
+[claim_9 text - anchor, has edge to claim_5]
+
+[claim_5 text - mainstream, connected to anchor]
+
+───
+
+[claim_7 text - anchor]
+
+[remaining mainstream - randomly assigned]
+
+───
+
+[claim_10 text - anchor]
+
+[remaining mainstream - randomly assigned]
+
+? The latency and cost penalty...
+? The privacy implications...
+? The hardware/compute ceiling...
+```
+
+---
+
+## Summary of Changes
+
+| File | Action |
+|------|--------|
+| `positionBrief.ts` | Complete rewrite - delete all, replace with new unified builder |
+| `ConciergeService.ts` | Update prompt, update imports, add ghosts parameter |
+| Callers | Pass ghosts array to handleTurn/buildConciergePrompt |
+

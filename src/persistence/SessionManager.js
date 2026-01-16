@@ -2,7 +2,7 @@
 // Supports both legacy chrome.storage and new persistence layer via feature flag
 
 import { SimpleIndexedDBAdapter } from "./SimpleIndexedDBAdapter.js";
-import { buildMinimalMapperArtifact } from "../utils/context-bridge";
+
 
 
 
@@ -1193,6 +1193,11 @@ export class SessionManager {
       summary += `<previous_answer>\n${request.gauntletOutput.the_answer.statement}\n</previous_answer>\n\n`;
     }
 
+    // LEGACY: The "council_views" block was the old way of broadcasting context.
+    // In the new paradigm, we rely on ReactiveBridge (injected via StepExecutor)
+    // and Concierge Handoffs. We no longer inject the full mapper artifact here.
+
+    /* 
     if (request?.mapperArtifact) {
       try {
         const minimal = buildMinimalMapperArtifact(request.mapperArtifact);
@@ -1200,6 +1205,7 @@ export class SessionManager {
         summary += `<council_views>\n${block}\n</council_views>`;
       } catch (_) { }
     }
+    */
 
     const finalSummary = summary.trim();
     console.log("[SessionManager] Built Context Summary:", {

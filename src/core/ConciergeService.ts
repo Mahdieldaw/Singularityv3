@@ -10,7 +10,7 @@ import {
 } from "../../shared/contract";
 
 // Spatial Brief System
-import { buildPositionBrief } from './positionBrief';
+import { buildPositionBrief, buildPositionBriefWithGhosts } from './positionBrief';
 
 // Shadow Mapper types
 import type { ShadowAudit } from './PromptMethods';
@@ -75,6 +75,8 @@ export interface ConciergePromptOptions {
             adjustedScore: number;
         }>;
     };
+    /** Ghost strings from MapperArtifact (v4 - geometry) */
+    ghosts?: string[];
 }
 
 export interface HandleTurnResult {
@@ -299,7 +301,8 @@ export function buildConciergePrompt(
     options?: ConciergePromptOptions
 ): string {
     // Build positions using spatial arrangement (shape-aware or edge-based fallback)
-    const positions = buildPositionBrief(analysis);
+    const ghosts = options?.ghosts || [];
+    const positions = buildPositionBriefWithGhosts(analysis, ghosts);
 
     // Handoff V2: Prior context for fresh spawns after COMMIT or batch re-invoke
     const priorContextSection = options?.priorContext
@@ -347,10 +350,10 @@ Respond directly to the user's query using what the positions reveal.
 
 Interpret structure, not popularity.
 
-Side-by-side positions are alternatives.
-Linked positions imply sequence or dependency.
-Indented positions qualify what's above.
-Less common positions may contain the decisive insight.
+Side-by-side positions are alternatives or tensions.
+Groups separated by "───" represent distinct clusters of thought.
+The first position in each group is often a grounding minority voice.
+Positions prefixed with "?" represent missing factors or unknowns.
 
 Resolve tensions honestly.
 If paths diverge, expose the tradeoffs.

@@ -45,7 +45,8 @@ export const ConciergePipelinePanel: React.FC<ConciergePipelinePanelProps> = ({ 
                 leakageDetected,
                 leakageViolations,
             };
-        } catch {
+        } catch (e) {
+            console.error('[ConciergePipelinePanel] Pipeline construction failed:', e, { userMessage, analysis: !!analysis, stateOutput: !!state.output });
             return null;
         }
     }, [state.output, analysis, userMessage]);

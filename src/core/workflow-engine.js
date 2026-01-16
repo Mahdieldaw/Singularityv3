@@ -41,6 +41,17 @@ export class WorkflowEngine {
         this.stepExecutor.executePromptStep(step, ctx, opts),
       mapping: (step, ctx, results, wfCtx, _resolved, opts) =>
         this.stepExecutor.executeMappingStep(step, ctx, results, wfCtx, opts),
+      singularity: (step, ctx, results, _wfCtx, resolved, opts) =>
+        this.cognitiveHandler.orchestrateSingularityPhase(
+          {}, // Empty request as it's derived from payload
+          ctx,
+          [step],
+          new Map([[step.stepId, { status: "pending" }]]), // Dummy results map for handler
+          resolved,
+          this.currentUserMessage,
+          this.stepExecutor,
+          this.streamingManager
+        ),
     };
 
     // Provider key mapping for upsert
@@ -77,10 +88,10 @@ export class WorkflowEngine {
       const mode = request.mode || "auto";
       context.mode = mode;
 
-      // VALIDATION: Ensure only foundation steps are present in the main loop
-      const invalidSteps = steps.filter(s => !['prompt', 'mapping'].includes(s.type));
+      // VALIDATION: Ensure only foundation/singularity steps are present in the main loop
+      const invalidSteps = steps.filter(s => !['prompt', 'mapping', 'singularity'].includes(s.type));
       if (invalidSteps.length > 0) {
-        throw new Error(`Foundation phase received cognitive/legacy steps: ${invalidSteps.map(s => s.type).join(', ')}. Foundation only supports 'prompt' and 'mapping'.`);
+        throw new Error(`Foundation phase received unsupported steps: ${invalidSteps.map(s => s.type).join(', ')}.`);
       }
 
       this._seedContexts(resolvedContext, stepResults, workflowContexts);

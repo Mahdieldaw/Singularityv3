@@ -46,9 +46,33 @@ export class WorkflowCompiler {
     // ========================================================================
     switch (resolvedContext.type) {
       case "initialize":
-      case "extend":
-        // Batch step if providers specified
+        // Initialize ALWAYS runs full batch if providers specified
         if (compileRequest.providers && compileRequest.providers.length > 0) {
+          const batchStep = this._createBatchStep(compileRequest, resolvedContext);
+          steps.push(batchStep);
+          batchStepId = batchStep.stepId;
+        }
+        break;
+
+      case "extend":
+        // Check for gated singularity direct routing
+        const isGated = !compileRequest.batchAutoRunEnabled && compileRequest.singularity;
+
+        if (isGated) {
+          console.log("[Compiler] Gated extend: Generating direct singularity step");
+          const singularityStep = {
+            stepId: `singularity-direct-${Date.now()}`,
+            type: "singularity",
+            payload: {
+              singularityProvider: compileRequest.singularity,
+              originalPrompt: compileRequest.userMessage,
+              // Note: mapperArtifact will be resolved from context in CognitivePipelineHandler
+              useThinking: !!compileRequest.useThinking,
+            }
+          };
+          steps.push(singularityStep);
+        } else if (compileRequest.providers && compileRequest.providers.length > 0) {
+          // Normal extend: generate batch step
           const batchStep = this._createBatchStep(compileRequest, resolvedContext);
           steps.push(batchStep);
           batchStepId = batchStep.stepId;
@@ -191,14 +215,21 @@ export class WorkflowCompiler {
 
   _applyBatchGating(request, resolvedContext) {
     if (!request || typeof request !== "object") return request;
+    // Gating strictly applies ONLY to extend requests
     if (resolvedContext?.type !== "extend") return request;
     if (request.batchAutoRunEnabled) return request;
 
-    const provider = Array.isArray(request.providers) ? request.providers[0] : null;
+    // If auto-run is disabled, enforce single provider gating
+    // Prioritize singularity provider if specified; fallback to first in providers list
+    const gatedProvider = request.singularity || (Array.isArray(request.providers) ? request.providers[0] : null);
 
-    if (!provider) return request;
+    if (!gatedProvider) return request;
 
-    return { ...request, providers: [provider] };
+    return {
+      ...request,
+      providers: [gatedProvider],
+      includeMapping: false // Disable mapping for gated turns
+    };
   }
 
   // ============================================================================

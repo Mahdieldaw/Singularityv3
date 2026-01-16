@@ -22,68 +22,23 @@ export class CognitivePipelineHandler {
       const userMessageForSingularity =
         context?.userMessage || currentUserMessage || "";
 
-      let mapperArtifact = mappingResult?.mapperArtifact || null;
+      // 1. Resolve mapperArtifact (from current results, context, or request payload)
+      let mapperArtifact = mappingResult?.mapperArtifact || context?.mapperArtifact || request?.payload?.mapperArtifact || null;
 
       if (!mapperArtifact) {
-        try {
-          const mappingSteps = Array.isArray(steps)
-            ? steps.filter((s) => s && s.type === "mapping")
-            : [];
-          for (const step of mappingSteps) {
-            const take = stepResults.get(step.stepId);
-            const result = take?.status === "completed" ? take.result : null;
-            if (!result) continue;
-            const text = String(
-              (result.meta && result.meta.rawMappingText) ||
-              result.text ||
-              "",
-            );
-
-            // Allow V3 <map> or legacy tags
-            const hasStructuralTags =
-              text.includes("<map>") ||
-              text.includes("<mapper_artifact>") ||
-              text.includes("<mapping_output>") ||
-              text.includes("<decision_map>");
-
-            if (!hasStructuralTags) {
-              continue;
-            }
-
-            mapperArtifact = parseMapperArtifact(text);
-            if (mapperArtifact) {
-              mapperArtifact.query = userMessageForSingularity;
-            }
-
-
-            // ⚠️ CRITICAL FIX: model_count is not set by parser sometimes
-            // Calculate it from citationSourceOrder or fallback to supporters count
-            if (mapperArtifact && (!mapperArtifact.model_count || mapperArtifact.model_count === 0)) {
-              const citationOrder = result?.meta?.citationSourceOrder;
-              if (citationOrder && typeof citationOrder === 'object') {
-                mapperArtifact.model_count = Object.keys(citationOrder).length;
-              } else {
-                // Fallback: count unique supporters across claims (including string IDs)
-                const supporterSet = new Set();
-                (mapperArtifact.claims || []).forEach(c => {
-                  (c.supporters || []).forEach(s => {
-                    supporterSet.add(s);
-                  });
-                });
-                mapperArtifact.model_count = supporterSet.size > 0 ? supporterSet.size : 1;
-              }
-            }
-            break;
-
-          }
-        } catch (e) {
-          console.error('[CognitiveHandler] Fallback parsing failed:', e);
+        // If it's a direct singularity step, we might not have a mappingResult.
+        // Try to find it in the context (hydrated by WorkflowEngine)
+        if (context?.mapperArtifact) {
+          mapperArtifact = context.mapperArtifact;
+        } else {
+          console.warn("[CognitiveHandler] No mapperArtifact found in results or context.");
         }
       }
 
       if (!mapperArtifact) {
-        console.warn("[CognitiveHandler] Missing mapperArtifact - forcing end of loop");
-        return true;
+        // According to user requirement: fail if missing.
+        console.error("[CognitiveHandler] CRITICAL: Missing mapperArtifact for Singularity phase.");
+        throw new Error("Singularity mode requires a valid Mapper Artifact which is missing in this context.");
       }
 
       // ✅ Populate context so WorkflowEngine/TurnEmitter can see it
@@ -145,15 +100,25 @@ export class CognitivePipelineHandler {
                 if (entries.length > 0) {
                   const [firstKey, firstVal] = entries[0];
                   // If values are numbers AND key is not numeric, treat as provider -> index
-                  const isProviderToIndex = typeof firstVal === 'number' && isNaN(Number(firstKey));
+                  const isProviderToIndex = typeof firstVal === 'number' && Number.isFinite(firstVal) && isNaN(Number(firstKey));
 
                   if (isProviderToIndex) {
-                    normalizedCitationOrder = { ...rawCitationOrder };
+                    // Start with what we have, but filter for valid numbers
+                    Object.entries(rawCitationOrder).forEach(([k, v]) => {
+                      if (typeof v === 'number' && Number.isFinite(v)) {
+                        normalizedCitationOrder[k] = v;
+                      }
+                    });
                   } else {
                     // Treat as index -> provider and invert
                     entries.forEach(([k, v]) => {
                       if (v && typeof v === 'string') {
-                        normalizedCitationOrder[v] = Number(k);
+                        const index = Number(k);
+                        if (Number.isFinite(index)) {
+                          normalizedCitationOrder[v] = index;
+                        } else {
+                          console.warn(`[CognitivePipelineHandler] Invalid citation index '${k}' for provider '${v}'. Skipping.`);
+                        }
                       }
                     });
                   }
@@ -164,15 +129,17 @@ export class CognitivePipelineHandler {
               const providersInResults = Object.keys(batchResults);
               const processedProviders = new Set();
 
-              // 1. Process providers that exist in our citation order
+              // 1. Process providers that exist in our confirmed citation order
               const sortedByCitation = Object.entries(normalizedCitationOrder)
                 .sort(([, a], [, b]) => (a || 0) - (b || 0));
 
               sortedByCitation.forEach(([providerId, index]) => {
                 const resp = batchResults[providerId];
                 if (resp) {
+                  // Double check index is a number
+                  const validIndex = Number.isFinite(Number(index)) ? Number(index) : 1;
                   batchResponses.push({
-                    modelIndex: Number(index),
+                    modelIndex: validIndex,
                     content: resp.text || ""
                   });
                   processedProviders.add(providerId);
@@ -180,9 +147,13 @@ export class CognitivePipelineHandler {
               });
 
               // 2. Append any providers present in batchResults but missing from citationOrder
-              let fallbackIndex = batchResponses.length > 0
-                ? Math.max(...batchResponses.map(r => r.modelIndex)) + 1
+              // Safely compute fallback index, ensuring no NaNs
+              const validIndices = batchResponses.map(r => r.modelIndex).filter(n => Number.isFinite(n));
+              let fallbackIndex = validIndices.length > 0
+                ? Math.max(...validIndices) + 1
                 : 1;
+
+              if (!Number.isFinite(fallbackIndex)) fallbackIndex = 1;
 
               providersInResults.forEach(providerId => {
                 if (!processedProviders.has(providerId)) {
@@ -308,27 +279,30 @@ export class CognitivePipelineHandler {
                 conciergePrompt = ConciergeService.buildConciergePrompt(
                   userMessageForSingularity,
                   structuralAnalysis,
-                  conciergePromptSeed,
+                  {
+                    ...conciergePromptSeed,
+                    ghosts: mapperArtifact.ghosts || []
+                  },
                 );
               } else {
                 console.warn("[CognitiveHandler] ConciergeService.buildConciergePrompt missing");
               }
             } else if (turnInCurrentInstance === 2) {
-              // Turn 2: Inject handoff protocol
-              conciergePromptType = "protocol_injection";
+              // Turn 2: Optimized followup (No structural analysis)
+              conciergePromptType = "followup_optimized";
               if (typeof ConciergeService.buildTurn2Message === 'function') {
                 conciergePrompt = ConciergeService.buildTurn2Message(userMessageForSingularity);
-                console.log(`[CognitiveHandler] Turn 2: injecting handoff protocol`);
+                console.log(`[CognitiveHandler] Turn 2: using optimized followup message`);
               } else {
                 console.warn("[CognitiveHandler] ConciergeService.buildTurn2Message missing, falling back to standard prompt");
               }
             } else {
-              // Turn 3+: Echo current handoff for updates
+              // Turn 3+: Dynamic optimized followup
               conciergePromptType = "handoff_echo";
               const pendingHandoff = conciergeState?.pendingHandoff || null;
               if (typeof ConciergeService.buildTurn3PlusMessage === 'function') {
                 conciergePrompt = ConciergeService.buildTurn3PlusMessage(userMessageForSingularity, pendingHandoff);
-                console.log(`[CognitiveHandler] Turn ${turnInCurrentInstance}: echoing current handoff`);
+                console.log(`[CognitiveHandler] Turn ${turnInCurrentInstance}: using optimized handoff echo`);
               } else {
                 console.warn("[CognitiveHandler] ConciergeService.buildTurn3PlusMessage missing, falling back to standard prompt");
               }
@@ -343,7 +317,11 @@ export class CognitivePipelineHandler {
             console.warn("[CognitiveHandler] Prompt building failed, using fallback");
             conciergePromptType = "standard_fallback";
             if (ConciergeService && typeof ConciergeService.buildConciergePrompt === 'function') {
-              conciergePrompt = ConciergeService.buildConciergePrompt(userMessageForSingularity, structuralAnalysis);
+              conciergePrompt = ConciergeService.buildConciergePrompt(
+                userMessageForSingularity,
+                structuralAnalysis,
+                { ghosts: mapperArtifact.ghosts || [] }
+              );
             } else {
               console.error("[CognitiveHandler] ConciergeService.buildConciergePrompt unavailable for fallback");
             }
