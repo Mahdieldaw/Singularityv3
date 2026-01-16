@@ -23,7 +23,14 @@ export interface ExclusionRule {
     severity: 'hard' | 'soft';
 }
 
-export const ALL_STANCES: Stance[] = ['prescriptive', 'cautionary', 'prerequisite', 'dependent', 'assertive', 'uncertain'];
+export const ALL_STANCES: Stance[] = (Object.keys({
+    prescriptive: 1,
+    cautionary: 1,
+    prerequisite: 1,
+    dependent: 1,
+    assertive: 1,
+    uncertain: 1
+} as Record<Stance, number>) as Stance[]);
 
 export const EXCLUSION_RULES: ExclusionRule[] = [
     // ═══════════════════════════════════════════════════════════════════
@@ -60,7 +67,7 @@ export const EXCLUSION_RULES: ExclusionRule[] = [
     {
         id: 'quoted_material',
         appliesTo: ALL_STANCES,
-        pattern: /^("[^"]{10,}"|[“\u201C][^”\u201D]{10,}[”\u201D])$/,
+        pattern: /^"[^"]{10,}"$|^[“\u201C][^”\u201D]{10,}[”\u201D]$/,
         reason: 'Quoted material, not original claim',
         severity: 'hard'
     },

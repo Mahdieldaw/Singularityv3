@@ -172,9 +172,10 @@ export const computePeakPairRelationships = (
     const edgeMap = new Map<string, Edge[]>();
     for (const edge of edges) {
         const key = `${edge.from}-${edge.to}`;
-        const existing = edgeMap.get(key) || [];
-        existing.push(edge);
-        edgeMap.set(key, existing);
+        if (!edgeMap.has(key)) {
+            edgeMap.set(key, []);
+        }
+        edgeMap.get(key)!.push(edge);
     }
 
     const relations: PeakPairRelationship[] = [];

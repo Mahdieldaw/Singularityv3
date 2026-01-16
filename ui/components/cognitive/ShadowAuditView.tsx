@@ -12,8 +12,14 @@ interface ShadowAuditViewProps {
 export const ShadowAuditView: React.FC<ShadowAuditViewProps> = ({ analysis }) => {
     if (!analysis?.shadow) return null;
 
-    const { shadow } = analysis;
-    const { audit, topUnindexed } = shadow;
+    const shadow = analysis?.shadow;
+    const audit = shadow?.audit;
+    const topUnindexed = shadow?.topUnindexed || [];
+
+    const gaps = audit?.gaps ?? { conflicts: 0, prerequisites: 0, prescriptive: 0 };
+    const extraction = audit?.extraction ?? { survivalRate: 0, pass1Candidates: 0 };
+    const shadowStatementCount = audit?.shadowStatementCount ?? 0;
+    const processingTime = shadow?.processingTime ?? 0;
 
     return (
         <div className="mt-8 pt-6 border-t border-border-subtle animate-in fade-in slide-in-from-bottom-2 duration-700">
@@ -30,7 +36,7 @@ export const ShadowAuditView: React.FC<ShadowAuditViewProps> = ({ analysis }) =>
                             </span>
                         </div>
                         <div className="text-[11px] text-text-muted">
-                            {audit.gaps.conflicts + audit.gaps.prerequisites} hidden relationships detected by mechanical scan
+                            {gaps.conflicts + gaps.prerequisites} hidden relationships detected by mechanical scan
                         </div>
                     </div>
                 </summary>
@@ -41,23 +47,23 @@ export const ShadowAuditView: React.FC<ShadowAuditViewProps> = ({ analysis }) =>
                         <div className="p-3 rounded-xl bg-surface-highlight/30 border border-border-subtle/50">
                             <div className="text-[10px] uppercase font-bold text-text-muted mb-1">Survival Rate</div>
                             <div className="text-lg font-mono text-text-primary">
-                                {(audit.extraction.survivalRate * 100).toFixed(0)}%
+                                {(extraction.survivalRate * 100).toFixed(0)}%
                             </div>
-                            <div className="text-[10px] text-text-muted">{audit.shadowStatementCount} extracted / {audit.extraction.pass1Candidates} searched</div>
+                            <div className="text-[10px] text-text-muted">{shadowStatementCount} extracted / {extraction.pass1Candidates} searched</div>
                         </div>
                         <div className="p-3 rounded-xl bg-surface-highlight/30 border border-border-subtle/50">
                             <div className="text-[10px] uppercase font-bold text-text-muted mb-1">Conflicts</div>
-                            <div className="text-lg font-mono text-amber-500">{audit.gaps.conflicts}</div>
+                            <div className="text-lg font-mono text-amber-500">{gaps.conflicts}</div>
                             <div className="text-[10px] text-text-muted">In Shadow Only</div>
                         </div>
                         <div className="p-3 rounded-xl bg-surface-highlight/30 border border-border-subtle/50">
                             <div className="text-[10px] uppercase font-bold text-text-muted mb-1">Prereqs</div>
-                            <div className="text-lg font-mono text-blue-500">{audit.gaps.prerequisites}</div>
+                            <div className="text-lg font-mono text-blue-500">{gaps.prerequisites}</div>
                             <div className="text-[10px] text-text-muted">In Shadow Only</div>
                         </div>
                         <div className="p-3 rounded-xl bg-surface-highlight/30 border border-border-subtle/50">
                             <div className="text-[10px] uppercase font-bold text-text-muted mb-1">Time</div>
-                            <div className="text-lg font-mono text-text-primary">{shadow.processingTime.toFixed(0)}ms</div>
+                            <div className="text-lg font-mono text-text-primary">{processingTime.toFixed(0)}ms</div>
                             <div className="text-[10px] text-text-muted">Shadow Execution</div>
                         </div>
                     </div>

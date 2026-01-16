@@ -210,7 +210,6 @@ export const assignPercentileFlags = (
             : 0;
 
 
-
         const isHighSupport = isInTopPercentile(claim.supportRatio, allSupportRatios, 0.3);
         const isLowSupport = isInBottomPercentile(claim.supportRatio, allSupportRatios, 0.3);
         const isHighLeverage = isInTopPercentile(claim.leverage, allLeverages, 0.25);

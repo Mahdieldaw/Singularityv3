@@ -24,8 +24,6 @@ import { MIN_CHAIN_LENGTH } from "./classification";
 import { buildKeystonePatternData, buildChainPatternData, generateWhyItMatters, DissentVoice } from "./builders";
 import { determineTensionDynamics } from "./utils";
 
-type Voice = DissentVoice;
-
 
 export const detectDissentPattern = (
     claims: EnrichedClaim[],
@@ -58,7 +56,7 @@ export const detectDissentPattern = (
         return chalList.some((id: string) => peakIdsSet.has(id));
     });
     for (const claim of challengers) {
-        if (dissentVoices.some((v: Voice) => v.id === claim.id)) continue;
+        if (dissentVoices.some((v: DissentVoice) => v.id === claim.id)) continue;
         const chalList: string[] = Array.isArray(claim.challenges)
             ? claim.challenges
             : (claim.challenges ? [claim.challenges] : []);
@@ -92,7 +90,7 @@ export const detectDissentPattern = (
             return outsiderSupport > c.supporters.length * 0.5 && !peakIdsSet.has(c.id);
         });
         for (const claim of outsiderClaims) {
-            if (dissentVoices.some((v: Voice) => v.id === claim.id)) continue;
+            if (dissentVoices.some((v: DissentVoice) => v.id === claim.id)) continue;
             dissentVoices.push({
                 id: claim.id,
                 label: claim.label,
@@ -107,7 +105,7 @@ export const detectDissentPattern = (
     const edgeCases = claims.filter((c: EnrichedClaim) =>
         c.type === 'conditional' &&
         c.supportRatio < 0.4 &&
-        !dissentVoices.some((v: Voice) => v.id === c.id)
+        !dissentVoices.some((v: DissentVoice) => v.id === c.id)
     );
     for (const claim of edgeCases) {
         dissentVoices.push({
@@ -121,9 +119,9 @@ export const detectDissentPattern = (
         });
     }
     if (dissentVoices.length === 0) return null;
-    const rankedVoices = [...dissentVoices].sort((a: Voice, b: Voice) => (b.insightScore || 0) - (a.insightScore || 0));
+    const rankedVoices = [...dissentVoices].sort((a: DissentVoice, b: DissentVoice) => (b.insightScore || 0) - (a.insightScore || 0));
     const peakTypes = new Set(peaks.map(p => p.type));
-    const minorityOnlyTypes = Array.from(new Set(rankedVoices.map((v: Voice) => {
+    const minorityOnlyTypes = Array.from(new Set(rankedVoices.map((v: DissentVoice) => {
         const claim = claims.find((c: EnrichedClaim) => c.id === v.id);
         return claim?.type;
     }))).filter(t => t && !peakTypes.has(t));
@@ -625,4 +623,3 @@ export const detectConflictClusters = (
     }
     return clusters;
 };
-

@@ -253,12 +253,6 @@ export class SessionManager {
     };
     await this.adapter.put("turns", aiTurnRecord);
 
-    if (mapperArtifact) {
-      // Context bridge persistence removed - now handled by dedicated modules
-
-
-    }
-
     if (request?.artifactCuration?.edits) {
       const edits = request.artifactCuration.edits || {};
       try {
@@ -389,11 +383,6 @@ export class SessionManager {
       meta: await this._attachRunIdMeta(aiTurnId),
     };
     await this.adapter.put("turns", aiTurnRecord);
-
-    if (mapperArtifact) {
-
-
-    }
 
     if (request?.artifactCuration?.edits) {
       const edits = request.artifactCuration.edits || {};
@@ -682,7 +671,7 @@ export class SessionManager {
    * @returns {number} Total count of responses
    */
   countResponses(responseBucket) {
-    return responseBucket ? Object.values(responseBucket).flat().length : 0;
+    return responseBucket ? Object.keys(responseBucket).length : 0;
   }
 
   /**
@@ -919,11 +908,9 @@ export class SessionManager {
     sessionId,
     providerId,
     result = {},
-    options = {},
   ) {
-    const { skipSave: _skipSave = true } = options;
     if (!sessionId || !providerId) return;
-
+    // skipSave option removed - always persists
     try {
       const session = await this.getOrCreateSession(sessionId);
 
@@ -1012,7 +999,7 @@ export class SessionManager {
    * updates shape: { [providerId]: { text?: string, meta?: object } }
    */
   async updateProviderContextsBatch(sessionId, updates = {}, options = {}) {
-    const { skipSave: _skipSave = true, contextRole = null } = options;
+    const { contextRole = null } = options;
     if (!sessionId || !updates || typeof updates !== "object") return;
 
     try {
@@ -1174,19 +1161,6 @@ export class SessionManager {
       summary += `<previous_answer>\n${request.gauntletOutput.the_answer.statement}\n</previous_answer>\n\n`;
     }
 
-    // LEGACY: The "council_views" block was the old way of broadcasting context.
-    // In the new paradigm, we rely on ReactiveBridge (injected via StepExecutor)
-    // and Concierge Handoffs. We no longer inject the full mapper artifact here.
-
-    /* 
-    if (request?.mapperArtifact) {
-      try {
-        const minimal = buildMinimalMapperArtifact(request.mapperArtifact);
-        const block = JSON.stringify(minimal);
-        summary += `<council_views>\n${block}\n</council_views>`;
-      } catch (_) { }
-    }
-    */
 
     const finalSummary = summary.trim();
     console.log("[SessionManager] Built Context Summary:", {

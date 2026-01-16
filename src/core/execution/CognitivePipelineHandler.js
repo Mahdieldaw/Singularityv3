@@ -1,4 +1,3 @@
-
 import { parseMapperArtifact } from '../../../shared/parsing-utils';
 import { extractUserMessage } from '../context-utils.js';
 
@@ -39,7 +38,6 @@ export class CognitivePipelineHandler {
       let singularityOutput = null;
       let singularityProviderId = null;
 
-      // Determine Singularity provider from request or context
       // Determine Singularity provider from request or context
       singularityProviderId = request?.singularity ||
         context?.singularityProvider ||
@@ -464,7 +462,9 @@ export class CognitivePipelineHandler {
                     text: userFacingText, // Send handoff-stripped to UI
                   },
                 });
-              } catch (_) { }
+              } catch (err) {
+                console.error("port.postMessage failed in CognitivePipelineHandler (orchestrateSingularityPhase):", err);
+              }
             } catch (e) {
               console.warn("[CognitiveHandler] Failed to update concierge state:", e);
             }
@@ -481,7 +481,9 @@ export class CognitivePipelineHandler {
                 error: singularityErr?.message || String(singularityErr),
               });
             }
-          } catch (_) { }
+          } catch (err) {
+            console.error("port.postMessage failed in CognitivePipelineHandler (orchestrateSingularityPhase/singularityStep):", err);
+          }
         }
       }
 
@@ -596,7 +598,9 @@ export class CognitivePipelineHandler {
           result,
           ...(isRecompute ? { isRecompute: true, sourceTurnId: sourceTurnId || aiTurnId } : {}),
         });
-      } catch (_) { }
+      } catch (err) {
+        console.error("port.postMessage failed in CognitivePipelineHandler (handleContinueRequest):", err);
+      }
 
       await this.sessionManager.upsertProviderResponse(
         effectiveSessionId,
@@ -693,7 +697,9 @@ export class CognitivePipelineHandler {
           error: error.message || String(error),
           ...(isRecompute ? { isRecompute: true, sourceTurnId: sourceTurnId || aiTurnId } : {}),
         });
-      } catch (_) { }
+      } catch (err) {
+        console.error("port.postMessage failed in CognitivePipelineHandler (handleContinueRequest/errorBoundary):", err);
+      }
     }
   }
 }

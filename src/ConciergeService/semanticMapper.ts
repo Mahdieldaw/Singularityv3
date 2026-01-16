@@ -154,20 +154,25 @@ export function parseSemanticMapperOutput(
   const validIds = new Set(shadowStatements.map(s => s.id));
   const result = baseParseOutput(rawResponse, validIds);
 
-  function isSemanticMapperOutput(parsed: any): parsed is SemanticMapperOutput {
-    return parsed && Array.isArray(parsed.claims);
+  function isSemanticMapperOutput(parsed: unknown): parsed is SemanticMapperOutput {
+    return (
+      parsed !== null &&
+      typeof parsed === 'object' &&
+      'claims' in parsed &&
+      Array.isArray((parsed as { claims: unknown }).claims)
+    );
   }
 
   const output = isSemanticMapperOutput(result.output) ? result.output : undefined;
+  const errors = result.errors ? [...result.errors] : [];
   if (result.success && !output) {
-    result.errors = result.errors || [];
-    result.errors.push({ field: 'output', issue: 'Invalid SemanticMapperOutput shape' });
+    errors.push({ field: 'output', issue: 'Invalid SemanticMapperOutput shape' });
   }
 
   return {
     success: result.success && !!output,
     output: output,
-    errors: result.errors,
+    errors: errors,
     warnings: result.warnings
   };
 }
