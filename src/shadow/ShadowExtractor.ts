@@ -11,9 +11,9 @@
 // Output: ShadowStatement[] with stance, signals, and location metadata
 // ═══════════════════════════════════════════════════════════════════════════
 
-import { 
-    Stance, 
-    classifyStance, 
+import {
+    Stance,
+    classifyStance,
     detectSignals,
 } from './StatementTypes';
 import { isExcluded } from './ExclusionRules';
@@ -30,16 +30,16 @@ export interface ShadowStatement {
     id: string;                    // "s_0", "s_1", ...
     modelIndex: number;            // Which model produced this
     text: string;                  // The extracted sentence/clause
-    
+
     stance: Stance;                // What kind of statement
     confidence: number;            // 0.0-1.0 based on pattern strength
-    
+
     signals: {
         sequence: boolean;         // Order/dependency language
         tension: boolean;          // Friction/contrast language
         conditional: boolean;      // Gate/condition language
     };
-    
+
     location: {
         paragraphIndex: number;
         sentenceIndex: number;
@@ -59,7 +59,7 @@ export interface ShadowExtractionResult {
             conditional: number;
         };
         processingTimeMs: number;
-        
+
         // Diagnostics
         candidatesProcessed: number;
         candidatesExcluded: number;
@@ -76,17 +76,17 @@ export interface ShadowExtractionResult {
  */
 function splitIntoSentences(paragraph: string): string[] {
     // Protect common abbreviations and decimals
-    const protected = paragraph
+    const protectedText = paragraph
         .replace(/\b(Mr|Mrs|Ms|Dr|Prof|Inc|Ltd|vs|etc|e\.g|i\.e)\./gi, '$1|||')
         .replace(/\b(\d+)\./g, '$1|||');
-    
+
     // Split on sentence boundaries
-    const sentences = protected
+    const sentences = protectedText
         .split(/(?<=[.!?])\s+/)
         .map(s => s.replace(/\|\|\|/g, '.'))
         .map(s => s.trim())
         .filter(s => s.length > 0);
-    
+
     return sentences;
 }
 
@@ -95,11 +95,11 @@ function splitIntoSentences(paragraph: string): string[] {
  */
 function isSubstantive(sentence: string): boolean {
     const words = sentence.split(/\s+/).filter(w => w.length > 0);
-    
+
     // Length checks
     if (words.length < 5) return false;
     if (words.length > 100) return false; // Probably a run-on or split issue
-    
+
     // Filter meta-commentary
     const metaPatterns = [
         /^(sure|okay|yes|no|well|so|now)[,.]?\s/i,
@@ -108,11 +108,11 @@ function isSubstantive(sentence: string): boolean {
         /\b(as I mentioned|as discussed|as noted)\b/i,
         /^(to summarize|in summary|in conclusion)\b/i,
     ];
-    
+
     for (const pattern of metaPatterns) {
         if (pattern.test(sentence)) return false;
     }
-    
+
     return true;
 }
 
@@ -124,27 +124,27 @@ export function extractShadowStatements(
     responses: Array<{ modelIndex: number; content: string }>
 ): ShadowExtractionResult {
     const startTime = performance.now();
-    
+
     const statements: ShadowStatement[] = [];
     let idCounter = 0;
     let candidatesProcessed = 0;
     let candidatesExcluded = 0;
     let sentencesProcessed = 0;
-    
+
     for (const response of responses) {
         // Split into paragraphs
         const paragraphs = response.content
             .split(/\n\n+/)
             .map(p => p.trim())
             .filter(p => p.length > 0);
-        
+
         for (let pIdx = 0; pIdx < paragraphs.length; pIdx++) {
             const paragraph = paragraphs[pIdx];
             const sentences = splitIntoSentences(paragraph);
-            
+
             for (let sIdx = 0; sIdx < sentences.length; sIdx++) {
                 sentencesProcessed++;
-                
+
                 if (sentencesProcessed > SENTENCE_LIMIT) {
                     console.warn(
                         `[ShadowExtractor] Hit sentence limit (${SENTENCE_LIMIT}), ` +
@@ -152,26 +152,26 @@ export function extractShadowStatements(
                     );
                     break;
                 }
-                
+
                 const sentence = sentences[sIdx];
-                
+
                 // Check substantiveness
                 if (!isSubstantive(sentence)) continue;
-                
+
                 candidatesProcessed++;
-                
+
                 // Classify stance
                 const { stance, confidence } = classifyStance(sentence);
-                
+
                 // Check exclusions
                 if (isExcluded(sentence, stance)) {
                     candidatesExcluded++;
                     continue;
                 }
-                
+
                 // Detect signals
                 const signals = detectSignals(sentence);
-                
+
                 // Create statement
                 statements.push({
                     id: `s_${idCounter++}`,
@@ -186,7 +186,7 @@ export function extractShadowStatements(
                     },
                     fullParagraph: paragraph,
                 });
-                
+
                 if (statements.length >= CANDIDATE_LIMIT) {
                     console.warn(
                         `[ShadowExtractor] Hit candidate limit (${CANDIDATE_LIMIT}), ` +
@@ -195,26 +195,26 @@ export function extractShadowStatements(
                     break;
                 }
             }
-            
+
             if (statements.length >= CANDIDATE_LIMIT || sentencesProcessed > SENTENCE_LIMIT) {
                 break;
             }
         }
-        
+
         if (statements.length >= CANDIDATE_LIMIT || sentencesProcessed > SENTENCE_LIMIT) {
             break;
         }
     }
-    
+
     // Build metadata
     const meta = buildMetadata(
-        statements, 
+        statements,
         performance.now() - startTime,
         candidatesProcessed,
         candidatesExcluded,
         sentencesProcessed
     );
-    
+
     return {
         statements,
         meta,
@@ -246,20 +246,20 @@ function buildMetadata(
         tension: 0,
         conditional: 0,
     };
-    
+
     for (const stmt of statements) {
         // Count by model
         byModel[stmt.modelIndex] = (byModel[stmt.modelIndex] || 0) + 1;
-        
+
         // Count by stance
         byStance[stmt.stance]++;
-        
+
         // Count by signal
         if (stmt.signals.sequence) bySignal.sequence++;
         if (stmt.signals.tension) bySignal.tension++;
         if (stmt.signals.conditional) bySignal.conditional++;
     }
-    
+
     return {
         totalStatements: statements.length,
         byModel,

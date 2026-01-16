@@ -255,6 +255,7 @@ export class SessionManager {
 
     if (mapperArtifact) {
       try {
+        /*
         const minimal = buildMinimalMapperArtifact(request.mapperArtifact);
         const bridge = {
           query: String(request.userMessage || ""),
@@ -265,6 +266,7 @@ export class SessionManager {
           turnId: aiTurnId,
         };
         await this.persistContextBridge(sessionId, aiTurnId, bridge);
+        */
       } catch (_) { }
     }
 
@@ -401,6 +403,7 @@ export class SessionManager {
 
     if (mapperArtifact) {
       try {
+        /*
         const minimal = buildMinimalMapperArtifact(request.mapperArtifact);
         const bridge = {
           query: String(request.userMessage || ""),
@@ -411,6 +414,7 @@ export class SessionManager {
           turnId: aiTurnId,
         };
         await this.persistContextBridge(sessionId, aiTurnId, bridge);
+        */
       } catch (_) { }
     }
 

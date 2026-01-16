@@ -35,12 +35,15 @@ export const computeSignalStrength = (
     const maxSupport = Math.max(...supportCounts, 1);
     const normalized = supportCounts.map(c => c / maxSupport);
 
-    const mean = normalized.reduce((a, b) => a + b, 0) / normalized.length;
-    const variance = normalized.reduce((sum, v) => sum + Math.pow(v - mean, 2), 0) / normalized.length;
-    const supportSignal = clamp01(variance * 5);
+    let supportSignal = 0;
+    if (normalized.length > 0) {
+        const mean = normalized.reduce((a, b) => a + b, 0) / normalized.length;
+        const variance = normalized.reduce((sum, v) => sum + Math.pow(v - mean, 2), 0) / normalized.length;
+        supportSignal = clamp01(variance * 5);
+    }
 
     const uniqueModelCount = new Set(supporters.flat()).size;
-    const coverageSignal = uniqueModelCount / modelCount;
+    const coverageSignal = modelCount > 0 ? clamp01(uniqueModelCount / modelCount) : 0;
 
     return (edgeSignal * 0.4 + supportSignal * 0.3 + coverageSignal * 0.3);
 };

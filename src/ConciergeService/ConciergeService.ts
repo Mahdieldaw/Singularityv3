@@ -13,7 +13,7 @@ import {
 import { buildPositionBrief, buildPositionBriefWithGhosts } from './positionBrief';
 
 // Shadow Mapper types
-import type { ShadowAudit } from './PromptMethods';
+import type { ShadowAudit, UnindexedStatement } from '../core/PromptMethods';
 
 import {
     parseConciergeOutput,
@@ -68,12 +68,7 @@ export interface ConciergePromptOptions {
     /** Shadow analysis data (optional - computed from batch responses) */
     shadow?: {
         audit: ShadowAudit;
-        topUnindexed: Array<{
-            text: string;
-            type: string;
-            sourceModels: number[];
-            adjustedScore: number;
-        }>;
+        topUnindexed: UnindexedStatement[];
     };
     /** Ghost strings from MapperArtifact (v4 - geometry) */
     ghosts?: string[];
@@ -217,12 +212,7 @@ function formatActiveWorkflow(workflow: ActiveWorkflow): string {
  */
 export interface ShadowData {
     audit: ShadowAudit;
-    topUnindexed: Array<{
-        text: string;
-        type: string;
-        sourceModels: number[];
-        adjustedScore: number;
-    }>;
+    topUnindexed: UnindexedStatement[];
 }
 
 /**
@@ -268,14 +258,14 @@ function buildShadowSection(shadow: ShadowData): string {
         parts.push('');
         parts.push('**Potentially missed (sorted by relevance):**');
         for (const item of relevant.slice(0, 3)) {
-            const typeLabel = item.type.charAt(0).toUpperCase() + item.type.slice(1);
-            const truncatedText = item.text.length > 100
-                ? item.text.slice(0, 97) + '...'
-                : item.text;
+            const { statement } = item;
+            const typeLabel = statement.stance.charAt(0).toUpperCase() + statement.stance.slice(1);
+            const truncatedText = statement.text.length > 100
+                ? statement.text.slice(0, 97) + '...'
+                : statement.text;
             let line = `• [${typeLabel}] "${truncatedText}"`;
-            if (item.sourceModels.length > 1) {
-                line += ` (from ${item.sourceModels.length} perspectives)`;
-            }
+            // V2 uses single modelIndex per statement, but we can mention it
+            line += ` (from perspective ${statement.modelIndex})`;
             parts.push(line);
         }
     }

@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from "react";
 import type { StructuralAnalysis } from "../../../shared/contract";
 import type { SingularityOutputState } from "../../hooks/useSingularityOutput";
-import { ConciergeService } from "../../../src/core/ConciergeService";
+import { ConciergeService } from "../../../src/ConciergeService/ConciergeService";
 import MarkdownDisplay from "../MarkdownDisplay";
 
 interface ConciergePipelinePanelProps {

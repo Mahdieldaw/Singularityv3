@@ -74,6 +74,7 @@ export interface Claim {
   quote?: string;
   support_count?: number;
   originalId?: string; // Tracking for edits across turns
+  sourceStatementIds?: string[]; // Tracking for shadow mapper provenance
 }
 
 export interface Edge {
@@ -1131,19 +1132,9 @@ export interface StructuralAnalysis {
   ratios: CoreRatios;
   shape: ProblemStructure;
   shadow?: {
-    audit: any; // We'll use any here to avoid importing ShadowAudit into contract, or we can define a simple interface
-    unindexed: Array<{
-      text: string;
-      type: string;
-      sourceModels: number[];
-      adjustedScore: number;
-    }>;
-    topUnindexed: Array<{
-      text: string;
-      type: string;
-      sourceModels: number[];
-      adjustedScore: number;
-    }>;
+    audit: any;
+    unindexed: any[];
+    topUnindexed: any[];
     processingTime: number;
   };
 }

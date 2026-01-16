@@ -43,12 +43,12 @@ export class WorkflowEngine {
         this.stepExecutor.executeMappingStep(step, ctx, results, wfCtx, opts),
       singularity: (step, ctx, results, _wfCtx, resolved, opts) =>
         this.cognitiveHandler.orchestrateSingularityPhase(
-          {}, // Empty request as it's derived from payload
+          this.currentRequest || {},
           ctx,
           [step],
-          new Map([[step.stepId, { status: "pending" }]]), // Dummy results map for handler
+          results,
           resolved,
-          this.currentUserMessage,
+          this.currentUserMessage || ctx?.userMessage || "",
           this.stepExecutor,
           this.streamingManager
         ),
@@ -62,6 +62,7 @@ export class WorkflowEngine {
   }
 
   async execute(request, resolvedContext) {
+    this.currentRequest = request;
     const { context, steps } = request;
     const stepResults = new Map();
     const workflowContexts = {};

@@ -1,14 +1,11 @@
 import {
     MapperArtifact,
-    Claim,
-    Edge,
     ProblemStructure,
     EnrichedClaim,
     StructuralAnalysis,
     SettledShapeData,
     ContestedShapeData,
     TradeoffShapeData,
-    GraphAnalysis
 } from "../../../shared/contract";
 import { computeLandscapeMetrics, computeClaimRatios, assignPercentileFlags, computeCoreRatios } from "./metrics";
 import { getTopNCount, computeSignalStrength } from "./utils";
@@ -35,9 +32,10 @@ import {
 import {
     executeShadowExtraction,
     executeShadowDelta,
+    extractReferencedIds,
     ShadowAudit,
     UnindexedStatement
-} from "../shadow";
+} from "../../shadow";
 
 export const computeStructuralAnalysis = (artifact: MapperArtifact): StructuralAnalysis => {
     const rawClaims = Array.isArray(artifact?.claims) ? artifact.claims : [];
@@ -113,7 +111,13 @@ export const computeStructuralAnalysis = (artifact: MapperArtifact): StructuralA
     let shapeData: ProblemStructure['data'] | undefined;
     try {
         shapeData = buildShapeData();
-    } catch {
+    } catch (err) {
+        console.error("[StructuralAnalysis] buildShapeData failed:", {
+            error: err,
+            claimsCount: claimsWithLeverage.length,
+            edgesCount: edges.length,
+            ghostsCount: ghosts.length
+        });
         shapeData = buildSparseData(claimsWithLeverage, graph, ghosts, signalStrength);
     }
     const floorAssumptions = (shapeData as SettledShapeData)?.floorAssumptions;
@@ -169,9 +173,10 @@ export const computeFullAnalysis = (
 } => {
     const baseAnalysis = computeStructuralAnalysis(primaryArtifact);
     const shadowExtraction = executeShadowExtraction(batchResponses);
+    const referencedIds = extractReferencedIds(primaryArtifact.claims || []);
     const shadowDelta = executeShadowDelta(
         shadowExtraction,
-        primaryArtifact,
+        referencedIds,
         userQuery
     );
     const MAX_SHADOW_TOP = 5;
@@ -179,9 +184,9 @@ export const computeFullAnalysis = (
         ...baseAnalysis,
         shadow: {
             audit: shadowDelta.audit,
-            unindexed: shadowDelta.unindexed,
-            topUnindexed: shadowDelta.unindexed.slice(0, MAX_SHADOW_TOP),
-            processingTime: shadowExtraction.processingTime + shadowDelta.processingTime
+            unindexed: shadowDelta.unreferenced,
+            topUnindexed: shadowDelta.unreferenced.slice(0, MAX_SHADOW_TOP),
+            processingTime: shadowExtraction.meta.processingTimeMs + shadowDelta.processingTimeMs
         }
     };
 };

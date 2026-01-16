@@ -19,7 +19,7 @@
 // Changes require human review (see GUARDRAILS.md)
 // ═══════════════════════════════════════════════════════════════════════════
 
-export type Stance = 
+export type Stance =
     | 'prescriptive'  // Do X, use Y, ensure Z
     | 'cautionary'    // Don't do X, avoid Y, risk of Z
     | 'prerequisite'  // Before X, first Y, requires Z
@@ -30,9 +30,9 @@ export type Stance =
 // Priority order: higher priority wins when multiple patterns match
 // Rationale: Structural relationships (order) > Actions > Facts
 export const STANCE_PRIORITY: Stance[] = [
-    'cautionary',     // 6 - Warnings are critical
-    'prerequisite',   // 5 - "Before" signals hard order
-    'dependent',      // 4 - "After" signals hard order
+    'prerequisite',   // 6 - "Before" signals hard order (Top)
+    'dependent',      // 5 - "After" signals hard order
+    'cautionary',     // 4 - Warnings / Risks
     'prescriptive',   // 3 - Action recommendations
     'uncertain',      // 2 - Hedges and caveats
     'assertive',      // 1 - Default factual
@@ -62,7 +62,7 @@ export const STANCE_PATTERNS: Record<Stance, RegExp[]> = {
         /\bshould\s+not\b/i,
         /\bshouldn'?t\b/i,
     ],
-    
+
     prerequisite: [
         /\bbefore\b/i,
         /\bfirst\b/i,
@@ -80,7 +80,7 @@ export const STANCE_PATTERNS: Record<Stance, RegExp[]> = {
         /\ballows?\s+you\s+to\b/i,
         /\binitially\b/i,
     ],
-    
+
     dependent: [
         /\bafter\b/i,
         /\bonce\b/i,
@@ -93,7 +93,7 @@ export const STANCE_PATTERNS: Record<Stance, RegExp[]> = {
         /\bin\s+the\s+next\s+step\b/i,
         /\bdownstream\b/i,
     ],
-    
+
     prescriptive: [
         /\bshould\b/i,
         /\bmust\b/i,
@@ -115,7 +115,7 @@ export const STANCE_PATTERNS: Record<Stance, RegExp[]> = {
         /\bimplement\b/i,
         /\bapply\b/i,
     ],
-    
+
     uncertain: [
         /\bmight\b/i,
         /\bmay\b/i,
@@ -135,7 +135,7 @@ export const STANCE_PATTERNS: Record<Stance, RegExp[]> = {
         /\busually\b/i,
         /\bin\s+some\s+cases\b/i,
     ],
-    
+
     assertive: [
         /\bis\b/i,
         /\bare\b/i,
@@ -183,7 +183,7 @@ export const SIGNAL_PATTERNS: SignalPatterns = {
         /\benables?\b/i,
         /\bunblocks?\b/i,
     ],
-    
+
     tension: [
         /\bbut\b/i,
         /\bhowever\b/i,
@@ -206,7 +206,7 @@ export const SIGNAL_PATTERNS: SignalPatterns = {
         /\bcompeting\b/i,
         /\bconflicts?\s+with\b/i,
     ],
-    
+
     conditional: [
         /\bif\b/i,
         /\bwhen\b/i,
@@ -248,11 +248,11 @@ export function classifyStance(text: string): { stance: Stance; confidence: numb
     let bestStance: Stance = 'assertive';
     let maxPriority = 0;
     let matchCount = 0;
-    
+
     for (const stance of STANCE_PRIORITY) {
         const patterns = STANCE_PATTERNS[stance];
         const matches = patterns.filter(p => p.test(text)).length;
-        
+
         if (matches > 0) {
             const priority = getStancePriority(stance);
             if (priority > maxPriority) {
@@ -262,11 +262,11 @@ export function classifyStance(text: string): { stance: Stance; confidence: numb
             }
         }
     }
-    
+
     // Confidence based on pattern strength
     // 1 match = 0.65, 2 matches = 0.80, 3+ matches = 0.95
     const confidence = Math.min(1.0, 0.5 + (matchCount * 0.15));
-    
+
     return { stance: bestStance, confidence };
 }
 
@@ -294,8 +294,8 @@ export function computeSignalWeight(signals: {
     conditional: boolean;
 }): number {
     let weight = 0;
+    if (signals.conditional) weight += 3;
     if (signals.sequence) weight += 2;
-    if (signals.tension) weight += 2;
-    if (signals.conditional) weight += 1;
+    if (signals.tension) weight += 1;
     return weight;
 }

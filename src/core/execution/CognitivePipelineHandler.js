@@ -26,16 +26,7 @@ export class CognitivePipelineHandler {
       let mapperArtifact = mappingResult?.mapperArtifact || context?.mapperArtifact || request?.payload?.mapperArtifact || null;
 
       if (!mapperArtifact) {
-        // If it's a direct singularity step, we might not have a mappingResult.
-        // Try to find it in the context (hydrated by WorkflowEngine)
-        if (context?.mapperArtifact) {
-          mapperArtifact = context.mapperArtifact;
-        } else {
-          console.warn("[CognitiveHandler] No mapperArtifact found in results or context.");
-        }
-      }
-
-      if (!mapperArtifact) {
+        console.warn("[CognitiveHandler] No mapperArtifact found in results or context.");
         // According to user requirement: fail if missing.
         console.error("[CognitiveHandler] CRITICAL: Missing mapperArtifact for Singularity phase.");
         throw new Error("Singularity mode requires a valid Mapper Artifact which is missing in this context.");

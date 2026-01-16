@@ -17,8 +17,6 @@ import {
   selectedModeAtom,
   singularityProviderAtom,
   batchAutoRunEnabledAtom,
-  uiPhaseAtom,
-  isHistoryPanelOpenAtom,
   turnIdsAtom,
 } from "../state/atoms";
 import { useChat } from "../hooks/chat/useChat";
@@ -58,8 +56,6 @@ const ChatInput = ({
   const [prompt, setPrompt] = useAtom(chatInputValueAtom);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
-  const setUiPhase = useSetAtom(uiPhaseAtom);
-  const setIsHistoryPanelOpen = useSetAtom(isHistoryPanelOpenAtom);
   const [activeTarget, setActiveTarget] = useAtom(activeProviderTargetAtom); // Keep this as useAtom to read activeTarget
   const turnIds = useAtomValue(turnIdsAtom);
   const [currentSessionId] = useAtom(currentSessionIdAtom);

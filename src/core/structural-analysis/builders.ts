@@ -214,52 +214,56 @@ export const buildForkedData = (
     conflictInfos: ConflictInfo[],
     conflictClusters: ConflictCluster[]
 ): ContestedShapeData => {
-    let centralConflict: CentralConflict;
+    let centralConflict: CentralConflict | undefined;
     if (conflictClusters.length > 0) {
-        const topCluster = conflictClusters.sort((a, b) =>
+        const topCluster = [...conflictClusters].sort((a, b) =>
             b.challengerIds.length - a.challengerIds.length
         )[0];
-        const target = claims.find(c => c.id === topCluster.targetId)!;
-        const challengerClaims = claims.filter(c => topCluster.challengerIds.includes(c.id));
-        centralConflict = {
-            type: 'cluster',
-            axis: topCluster.axis,
-            target: {
-                claim: {
-                    id: target.id,
-                    label: target.label,
-                    text: target.text,
-                    supportCount: target.supporters.length,
-                    supportRatio: target.supportRatio,
-                    role: target.role,
-                    isHighSupport: target.isHighSupport,
-                    challenges: target.challenges
+        const target = claims.find(c => c.id === topCluster.targetId);
+        if (target) {
+            const challengerClaims = claims.filter(c => topCluster.challengerIds.includes(c.id));
+            centralConflict = {
+                type: 'cluster',
+                axis: topCluster.axis,
+                target: {
+                    claim: {
+                        id: target.id,
+                        label: target.label,
+                        text: target.text,
+                        supportCount: target.supporters.length,
+                        supportRatio: target.supportRatio,
+                        role: target.role,
+                        isHighSupport: target.isHighSupport,
+                        challenges: target.challenges
+                    },
+                    supportingClaims: [],
+                    supportRationale: target.text
                 },
-                supportingClaims: [],
-                supportRationale: target.text
-            },
-            challengers: {
-                claims: challengerClaims.map(c => ({
-                    id: c.id,
-                    label: c.label,
-                    text: c.text,
-                    supportCount: c.supporters.length,
-                    supportRatio: c.supportRatio,
-                    role: c.role,
-                    isHighSupport: c.isHighSupport,
-                    challenges: c.challenges
-                })),
-                commonTheme: topCluster.theme,
-                supportingClaims: []
-            },
-            dynamics: 'one_vs_many',
-            stakes: {
-                acceptingTarget: `Accepting ${target.label} means accepting the established position`,
-                acceptingChallengers: `Accepting challengers means reconsidering the established position`
-            }
-        };
-    } else if (conflictInfos.length > 0) {
-        const topConflict = conflictInfos.sort((a, b) => b.significance - a.significance)[0];
+                challengers: {
+                    claims: challengerClaims.map(c => ({
+                        id: c.id,
+                        label: c.label,
+                        text: c.text,
+                        supportCount: c.supporters.length,
+                        supportRatio: c.supportRatio,
+                        role: c.role,
+                        isHighSupport: c.isHighSupport,
+                        challenges: c.challenges
+                    })),
+                    commonTheme: topCluster.theme,
+                    supportingClaims: []
+                },
+                dynamics: 'one_vs_many',
+                stakes: {
+                    acceptingTarget: `Accepting ${target.label} means accepting the established position`,
+                    acceptingChallengers: `Accepting challengers means reconsidering the established position`
+                }
+            };
+        }
+    }
+
+    if (!centralConflict && conflictInfos.length > 0) {
+        const topConflict = [...conflictInfos].sort((a, b) => b.significance - a.significance)[0];
         centralConflict = {
             type: 'individual',
             axis: topConflict.axis.resolved,
@@ -276,7 +280,9 @@ export const buildForkedData = (
             dynamics: topConflict.dynamics,
             stakes: topConflict.stakes
         };
-    } else {
+    }
+
+    if (!centralConflict) {
         throw new Error("Forked shape requires at least one conflict");
     }
     const usedIds = new Set<string>();

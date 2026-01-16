@@ -67,7 +67,7 @@ describe('ConciergeService', () => {
     });
 
     it('should include active workflow if provided', () => {
-         const prompt = ConciergeService.buildConciergePrompt('Hello', mockAnalysis, {
+        const prompt = ConciergeService.buildConciergePrompt('Hello', mockAnalysis, {
             isFirstTurn: false,
             activeWorkflow: {
                 goal: 'Test Goal',

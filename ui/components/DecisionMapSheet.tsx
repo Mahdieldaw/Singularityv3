@@ -31,7 +31,6 @@ const ConciergePipelinePanel = safeLazy(() => import("./debug/ConciergePipelineP
 import { normalizeProviderId } from "../utils/provider-id-mapper";
 
 import { useSingularityOutput } from "../hooks/useSingularityOutput";
-import type { SingularityOutputState } from "../hooks/useSingularityOutput";
 
 import { StructuralInsight } from "./StructuralInsight";
 

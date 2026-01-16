@@ -28,15 +28,33 @@ export interface UnreferencedStatement {
     adjustedScore: number;         // Combined score for ranking
 }
 
+export interface ShadowAudit {
+    shadowStatementCount: number;
+    referencedCount: number;
+    unreferencedCount: number;
+    highSignalUnreferencedCount: number;  // signalWeight > 0
+    byStance: Record<Stance, { total: number; unreferenced: number }>;
+
+    // Gaps for Concierge (derived from stance and signals)
+    gaps: {
+        conflicts: number;
+        prerequisites: number;
+        prescriptive: number;
+    };
+
+    // V1 Compatibility fields
+    primaryCounts: {
+        claims: number;
+    };
+    extraction: {
+        survivalRate: number;
+        pass1Candidates: number;
+    };
+}
+
 export interface ShadowDeltaResult {
     unreferenced: UnreferencedStatement[];
-    audit: {
-        shadowStatementCount: number;
-        referencedCount: number;
-        unreferencedCount: number;
-        highSignalUnreferencedCount: number;  // signalWeight > 0
-        byStance: Record<Stance, { total: number; unreferenced: number }>;
-    };
+    audit: ShadowAudit;
     processingTimeMs: number;
 }
 
@@ -57,7 +75,7 @@ export function computeShadowDelta(
     userQuery: string
 ): ShadowDeltaResult {
     const startTime = performance.now();
-    
+
     // Initialize stance counters
     const byStance: Record<Stance, { total: number; unreferenced: number }> = {
         prescriptive: { total: 0, unreferenced: 0 },
@@ -67,30 +85,30 @@ export function computeShadowDelta(
         assertive: { total: 0, unreferenced: 0 },
         uncertain: { total: 0, unreferenced: 0 },
     };
-    
+
     const unreferenced: UnreferencedStatement[] = [];
-    
+
     // Process each shadow statement
     for (const statement of shadowResult.statements) {
         byStance[statement.stance].total++;
-        
+
         // Check if this statement was used by semantic mapper
         if (!referencedStatementIds.has(statement.id)) {
             byStance[statement.stance].unreferenced++;
-            
+
             // Compute scores
             const queryRelevance = computeQueryRelevance(statement.text, userQuery);
             const signalWeight = computeSignalWeight(statement.signals);
-            
+
             // Adjusted score combines:
             // - Base confidence from pattern matching
             // - Query relevance boost (up to 2x)
             // - Signal weight boost (up to 1.5x for max signals)
-            const adjustedScore = 
-                statement.confidence * 
-                (1 + queryRelevance) * 
+            const adjustedScore =
+                statement.confidence *
+                (1 + queryRelevance) *
                 (1 + signalWeight * 0.2);
-            
+
             unreferenced.push({
                 statement,
                 queryRelevance,
@@ -99,21 +117,44 @@ export function computeShadowDelta(
             });
         }
     }
-    
+
     // Sort by adjusted score (highest first)
     unreferenced.sort((a, b) => b.adjustedScore - a.adjustedScore);
-    
+
     // Count high-signal unreferenced
     const highSignalUnreferencedCount = unreferenced.filter(u => u.signalWeight > 0).length;
-    
+
+    // Count gaps for Concierge
+    const gaps = {
+        conflicts: unreferenced.filter(u => u.statement.signals.tension).length,
+        prerequisites: unreferenced.filter(u =>
+            u.statement.stance === 'prerequisite' ||
+            u.statement.stance === 'dependent' ||
+            u.statement.signals.sequence
+        ).length,
+        prescriptive: byStance.prescriptive.unreferenced + byStance.cautionary.unreferenced,
+    };
+
+    const shadowStatementCount = shadowResult.statements.length;
+
     return {
         unreferenced,
         audit: {
-            shadowStatementCount: shadowResult.statements.length,
+            shadowStatementCount,
             referencedCount: referencedStatementIds.size,
             unreferencedCount: unreferenced.length,
             highSignalUnreferencedCount,
             byStance,
+            gaps,
+            primaryCounts: {
+                claims: referencedStatementIds.size, // Approximation of claims count
+            },
+            extraction: {
+                survivalRate: shadowStatementCount > 0
+                    ? shadowStatementCount / shadowResult.meta.sentencesProcessed
+                    : 0,
+                pass1Candidates: shadowResult.meta.candidatesProcessed,
+            }
         },
         processingTimeMs: performance.now() - startTime,
     };
@@ -129,15 +170,15 @@ export function computeShadowDelta(
 function computeQueryRelevance(statementText: string, queryText: string): number {
     const wordsA = extractSignificantWords(statementText);
     const wordsB = extractSignificantWords(queryText);
-    
+
     if (wordsA.size === 0 || wordsB.size === 0) return 0;
-    
+
     // Count intersection
     let overlap = 0;
     wordsA.forEach(word => {
         if (wordsB.has(word)) overlap++;
     });
-    
+
     // Jaccard: intersection / union
     const unionSize = new Set([...wordsA, ...wordsB]).size;
     return overlap / unionSize;
@@ -152,12 +193,12 @@ function extractSignificantWords(text: string): Set<string> {
         .replace(/[^\w\s]/g, ' ')
         .replace(/\s+/g, ' ')
         .trim();
-    
+
     const words = normalized.split(' ');
     const significant = words.filter(w => {
         // Filter short words
         if (w.length < 3) return false;
-        
+
         // Filter common stop words
         const stopWords = new Set([
             'the', 'and', 'for', 'are', 'but', 'not', 'you', 'with',
@@ -167,10 +208,10 @@ function extractSignificantWords(text: string): Set<string> {
             'was', 'were', 'been', 'being', 'from', 'they', 'she',
             'would', 'could', 'should', 'about', 'into', 'through',
         ]);
-        
+
         return !stopWords.has(w);
     });
-    
+
     return new Set(significant);
 }
 
@@ -216,23 +257,23 @@ export function formatUnreferencedForPrompt(
     limit: number = 5
 ): string {
     if (unreferenced.length === 0) return '';
-    
+
     const top = unreferenced.slice(0, limit);
-    
+
     let output = '## Additional Context (not in main analysis)\n\n';
     output += 'These statements were extracted but not used in claims:\n\n';
-    
+
     for (const u of top) {
         const signalTags = [];
         if (u.statement.signals.sequence) signalTags.push('SEQ');
         if (u.statement.signals.tension) signalTags.push('TENS');
         if (u.statement.signals.conditional) signalTags.push('COND');
-        
+
         const tags = signalTags.length > 0 ? ` [${signalTags.join(',')}]` : '';
-        
+
         output += `- (${u.statement.stance}${tags}): "${u.statement.text}"\n`;
     }
-    
+
     return output;
 }
 
@@ -241,21 +282,21 @@ export function formatUnreferencedForPrompt(
  */
 export function formatAuditSummary(delta: ShadowDeltaResult): string {
     const { audit } = delta;
-    
+
     let summary = `Shadow Delta Audit:\n`;
     summary += `  Total shadow statements: ${audit.shadowStatementCount}\n`;
     summary += `  Referenced in claims: ${audit.referencedCount}\n`;
     summary += `  Unreferenced: ${audit.unreferencedCount}\n`;
     summary += `  High-signal unreferenced: ${audit.highSignalUnreferencedCount}\n`;
     summary += `\n  By stance:\n`;
-    
+
     for (const [stance, counts] of Object.entries(audit.byStance)) {
-        const percent = counts.total > 0 
+        const percent = counts.total > 0
             ? Math.round((counts.unreferenced / counts.total) * 100)
             : 0;
         summary += `    ${stance}: ${counts.unreferenced}/${counts.total} (${percent}% unreferenced)\n`;
     }
-    
+
     return summary;
 }
 
@@ -271,7 +312,7 @@ export function extractReferencedIds(
     claims: Array<{ sourceStatementIds?: string[] }>
 ): Set<string> {
     const ids = new Set<string>();
-    
+
     for (const claim of claims) {
         if (claim.sourceStatementIds) {
             for (const id of claim.sourceStatementIds) {
@@ -279,6 +320,6 @@ export function extractReferencedIds(
             }
         }
     }
-    
+
     return ids;
 }

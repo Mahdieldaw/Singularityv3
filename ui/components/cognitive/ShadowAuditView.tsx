@@ -43,22 +43,22 @@ export const ShadowAuditView: React.FC<ShadowAuditViewProps> = ({ analysis }) =>
                             <div className="text-lg font-mono text-text-primary">
                                 {(audit.extraction.survivalRate * 100).toFixed(0)}%
                             </div>
-                            <div className="text-[10px] text-text-muted">{audit.extraction.survivedSteps} / {audit.extraction.pass1Candidates}</div>
+                            <div className="text-[10px] text-text-muted">{audit.shadowStatementCount} extracted / {audit.extraction.pass1Candidates} searched</div>
                         </div>
                         <div className="p-3 rounded-xl bg-surface-highlight/30 border border-border-subtle/50">
                             <div className="text-[10px] uppercase font-bold text-text-muted mb-1">Conflicts</div>
                             <div className="text-lg font-mono text-amber-500">{audit.gaps.conflicts}</div>
-                            <div className="text-[10px] text-text-muted">Missing in Primary</div>
+                            <div className="text-[10px] text-text-muted">In Shadow Only</div>
                         </div>
                         <div className="p-3 rounded-xl bg-surface-highlight/30 border border-border-subtle/50">
                             <div className="text-[10px] uppercase font-bold text-text-muted mb-1">Prereqs</div>
                             <div className="text-lg font-mono text-blue-500">{audit.gaps.prerequisites}</div>
-                            <div className="text-[10px] text-text-muted">Structural Gaps</div>
+                            <div className="text-[10px] text-text-muted">In Shadow Only</div>
                         </div>
                         <div className="p-3 rounded-xl bg-surface-highlight/30 border border-border-subtle/50">
                             <div className="text-[10px] uppercase font-bold text-text-muted mb-1">Time</div>
                             <div className="text-lg font-mono text-text-primary">{shadow.processingTime.toFixed(0)}ms</div>
-                            <div className="text-[10px] text-text-muted">Dual-Pass Exec</div>
+                            <div className="text-[10px] text-text-muted">Shadow Execution</div>
                         </div>
                     </div>
 
@@ -67,28 +67,26 @@ export const ShadowAuditView: React.FC<ShadowAuditViewProps> = ({ analysis }) =>
                         <div className="space-y-3">
                             <div className="text-xs font-bold text-text-secondary flex items-center gap-2">
                                 <span className="w-1 h-1 rounded-full bg-brand-500" />
-                                TOP UNINDEXED STATEMENTS
+                                TOP UNREFERENCED STATEMENTS
                             </div>
                             <div className="space-y-2">
                                 {topUnindexed.map((item, i) => (
                                     <div key={i} className="p-3 rounded-xl bg-surface-raised border border-border-subtle flex flex-col gap-2">
                                         <div className="flex items-center justify-between">
                                             <span className="px-1.5 py-0.5 rounded bg-surface-highlight border border-border-subtle text-[10px] font-mono uppercase text-text-muted">
-                                                {item.type}
+                                                {item.statement.stance}
                                             </span>
                                             <div className="flex items-center gap-2">
                                                 <span className="text-[10px] text-text-muted italic">Score: {item.adjustedScore.toFixed(2)}</span>
                                                 <div className="flex -space-x-1">
-                                                    {item.sourceModels.map(m => (
-                                                        <div key={m} className="w-4 h-4 rounded-full bg-surface-highlight border border-surface flex items-center justify-center text-[8px] font-bold text-text-muted">
-                                                            {m}
-                                                        </div>
-                                                    ))}
+                                                    <div className="w-4 h-4 rounded-full bg-surface-highlight border border-surface flex items-center justify-center text-[8px] font-bold text-text-muted">
+                                                        {item.statement.modelIndex}
+                                                    </div>
                                                 </div>
                                             </div>
                                         </div>
                                         <div className="text-sm text-text-primary leading-relaxed">
-                                            "{item.text}"
+                                            "{item.statement.text}"
                                         </div>
                                     </div>
                                 ))}

@@ -1015,7 +1015,301 @@ export function formatHandoffEcho(handoff: ConciergeDelta | null | undefined): s
     if (context.length > 0) {
         lines.push(`context: ${context.join('; ')}`);
     }
+    if (commit) {
+        lines.push(`>>>COMMIT: ${commit}`);
+    }
     lines.push('---/HANDOFF---');
 
     return lines.join('\n');
+}
+
+// ============================================================================ 
+// SEMANTIC MAPPER OUTPUT PARSING (V4)
+// ============================================================================ 
+
+export interface SemanticMapperParseError {
+    field: string;
+    issue: string;
+    context?: string;
+}
+
+export interface SemanticMapperParseResult {
+    success: boolean;
+    output?: any; // Will be typed as SemanticMapperOutput in the caller
+    errors?: SemanticMapperParseError[];
+    warnings?: string[];
+}
+
+/**
+ * Robustly parse Semantic Mapper JSON output.
+ * Extracts JSON from markdown fences or raw text and validates the structure.
+ */
+export function parseSemanticMapperOutput(
+    rawResponse: string,
+    validStatementIds?: Set<string>
+): SemanticMapperParseResult {
+    const errors: SemanticMapperParseError[] = [];
+    const warnings: string[] = [];
+
+    // Extract JSON from response
+    let jsonText: string;
+
+    // Try to find JSON in markdown code fences
+    const fenceMatch = rawResponse.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
+    if (fenceMatch) {
+        jsonText = fenceMatch[1];
+    } else {
+        // Try to find raw JSON object
+        const rawMatch = rawResponse.match(/(\{[\s\S]*\})/);
+        if (rawMatch) {
+            jsonText = rawMatch[1];
+        } else {
+            return {
+                success: false,
+                errors: [{ field: 'response', issue: 'No JSON object found in response' }],
+            };
+        }
+    }
+
+    // Parse JSON
+    let parsed: any;
+    try {
+        parsed = JSON.parse(jsonText);
+    } catch (e) {
+        return {
+            success: false,
+            errors: [{
+                field: 'json',
+                issue: 'Failed to parse JSON',
+                context: e instanceof Error ? e.message : String(e)
+            }],
+        };
+    }
+
+    // Validate structure
+    if (!parsed.claims || !Array.isArray(parsed.claims)) {
+        errors.push({ field: 'claims', issue: 'Missing or invalid claims array' });
+        return { success: false, errors };
+    }
+
+    // Track claim IDs and gate IDs for reference validation
+    const claimIds = new Set<string>();
+    const gateIds = new Set<string>();
+
+    // Validate each claim
+    for (let i = 0; i < parsed.claims.length; i++) {
+        const claim = parsed.claims[i];
+        const claimContext = `claim[${i}]`;
+
+        // Required fields
+        if (!claim.id) {
+            errors.push({ field: `${claimContext}.id`, issue: 'Missing claim ID' });
+        } else {
+            if (claimIds.has(claim.id)) {
+                errors.push({ field: `${claimContext}.id`, issue: `Duplicate claim ID: ${claim.id}` });
+            }
+            claimIds.add(claim.id);
+        }
+
+        if (!claim.label) {
+            errors.push({ field: `${claimContext}.label`, issue: 'Missing claim label' });
+        }
+
+        if (!claim.stance) {
+            errors.push({ field: `${claimContext}.stance`, issue: 'Missing stance' });
+        }
+
+        if (!claim.sourceStatementIds || !Array.isArray(claim.sourceStatementIds)) {
+            errors.push({ field: `${claimContext}.sourceStatementIds`, issue: 'Missing or invalid sourceStatementIds' });
+        } else if (claim.sourceStatementIds.length === 0) {
+            errors.push({ field: `${claimContext}.sourceStatementIds`, issue: 'Empty sourceStatementIds array' });
+        } else if (validStatementIds) {
+            // Validate statement IDs exist
+            for (const sid of claim.sourceStatementIds) {
+                if (!validStatementIds.has(sid)) {
+                    warnings.push(`Claim ${claim.id} references unknown statement: ${sid}`);
+                }
+            }
+        }
+
+        // Validate gates
+        if (!claim.gates) {
+            errors.push({ field: `${claimContext}.gates`, issue: 'Missing gates object' });
+        } else {
+            // Conditional gates
+            if (!claim.gates.conditionals) {
+                claim.gates.conditionals = []; // Auto-fix
+            } else if (!Array.isArray(claim.gates.conditionals)) {
+                errors.push({ field: `${claimContext}.gates.conditionals`, issue: 'Must be an array' });
+            } else {
+                for (let j = 0; j < claim.gates.conditionals.length; j++) {
+                    const gate = claim.gates.conditionals[j];
+                    const gateContext = `${claimContext}.gates.conditionals[${j}]`;
+
+                    if (!gate.id) {
+                        errors.push({ field: `${gateContext}.id`, issue: 'Missing gate ID' });
+                    } else {
+                        if (gateIds.has(gate.id)) {
+                            errors.push({ field: `${gateContext}.id`, issue: `Duplicate gate ID: ${gate.id}` });
+                        }
+                        gateIds.add(gate.id);
+                    }
+
+                    if (!gate.condition) {
+                        errors.push({ field: `${gateContext}.condition`, issue: 'Missing condition' });
+                    }
+
+                    if (!gate.sourceStatementIds || gate.sourceStatementIds.length === 0) {
+                        errors.push({ field: `${gateContext}.sourceStatementIds`, issue: 'Missing provenance' });
+                    } else if (validStatementIds) {
+                        for (const sid of gate.sourceStatementIds) {
+                            if (!validStatementIds.has(sid)) {
+                                warnings.push(`Gate ${gate.id} references unknown statement: ${sid}`);
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Prerequisite gates
+            if (!claim.gates.prerequisites) {
+                claim.gates.prerequisites = []; // Auto-fix
+            } else if (!Array.isArray(claim.gates.prerequisites)) {
+                errors.push({ field: `${claimContext}.gates.prerequisites`, issue: 'Must be an array' });
+            } else {
+                for (let j = 0; j < claim.gates.prerequisites.length; j++) {
+                    const gate = claim.gates.prerequisites[j];
+                    const gateContext = `${claimContext}.gates.prerequisites[${j}]`;
+
+                    if (!gate.id) {
+                        errors.push({ field: `${gateContext}.id`, issue: 'Missing gate ID' });
+                    } else {
+                        if (gateIds.has(gate.id)) {
+                            errors.push({ field: `${gateContext}.id`, issue: `Duplicate gate ID: ${gate.id}` });
+                        }
+                        gateIds.add(gate.id);
+                    }
+
+                    if (!gate.claimId) {
+                        errors.push({ field: `${gateContext}.claimId`, issue: 'Missing required claim reference' });
+                    }
+
+                    if (!gate.condition) {
+                        errors.push({ field: `${gateContext}.condition`, issue: 'Missing condition' });
+                    }
+
+                    if (!gate.sourceStatementIds || gate.sourceStatementIds.length === 0) {
+                        errors.push({ field: `${gateContext}.sourceStatementIds`, issue: 'Missing provenance' });
+                    } else if (validStatementIds) {
+                        for (const sid of gate.sourceStatementIds) {
+                            if (!validStatementIds.has(sid)) {
+                                warnings.push(`Gate ${gate.id} references unknown statement: ${sid}`);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Validate edges
+        if (!claim.edges) {
+            errors.push({ field: `${claimContext}.edges`, issue: 'Missing edges object' });
+        } else {
+            // Sequence edges
+            if (!claim.edges.sequence) {
+                claim.edges.sequence = []; // Auto-fix
+            } else if (!Array.isArray(claim.edges.sequence)) {
+                errors.push({ field: `${claimContext}.edges.sequence`, issue: 'Must be an array' });
+            } else {
+                for (let j = 0; j < claim.edges.sequence.length; j++) {
+                    const edge = claim.edges.sequence[j];
+                    const edgeContext = `${claimContext}.edges.sequence[${j}]`;
+
+                    if (!edge.targetClaimId) {
+                        errors.push({ field: `${edgeContext}.targetClaimId`, issue: 'Missing target claim' });
+                    }
+
+                    if (!edge.sourceStatementIds || edge.sourceStatementIds.length === 0) {
+                        errors.push({ field: `${edgeContext}.sourceStatementIds`, issue: 'Missing provenance' });
+                    } else if (validStatementIds) {
+                        for (const sid of edge.sourceStatementIds) {
+                            if (!validStatementIds.has(sid)) {
+                                warnings.push(`Sequence edge references unknown statement: ${sid}`);
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Tension edges
+            if (!claim.edges.tension) {
+                claim.edges.tension = []; // Auto-fix
+            } else if (!Array.isArray(claim.edges.tension)) {
+                errors.push({ field: `${claimContext}.edges.tension`, issue: 'Must be an array' });
+            } else {
+                for (let j = 0; j < claim.edges.tension.length; j++) {
+                    const edge = claim.edges.tension[j];
+                    const edgeContext = `${claimContext}.edges.tension[${j}]`;
+
+                    if (!edge.targetClaimId) {
+                        errors.push({ field: `${edgeContext}.targetClaimId`, issue: 'Missing target claim' });
+                    }
+
+                    if (!edge.sourceStatementIds || edge.sourceStatementIds.length === 0) {
+                        errors.push({ field: `${edgeContext}.sourceStatementIds`, issue: 'Missing provenance' });
+                    } else if (validStatementIds) {
+                        for (const sid of edge.sourceStatementIds) {
+                            if (!validStatementIds.has(sid)) {
+                                warnings.push(`Tension edge references unknown statement: ${sid}`);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Second pass: validate claim references
+    for (const claim of parsed.claims) {
+        if (claim.gates && claim.gates.prerequisites) {
+            for (const gate of claim.gates.prerequisites) {
+                if (gate.claimId && !claimIds.has(gate.claimId)) {
+                    warnings.push(`Prerequisite gate ${gate.id} references unknown claim: ${gate.claimId}`);
+                }
+            }
+        }
+
+        if (claim.edges) {
+            if (claim.edges.sequence) {
+                for (const edge of claim.edges.sequence) {
+                    if (edge.targetClaimId && !claimIds.has(edge.targetClaimId)) {
+                        warnings.push(`Sequence edge from ${claim.id} references unknown claim: ${edge.targetClaimId}`);
+                    }
+                }
+            }
+            if (claim.edges.tension) {
+                for (const edge of claim.edges.tension) {
+                    if (edge.targetClaimId && !claimIds.has(edge.targetClaimId)) {
+                        warnings.push(`Tension edge from ${claim.id} references unknown claim: ${edge.targetClaimId}`);
+                    }
+                }
+            }
+        }
+    }
+
+    if (errors.length > 0) {
+        return {
+            success: false,
+            errors,
+            warnings: warnings.length > 0 ? warnings : undefined,
+        };
+    }
+
+    return {
+        success: true,
+        output: {
+            claims: parsed.claims,
+        },
+        warnings: warnings.length > 0 ? warnings : undefined,
+    };
 }

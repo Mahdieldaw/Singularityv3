@@ -83,7 +83,7 @@ export const StructuralDebugPanel: React.FC<StructuralDebugPanelProps> = ({ anal
                 supportRatio: v.supportRatio,
                 insightType: v.insightType || 'edge_case',
                 insightScore: v.insightScore || 0.5,
-                whyItMatters: v.whyItMatters || (data?.strongestVoice?.id && v.id === data.strongestVoice.id ? data.strongestVoice.whyItMatters : 'Challenging minority voice'),
+                whyItMatters: v.whyItMatters || (v.id === data?.strongestVoice?.id ? data?.strongestVoice?.whyItMatters : null) || 'Challenging minority voice',
                 challenges: v.challenges || (Array.isArray(v.targets) ? v.targets.join(', ') : 'consensus')
             }));
         }
