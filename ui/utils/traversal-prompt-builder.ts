@@ -1,11 +1,9 @@
-/**
- * Build continuation prompt for Concierge based on user's traversal decisions
- */
 export function buildTraversalContinuationPrompt(
   originalQuery: string,
   gateResolutions: Map<string, any>,
   forcingPointResolutions: Map<string, any>,
-  claims: any[]
+  claims: any[],
+  gatesMap?: Map<string, any>
 ): string {
   const parts: string[] = [];
 
@@ -19,7 +17,16 @@ export function buildTraversalContinuationPrompt(
       if (resolution.satisfied && resolution.userInput) {
         parts.push(`- ${resolution.userInput}`);
       } else if (!resolution.satisfied) {
-        parts.push(`- Does NOT apply: ${gateId}`);
+        // Try to find a human-readable label
+        const gate = gatesMap?.get(gateId);
+        const label =
+          resolution.label ||
+          resolution.question ||
+          resolution.condition ||
+          gate?.question ||
+          gate?.condition ||
+          gateId;
+        parts.push(`- Does NOT apply: ${label}`);
       }
     });
     parts.push("");
@@ -28,7 +35,7 @@ export function buildTraversalContinuationPrompt(
   // User's choices at forcing points
   if (forcingPointResolutions.size > 0) {
     parts.push("User Decisions:");
-    forcingPointResolutions.forEach((resolution, fpId) => {
+    forcingPointResolutions.forEach((resolution) => {
       const claim = claims.find(c => c.id === resolution.selectedClaimId);
       if (claim) {
         parts.push(`- Chose: "${claim.label}"`);

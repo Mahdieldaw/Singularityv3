@@ -204,7 +204,7 @@ export function computeTargetedAnalysis(
  */
 export function formatTargetedInsights(
     analysis: TargetedAnalysis,
-    state: TraversalState
+    _state: TraversalState
 ): string {
     const notes: string[] = [];
 
@@ -222,7 +222,7 @@ export function formatTargetedInsights(
         notes.push(`⚙️ Fragile path: "${fp.claim.label}" depends on "${fp.unblockedGate}" which you haven't confirmed`);
     }
 
-    return notes.length > 0 
+    return notes.length > 0
         ? `<NOTES>\n${notes.join('\n\n')}\n</NOTES>\n\n`
         : '';
 }

@@ -82,7 +82,7 @@ export function extractForcingPoints(
                 type: 'conditional',
                 tier: 0,
 
-                question: 'Does this apply to your situation?',
+                question: gate.question,
                 condition: gate.condition,
 
                 gateId: gate.id,
@@ -123,7 +123,7 @@ export function extractForcingPoints(
                 type: 'prerequisite',
                 tier,
 
-                question: 'Do you have this in place?',
+                question: gate.question,
                 condition: gate.condition,
 
                 gateId: gate.id,
@@ -157,7 +157,7 @@ export function extractForcingPoints(
             type: 'conflict',
             tier,
 
-            question: 'Which matters more to you?',
+            question: tension.question,
             condition: `${claimA.label} vs ${claimB.label}`,
 
             options: [

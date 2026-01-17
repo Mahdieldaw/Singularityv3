@@ -15,6 +15,7 @@ import { Stance } from '../shadow';
 export interface ConditionalGate {
     id: string;                    // "cg_0", "cg_1"
     condition: string;             // The condition text
+    question: string;              // Canonical question form (e.g., "Does this system expose a web API?")
     sourceStatementIds: string[];  // Provenance
 }
 
@@ -26,29 +27,23 @@ export interface PrerequisiteGate {
     id: string;                    // "pg_0", "pg_1"
     claimId: string;               // The required claim
     condition: string;             // Human-readable description of dependency
+    question: string;              // Canonical question form (e.g., "Is a schema already defined?")
     sourceStatementIds: string[];  // Provenance
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// EDGE TYPES
+// RELATIONSHIP TYPES
 // ═══════════════════════════════════════════════════════════════════════════
 
 /**
- * Sequence Edge
- * This claim enables/comes-before the target claim
- */
-export interface SequenceEdge {
-    targetClaimId: string;
-    sourceStatementIds: string[];  // Provenance
-}
-
-/**
- * Tension Edge
+ * Conflict Edge
  * This claim conflicts/trades-off with the target claim
  */
-export interface TensionEdge {
-    targetClaimId: string;
-    sourceStatementIds: string[];  // Provenance
+export interface ConflictEdge {
+    claimId: string;
+    question: string;              // Canonical question form (e.g., "Which matters more: lower latency or greater flexibility?")
+    sourceStatementIds: string[];  // Provenance (REQUIRED)
+    nature?: 'optimization' | 'mutual_exclusion' | 'resource_competition';
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -71,11 +66,9 @@ export interface Claim {
         prerequisites: PrerequisiteGate[]; // Tier 1
     };
 
-    // Relationships
-    edges: {
-        sequence: SequenceEdge[];  // This claim enables these
-        tension: TensionEdge[];    // This claim conflicts with these
-    };
+    // Relationships (minimal, provenance-required)
+    enables?: string[];            // Claim IDs this enables (beyond prerequisites)
+    conflicts?: ConflictEdge[];    // Conflicts with provenance (REQUIRED)
 
     // Provenance (non-negotiable)
     sourceStatementIds: string[];  // ShadowStatement.id[]

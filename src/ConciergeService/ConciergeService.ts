@@ -12,7 +12,7 @@ import {
 // Spatial Brief System
 import { buildPositionBrief, buildPositionBriefWithGhosts } from './positionBrief';
 import { buildSynthesisPrompt } from './synthesisPrompt';
-import { computeTargetedAnalysis, formatTargetedInsights } from './positionBrief';
+// unused imports removed
 
 // Shadow Mapper types
 import type { ShadowAudit, UnindexedStatement } from '../core/PromptMethods';

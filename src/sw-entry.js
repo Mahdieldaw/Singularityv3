@@ -36,6 +36,7 @@ import { persistenceMonitor } from "./core/PersistenceMonitor.js";
 
 // Global Services Registry
 import { services } from "./core/service-registry.js";
+import { parseUnifiedMapperOutput } from './../shared/parsing-utils.js';
 
 // ============================================================================
 // FEATURE FLAGS (Source of Truth)

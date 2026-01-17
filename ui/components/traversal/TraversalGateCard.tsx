@@ -21,6 +21,10 @@ export const TraversalGateCard: React.FC<TraversalGateCardProps> = ({
   const [expanded, setExpanded] = useState(false);
   const [userInput, setUserInput] = useState(resolution?.userInput || '');
 
+  React.useEffect(() => {
+    setUserInput(resolution?.userInput || '');
+  }, [resolution?.userInput]);
+
   const handleResolve = (satisfied: boolean) => {
     if (gate.type === 'conditional' && satisfied && !userInput.trim()) {
       // For conditional gates, require user context
@@ -63,8 +67,8 @@ export const TraversalGateCard: React.FC<TraversalGateCardProps> = ({
 
           {isResolved && (
             <div className={`px-3 py-1.5 rounded-lg text-xs font-bold ${resolution?.satisfied
-                ? 'bg-green-500/10 text-green-500 border border-green-500/30'
-                : 'bg-red-500/10 text-red-500 border border-red-500/30'
+              ? 'bg-green-500/10 text-green-500 border border-green-500/30'
+              : 'bg-red-500/10 text-red-500 border border-red-500/30'
               }`}>
               {resolution?.satisfied ? '✓ Satisfied' : '✗ Not Applicable'}
             </div>

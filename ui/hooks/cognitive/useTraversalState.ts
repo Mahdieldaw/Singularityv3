@@ -48,9 +48,16 @@ export function useTraversalState(traversalGraph: any, forcingPoints: any[]) {
 
   // Check if all forcing points are resolved
   const isComplete = useMemo(() => {
-    if (!forcingPoints || forcingPoints.length === 0) return false;
-    return forcingPoints.every((fp: any) => state.forcingPointResolutions.has(fp.id));
-  }, [forcingPoints, state.forcingPointResolutions]);
+    const tiers = Array.isArray(traversalGraph?.tiers) ? traversalGraph.tiers : [];
+    const allGates = tiers.flatMap((t: any) => Array.isArray(t?.gates) ? t.gates : []);
+    const gateIds = allGates.map((g: any) => g?.id).filter(Boolean);
+    const allGatesResolved = gateIds.every((id: string) => state.gateResolutions.has(id));
+
+    const fps = Array.isArray(forcingPoints) ? forcingPoints : [];
+    const allForcingPointsResolved = fps.every((fp: any) => state.forcingPointResolutions.has(fp.id));
+
+    return allGatesResolved && allForcingPointsResolved;
+  }, [forcingPoints, state.forcingPointResolutions, traversalGraph, state.gateResolutions]);
 
   // Get unlocked tiers based on gate resolutions
   const unlockedTiers = useMemo(() => {

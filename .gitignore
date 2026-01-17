@@ -43,7 +43,7 @@ docs/
 *.md    
 *.txt
 *.d.ts
-*.css
+
 .*test.ts
 src/core/V31Verification.ts
 docs/*

@@ -8,7 +8,7 @@ import { CognitivePipelineHandler } from './execution/CognitivePipelineHandler';
 import { parseMapperArtifact } from '../../shared/parsing-utils';
 
 export class WorkflowEngine {
-  constructor(orchestrator, sessionManager, port, options = {}) {
+  constructor(orchestrator, sessionManager, port, _options = {}) {
     this.orchestrator = orchestrator;
     this.sessionManager = sessionManager;
     this.port = port;
@@ -403,7 +403,7 @@ export class WorkflowEngine {
   async handleRetryRequest(message) {
     try {
       const { sessionId, aiTurnId, providerIds, retryScope } = message || {};
-      console.log(`[WorkflowEngine] Retry requested for providers = ${(providerIds || []).join(', ')} scope = ${retryScope} ` );
+      console.log(`[WorkflowEngine] Retry requested for providers = ${(providerIds || []).join(', ')} scope = ${retryScope} `);
 
       try {
         (providerIds || []).forEach((pid) => this.healthTracker.resetCircuit(pid));

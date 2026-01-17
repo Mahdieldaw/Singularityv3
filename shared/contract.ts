@@ -668,6 +668,7 @@ export interface TraversalGate {
   id: string;
   type: 'conditional' | 'prerequisite';
   condition: string;
+  question: string;
   blockedClaims: string[];
   sourceStatementIds: string[];
 }
@@ -681,15 +682,69 @@ export interface TraversalTier {
 export interface LiveTension {
   claimAId: string;
   claimBId: string;
+  question: string;
   sourceStatementIds: string[];
   isLive: boolean;
   blockedByGates: string[];
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// SERIALIZED TRAVERSAL TYPES
+// ═══════════════════════════════════════════════════════════════════════════
+
+export interface SerializedConditionalGate {
+  id: string;
+  condition: string;
+  question: string;
+  sourceStatementIds: string[];
+}
+
+export interface SerializedPrerequisiteGate {
+  id: string;
+  claimId: string;
+  condition: string;
+  question: string;
+  sourceStatementIds: string[];
+}
+
+export interface SerializedConflictEdge {
+  claimId: string;
+  question: string;
+  sourceStatementIds: string[];
+  nature?: 'optimization' | 'mutual_exclusion' | 'resource_competition';
+}
+
+export interface SerializedAssembledClaim {
+  id: string;
+  label: string;
+  description?: string;
+  stance: string; // "PRO" | "CON" | etc. (Using string to avoid strict Stance dependency if not available here, or import Stance if possible)
+
+  gates: {
+    conditionals: SerializedConditionalGate[];
+    prerequisites: SerializedPrerequisiteGate[];
+  };
+
+  enables: string[];
+  conflicts: SerializedConflictEdge[];
+
+  sourceStatementIds: string[];
+  // sourceStatements omitted for serialization to keep payload light, or use any[] if strictly needed
+
+  supporterModels: number[];
+  supportRatio: number;
+
+  hasConditionalSignal: boolean;
+  hasSequenceSignal: boolean;
+  hasTensionSignal: boolean;
+
+  tier: number;
+}
+
 export interface SerializedTraversalGraph {
-  claims: any[]; // AssembledClaim[]
+  claims: SerializedAssembledClaim[];
   tensions: LiveTension[];
-  tiers: TraversalTier[]; // Serializable array format
+  tiers: TraversalTier[];
   maxTier: number;
   roots: string[];
   cycles: string[][];

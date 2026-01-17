@@ -1,13 +1,15 @@
 import React from 'react';
-import { useTraversalState } from '../hooks/useTraversalState';
+import { useTraversalState } from '../../hooks/cognitive/useTraversalState';
 import { TraversalGateCard } from './TraversalGateCard';
 import { TraversalForcingPointCard } from './TraversalForcingPointCard';
-import { buildTraversalContinuationPrompt } from '../utils/traversal-prompt-builder';
+import { buildTraversalContinuationPrompt } from '../../utils/traversal-prompt-builder';
+import type { Claim, ForcingPoint, SerializedTraversalGraph, TraversalGate } from '../../../shared/contract';
+import { CONTINUE_COGNITIVE_WORKFLOW, WORKFLOW_STEP_UPDATE } from '../../../shared/messaging';
 
 interface TraversalGraphViewProps {
-  traversalGraph: any;
-  forcingPoints: any[];
-  claims: any[];
+  traversalGraph: SerializedTraversalGraph;
+  forcingPoints: ForcingPoint[];
+  claims: Claim[];
   originalQuery: string;
   sessionId: string;
   aiTurnId: string;
@@ -23,6 +25,11 @@ export const TraversalGraphView: React.FC<TraversalGraphViewProps> = ({
   aiTurnId,
   onComplete
 }) => {
+  const tiersArray = Array.isArray(traversalGraph?.tiers) ? traversalGraph.tiers : [];
+  const conflictForcingPoints = Array.isArray(forcingPoints)
+    ? forcingPoints.filter((fp: any) => fp && fp.type === 'conflict')
+    : [];
+
   const {
     state,
     resolveGate,
@@ -30,53 +37,110 @@ export const TraversalGraphView: React.FC<TraversalGraphViewProps> = ({
     unlockedTiers,
     isComplete,
     reset
-  } = useTraversalState(traversalGraph, forcingPoints);
+  } = useTraversalState(traversalGraph, conflictForcingPoints);
 
   const [isSubmitting, setIsSubmitting] = React.useState(false);
+  const [submissionError, setSubmissionError] = React.useState<string | null>(null);
 
   const handleSubmitToConcierge = async () => {
     setIsSubmitting(true);
+    setSubmissionError(null);
+
+    const allGates = tiersArray.flatMap((t) => t.gates || []);
+    const gatesMap = new Map<string, TraversalGate>(allGates.map((g) => [g.id, g]));
 
     const continuationPrompt = buildTraversalContinuationPrompt(
       originalQuery,
       state.gateResolutions,
       state.forcingPointResolutions,
-      claims
+      claims,
+      gatesMap
     );
 
+    let port: chrome.runtime.Port | null = null;
+    let messageListener: ((msg: any) => void) | null = null;
+    let timeoutId: any = null;
+
     try {
-      // Send to service worker
-      const port = chrome.runtime.connect({ name: 'htos-popup' });
+      port = chrome.runtime.connect({ name: 'htos-popup' });
+
+      const cleanup = () => {
+        try {
+          if (timeoutId) clearTimeout(timeoutId);
+        } catch (_) { }
+        try {
+          if (port && messageListener) {
+            port.onMessage.removeListener(messageListener);
+          }
+        } catch (_) { }
+        try {
+          port?.disconnect();
+        } catch (_) { }
+      };
+
+      messageListener = (msg: any) => {
+        if (msg.type !== WORKFLOW_STEP_UPDATE) return;
+        if (msg.status === 'completed') {
+          cleanup();
+          setIsSubmitting(false);
+          onComplete?.();
+          return;
+        }
+        if (msg.status === 'failed') {
+          cleanup();
+          setIsSubmitting(false);
+          setSubmissionError(msg.error || 'Submission failed. Please try again.');
+        }
+      };
+
+      port.onMessage.addListener(messageListener);
+
+      port.onDisconnect.addListener(() => {
+        const err = chrome.runtime.lastError;
+        console.warn('Port disconnected:', err);
+      });
 
       port.postMessage({
-        type: 'CONTINUE_COGNITIVE_REQUEST',
+        type: CONTINUE_COGNITIVE_WORKFLOW,
         payload: {
           sessionId,
           aiTurnId,
           userMessage: continuationPrompt,
-          providerId: 'gemini',  // Or let user choose
+          providerId: 'gemini',
           isTraversalContinuation: true
         }
       });
 
-      // Listen for completion
-      port.onMessage.addListener((msg) => {
-        if (msg.type === 'WORKFLOW_STEP_UPDATE' && msg.status === 'completed') {
-          setIsSubmitting(false);
-          onComplete?.();
-        }
-      });
+      timeoutId = setTimeout(() => {
+        cleanup();
+        setIsSubmitting(false);
+        setSubmissionError('Submission timed out. Please try again.');
+      }, 30000);
+
     } catch (error) {
       console.error('Failed to submit traversal to Concierge:', error);
       setIsSubmitting(false);
+      setSubmissionError('Failed to submit: ' + String(error));
+      try {
+        if (port && messageListener) {
+          port.onMessage.removeListener(messageListener);
+        }
+      } catch (_) { }
+      try { port?.disconnect(); } catch (_) { }
     }
+
   };
 
-  if (!traversalGraph?.tiers) {
-    return null;
+  if (!Array.isArray(traversalGraph?.tiers)) {
+    console.warn('[Traversal] Legacy/malformed traversal graph detected', traversalGraph);
+    return (
+      <div className="mt-8 pt-6 border-t border-border-subtle text-text-muted text-sm">
+        This response used an older traversal format and can’t be displayed.
+      </div>
+    );
   }
 
-  const sortedTiers = [...traversalGraph.tiers].sort((a: any, b: any) => a.tierIndex - b.tierIndex);
+  const sortedTiers = [...tiersArray].sort((a: any, b: any) => a.tierIndex - b.tierIndex);
 
   return (
     <div className="mt-8 pt-6 border-t border-border-subtle">
@@ -96,9 +160,13 @@ export const TraversalGraphView: React.FC<TraversalGraphViewProps> = ({
       </div>
 
       {/* Tiers */}
-      {sortedTiers.map((tier: any, idx: number) => {
+      {sortedTiers.map((tier: any) => {
         const isUnlocked = unlockedTiers.has(tier.tierIndex);
-        const tierClaims = (tier.claimIds || tier.claims || []).map((id: string) => claims.find((c: any) => c.id === id)).filter(Boolean);
+        const tierClaims = Array.isArray(tier.claimIds)
+          ? tier.claimIds.map((id: string) => claims.find((c: any) => c.id === id)).filter(Boolean)
+          : Array.isArray(tier.claims)
+            ? tier.claims
+            : [];
 
         return (
           <div key={tier.tierIndex} className="mb-6">
@@ -115,8 +183,8 @@ export const TraversalGraphView: React.FC<TraversalGraphViewProps> = ({
 
             {/* Tier header */}
             <div className={`p-4 rounded-t-xl border-2 border-b-0 ${isUnlocked
-                ? 'bg-surface-raised border-brand-500/30'
-                : 'bg-surface-subtle border-border-subtle opacity-50'
+              ? 'bg-surface-raised border-brand-500/30'
+              : 'bg-surface-subtle border-border-subtle opacity-50'
               }`}>
               <div className="flex items-center gap-2">
                 {isUnlocked ? '🔓' : '🔒'}
@@ -131,8 +199,8 @@ export const TraversalGraphView: React.FC<TraversalGraphViewProps> = ({
 
             {/* Tier claims */}
             <div className={`p-4 rounded-b-xl border-2 border-t-0 ${isUnlocked
-                ? 'bg-surface-raised border-brand-500/30'
-                : 'bg-surface-subtle border-border-subtle opacity-50'
+              ? 'bg-surface-raised border-brand-500/30'
+              : 'bg-surface-subtle border-border-subtle opacity-50'
               }`}>
               <div className="flex gap-3 overflow-x-auto pb-2">
                 {tierClaims.map((claim: any) => (
@@ -167,10 +235,10 @@ export const TraversalGraphView: React.FC<TraversalGraphViewProps> = ({
       })}
 
       {/* Forcing Points */}
-      {forcingPoints && forcingPoints.length > 0 && (
+      {conflictForcingPoints.length > 0 && (
         <div className="mt-8">
           <h4 className="text-md font-bold text-text-primary mb-4">Key Decision Points</h4>
-          {forcingPoints.map((fp: any) => (
+          {conflictForcingPoints.map((fp: any) => (
             <TraversalForcingPointCard
               key={fp.id}
               forcingPoint={fp}
@@ -200,6 +268,11 @@ export const TraversalGraphView: React.FC<TraversalGraphViewProps> = ({
             >
               {isSubmitting ? 'Generating...' : 'Generate Personalized Guidance'}
             </button>
+            {submissionError && (
+              <div className="mt-2 text-xs text-red-500 font-bold">
+                {submissionError}
+              </div>
+            )}
           </div>
         </div>
       )}

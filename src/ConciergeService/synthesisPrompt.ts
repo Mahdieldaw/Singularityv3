@@ -2,7 +2,7 @@
 
 import { TraversalState, formatPathSummary, getActiveClaims } from './traversalState';
 import { TraversalGraph } from './traversal';
-import { AssembledClaim, formatClaimEvidence } from './claimAssembly';
+
 import { buildPositionBriefFromClaims, TargetedAnalysis, computeTargetedAnalysis, formatTargetedInsights } from './positionBrief'; // Need this
 
 export interface SynthesisContext {
@@ -100,15 +100,4 @@ Never:
 Respond.`;
 }
 
-function formatActiveClaims(claims: AssembledClaim[]): string {
-    return claims.map(claim => {
-        let section = `## ${claim.label}\n${claim.description || claim.label}\n`;
 
-        const evidence = formatClaimEvidence(claim);
-        if (evidence) {
-            section += `\nSupporting Evidence:\n${evidence}\n`;
-        }
-
-        return section;
-    }).join('\n');
-}

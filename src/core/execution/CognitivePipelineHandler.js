@@ -54,6 +54,11 @@ export class CognitivePipelineHandler {
             await this.sessionManager.adapter.put("turns", currentAiTurn);
           }
 
+          // Safe fallback object for messaging, handling case where currentAiTurn is null
+          const aiTurnForMessage = currentAiTurn
+            ? { ...currentAiTurn, pipelineStatus: 'awaiting_traversal' }
+            : { id: aiTurnId, pipelineStatus: 'awaiting_traversal' };
+
           // 2. Notify UI
           this.port.postMessage({
             type: "MAPPER_ARTIFACT_READY",
@@ -73,10 +78,7 @@ export class CognitivePipelineHandler {
             aiTurnId: aiTurnId,
             turn: {
               user: { id: context.canonicalUserTurnId, sessionId: context.sessionId }, // Minimal user turn ref
-              ai: {
-                ...currentAiTurn,
-                pipelineStatus: 'awaiting_traversal'
-              }
+              ai: aiTurnForMessage
             }
           });
 

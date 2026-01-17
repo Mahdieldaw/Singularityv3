@@ -16,7 +16,7 @@ import { MetricsRibbon } from './MetricsRibbon';
 import StructureGlyph from '../StructureGlyph';
 import { computeProblemStructureFromArtifact, computeStructuralAnalysis } from '../../../src/core/PromptMethods';
 import { MapperArtifact } from '../../../shared/contract';
-import { TraversalGraphView } from '../../../src/ui/components/TraversalGraphView';
+import { TraversalGraphView } from '../traversal/TraversalGraphView';
 
 interface CognitiveOutputRendererProps {
     aiTurn: AiTurn;

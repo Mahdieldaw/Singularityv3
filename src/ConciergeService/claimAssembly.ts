@@ -7,8 +7,7 @@ import {
     Claim,
     ConditionalGate,
     PrerequisiteGate,
-    SequenceEdge,
-    TensionEdge,
+    ConflictEdge,
     SemanticMapperOutput
 } from './contract';
 
@@ -28,11 +27,9 @@ export interface AssembledClaim {
         prerequisites: PrerequisiteGate[];
     };
 
-    // Edges (from mapper)
-    edges: {
-        sequence: SequenceEdge[];
-        tension: TensionEdge[];
-    };
+    // Relationships (from mapper)
+    enables: string[];
+    conflicts: ConflictEdge[];
 
     // Provenance (enriched)
     sourceStatementIds: string[];
@@ -49,7 +46,6 @@ export interface AssembledClaim {
 
     // Computed during traversal graph building
     tier: number;
-    enables: string[];  // Claim IDs this claim enables (inverse of prerequisites)
 }
 
 export interface ClaimAssemblyResult {
@@ -59,8 +55,7 @@ export interface ClaimAssemblyResult {
         totalClaims: number;
         conditionalGateCount: number;
         prerequisiteGateCount: number;
-        sequenceEdgeCount: number;
-        tensionEdgeCount: number;
+        conflictCount: number;
         modelCount: number;
     };
 }
@@ -85,7 +80,7 @@ export function assembleClaims(
             .filter((s): s is ShadowStatement => s !== undefined);
 
         // Compute support
-        const supporterModels = [...new Set(sourceStatements.map(s => s.modelIndex))];
+        const supporterModels = Array.from(new Set(sourceStatements.map(s => s.modelIndex)));
         const supportRatio = modelCount > 0 ? supporterModels.length / modelCount : 0;
 
         // Aggregate signals from sources
@@ -100,7 +95,8 @@ export function assembleClaims(
             stance: claim.stance,
 
             gates: claim.gates,
-            edges: claim.edges,
+            enables: claim.enables || [],
+            conflicts: claim.conflicts || [],
 
             sourceStatementIds: claim.sourceStatementIds,
             sourceStatements,
@@ -113,7 +109,6 @@ export function assembleClaims(
             hasTensionSignal,
 
             tier: 0,     // Computed in traversal
-            enables: [], // Computed below
         };
     });
 
@@ -124,19 +119,12 @@ export function assembleClaims(
         // For each prerequisite gate, the required claim "enables" this claim
         for (const prereq of claim.gates.prerequisites) {
             const requiredClaim = claimMap.get(prereq.claimId);
-            if (requiredClaim) {
+            if (requiredClaim && !requiredClaim.enables.includes(claim.id)) {
                 requiredClaim.enables.push(claim.id);
             }
         }
 
-        // Sequence edges also define enables relationships
-        for (const seq of claim.edges.sequence) {
-            // This claim enables seq.targetClaimId
-            // Already stored on claim.edges.sequence, but ensure enables is populated
-            if (!claim.enables.includes(seq.targetClaimId)) {
-                claim.enables.push(seq.targetClaimId);
-            }
-        }
+        // Explicit enables from mapper are already on claim.enables
     }
 
     // Compute meta
@@ -146,11 +134,8 @@ export function assembleClaims(
     const prerequisiteGateCount = claims.reduce(
         (sum, c) => sum + c.gates.prerequisites.length, 0
     );
-    const sequenceEdgeCount = claims.reduce(
-        (sum, c) => sum + c.edges.sequence.length, 0
-    );
-    const tensionEdgeCount = claims.reduce(
-        (sum, c) => sum + c.edges.tension.length, 0
+    const conflictCount = claims.reduce(
+        (sum, c) => sum + c.conflicts.length, 0
     );
 
     return {
@@ -159,8 +144,7 @@ export function assembleClaims(
             totalClaims: claims.length,
             conditionalGateCount,
             prerequisiteGateCount,
-            sequenceEdgeCount,
-            tensionEdgeCount,
+            conflictCount,
             modelCount,
         },
     };
@@ -185,11 +169,11 @@ export function getGateProvenance(
 /**
  * Get provenance for a specific edge
  */
-export function getEdgeProvenance(
-    edge: SequenceEdge | TensionEdge,
+export function getConflictProvenance(
+    conflict: ConflictEdge,
     statementMap: Map<string, ShadowStatement>
 ): ShadowStatement[] {
-    return edge.sourceStatementIds
+    return conflict.sourceStatementIds
         .map(id => statementMap.get(id))
         .filter((s): s is ShadowStatement => s !== undefined);
 }
@@ -221,14 +205,9 @@ export function validateProvenance(
             }
         }
 
-        // Check edge provenance
-        for (const edge of claim.edges.sequence) {
-            for (const id of edge.sourceStatementIds) {
-                if (!statementMap.has(id)) missing.push(id);
-            }
-        }
-        for (const edge of claim.edges.tension) {
-            for (const id of edge.sourceStatementIds) {
+        // Check conflict provenance
+        for (const conflict of (claim.conflicts || [])) {
+            for (const id of conflict.sourceStatementIds) {
                 if (!statementMap.has(id)) missing.push(id);
             }
         }
@@ -236,7 +215,7 @@ export function validateProvenance(
 
     return {
         valid: missing.length === 0,
-        missing: [...new Set(missing)],
+        missing: Array.from(new Set(missing)),
     };
 }
 

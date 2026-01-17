@@ -1,6 +1,6 @@
 import { ArtifactProcessor } from '../../../shared/artifact-processor';
 import { PROVIDER_LIMITS } from '../../../shared/provider-limits';
-import { parseUnifiedMapperOutput, parseMapperArtifact } from '../../../shared/parsing-utils';
+import { parseMapperArtifact } from '../../../shared/parsing-utils';
 import { classifyError } from '../error-classifier.js';
 import {
   errorHandler,
@@ -195,7 +195,7 @@ export class StepExecutor {
               type: "WORKFLOW_STEP_UPDATE",
               sessionId: context.sessionId,
               stepId: step.stepId,
-              status: "partial_failure",
+              status: "failed",
               error: error?.message || String(error),
             });
           } catch (_) { }
@@ -461,83 +461,47 @@ export class StepExecutor {
                 );
 
                 const traversalGraph = buildTraversalGraph(assemblyResult);
+                const forcingPointsResult = extractForcingPoints(traversalGraph);
 
-                // ═══════════════════════════════════════════════════════════════════════
-                // SHADOW DELTA: Compute unreferenced statements and prepare UI-friendly data
-                // ═══════════════════════════════════════════════════════════════════════
-                // Extract which shadow statements were referenced by assembled claims
+                // Shadow Delta
                 const referencedIds = extractReferencedIds(assemblyResult.claims);
-
-                // Compute delta (what shadow found but semantic mapper didn't use)
-                const shadowDelta = computeShadowDelta(
-                  shadowResult,
-                  referencedIds,
-                  payload.originalPrompt
-                );
-
-                // Get top unreferenced statements for UI display
+                const shadowDelta = computeShadowDelta(shadowResult, referencedIds, payload.originalPrompt);
                 const topUnindexed = getTopUnreferenced(shadowDelta, 10);
 
-                // Debug logging for easier inspection in browser/devtools
-                try {
-                  console.log(`[Shadow Delta] ${shadowDelta.audit.unreferencedCount}/${shadowDelta.audit.shadowStatementCount} unreferenced (${shadowDelta.audit.highSignalUnreferencedCount} high-signal)`);
-                  console.log('[Shadow Debug] Top unindexed:', topUnindexed.slice(0,3).map(u => ({ stance: u.statement.stance, score: u.adjustedScore.toFixed(2), text: u.statement.text.slice(0,80) })));
-                } catch (_) { }
+                // ═══════════════════════════════════════════════════════════════════════
+                // V2-TO-V1 CONVERSION (Backward Compatibility)
+                // ═══════════════════════════════════════════════════════════════════════
+                const { convertV2toV1 } = await import('../../ConciergeService/v2-to-v1-adapter');
 
-                // 6. Construct Artifact (Legacy Compatibility + New Data)
-                // Flatten new claims to legacy format
-                // After parseSemanticMapperOutput succeeds
-if (parseResult.success && parseResult.output) {
-  console.log(`[StepExecutor] Assembling claims from ${parseResult.output.claims.length} mapped items...`);
-  const assemblyResult = assembleClaims(
-    parseResult.output,
-    shadowResult.statements,
-    citationOrder.length
-  );
+                const v1Artifact = convertV2toV1(
+                  parseResult.output,  // V2 semantic mapper output
+                  shadowResult.statements,
+                  {
+                    query: payload.originalPrompt,
+                    turn: context.turn || 0,
+                    model_count: citationOrder.length
+                  }
+                );
 
-  const traversalGraph = buildTraversalGraph(assemblyResult);
-  const forcingPointsResult = extractForcingPoints(traversalGraph);
-  
-  // Shadow Delta
-  const { computeShadowDelta, extractReferencedIds, getTopUnreferenced } = await import('../../shadow');
-  const referencedIds = extractReferencedIds(assemblyResult.claims);
-  const shadowDelta = computeShadowDelta(shadowResult, referencedIds, payload.originalPrompt);
-  const topUnindexed = getTopUnreferenced(shadowDelta, 10);
-  
-  // ═══════════════════════════════════════════════════════════════════════
-  // V2-TO-V1 CONVERSION (Backward Compatibility)
-  // ═══════════════════════════════════════════════════════════════════════
-  const { convertV2toV1 } = await import('../../ConciergeService/v2-to-v1-adapter');
-  
-  const v1Artifact = convertV2toV1(
-    parseResult.output,  // V2 semantic mapper output
-    shadowResult.statements,
-    {
-      query: payload.originalPrompt,
-      turn: context.turn || 0,
-      model_count: citationOrder.length
-    }
-  );
-  
-  // Attach V2-specific data that V1 format can't represent
-  mapperArtifact = {
-    ...v1Artifact,
-    
-    // NEW DATA (not in V1)
-    traversalGraph,
-    forcingPoints: forcingPointsResult.forcingPoints,
-    
-    // SHADOW DATA
-    shadow: {
-      statements: shadowResult.statements,
-      audit: shadowDelta.audit,
-      topUnindexed: topUnindexed,
-      processingTime: shadowDelta.processingTimeMs + shadowResult.meta.processingTimeMs
-    }
-  };
-  
-  console.log(`[StepExecutor] Generated V1-compatible artifact with ${v1Artifact.claims.length} claims, ${v1Artifact.edges.length} edges`);
-}
+                // Attach V2-specific data that V1 format can't represent
+                mapperArtifact = {
+                  ...v1Artifact,
+
+                  // NEW DATA (not in V1)
+                  traversalGraph,
+                  forcingPoints: forcingPointsResult.forcingPoints,
+
+                  // SHADOW DATA
+                  shadow: {
+                    statements: shadowResult.statements,
+                    audit: shadowDelta.audit,
+                    topUnindexed: topUnindexed,
+                    processingTime: shadowDelta.processingTimeMs + shadowResult.meta.processingTimeMs
+                  }
+                };
+
+                console.log(`[StepExecutor] Generated V1-compatible artifact with ${v1Artifact.claims.length} claims, ${v1Artifact.edges.length} edges`);
+
 
                 // mapperArtifact was built from V2->V1 adapter above (v1Artifact) and has
                 // been augmented with traversalGraph, forcingPoints and shadow data.
@@ -580,7 +544,7 @@ if (parseResult.success && parseResult.output) {
             citationOrder.forEach((pid, idx) => {
               citationSourceOrder[idx + 1] = pid;
             });
-            
+
             const finalResultWithMeta = {
               ...finalResult,
               meta: {

@@ -13,6 +13,7 @@ import { TraversalTier, TraversalGate } from '../../shared/contract';
 export interface LiveTension {
     claimAId: string;
     claimBId: string;
+    question: string;
     sourceStatementIds: string[];  // Provenance for this tension
 
     // Status
@@ -74,19 +75,19 @@ export function buildTraversalGraph(
         .map(c => c.id);
 
     // ─────────────────────────────────────────────────────────────────────
-    // 3. Extract all tensions from claim edges
+    // 3. Extract all tensions from claim conflicts
     // ─────────────────────────────────────────────────────────────────────
 
     const tensions: LiveTension[] = [];
     const seenTensions = new Set<string>();
 
     for (const claim of claims) {
-        for (const tensionEdge of claim.edges.tension) {
-            const targetClaim = claimMap.get(tensionEdge.targetClaimId);
+        for (const conflict of claim.conflicts) {
+            const targetClaim = claimMap.get(conflict.claimId);
             if (!targetClaim) continue;
 
             // Dedupe (A↔B same as B↔A)
-            const key = [claim.id, tensionEdge.targetClaimId].sort().join('::');
+            const key = [claim.id, conflict.claimId].sort().join('::');
             if (seenTensions.has(key)) continue;
             seenTensions.add(key);
 
@@ -105,8 +106,9 @@ export function buildTraversalGraph(
 
             tensions.push({
                 claimAId: claim.id,
-                claimBId: tensionEdge.targetClaimId,
-                sourceStatementIds: tensionEdge.sourceStatementIds,
+                claimBId: conflict.claimId,
+                question: conflict.question,
+                sourceStatementIds: conflict.sourceStatementIds,
                 isLive,
                 blockedByGates,
             });
@@ -181,7 +183,7 @@ function computeTiers(
     const tempTiers = new Map<number, string[]>();
     let maxTier = 0;
 
-    for (const [claimId, tier] of tierAssignment) {
+    for (const [claimId, tier] of Array.from(tierAssignment.entries())) {
         maxTier = Math.max(maxTier, tier);
         const existing = tempTiers.get(tier) || [];
         existing.push(claimId);
@@ -192,7 +194,7 @@ function computeTiers(
     const tiers: TraversalTier[] = [];
     const claimMap = new Map(claims.map(c => [c.id, c]));
 
-    for (const [tierIndex, claimIds] of tempTiers) {
+    for (const [tierIndex, claimIds] of Array.from(tempTiers.entries())) {
         // Find gates belonging to this tier's claims
         const gates: TraversalGate[] = [];
 
