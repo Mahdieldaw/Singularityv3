@@ -1,77 +1,103 @@
-// ═══════════════════════════════════════════════════════════════════════════
-// SYNTHESIS PROMPT BUILDER - V4
-// ═══════════════════════════════════════════════════════════════════════════
+// synthesisPromptV2.ts - combines both
 
-import { TraversalState, formatPathSummary } from './traversalState';
+import { TraversalState, formatPathSummary, getActiveClaims } from './traversalState';
 import { TraversalGraph } from './traversal';
-import { ForcingPoint } from './forcingPoints';
 import { AssembledClaim, formatClaimEvidence } from './claimAssembly';
+import { buildPositionBriefFromClaims, TargetedAnalysis, computeTargetedAnalysis, formatTargetedInsights } from './positionBrief'; // Need this
 
 export interface SynthesisContext {
     userQuery: string;
     traversalState: TraversalState;
     graph: TraversalGraph;
-    forcingPoints: ForcingPoint[];
     ghosts: string[];
+    // NEW: For structural insights
+    structuralAnalysis?: TargetedAnalysis;
 }
 
-/**
- * Build the final prompt for the synthesis model.
- * This prompt includes the "collapsed" decision space based on user choices.
- */
 export function buildSynthesisPrompt(ctx: SynthesisContext): string {
-    const { userQuery, traversalState, graph, ghosts } = ctx;
-
-    // 1. Get active and pruned claims
-    const activeClaims = graph.claims.filter(c => traversalState.active.has(c.id));
-    const prunedClaims = graph.claims.filter(c => traversalState.pruned.has(c.id));
-
-    // 2. Format user path (audit of choices)
+    const { userQuery, traversalState, graph, ghosts, structuralAnalysis } = ctx;
+ 
+     // 1. Get active claims (post-traversal)
+     const activeClaims = getActiveClaims(traversalState, graph);
+     
+    // Compute targeted analysis if not provided
+    const targeted = structuralAnalysis ?? computeTargetedAnalysis(activeClaims, traversalState, graph);
+    
+    // 2. LAYER 1: User Path
     const userPath = formatPathSummary(traversalState);
+    const pathSection = userPath 
+        ? `<USER_PATH>\n${userPath}\n</USER_PATH>\n\n`
+        : '';
 
-    // 3. Format active claims with evidence
-    const activeWithEvidence = formatActiveClaims(activeClaims);
+    // 3. LAYER 2: Position Brief (bucket system!)
+    const positionBrief = buildPositionBriefFromClaims(activeClaims, ghosts);
 
-    // 4. Format pruned claims as brief notes (to acknowledge what was given up)
-    const prunedNotes = prunedClaims.map(c => `- ${c.label}`).join('\n');
+    // 4. LAYER 3: Structural Insights (targeted to active claims)
+    const insightsSection = targeted
+        ? formatTargetedInsights(targeted, traversalState)
+        : '';
 
-    // 5. Format ghosts (unaddressed gaps)
-    const ghostNotes = ghosts.map(g => `? ${g}`).join('\n');
+    // 5. Voice: Singularity
+    return `
+<SYSTEM_IDENTITY>
+You are Singularity —
+the point where human instinct meets machine intelligence,
+and thinking becomes a decision.
+</SYSTEM_IDENTITY>
 
-    return `<CONTEXT>
-The user asked: "${userQuery}"
+<SYSTEM_DIRECTIVE>
+You are given a set of suggestions with supporting evidence.
+They may agree, contradict, or address different dimensions entirely.
+They are not ranked or resolved for you.
 
-Based on a multi-model analysis and a recursive traversal of the decision space, we have identified the following definitive path for the user.
-</CONTEXT>
+Your responsibility is not to explain them.
+Your responsibility is to decide what a person in this situation should do next — and why.
 
-<USER_PATH_CHOICES>
-${userPath || 'No specific choices were necessary.'}
-</USER_PATH_CHOICES>
+You may go beyond what's given if the situation demands it.
+The suggestions are a starting point, not a boundary.
+</SYSTEM_DIRECTIVE>
 
-<ACTIVE_CLAIMS_AND_EVIDENCE>
-${activeWithEvidence}
-</ACTIVE_CLAIMS_AND_EVIDENCE>
+<USER_QUERY>
+${userQuery}
+</USER_QUERY>
 
-<PRUNED_ALTERNATIVES_NOT_CHOSEN>
-${prunedNotes || 'None'}
-</PRUNED_ALTERNATIVES_NOT_CHOSEN>
+${pathSection}<SUGGESTIONS>
+${positionBrief}
+</SUGGESTIONS>
 
-<IDENTIFIED_GAPS_AND_GHOSTS>
-${ghostNotes || 'None identified'}
-</IDENTIFIED_GAPS_AND_GHOSTS>
+${insightsSection}<RESPONSE_INSTRUCTIONS>
+Answer the question directly.
 
-<INSTRUCTIONS>
-Synthesize a definitive recommendation for this user given their specific path.
+Choose a path that fits the user's reality, not the elegance of an idea.
 
-- Directly address the user's query using the evidence from the ACTIVE_CLAIMS.
-- Use a confident, authoritative tone. Do not hedge.
-- Reference the user's specific choices/confirmations from USER_PATH_CHOICES to show you are listening.
-- If relevant, briefly acknowledge why the PRUNED_ALTERNATIVES were set aside.
-- If the IDENTIFIED_GAPS pose a risk, mention them as a boundary.
-- End with a concrete, actionable next step.
+If there is a dominant path, take it plainly.
+If paths are parallel, acknowledge both can be pursued.
+If a tradeoff is unavoidable, name it and commit anyway.
+If something crucial is missing, say what it is and why it matters now.
 
-Be direct. They have navigated the complexity; now give them the answer.
-</INSTRUCTIONS>`;
+Do not reconcile for the sake of balance.
+Do not preserve ideas that don't change the decision.
+Do not flatten tension that should be felt.
+
+You are allowed to be decisive.
+You are allowed to be conditional.
+You are not allowed to be vague.
+
+Speak like someone who has to live with the consequences.
+
+End with one of:
+- a clear recommendation
+- a concrete next step
+- or the single question that would most change the decision
+
+Never:
+- Refer to how the information was produced
+- Mention agreement levels, frequency, or distribution
+- Explain structure, layout, or representation
+- Say "it depends" without saying what it depends on
+</RESPONSE_INSTRUCTIONS>
+
+Respond.`;
 }
 
 function formatActiveClaims(claims: AssembledClaim[]): string {

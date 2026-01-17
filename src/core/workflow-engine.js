@@ -1,6 +1,3 @@
-
-import { MapperService } from './MapperService';
-import { ResponseProcessor } from './ResponseProcessor';
 import { getHealthTracker } from './provider-health-tracker.js';
 import { StepExecutor } from './execution/StepExecutor';
 import { StreamingManager } from './execution/StreamingManager';
@@ -17,15 +14,13 @@ export class WorkflowEngine {
     this.port = port;
 
     // Services
-    this.mapperService = options.mapperService || options.MapperService || new MapperService();
-    this.responseProcessor = options.responseProcessor || new ResponseProcessor();
+    // MapperService and ResponseProcessor removed; new pipeline and provider adapters handle mapping and normalization.
+    // (legacy mapperService and responseProcessor support removed)
     this.healthTracker = getHealthTracker();
 
     // Components
     this.stepExecutor = new StepExecutor(
       orchestrator,
-      this.mapperService,
-      this.responseProcessor,
       this.healthTracker
     );
     this.streamingManager = new StreamingManager(port);
@@ -408,7 +403,7 @@ export class WorkflowEngine {
   async handleRetryRequest(message) {
     try {
       const { sessionId, aiTurnId, providerIds, retryScope } = message || {};
-      console.log(`[WorkflowEngine] Retry requested for providers = ${(providerIds || []).join(', ')} scope = ${retryScope} `);
+      console.log(`[WorkflowEngine] Retry requested for providers = ${(providerIds || []).join(', ')} scope = ${retryScope} ` );
 
       try {
         (providerIds || []).forEach((pid) => this.healthTracker.resetCircuit(pid));

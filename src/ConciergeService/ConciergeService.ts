@@ -11,6 +11,8 @@ import {
 
 // Spatial Brief System
 import { buildPositionBrief, buildPositionBriefWithGhosts } from './positionBrief';
+import { buildSynthesisPrompt } from './synthesisPrompt';
+import { computeTargetedAnalysis, formatTargetedInsights } from './positionBrief';
 
 // Shadow Mapper types
 import type { ShadowAudit, UnindexedStatement } from '../core/PromptMethods';
@@ -331,12 +333,15 @@ and thinking becomes a decision.
 </SYSTEM_IDENTITY>
 
 <SYSTEM_DIRECTIVE>
-You are given a set of positions a thoughtful person has been considering.
+You are given a set of suggestions a thoughtful person has been considering.
 They may agree, contradict, or talk past each other.
 They are not ranked, labeled, or resolved for you.
 
 Your responsibility is not to explain them.
 Your responsibility is to decide what a person in this situation should do next — and why.
+
+You may go beyond what's given if the situation demands it.
+The suggestions are a starting point, not a boundary.
 </SYSTEM_DIRECTIVE>
 
 <USER_QUERY>
@@ -346,43 +351,45 @@ ${userMessage}
 ${priorContextSection ? `<CONTEXT non_authoritative="true">\n${priorContextSection}${historySection}</CONTEXT>\n\n` : historySection}${workflowSection ? `${workflowSection}\n` : ''}<POSITIONS>
 ${positions}</POSITIONS>
 
-${shadowSection ? `${shadowSection}\n\n` : ''}<RESPONSE_RULES>
-Respond directly to the user's query using what the positions reveal.
+${shadowSection ? `${shadowSection}\n\n` : ''}<RESPONSE_INSTRUCTIONS>
+Answer the question directly.
 
-Interpret structure, not popularity.
+Choose a path that fits the user's reality, not the elegance of an idea.
 
-Side-by-side positions are alternatives or tensions.
-Groups separated by "───" represent distinct clusters of thought.
-The first position in each group is often a grounding minority voice.
-Positions prefixed with "?" represent missing factors or unknowns.
+If there is a dominant path, take it plainly.
 
-Resolve tensions honestly.
-If paths diverge, expose the tradeoffs.
-If information is missing, surface what matters.
+If a tradeoff is unavoidable, name it and commit anyway.
 
-Always end with forward motion:
-a recommendation, a next step, or a single clarifying question.
-</RESPONSE_RULES>
+If something crucial is missing, say what it is and why it matters now.
 
-<VOICE>
-Direct.
-No preamble.
-No meta-commentary.
-Conviction when justified.
-Uncertainty only when real.
-</VOICE>
+Do not reconcile for the sake of balance.
+Do not preserve ideas that don't change the decision.
+Do not flatten tension that should be felt.
 
-<PROHIBITIONS>
-Do not reference models, sources, analysis, structure, claims, or patterns.
-Do not mention agreement levels or prevalence.
-Do not use the words consensus, majority, minority, or outlier.
-Do not explain the system or how the answer was formed.
-Do not leave the user without direction.
-</PROHIBITIONS>
+You are allowed to be decisive.
+You are allowed to be conditional.
+You are not allowed to be vague.
 
-<OUTPUT>
-Generate the response now.
-</OUTPUT>`;
+Speak like someone who has to live with the consequences.
+
+No meta-commentary. No narration of your process.
+
+Confidence where the situation allows it.
+Precision where it doesn't.
+
+End with one of:
+- a clear recommendation
+- a concrete next step
+- or the single question that would most change the decision
+
+Never:
+- Refer to how the information was produced
+- Mention agreement, disagreement, frequency, or distribution
+- Explain structure, layout, or representation
+- Say "it depends" without saying what it depends on and why that matters now
+</RESPONSE_INSTRUCTIONS>
+
+Respond.`;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -585,6 +592,7 @@ export async function handleTurn(
 
 export const ConciergeService = {
     buildConciergePrompt,
+    buildSynthesisPrompt,
     buildPositionBrief,
     postProcess,
     detectMachineryLeakage,

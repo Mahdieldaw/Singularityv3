@@ -18,6 +18,11 @@ import type {
     Edge,
 } from '../../shared/contract';
 
+import type { AssembledClaim } from './claimAssembly';
+import type { TraversalState } from './traversalState';
+import type { TraversalGraph } from './traversal';
+import { getCascade } from './traversal';
+
 // ═══════════════════════════════════════════════════════════════════════════
 // UTILITIES
 // ═══════════════════════════════════════════════════════════════════════════
@@ -97,9 +102,159 @@ function buildTensionPairs(
     return pairs;
 }
 
+// NEW: Targeted structural analysis for active/path-specific concerns
+export interface TargetedAnalysis {
+    keystones: Array<{
+        claim: AssembledClaim;
+        dependentCount: number;
+        userConfirmed: boolean;  // Did user confirm this?
+    }>;
+    dissent: Array<{
+        claim: AssembledClaim;
+        contrastingWith: string; // User's preference
+    }>;
+    fragilePaths: Array<{
+        claim: AssembledClaim;
+        unblockedGate: string;   // Gate not yet confirmed
+    }>;
+}
+
+/**
+ * Compute a targeted analysis contextualized to the user's active path.
+ * - Only analyzes currently active claims
+ * - Identifies keystones (claims many others depend on)
+ * - Finds dissenting active alternatives that conflict with user choices
+ * - Marks fragile paths (claims still gated by unresolved gates)
+ */
+export function computeTargetedAnalysis(
+    activeClaims: AssembledClaim[],
+    traversalState: TraversalState,
+    graph: TraversalGraph
+): TargetedAnalysis {
+    // Work only on currently active claims
+    const activeIds = new Set(activeClaims.map(c => c.id));
+
+    // 1) Keystones: active claims that many others depend on (cascade size)
+    const keystones = activeClaims
+        .map(c => ({
+            claim: c,
+            dependentCount: getCascade(c.id, graph).length,
+            userConfirmed: traversalState.selected.has(c.id) || traversalState.collectedEvidence.has(c.id),
+        }))
+        .filter(k => k.dependentCount > 0)
+        .sort((a, b) => b.dependentCount - a.dependentCount);
+
+    // 2) Dissent: active claims that conflict with something the user has chosen
+    const dissent: Array<{ claim: AssembledClaim; contrastingWith: string }> = [];
+    const selectedIds = Array.from(traversalState.selected);
+
+    if (selectedIds.length > 0) {
+        // For each tension in the graph, if one side is selected and the other is active,
+        // the active opposite represents a dissenting alternative to the user's path.
+        for (const t of graph.tensions) {
+            const aSelected = selectedIds.includes(t.claimAId);
+            const bSelected = selectedIds.includes(t.claimBId);
+
+            if (aSelected && activeIds.has(t.claimBId)) {
+                const claim = graph.claims.find(c => c.id === t.claimBId);
+                if (claim) dissent.push({ claim, contrastingWith: t.claimAId });
+            }
+            if (bSelected && activeIds.has(t.claimAId)) {
+                const claim = graph.claims.find(c => c.id === t.claimAId);
+                if (claim) dissent.push({ claim, contrastingWith: t.claimBId });
+            }
+        }
+    }
+
+    // Deduplicate dissent by claim id
+    const seenDissent = new Set<string>();
+    const dedupedDissent = dissent.filter(d => {
+        if (seenDissent.has(d.claim.id)) return false;
+        seenDissent.add(d.claim.id);
+        return true;
+    });
+
+    // 3) Fragile paths: active claims that still depend on unresolved gates
+    const fragilePaths: Array<{ claim: AssembledClaim; unblockedGate: string }> = [];
+
+    for (const c of activeClaims) {
+        // Collect gate ids (conditionals + prerequisites)
+        const gateIds = [
+            ...c.gates.conditionals.map(g => g.id),
+            ...c.gates.prerequisites.map(g => g.id),
+        ];
+
+        // Find first gate that has not been resolved (i.e., not present in resolvedGates)
+        const unresolved = gateIds.find(gid => !traversalState.resolvedGates.has(gid));
+
+        if (unresolved) {
+            fragilePaths.push({ claim: c, unblockedGate: unresolved });
+        }
+    }
+
+    return {
+        keystones,
+        dissent: dedupedDissent,
+        fragilePaths,
+    };
+}
+
+/**
+ * Format targeted analysis insights into human-readable notes.
+ */
+export function formatTargetedInsights(
+    analysis: TargetedAnalysis,
+    state: TraversalState
+): string {
+    const notes: string[] = [];
+
+    for (const ks of analysis.keystones) {
+        if (ks.userConfirmed) {
+            notes.push(`⚠️ The "${ks.claim.label}" you confirmed is a keystone — ${ks.dependentCount} claims depend on it`);
+        }
+    }
+
+    for (const d of analysis.dissent) {
+        notes.push(`📊 Dissent exists on "${d.claim.label}" despite your preference for "${d.contrastingWith}"`);
+    }
+
+    for (const fp of analysis.fragilePaths) {
+        notes.push(`⚙️ Fragile path: "${fp.claim.label}" depends on "${fp.unblockedGate}" which you haven't confirmed`);
+    }
+
+    return notes.length > 0 
+        ? `<NOTES>\n${notes.join('\n\n')}\n</NOTES>\n\n`
+        : '';
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // MAIN ALGORITHMS
 // ═══════════════════════════════════════════════════════════════════════════
+// NEW function needed in positionBrief.ts
+export function buildPositionBriefFromClaims(
+    claims: AssembledClaim[],
+    ghosts: string[] = []
+): string {
+    // Same bucket algorithm, but:
+    // - Uses AssembledClaim (has sourceStatements attached)
+    // - Formats with evidence from claim.sourceStatements
+    // - No dependency on StructuralAnalysis
+
+    // Simple compatibility implementation: map AssembledClaim -> EnrichedClaim-like object
+    const mapped = claims.map(c => ({
+        id: c.id,
+        text: c.label + (c.description ? ` — ${c.description}` : ''),
+        supportRatio: c.supportRatio,
+    } as EnrichedClaim));
+
+    // Build a minimal analysis-like wrapper
+    const analysisLike = {
+        claimsWithLeverage: mapped,
+        edges: [] as Edge[],
+    } as unknown as StructuralAnalysis;
+
+    return buildPositionBriefWithGhosts(analysisLike, ghosts);
+}
 
 /**
  * Build position brief for concierge using the bucket-anchor algorithm.

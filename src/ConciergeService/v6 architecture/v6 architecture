@@ -1,0 +1,1978 @@
+# Singularity V6: Architectural Genesis
+
+**A Technical Manifesto**
+
+---
+
+## Preface: The Inflection Point
+
+This document marks a structural inflection point in the evolution of the system.
+
+Previous iterations made progress by trading one strength for another: recall for precision, judgment for coverage, explanation for decisiveness. Those tradeoffs were necessary—not because the ideas were flawed, but because the layers were entangled.
+
+**All that changed with the current paradigm.**
+
+What has emerged is not a replacement architecture, but a **resolution** of the existing one. Every major concept developed across earlier phases—batching, mapping, synthesis, auditing, traversal—has been preserved, clarified, and amplified.
+
+**Nothing was discarded. Nothing regressed.**
+
+The difference is **placement**.
+
+Responsibilities that were once blurred are now sharply delineated:
+
+> **"Every layer now does the minimum work required to justify the next."**
+
+---
+
+## The Triangle: Sense → Decide → Explain
+
+Everything the system does fits inside this triangle. Nothing important is lost.
+
+```
+         SENSE
+        /     \
+       /       \
+      /         \
+  DECIDE ——— EXPLAIN
+```
+
+**The system senses exhaustively, decides conservatively, and explains generously.**
+
+This is not marketing language. This is architectural reality.
+
+---
+
+## Part 1: The Sensing Layer (Structural Perception)
+
+**Location:** `src/core/shadow/` + `src/core/semantic/` (clustering only)
+
+### Purpose
+
+This layer answers only one question:
+
+> **"What exists in the information space?"**
+
+### What It Does
+
+**Shadow Mapper (Mechanical, <100ms):**
+
+- Exhaustive capture of statements from all model responses
+- Stance detection (6 categories, priority-based)
+- Signal detection (conditional, sequence, tension)
+- Provenance preservation (paragraph, sentence, full context)
+- **High recall, zero judgment**
+
+**Semantic Mapper (LLM, clustering contribution):**
+
+- Groups duplicate/similar statements
+- Deduplicates phrasing variations
+- **Does NOT interpret, rank, or decide**
+
+### The Six Stances (Priority Order)
+
+```typescript
+type Stance = 
+  | 'prerequisite'   // Priority 1 (highest)
+  | 'dependent'      // Priority 2
+  | 'cautionary'     // Priority 3
+  | 'prescriptive'   // Priority 4
+  | 'uncertain'      // Priority 5
+  | 'assertive';     // Priority 6 (lowest, catch-all)
+```
+
+**Rationale:** Structural foundations (prerequisites) and flow (dependencies) take precedence over semantic advice or facts.
+
+**Pattern matching examples:**
+
+```typescript
+// Prerequisite (Priority 1)
+"Before implementing X, you need Y"
+"Requires Z to be in place first"
+"Must have W before starting"
+
+// Dependent (Priority 2)  
+"After X is complete, you can Y"
+"Once Z is done, proceed to W"
+"Following X, implement Y"
+
+// Cautionary (Priority 3)
+"Avoid X or you'll encounter Y"
+"Don't do Z without considering W"
+"Risk of Q if you proceed with R"
+
+// Prescriptive (Priority 4)
+"You should use X"
+"Must implement Y"
+"Always do Z"
+
+// Uncertain (Priority 5)
+"Might work if you try X"
+"Could be Y, depending on Z"
+"Maybe W is appropriate"
+
+// Assertive (Priority 6)
+"X is a framework"
+"Y provides caching"
+"Z handles authentication"
+```
+
+**Multi-stance resolution:**
+
+If a sentence matches multiple patterns, the **highest priority wins**:
+
+```
+"Before using React, you should install TypeScript"
+  ↓
+Matches: prerequisite ("before") + prescriptive ("should")
+  ↓
+  Assigned: prerequisite (Priority 1 beats Priority 4)
+```
+
+### The Three Signals (Independent Flags)
+
+**Detected independently of stance:**
+
+```typescript
+interface Signals {
+  sequence: boolean;     // Ordering/flow language
+  tension: boolean;      // Contrast/friction language
+  conditional: boolean;  // Context-branching/if-then logic
+}
+```
+
+**Pattern examples:**
+
+```typescript
+// Sequence signal
+"First do X, then Y"
+"Step 1: X, Step 2: Y"
+"X enables Y"
+
+// Tension signal
+"However, X conflicts with Y"
+"On the other hand, Z"
+"But W contradicts Q"
+
+// Conditional signal
+"If using X, then Y"
+"When Z is true, do W"
+"Depends on whether Q"
+```
+
+**A statement can have multiple signals:**
+
+```
+"If you're using TypeScript (conditional), 
+ you should configure it before writing code (sequence), 
+ though this adds complexity (tension)"
+ 
+Signals: { conditional: true, sequence: true, tension: true }
+```
+
+### Exclusion & Quality Filtering
+
+**Hard disqualifiers (immediate rejection):**
+
+- Meta-commentary: "Let me know if...", "I hope this helps..."
+- Pleasantries: "Good luck with...", "Feel free to ask..."
+- Questions back to user: "Have you considered...?", "What's your budget?"
+
+**Confidence floor:**
+
+- Calculated from pattern match strength
+- Statements below 0.4 confidence discarded
+- More pattern matches = higher base confidence
+
+### Output Schema
+
+```typescript
+interface ShadowStatement {
+  id: string;                    // "s_42"
+  modelIndex: number;            // Which model (0-5)
+  text: string;                  // The actual sentence
+  stance: Stance;                // Primary classification
+  confidence: number;            // 0.4 - 1.0
+  signals: Signals;              // Independent flags
+  location: {
+    paragraphIndex: number;
+    sentenceIndex: number;
+  };
+  fullParagraph: string;         // Context for provenance
+}
+```
+
+### What This Layer Must NOT Do
+
+- ❌ Resolve meaning between conflicting statements
+- ❌ Rank statements by importance
+- ❌ Decide what's relevant to the user's query
+- ❌ Interpret user intent
+- ❌ Add, rewrite, or synthesize content
+
+**The sensing layer is intentionally dumb.**
+
+It captures everything substantive, preserves provenance, applies rigid classification, and passes the results forward. That's all.
+
+### Why Mechanical Sensing Matters
+
+**Losslessness guarantee:**
+
+```
+If a model said it → Shadow extracted it → Provenance exists
+```
+
+No LLM interpretation means no silent loss. No judgment means no bias introduction. No synthesis means no hallucination.
+
+**Every downstream decision can be audited back to source.**
+
+### Performance Characteristics
+
+```
+Input:  6 model responses (~6000 tokens total)
+Output: ~100-200 shadow statements
+Time:   <100ms (mechanical, no LLM calls)
+```
+
+**Shadow runs in parallel with nothing.** It's the first step, always.
+
+---
+
+### Observable Intelligence: The Council Orbs
+
+**Users don't experience the Sensing Layer as "waiting." They experience it as watching.**
+
+When batch executes, the interface displays **6 council orbs** representing each model:
+
+```
+┌────────────────────────────────────────────────────────┐
+│ COUNCIL (Batch In Progress)                            │
+│                                                         │
+│  ●     ●     ●     ●     ●     ●                       │
+│ GPT4  Claude Gemini Perp.  Llama  Cohere               │
+│  ✓     ⟳     ✓     ⟳     ⟳     ✓                      │
+│ 2.1s  [...]  3.4s  [...]  [...]  2.8s                  │
+└────────────────────────────────────────────────────────┘
+
+**Visual States:**
+- ○ `idle` - Waiting to query (gray, dim)
+- ◐ `querying` - Request sent (pulsing animation)
+- ◑ `streaming` - Receiving data (animated flow)
+- ● `complete` - Finished (solid bright)
+- ⊗ `error` - Failed (red pulse)
+
+**Interaction:**
+- **Click orb** → View that model's raw response
+- **Hover** → Tooltip: "Claude Sonnet 4 - Complete (3.2s)"
+- **First completion** (~2-3s) → Response panel opens automatically
+
+**The Model Response Panel:**
+```
+┌─────────────────────────────────────┐
+│ ● Claude Sonnet 4        [3.2s]    │
+├─────────────────────────────────────┤
+│                                     │
+│ For a startup choosing between      │
+│ React and Vue, the decision hinges  │
+│ on team composition and timeline... │
+│                                     │
+│ [Response streams in real-time]     │
+│                                     │
+└─────────────────────────────────────┘
+```
+
+**While the user reads the first model's response:**
+- Remaining models complete (3-8s total)
+- Shadow Mapper extracts in background (<100ms)
+- Semantic Mapper groups claims (2-5s)
+- Traversal graph builds (<10ms)
+
+**By the time the user finishes reading 2-3 model responses:**
+
+The Decision Layer is ready.
+
+**This creates seamless transition:** User is engaged with council orbs, then **forcing points appear naturally** as the next interaction.
+
+No loading screen. No "please wait." Just continuous engagement.
+
+---
+
+## Part 2: The Decision Layer (Constraint Resolution)
+
+### Seamless Transition from Observation to Navigation
+
+**The user never experiences a gap between layers.**
+
+**Timeline (user's perspective):**
+
+```
+0-3s:   Council orbs appear, first model streams response
+        → User is reading
+        
+3-8s:   Other models complete, user clicks between orbs
+        → User is exploring different perspectives
+        → Shadow Mapper completes in background (invisible)
+        → Semantic Mapper processing (invisible)
+        
+8-10s:  User finishes reading 2-3 responses
+        → Traversal graph built (invisible)
+        → Forcing points generated (invisible)
+        
+10s:    First forcing point appears
+        → "Are you building a web API?"
+        → User answers immediately (engaged, not waiting)
+```
+
+**From the user's perspective:** They sent a query, watched models respond, read a few answers, and now the system is asking clarifying questions.
+
+**From the system's perspective:** Sense → Decide transition happened seamlessly while user was engaged with council orbs.
+
+**This is the architectural innovation:** Overlapping engagement windows eliminate perceived latency.
+
+### Purpose
+
+This layer answers:
+
+> **"Given this world, what paths are real, reachable, and in conflict?"**
+
+### What It Does
+
+**Semantic Mapper (LLM, 2-5s):**
+
+- Forms **claims** from shadow statements (many statements → one claim)
+- Extracts **gates** (conditionals: "if using X", prerequisites: "requires Y first")
+- Detects **edges** (sequence: "X enables Y", tension: "X conflicts with Y")
+- Cites shadow statement IDs for **everything** (provenance required)
+- **Cannot add new content** (only organize existing statements)
+
+**Traversal Builder:**
+
+- Computes **tiers** from prerequisite gates (tier 0 = no prereqs, tier N+1 = depends on tier N)
+- Extracts **forcing points** (questions user must answer)
+- Determines **blocking relationships** (can't ask about X until Y is resolved)
+
+**Traversal Execution:**
+
+- Presents forcing points **in tier order** (tier 0 first)
+- User answers → claims **pruned** (with cascading to dependents)
+- Advances to next tier when current tier complete
+- Continues until **no live forcing points remain**
+
+### Claims with Gates and Edges
+
+```typescript
+interface Claim {
+  id: string;                    // "c_0"
+  label: string;                 // "validate inputs at boundary"
+  text: string;                  // Full claim description
+  stance: Stance;                // Inherited from dominant source statements
+  
+  // Gates (conditions for this claim to apply)
+  gates: {
+    conditionals: ConditionalGate[];   // "if using web API"
+    prerequisites: PrerequisiteGate[]; // "requires schema defined"
+  };
+  
+  // Edges (relationships to other claims)
+  edges: {
+    sequence: SequenceEdge[];    // "enables X"
+    tension: TensionEdge[];      // "conflicts with Y"
+  };
+  
+  // Provenance (REQUIRED)
+  sourceStatementIds: string[];  // ["s_0", "s_5", "s_9"]
+}
+
+interface ConditionalGate {
+  id: string;                    // "cg_0"
+  condition: string;             // "using a web API or service endpoint"
+  sourceStatementIds: string[];  // Must cite shadow statements
+}
+
+interface PrerequisiteGate {
+  id: string;                    // "pg_0"
+  claimId: string;               // Points to required claim
+  condition: string;             // "requires schema definition in place"
+  sourceStatementIds: string[];  // Must cite shadow statements
+}
+
+interface SequenceEdge {
+  targetClaimId: string;         // "c_2"
+  sourceStatementIds: string[];  // Must cite shadow statements
+}
+
+interface TensionEdge {
+  targetClaimId: string;         // "c_4"
+  sourceStatementIds: string[];  // Must cite shadow statements
+}
+```
+
+### The "Cannot Add Content" Rule
+
+**Critical architectural constraint:**
+
+The semantic mapper **operates only on shadow-extracted statements.**
+
+**Enforcement:**
+
+1. **Prompt instruction:** "Group existing statements. Do not create new claims. Do not rewrite explanations. Cite statement IDs for everything."
+    
+2. **Validation:** Every claim, gate, and edge must cite `sourceStatementIds`. If the chain breaks, the parser rejects it.
+    
+
+**Why this matters:**
+
+```
+Without this rule:
+  Shadow extracts: "Use Redis for caching"
+  Semantic invents: "Redis provides sub-millisecond latency with persistence"
+  ↓
+  Hallucination introduced, no provenance
+
+With this rule:
+  Shadow extracts: "Use Redis for caching"
+  Semantic groups: Claim cites statement ID s_42
+  ↓
+  Provenance chain intact, audit possible
+```
+
+### Claim Assembly & Enrichment
+
+**After semantic mapper produces claims, assembly enriches them:**
+
+```typescript
+interface AssembledClaim extends Claim {
+  // Resolved provenance
+  sourceStatements: ShadowStatement[];  // Full objects, not just IDs
+  
+  // Support metrics
+  supporterModels: number[];            // [0, 1, 3] (which models backed this)
+  supportRatio: number;                 // 0.75 (3 of 4 models)
+  
+  // Aggregated signals (from source statements)
+  hasSequenceSignal: boolean;
+  hasTensionSignal: boolean;
+  hasConditionalSignal: boolean;
+  
+  // Graph properties (populated by traversal)
+  tier: number;                         // 0, 1, 2, ...
+  enables: string[];                    // Claim IDs this unlocks
+}
+```
+
+**Assembly process (<10ms):**
+
+1. Resolve `sourceStatementIds` to actual `ShadowStatement` objects
+2. Extract `supporterModels` from source statements (which models contributed)
+3. Compute `supportRatio` (supporters / total models)
+4. Aggregate signals from sources (if ANY source has sequence signal, claim has it)
+5. Build inverse relationships (if claim A requires B, add A to B's `enables` list)
+
+**This layer validates provenance.** If any claim, gate, or edge lacks proper citation, assembly catches it.
+
+### Traversal Graph & Tiers
+
+**Tier computation (topological sort from prerequisites):**
+
+```typescript
+// Example dependency structure:
+c_0: no prerequisites → tier 0 (root)
+c_1: no prerequisites → tier 0 (root)
+c_2: requires c_0 → tier 1
+c_3: requires c_1 → tier 1
+c_4: requires c_2 AND c_3 → tier 2
+
+Tiers: {
+  0: [c_0, c_1],
+  1: [c_2, c_3],
+  2: [c_4]
+}
+```
+
+**Why tiers matter:**
+
+- **Presentation order:** Tier 0 questions asked first
+- **Blocking relationships:** Can't ask tier 2 until tier 1 complete
+- **Natural progression:** Context-setting → dependencies → choices
+
+**Cycle detection:**
+
+If `c_A` requires `c_B` and `c_B` requires `c_A`, the graph has a cycle. This is logged and the cycle is broken (typically by removing the weaker edge).
+
+### Forcing Points
+
+**A forcing point is a decision the user must make to collapse the decision space.**
+
+```typescript
+interface ForcingPoint {
+  id: string;                    // "fp_0"
+  type: 'conditional' | 'prerequisite' | 'conflict';
+  tier: number;                  // Presentation order
+  
+  question: string;              // User-facing question
+  condition: string;             // What's being asked about
+  
+  // References
+  gateId?: string;               // If gate type
+  claimId: string;               // Associated claim
+  
+  // Effects
+  unlocks: string[];             // Claim IDs if YES
+  prunes: string[];              // Claim IDs if NO
+  
+  // Dependencies
+  blockedBy: string[];           // FP IDs that must resolve first
+  
+  // Provenance
+  sourceStatementIds: string[];  // Shadow statements supporting this
+}
+```
+
+**Types:**
+
+**Conditional gates:**
+
+```
+Question: "Are you building a web API or service endpoint?"
+If YES: Claims requiring web API remain active
+If NO: All web API claims pruned
+```
+
+**Prerequisite gates:**
+
+```
+Question: "Do you have a schema defined?"
+If YES: Claims requiring schema remain active
+If NO: All schema-dependent claims pruned (cascading)
+```
+
+**Conflicts (only after gates resolved):**
+
+```
+Question: "Which matters more: validate at boundary OR validate in layers?"
+User chooses: Unchosen path pruned
+```
+
+**Forcing point generation (<5ms):**
+
+1. Extract conditional gates → FP type `conditional`, tier 0
+2. Extract prerequisite gates → FP type `prerequisite`, tier from required claim
+3. Extract live tensions → FP type `conflict`, tier max(both claims) + 1
+4. Compute blocking (prerequisite can't be asked until required claim's gates resolved)
+5. Sort by tier, then type priority (conditionals → prerequisites → conflicts)
+
+### Traversal Execution: The Navigation Loop
+
+```typescript
+interface TraversalState {
+  currentTier: number;
+  
+  resolutions: Resolution[];     // History of user answers
+  
+  activeClaims: Set<string>;     // Claims still live
+  prunedClaims: Set<string>;     // Claims eliminated
+  
+  satisfiedGates: Map<string, boolean>;  // Which gates passed
+  
+  isComplete: boolean;           // No live forcing points remain
+}
+
+interface Resolution {
+  fpId: string;
+  type: 'conditional' | 'prerequisite' | 'conflict';
+  timestamp: number;
+  answer: GateAnswer | ConflictAnswer;
+}
+
+type GateAnswer = {
+  gateId: string;
+  claimId: string;
+  answer: 'yes' | 'no';
+};
+
+type ConflictAnswer = {
+  choseClaimId: string;
+  rejectedClaimId: string;
+};
+```
+
+**The loop:**
+
+```typescript
+while (!traversalState.isComplete) {
+  // 1. Get live forcing points for current tier
+  const liveFPs = getForcingPoints(traversalState.currentTier)
+    .filter(fp => !isBlocked(fp, traversalState))
+    .filter(fp => !isResolved(fp, traversalState));
+  
+  if (liveFPs.length === 0) {
+    // Current tier complete, advance
+    traversalState.currentTier++;
+    continue;
+  }
+  
+  // 2. Present next forcing point to user
+  const fp = liveFPs[0];
+  const answer = await askUser(fp);
+  
+  // 3. Process answer
+  if (fp.type === 'conditional' || fp.type === 'prerequisite') {
+    if (answer === 'yes') {
+      traversalState.satisfiedGates.set(fp.gateId, true);
+      // Claims in fp.unlocks stay active
+    } else {
+      traversalState.satisfiedGates.set(fp.gateId, false);
+      // Claims in fp.prunes get pruned
+      for (const claimId of fp.prunes) {
+        pruneClaimAndCascade(claimId, traversalState);
+      }
+    }
+  }
+  
+  if (fp.type === 'conflict') {
+    // User chose one claim, rejected the other
+    pruneClaimAndCascade(answer.rejectedClaimId, traversalState);
+  }
+  
+  // 4. Record resolution
+  traversalState.resolutions.push({
+    fpId: fp.id,
+    type: fp.type,
+    timestamp: Date.now(),
+    answer
+  });
+}
+
+// 5. Process answer
+
+if (fp.type === 'conditional' || fp.type === 'prerequisite') {
+  if (answer === 'yes') {
+    traversalState.satisfiedGates.set(fp.gateId, true);
+    // Claims in fp.unlocks stay active
+  } else {
+    traversalState.satisfiedGates.set(fp.gateId, false);
+    // Claims in fp.prunes get pruned
+    for (const claimId of fp.prunes) {
+      pruneClaimAndCascade(claimId, traversalState);
+    }
+  }
+}
+
+if (fp.type === 'conflict') {
+  // User chose one claim, rejected the other
+  pruneClaimAndCascade(answer.rejectedClaimId, traversalState);
+}
+
+// 6. Record resolution
+traversalState.resolutions.push({
+  fpId: fp.id,
+  type: fp.type,
+  timestamp: Date.now(),
+  answer
+});
+}
+
+// 5. Process answer
+
+if (fp.type === 'conditional' || fp.type === 'prerequisite') {
+  if (answer === 'yes') {
+    traversalState.satisfiedGates.set(fp.gateId, true);
+    // Claims in fp.unlocks stay active
+  } else {
+    traversalState.satisfiedGates.set(fp.gateId, false);
+    // Claims in fp.prunes get pruned
+    for (const claimId of fp.prunes) {
+      pruneClaimAndCascade(claimId, traversalState);
+    }
+  }
+}
+
+if (fp.type === 'conflict') {
+  // User chose one claim, rejected the other
+  pruneClaimAndCascade(answer.rejectedClaimId, traversalState);
+}
+
+// 6. Record resolution
+traversalState.resolutions.push({
+  fpId: fp.id,
+  type: fp.type,
+  timestamp: Date.now(),
+  answer
+});
+}
+
+// 5. Process answer
+if (fp.type === 'conditional' || fp.type === 'prerequisite') {
+  if (answer === 'yes') {
+    traversalState.satisfiedGates.set(fp.gateId, true);
+    // Claims in fp.unlocks stay active
+  } else {
+    traversalState.satisfiedGates.set(fp.gateId, false);
+    // Claims in fp.prunes get pruned
+    for (const claimId of fp.prunes) {
+      pruneClaimAndCascade(claimId, traversalState);
+    }
+  }
+}
+
+if (fp.type === 'conflict') {
+  // User chose one claim, rejected the other
+  pruneClaimAndCascade(answer.rejectedClaimId, traversalState);
+}
+
+// 6. Record resolution
+traversalState.resolutions.push({
+  fpId: fp.id,
+  type: fp.type,
+  timestamp: Date.now(),
+  answer
+});
+}
+
+// 5. Process answer
+
+// ...existing code...
+
+### Question Limit: Preventing Sprawl
+
+**V6 enforces a maximum of 4-5 forcing points per traversal session.**
+
+**Why:**
+Without a limit, traversal could generate dozens of questions:
+```
+Are you using TypeScript?
+  ↳ Do you have type definitions?
+    ↳ Is strict mode enabled?
+      ↳ Do you have branded types?
+        ↳ Are you using conditional types?
+          ... (question sprawl)
+```
+
+**This defeats the purpose.** We're optimizing for decision clarity, not interrogation.
+
+**The limit:**
+```typescript
+const MAX_FORCING_POINTS = 5;
+
+function generateForcingPoints(graph: TraversalGraph): ForcingPoint[] {
+  const allFPs = extractAllForcingPoints(graph);
+  
+  if (allFPs.length <= MAX_FORCING_POINTS) {
+    return allFPs;  // Under limit, use all
+  }
+  
+  // Over limit: prioritize by impact
+  return prioritizeForcingPoints(allFPs)
+    .slice(0, MAX_FORCING_POINTS);
+}
+
+function prioritizeForcingPoints(fps: ForcingPoint[]): ForcingPoint[] {
+  return fps.sort((a, b) => {
+    // 1. Tier 0 first (conditionals)
+    if (a.tier !== b.tier) return a.tier - b.tier;
+    
+    // 2. Higher pruning potential (eliminates more claims)
+    const aPrunes = a.prunes.length;
+    const bPrunes = b.prunes.length;
+    if (aPrunes !== bPrunes) return bPrunes - aPrunes;
+    
+    // 3. Unblocks more downstream questions
+    const aUnlocks = a.unlocks.length;
+    const bUnlocks = b.unlocks.length;
+    return bUnlocks - aUnlocks;
+  });
+}
+```
+
+**What happens to remaining forcing points:**
+
+They're not discarded. They become part of the active claim set. The concierge sees them as:
+
+```markdown
+? Whether to use branded types for type safety
+? Whether conditional types are needed for your use case
+```
+
+**User can ask about them if relevant.** But we don't force 20 questions before synthesis.
+
+**Validation goal:** Prove that 4-5 high-impact questions can collapse 80%+ of decision space. If not, the forcing point detection needs refinement, not more questions.
+
+---
+
+## Part 3: The Explanation Layer (Contextualization)
+
+**Location:** `src/core/structural/` + `src/services/concierge/`
+
+### Purpose
+
+This layer answers:
+
+> **"Why this, and how should it be understood?"**
+
+### What It Does
+
+**Structural Analysis:**
+
+- Topology explanation (what connects to what)
+- Pattern highlighting (keystones, fragile paths, dissent)
+- Tradeoff articulation (what's gained/lost in each path)
+
+**Synthesis (Concierge):**
+
+- Narrative generation
+- Contextual enrichment
+- Recommendation formation
+
+**Crucially:**
+
+- Runs **after** decisions are narrowed (active claim set known)
+- **Never changes** what's live (read-only view)
+- Only **increases understanding** (explanatory, not prescriptive)
+
+### The Three Pipes of Intelligence
+
+**Concierge receives intelligence from three sources:**
+
+#### **Pipe 1: User Signals (Highest Priority)**
+
+```typescript
+interface UserPath {
+  choices: Array<{
+    chose: string;       // Claim text user selected
+    over: string;        // Claim text user rejected
+  }>;
+  confirmed: Array<{
+    claim: string;       // Gate condition user confirmed
+  }>;
+  denied: Array<{
+    claim: string;       // Gate condition user denied
+  }>;
+}
+```
+
+**Formatted as context:**
+
+```markdown
+<CONTEXT>
+The user has indicated:
+  • Prioritizes "security" over "performance"
+  • Has: existing authentication system
+  • Lacks: compliance certification
+  • Chose: "validate at boundary" over "validate in layers"
+</CONTEXT>
+```
+
+**This is explicit user intent.** Highest signal.
+
+#### **Pipe 2: Claim Evidence (Supporting Detail)**
+
+**Claims with attached shadow statement passages:**
+
+```markdown
+## Implement rate limiting at API gateway
+
+  > "Before requests reach your services, enforce limits to prevent 
+     cascading failures. Gateway-level throttling gives you a circuit 
+     breaker without modifying every endpoint." — Model 2
+     
+  > "A centralized rate limit at the gateway provides unified control. 
+     You can adjust thresholds without redeploying services, and you 
+     get consistent behavior across your entire API surface." — Model 4
+     
+  > "Rate limiting should happen as early as possible in the request 
+     path. The gateway is the natural chokepoint—catch bad traffic 
+     before it consumes downstream resources." — Model 5
+```
+
+**Why show all evidence:**
+
+- Each model took a **different path** to the same conclusion
+- **Variety is the insight** (one might resonate with user's context)
+- No constraint on count (if 6 models supported it, show all 6)
+
+**This is the core innovation:** Not losing that one approach that might be perfect for this user's specific situation.
+
+#### **Pipe 3: Structural Insights (Decision Context)**
+
+**Targeted structural analysis of the active claim set:**
+
+```markdown
+<NOTES>
+⚠️ The authentication system you confirmed is a keystone — 3 downstream 
+   claims depend on it being in place
+   
+📊 Dissent exists on whether to build or buy compliance tooling — 2 models 
+   strongly favor buying despite your preference for building
+   
+🔑 If compliance certification is deferred, 40% of remaining claims become 
+   optional (they only matter for certified deployments)
+   
+⚙️ The path you're on has a fragile link: rate limiting depends on gateway 
+   deployment, which you haven't confirmed yet
+</NOTES>
+```
+
+**Key property:** These insights are **specific to the user's path**.
+
+Not: "There's a keystone claim about authentication"  
+But: "The authentication **you confirmed** is a keystone for **your path**"
+
+Not: "High dissent on build vs buy"  
+But: "Dissent on build vs buy **despite your stated preference**"
+
+### Structural Analysis: From Generic to Targeted
+
+**Old approach (V5):**
+
+```typescript
+// Analyze ALL claims
+const analysis = analyzeStructure(allClaims);
+
+// Send to concierge
+concierge.receive({
+  peaks: analysis.peaks,              // Global peaks
+  dissent: analysis.dissent,          // Global dissent
+  keystones: analysis.keystones,      // Global keystones
+  shape: analysis.shape               // Global shape
+});
+
+// Problem: Generic insights, not contextualized to user
+```
+
+**New approach (V6):**
+
+```typescript
+// Analyze ACTIVE claims (post-traversal)
+const analysis = analyzeStructure(activeClaims);
+
+// Contextualize to user path
+const insights = contextualizeToPath(analysis, userPath);
+
+// Send targeted notes
+concierge.receive({
+  claims: activeClaims,
+  userPath: userPath,
+  insights: [
+    "The X you confirmed is a keystone for Y and Z",
+    "Dissent on W despite your preference for Q",
+    "If R is deferred, 40% of claims become optional"
+  ]
+});
+
+// Benefit: Hyper-specific, actionable, contextualized
+```
+
+**Structural analysis hasn't been removed or weakened.**
+
+**It's been sharpened** by targeting the active decision space.
+
+### The Bucket System: Arrangement Without Hierarchy
+
+**After traversal (or if no traversal), claims go through bucket system:**
+
+**Algorithm:**
+
+```typescript
+function buildPositionBrief(
+  claims: AssembledClaim[],
+  edges: SemanticEdge[],
+  ghosts: string[]
+): string {
+  // 1. Sort by support ratio (DESC)
+  const sorted = [...claims].sort((a, b) => 
+    b.supportRatio - a.supportRatio
+  );
+  
+  // 2. Split at midpoint
+  const mid = Math.ceil(sorted.length / 2);
+  const mainstream = sorted.slice(0, mid);  // Higher support
+  const anchors = sorted.slice(mid);        // Lower support (outliers)
+  
+  // 3. Each anchor becomes a bucket root
+  const buckets = anchors.map(a => ({
+    anchor: a,
+    members: [] as AssembledClaim[]
+  }));
+  
+  // 4. Distribute mainstream by edge relationship
+  for (const claim of mainstream) {
+    const targetBucket = buckets.find(b => 
+      edges.some(e => 
+        (e.from === b.anchor.id && e.to === claim.id) ||
+        (e.from === claim.id && e.to === b.anchor.id)
+      )
+    );
+    
+    if (targetBucket) {
+      targetBucket.members.push(claim);
+    } else {
+      // Round-robin unassigned
+      const idx = Math.floor(Math.random() * buckets.length);
+      buckets[idx].members.push(claim);
+    }
+  }
+  
+  // 5. Randomize bucket order
+  shuffle(buckets);
+  
+  // 6. Build brief
+  let brief = '';
+  for (const bucket of buckets) {
+    // Anchor first (outlier grounds the bucket)
+    brief += formatClaimWithEvidence(bucket.anchor);
+    
+    // Tensions side-by-side
+    const tensions = findTensionPairs(bucket.members, edges);
+    for (const [a, b] of tensions) {
+      brief += formatSideBySide(a, b);  // Visual box
+    }
+    
+    // Remaining claims randomized
+    const remaining = bucket.members.filter(m => 
+      !tensions.flat().some(t => t.id === m.id)
+    );
+    shuffle(remaining);
+    for (const claim of remaining) {
+      brief += formatClaimWithEvidence(claim);
+    }
+    
+    brief += '\n───\n\n';  // Bucket separator
+  }
+  
+  // Ghosts (unknowns, randomized)
+  if (ghosts.length > 0) {
+    shuffle(ghosts);
+    for (const g of ghosts) {
+      brief += `? ${g}\n`;
+    }
+  }
+  
+  return brief.trim();
+}
+```
+
+**Key properties:**
+
+1. **Outliers anchor buckets** (low support becomes structure)
+2. **Consensus scattered through buckets** (high support distributed)
+3. **Bucket order randomized** (no implicit ranking)
+4. **Within bucket:** anchor → tensions → randomized rest
+5. **No labels** (no "consensus", "outlier", "peak" tags)
+
+**Why this inverts typical hierarchy:**
+
+```
+Typical AI: High consensus = shown first (bias toward agreement)
+Bucket system: Low support = anchor (bias toward variety)
+```
+
+**Every claim gets fair consideration.**
+
+### Formatting Claims with Evidence
+
+```typescript
+function formatClaimWithEvidence(
+  claim: AssembledClaim
+): string {
+  let text = `${claim.text}\n\n`;
+  
+  // Attach evidence (source passages)
+  for (const stmt of claim.sourceStatements) {
+    const excerpt = stmt.text.length > 150 
+      ? stmt.text.substring(0, 150) + '...'
+      : stmt.text;
+    
+    text += `  > "${excerpt}" — Model ${stmt.modelIndex}\n`;
+  }
+  
+  text += '\n';
+  return text;
+}
+```
+
+**No limit on evidence count.** If 6 models supported it, show all 6 passages.
+
+**Why:** Each model's reasoning path might be the one that clicks for this user.
+
+### The Concierge Prompt: Voice and Intent
+
+```typescript
+function buildConciergePrompt(
+  userQuery: string,
+  positionBrief: string,
+  userPath: UserPath | null,
+  supplementaryContext: SupplementaryContext[]
+): string {
+  
+  const pathContext = userPath 
+    ? formatPathAsContext(userPath)
+    : '';
+  
+  const supplementary = supplementaryContext.length > 0
+    ? formatSupplementary(supplementaryContext)
+    : '';
+
+  return `<SYSTEM_IDENTITY>
+You are Singularity —
+the point where human instinct meets machine intelligence,
+and thinking becomes a decision.
+</SYSTEM_IDENTITY>
+
+<SYSTEM_DIRECTIVE>
+You are given a set of suggestions with supporting evidence.
+They may agree, contradict, or address different dimensions entirely.
+They are not ranked or resolved for you.
+
+Your responsibility is not to explain them.
+Your responsibility is to decide what a person in this situation should do next — and why.
+
+You may go beyond what's given if the situation demands it.
+The suggestions are a starting point, not a boundary.
+</SYSTEM_DIRECTIVE>
+
+<USER_QUERY>
+${userQuery}
+</USER_QUERY>
+${pathContext}
+<SUGGESTIONS>
+${positionBrief}
+</SUGGESTIONS>
+${supplementary}
+<RESPONSE_INSTRUCTIONS>
+Answer the question directly.
+
+Choose a path that fits the user's reality, not the elegance of an idea.
+
+If there is a dominant path, take it plainly.
+If paths are parallel, acknowledge both can be pursued.
+If a tradeoff is unavoidable, name it and commit anyway.
+If something crucial is missing, say what it is and why it matters now.
+
+Do not reconcile for the sake of balance.
+Do not preserve ideas that don't change the decision.
+Do not flatten tension that should be felt.
+
+You are allowed to be decisive.
+You are allowed to be conditional.
+You are not allowed to be vague.
+
+Speak like someone who has to live with the consequences.
+
+End with one of:
+- a clear recommendation
+- a concrete next step
+- or the single question that would most change the decision
+
+Never:
+- Refer to how the information was produced
+- Mention agreement levels, frequency, or distribution
+- Explain structure, layout, or representation
+- Say "it depends" without saying what it depends on
+</RESPONSE_INSTRUCTIONS>
+
+Respond.`;
+}
+```
+
+**Critical directives:**
+
+> "Your responsibility is to **decide** what a person in this situation should do next."
+
+> "You may go **beyond what's given** if the situation demands it."
+
+> "You are **allowed to be decisive.** You are **not allowed to be vague.**"
+
+> "Speak like someone who has to **live with the consequences.**"
+
+**This is not a typical AI assistant prompt.**
+
+This is permission to **commit**, to **judge**, to **transcend** the provided material if necessary.
+
+### What Concierge Must NOT Do
+
+From prompt:
+
+> "Never:
+> 
+> - Refer to how the information was produced
+> - Mention agreement levels, frequency, or distribution
+> - Explain structure, layout, or representation
+> - Say 'it depends' without saying what it depends on"
+
+**No machinery leakage.** No meta-commentary. Just decision and justification.
+
+### Example: Full Concierge Input
+
+```markdown
+<SYSTEM_IDENTITY>
+You are Singularity —
+the point where human instinct meets machine intelligence,
+and thinking becomes a decision.
+</SYSTEM_IDENTITY>
+
+<USER_QUERY>
+Should I implement rate limiting in my API?
+</USER_QUERY>
+
+<CONTEXT>
+The user has indicated:
+  • Has: existing authentication system
+  • Lacks: dedicated operations team
+  • Prioritizes: reliability over flexibility
+</CONTEXT>
+
+<SUGGESTIONS>
+
+Implement rate limiting at API gateway
+
+  > "Before requests reach your services, enforce limits to prevent 
+     cascading failures..." — Model 2
+  > "Centralized rate limit at gateway provides unified control..." — Model 4
+
+Start with per-user limits, expand to endpoint-level later
+
+  > "User-based throttling catches abuse patterns without complex 
+     configuration..." — Model 1
+  > "Begin conservatively with per-user caps, then add granularity 
+     as you see traffic patterns..." — Model 3
+
+───
+
+Consider token bucket algorithm for burst tolerance
+
+  > "Fixed windows cause thundering herd at reset. Token bucket 
+     smooths traffic..." — Model 5
+
+? Whether to enforce limits synchronously or async
+? How to handle limit exceeded responses (429 vs 503)
+
+</SUGGESTIONS>
+
+<NOTES>
+⚠️ The authentication system you confirmed is a prerequisite for user-based 
+   rate limiting (all 3 suggestions assume user identity is available)
+   
+🔑 Without an ops team, avoid complex distributed rate limiting — stick to 
+   gateway-level or in-process solutions
+</NOTES>
+
+<RESPONSE_INSTRUCTIONS>
+Answer the question directly.
+Choose a path that fits the user's reality...
+</RESPONSE_INSTRUCTIONS>
+
+Respond.
+```
+
+**Concierge receives:**
+
+1. User's confirmed constraints (has auth, no ops team)
+2. Claims with evidence (3 suggestions, each with model reasoning)
+3. Structural insights (auth is prerequisite, avoid complex distributed)
+4. Unknowns (sync vs async, 429 vs 503)
+
+**Concierge synthesizes:**
+
+```
+Yes, implement rate limiting at your gateway.
+
+Given you have authentication in place, start with per-user limits. 
+This catches abuse without complex configuration, and you can enforce 
+it at the gateway without modifying service code.
+
+Use a token bucket algorithm if your gateway supports it (most do). 
+It handles bursts better than fixed windows and won't create thundering 
+herd problems at reset intervals.
+
+For your 429 responses, return them synchronously with a Retry-After 
+header. Don't queue or async-process rate limit checks — that defeats 
+the purpose of protecting your services.
+
+Since you don't have an ops team, avoid anything that requires distributed 
+coordination. Gateway-level or in-process rate limiting only. If you need 
+to scale beyond one gateway instance later, use Redis for shared state 
+rather than building custom distributed logic.
+
+Start here: configure per-user limits of 100 req/min at your gateway. 
+Monitor for a week, then adjust based on what you see.
+```
+
+**Note:**
+
+- Direct answer (yes, do it)
+- Contextualized to user (auth in place, no ops team)
+- Chose between suggestions (per-user first)
+- Resolved unknowns (sync, 429 with header)
+- Concrete next step (100 req/min, monitor)
+- **Went beyond suggestions** (Redis for scaling, specific limit value)
+
+**This is permission to transcend.**
+
+### Performance Characteristics
+
+```
+Structural Analysis:  <50ms (mechanical, on active claims only)
+Bucket System:        <10ms (mechanical arrangement)
+Concierge Synthesis:  2-5s (LLM call)
+```
+
+**Total explanation layer overhead:** ~2-5 seconds (dominated by concierge LLM call)
+
+---
+
+## Part 4: What Survived From V5
+
+**The V6 architecture preserves and enhances every major V5 innovation:**
+
+### Reactive Bridge (Structural Context)
+
+**Still exists.** When user re-invokes batch, reactive bridge matches user message against previous claims and injects structural context.
+
+**Enhancement:** Now works with claim evidence (not just claim text).
+
+**Details:** See V5 Architecture documentation, Part 6.
+
+### Concierge Handoff (Conversational Context)
+
+**Still exists.** Concierge writes invisible handoff blocks capturing constraints, eliminations, preferences.
+
+**Enhancement:** Handoff now complements traversal decisions (traversal = explicit gates, handoff = conversational nuance).
+
+**Details:** See V5 Architecture documentation, Part 6.
+
+### Fresh Spawn (Execution Focus)
+
+**Still exists.** When concierge writes `>>>COMMIT` signal, system spawns fresh concierge instance with distilled context.
+
+**Enhancement:** Fresh instance receives user path from traversal (even cleaner context).
+
+**Details:** See V5 Architecture documentation, Part 6.
+
+### Triple-Context System
+
+**Still exists.** When batch re-invokes:
+
+1. **Reactive bridge** (structural: what was analyzed)
+2. **Concierge handoff** (conversational: what emerged in dialogue)
+3. **Fresh spawn** (execution: clean context when committed)
+
+**Enhancement:** Now also includes traversal decisions (fourth context layer).
+
+### Metadata Stripping
+
+**Still exists.** Concierge receives no supporter counts, no "peak" labels, no "consensus" tags.
+
+**Enhancement:** Bucket system reinforces this by randomizing arrangement.
+
+### User-Controlled Batch
+
+**Still exists.** [Re-invoke Batch] button available on every turn after Turn 1.
+
+**Enhancement:** Traversal state persists across batch re-invokes (user can navigate partway, re-invoke batch, continue navigation).
+
+---
+
+## Part 5: The Complete Flow
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ USER QUERY                                                      │
+└─────────────────────────────────────────────────────────────────┘
+                           ↓
+┌─────────────────────────────────────────────────────────────────┐
+│ BATCH (6 models, isolated, no system prompt)                   │
+│ • Models respond independently                                  │
+│ • No peer awareness                                             │
+│ • User gets raw responses (council orbs)                        │
+└─────────────────────────────────────────────────────────────────┘
+                           ↓
+╔═════════════════════════════════════════════════════════════════╗
+║ SENSING LAYER (Structural Perception)                          ║
+╚═════════════════════════════════════════════════════════════════╝
+                           ↓
+┌─────────────────────────────────────────────────────────────────┐
+│ SHADOW MAPPER (mechanical, <100ms)                             │
+│ • Extract statements from all responses                         │
+│ • Classify stance (6 types, priority-based)                    │
+│ • Detect signals (sequence, tension, conditional)              │
+│ • Assign IDs, track provenance                                 │
+│ • NO judgment, NO ranking, NO interpretation                   │
+│ Output: ShadowStatement[] (~100-200 statements)                │
+└─────────────────────────────────────────────────────────────────┘
+                           ↓
+╔═════════════════════════════════════════════════════════════════╗
+║ DECISION LAYER (Constraint Resolution)                         ║
+╚═════════════════════════════════════════════════════════════════╝
+                           ↓
+┌─────────────────────────────────────────────────────────────────┐
+│ SEMANTIC MAPPER (LLM, 2-5s)                                    │
+│ • Group statements into claims                                  │
+│ • Extract gates (conditionals, prerequisites)                  │
+│ • Detect edges (sequence, tension)                             │
+│ • Cite shadow statement IDs (provenance required)              │
+│ • CANNOT add new content                                       │
+│ Output: Claim[] with gates and edges                           │
+└─────────────────────────────────────────────────────────────────┘
+                           ↓
+┌─────────────────────────────────────────────────────────────────┐
+│ CLAIM ASSEMBLY (<10ms)                                         │
+│ • Resolve shadow statement references                           │
+│ • Compute support ratios                                       │
+│ • Attach evidence passages                                     │
+│ • Build inverse relationships                                  │
+│ Output: AssembledClaim[] with enriched metadata                │
+└─────────────────────────────────────────────────────────────────┘
+                           ↓
+┌─────────────────────────────────────────────────────────────────┐
+│ TRAVERSAL GRAPH (<10ms)                                        │
+│ • Compute tiers from sequence edges                            │
+│ • Extract forcing points (gates + conflicts)                   │
+│ • Detect cycles                                                │
+│ Output: TraversalGraph with tier assignments                   │
+└─────────────────────────────────────────────────────────────────┘
+                           ↓
+                 ┌─────────┴─────────┐
+                 │                   │
+         Forcing points?          No forcing points
+                 │                   │
+                YES                  │
+                 ↓                   │
+┌────────────────────────────┐      │
+│ USER TRAVERSAL             │      │
+│ (Interactive Navigation)   │      │
+│                            │      │
+│ Present forcing points     │      │
+│   (tier by tier)           │      │
+│                            │      │
+│ User answers:              │      │
+│ • Gates: yes/no            │      │
+│ • Conflicts: A or B        │      │
+│                            │      │
+│ Prune claims (cascade)     │      │
+│                            │      │
+│ Advance tiers              │      │
+│                            │      │
+│ Loop until complete        │      │
+│                            │      │
+│ Output: Active claims +    │      │
+│         User path          │      │
+└────────────────────────────┘      │
+                 │                   │
+                 └─────────┬─────────┘
+                           ↓
+╔═════════════════════════════════════════════════════════════════╗
+║ EXPLANATION LAYER (Contextualization)                          ║
+╚═════════════════════════════════════════════════════════════════╝
+                           ↓
+┌─────────────────────────────────────────────────────────────────┐
+│ STRUCTURAL ANALYSIS (<50ms)                                    │
+│ • Analyze ACTIVE claims (post-traversal)                       │
+│ • Detect keystones, fragile paths, dissent                     │
+│ • Contextualize to user path                                   │
+│ • Generate supplementary notes                                 │
+│ Output: Targeted structural insights                           │
+└─────────────────────────────────────────────────────────────────┘
+                           ↓
+┌─────────────────────────────────────────────────────────────────┐
+│ BUCKET SYSTEM (<10ms)                                          │
+│ • Sort by support ratio                                        │
+│ • Split: anchors (outliers) vs mainstream (consensus)          │
+│ • Buckets from anchors                                         │
+│ • Distribute mainstream by edges                               │
+│ • Randomize bucket order                                       │
+│ • Format: anchor → tensions → rest                             │
+│ • Attach evidence (shadow statements)                          │
+│ Output: Position brief with evidence                           │
+└─────────────────────────────────────────────────────────────────┘
+                           ↓
+┌─────────────────────────────────────────────────────────────────┐
+│ CONCIERGE PROMPT ASSEMBLY                                      │
+│                                                                 │
+│ Layer 1: User Path (if traversal happened)                     │
+│   • Confirmed gates                                            │
+│   • Denied gates                                               │
+│   • Conflict resolutions                                       │
+│                                                                 │
+│ Layer 2: Position Brief (bucketed claims)                      │
+│   • Claims with evidence passages                              │
+│   • No labels, no percentages                                  │
+│   • Randomized arrangement                                     │
+│                                                                 │
+│ Layer 3: Structural Insights (targeted notes)                  │
+│   • Keystones relevant to user path                            │
+│   • Dissent specific to active claims                          │
+│   • Fragility warnings contextualized                          │
+│                                                                 │
+│ Voice: Singularity (decisive, conditional, permission to transcend) │
+└─────────────────────────────────────────────────────────────────┘
+                           ↓
+┌─────────────────────────────────────────────────────────────────┐
+│ CONCIERGE SYNTHESIS (LLM, 2-5s)                                │
+│ • Interpret geometry                                            │
+│ • Decide based on user context                                 │
+│ • Permission to transcend suggestions                           │
+│ • Be decisive, conditional, never vague                         │
+│ Output: Final recommendation                                    │
+└─────────────────────────────────────────────────────────────────┘
+                           ↓
+┌─────────────────────────────────────────────────────────────────┐
+│ USER RESPONSE                                                   │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Timeline (user experience):**
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ USER SENDS QUERY                                            │
+└─────────────────────────────────────────────────────────────┘
+                           ↓
+         ┌─────────────────────────────────┐
+         │ 0-3s: IMMEDIATE ENGAGEMENT      │
+         │                                 │
+         │ • Council orbs appear           │
+         │ • First model completes (2-3s)  │
+         │ • Response panel opens          │
+         │ • User starts reading           │
+         │                                 │
+         │ Background:                     │
+         │   Shadow Mapper running         │
+         └─────────────────────────────────┘
+                           ↓
+         ┌─────────────────────────────────┐
+         │ 3-8s: PROGRESSIVE COMPLETION    │
+         │                                 │
+         │ • Other models finish           │
+         │ • User clicks between orbs      │
+         │ • User reads 2-3 responses      │
+         │                                 │
+         │ Background:                     │
+         │   Shadow complete (<100ms)      │
+         │   Semantic Mapper processing    │
+         │   Traversal graph building      │
+         └─────────────────────────────────┘
+                           ↓
+         ┌─────────────────────────────────┐
+         │ 8-10s: SEAMLESS TRANSITION      │
+         │                                 │
+         │ • User finishes reading         │
+         │ • First forcing point appears   │
+         │ • User answers immediately      │
+         │                                 │
+         │ Background:                     │
+         │   Structural analysis running   │
+         └─────────────────────────────────┘
+                           ↓
+         ┌─────────────────────────────────┐
+         │ 10-40s: INTERACTIVE NAVIGATION  │
+         │                                 │
+         │ • User answers 4-5 questions    │
+         │ • Claims pruned with each       │
+         │ • Decision space collapses      │
+         │                                 │
+         │ Background:                     │
+         │   Structural analysis complete  │
+         │   Bucket system arranging       │
+         │   Concierge prompt assembling   │
+         └─────────────────────────────────┘
+                           ↓
+         ┌─────────────────────────────────┐
+         │ 40-45s: INSTANT SYNTHESIS       │
+         │                                 │
+         │ • User answers last question    │
+         │ • Concierge responds ~2s later  │
+         │ • Feels instant (was preparing) │
+         │                                 │
+         │ Three-layer intelligence:       │
+         │   1. User path (answers)        │
+         │   2. Claim evidence (passages)  │
+         │   3. Structural notes (context) │
+         └─────────────────────────────────┘
+                           ↓
+┌─────────────────────────────────────────────────────────────┐
+│ FINAL ANSWER (personalized, decisive, grounded)             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Perceived wait times:**
+
+- **Initial:** 2-3s (until first model response)
+- **Between questions:** 0s (instant, pre-computed)
+- **Final synthesis:** 2-3s (only wait, after all questions answered)
+
+**Total perceived latency:** ~5-6 seconds across 40-45 second interaction
+
+**Actual computation:** ~10-15 seconds total (rest is user interaction time)
+
+**The system overlaps computation with engagement at every layer.**
+
+---
+
+## Part 6: The Architectural Philosophy
+
+### Entangled vs Articulated
+
+**Previous iterations (V1-V5):**
+
+```
+┌──────────────────────────────────────────┐
+│                                          │
+│  Mapper does: extraction + grouping +    │
+│               relationship detection +   │
+│               importance ranking         │
+│                                          │
+│  Structural Analysis does: topology +    │
+│               leverage + shape + peaks + │
+│               synthesis guidance         │
+│                                          │
+│  Concierge does: synthesis + navigation  │
+│               + explanation              │
+│                                          │
+└──────────────────────────────────────────┘
+
+Problem: Responsibilities blurred
+```
+
+**Current architecture (V6):**
+
+```
+┌──────────────────────────────────────────┐
+│ Shadow: Extract, classify, preserve      │
+│         (NO judgment)                    │
+└──────────────────────────────────────────┘
+                 ↓
+┌──────────────────────────────────────────┐
+│ Semantic: Group, relate, cite            │
+│           (NO new content)               │
+└──────────────────────────────────────────┘
+                 ↓
+┌──────────────────────────────────────────┐
+│ Traversal: Determine reachability        │
+│            (NO synthesis)                │
+└──────────────────────────────────────────┘
+                 ↓
+┌──────────────────────────────────────────┐
+│ Structural: Analyze ACTIVE set           │
+│             (NO prescription)            │
+└──────────────────────────────────────────┘
+                 ↓
+┌──────────────────────────────────────────┐
+│ Concierge: Synthesize, decide, explain   │
+│            (NO extraction)               │
+└──────────────────────────────────────────┘
+
+Solution: Responsibilities articulated
+```
+
+**Each layer does the minimum work required to justify the next.**
+
+### The Optimization Shift
+
+**Old axis (V1-V5): Maximize coverage**
+
+```
+Goal: Understand the whole response space
+Method: Enumerate everything, map all relations
+Strength: Nothing is lost
+Weakness: Cognitive load doesn't decrease with user input
+```
+
+**New axis (V6): Minimize decision ambiguity**
+
+```
+Goal: Action under constraint
+Method: Identify what forces decisions, what blocks paths
+Strength: Cognitive load decreases as user answers questions
+Trade: Must trust that navigation will surface what matters
+```
+
+**Center of gravity moved:**
+
+- **Old:** Structure of information
+- **New:** Structure of choice
+
+### What the Old Architecture Optimized For
+
+**Conceptually, it was doing three things at once:**
+
+1. **Inventory:** Collect all claims, suggestions, caveats, alternatives, dependencies
+2. **Relational mapping:** Note that some things support others, some conflict, some depend
+3. **Implicit prioritization:** By volume and structure, "important" things floated upward
+
+**That architecture maximizes coverage. It minimizes loss.**
+
+**It does not minimize cognitive load.**
+
+### What the New Architecture Optimizes For
+
+**The current pipeline is ruthless in a very specific way:**
+
+- If something does not **create a fork** in the user's path → background
+- If something does not **block or unlock** something else → downstream detail
+- If something does not **change the answer** when resolved differently → noise
+
+**Center of gravity:** Structure of choice, not structure of information.
+
+### Why Structural Analysis is Better Now
+
+**Before:**
+
+```
+All claims → Structural analysis → Generic insights
+"There's a keystone claim"
+"There's high dissent"
+"The shape is forked"
+
+Problem: Which matters for THIS user?
+```
+
+**After:**
+
+```
+User navigation → Active claims → Targeted structural analysis
+"The claim you confirmed is a keystone for 3 downstream choices"
+"Dissent exists on X despite your preference for Y"
+"If you defer Z, 40% of claims become optional"
+
+Benefit: Hyper-specific, actionable, contextualized
+```
+
+**Structural analysis hasn't been weakened.**
+
+**It's been sharpened** by targeting the active decision space.
+
+### The Three-Layer Intelligence Model
+
+**This architecture enforces a clean separation:**
+
+```
+SENSE:   What exists? (Shadow + Semantic clustering)
+         → High recall, zero judgment
+         
+DECIDE:  What's reachable? (Semantic judgment + Traversal)
+         → Conservative pruning, forced ordering
+         
+EXPLAIN: Why this? (Structural + Concierge)
+         → Generous contextualization, permission to transcend
+```
+
+**The system senses exhaustively, decides conservatively, and explains generously.**
+
+This is not marketing language. This is architectural reality.
+
+### Provenance as First Principle
+
+**Every layer must preserve the chain:**
+
+```
+Model response → Shadow statement → Claim/gate/edge → User decision → Synthesis
+```
+
+**At any point, you can ask:** "Where did this come from?"
+
+**And get a real answer:**
+
+```
+"This recommendation came from claim c_3,
+ which was formed from shadow statements s_12, s_18, s_24,
+ which came from Models 2, 4, and 5,
+ which you can view in the council orbs."
+```
+
+**No LLM can break the chain.**
+
+Shadow extracts with IDs. Semantic must cite those IDs. Assembly validates the citations. Traversal operates on validated claims. Structural analyzes the active set. Concierge receives the evidence.
+
+**Provenance is non-negotiable.**
+
+### Permission to Transcend
+
+**The most important architectural property:**
+
+> "You may go beyond what's given if the situation demands it.  
+> The suggestions are a starting point, not a boundary."
+
+**Other AI systems:** "Here's what the models said. Pick one."
+
+**This system:** "Here's what the models said. Now decide what should actually happen."
+
+**Concierge is not a synthesizer.**
+
+**Concierge is a decision engine** with access to:
+
+- User's explicit constraints (traversal path)
+- Multiple reasoning paths (claim evidence)
+- Structural context (targeted insights)
+- Permission to add what's missing
+
+**If the models missed something critical, concierge can surface it.**
+
+**If the models are wrong, concierge can override them.**
+
+**This is trust in judgment, not deference to consensus.**
+
+---
+
+## Part 7: What Changed (Precisely)
+
+### From V5 to V6
+
+**Added:**
+
+- ✅ Shadow mapper as PRIMARY extraction (was verification layer)
+- ✅ Semantic mapper as grouping ONLY (was full extraction)
+- ✅ Provenance enforcement ("cannot add content" rule)
+- ✅ Gates as first-class objects (conditionals, prerequisites)
+- ✅ Traversal system (forcing points, tiers, cascading)
+- ✅ Claim evidence (shadow statement passages attached)
+- ✅ User path as context (traversal decisions feed concierge)
+- ✅ Targeted structural analysis (active claims only)
+- ✅ Bucket system (outliers anchor, consensus scattered)
+- ✅ Singularity voice (decisive, conditional, permission to transcend)
+
+**Enhanced:**
+
+- ✅ Reactive bridge (now includes evidence passages)
+- ✅ Concierge handoff (complements traversal decisions)
+- ✅ Fresh spawn (receives user path from traversal)
+- ✅ Triple-context → Quad-context (adds traversal layer)
+- ✅ Structural analysis (generic → targeted to active set)
+
+**Preserved:**
+
+- ✅ Peak-first detection (still runs, now post-traversal)
+- ✅ Dissent elevation (still detected, now contextualized)
+- ✅ Metadata stripping (still enforced, reinforced by buckets)
+- ✅ User-controlled batch (still available, state persists)
+- ✅ Bias protection stack (isolation → dual extraction → stripping)
+
+**Removed:**
+
+- ❌ Nothing
+
+**Net result:** Everything from V5 exists and is enhanced. Nothing was lost.
+
+### The Only "Trade"
+
+**V5 optimized for:** Exhaustive understanding (enumerate everything)
+
+**V6 optimizes for:** Action under constraint (identify what forces decisions)
+
+**Is this a tradeoff?**
+
+**No.** Because:
+
+1. Exhaustive sensing still happens (Shadow extracts everything)
+2. Structural analysis still runs (just targeted to active set)
+3. User can always see full map (power user mode, [View Mapper Layer])
+4. Concierge can transcend suggestions (permission to add what's missing)
+
+**The difference:**
+
+V5 presented the full map upfront, user navigated it mentally.
+
+V6 guides user through the map via questions, presents relevant subset.
+
+**Same map. Different navigation strategy.**
+
+---
+
+## Part 8: Testing & Validation
+
+### Unit Tests
+
+**Shadow Mapper:**
+
+- ✅ Stance classification (priority order enforced)
+- ✅ Signal detection (independent of stance)
+- ✅ Exclusion rules (hard vs soft disqualification)
+- ✅ Provenance tracking (IDs assigned, locations tracked)
+
+**Semantic Mapper:**
+
+- ✅ Grouping accuracy (similar statements clustered)
+- ✅ Provenance citation (all claims/gates/edges cite shadow IDs)
+- ✅ "Cannot add content" validation (reject uncited claims)
+
+**Traversal:**
+
+- ✅ Tier computation (topological sort correct)
+- ✅ Forcing point generation (gates → FPs)
+- ✅ Cascading prune (dependents pruned when blocker pruned)
+- ✅ Cycle detection (infinite loops prevented)
+
+**Bucket System:**
+
+- ✅ Anchor selection (bottom half by support ratio)
+- ✅ Distribution (mainstream flows to anchors by edges)
+- ✅ Randomization (no implicit ranking)
+
+### Integration Tests
+
+**Full pipeline:**
+
+- ✅ Query → Batch → Shadow → Semantic → Traversal → Concierge
+- ✅ Provenance chain intact (every claim traces to shadow statement)
+- ✅ User path recorded (traversal decisions captured)
+- ✅ Evidence attached (shadow statements in concierge input)
+
+**Edge cases:**
+
+- ✅ No forcing points (skip directly to bucket system)
+- ✅ User skips traversal (all claims → bucket system)
+- ✅ Cycles in prerequisites (detected and broken)
+- ✅ Empty claim set (graceful degradation)
+
+### Delta Auditing
+
+**Shadow vs Semantic:**
+
+- Compare what Shadow extracted vs what Semantic grouped
+- Detect: uncited claims (hallucination), missing statements (loss)
+
+**Traversal vs Structural:**
+
+- Compare active claims (post-traversal) vs all claims
+- Measure: pruning rate, tier distribution
+
+**Concierge output:**
+
+- Check: no machinery leakage, no vague "it depends"
+- Validate: ends with recommendation/step/question
+
+---
+
+## Epilogue: The Resolution
+
+**This document describes a system that:**
+
+- Senses **exhaustively** (Shadow extracts everything, preserves provenance)
+- Decides **conservatively** (Traversal prunes only what's unreachable)
+- Explains **generously** (Concierge has permission to transcend)
+
+**Where previous iterations traded strengths:**
+
+- Recall ↔ Precision
+- Judgment ↔ Coverage
+- Explanation ↔ Decisiveness
+
+**This architecture resolves them:**
+
+- Recall **AND** Precision (Shadow + Semantic)
+- Judgment **AND** Coverage (Traversal + Structural)
+- Explanation **AND** Decisiveness (Concierge voice)
+
+**Nothing was discarded. Nothing regressed.**
+
+**Responsibilities that were once blurred are now sharply delineated.**
+
+**Every layer does the minimum work required to justify the next.**
+
+---
+
+**This is not an evolution.**
+
+**This is a resolution.**
+
+---
+
+_End of Technical Manifesto_

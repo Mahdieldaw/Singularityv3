@@ -36,9 +36,6 @@ import { persistenceMonitor } from "./core/PersistenceMonitor.js";
 
 // Global Services Registry
 import { services } from "./core/service-registry.js";
-import { MapperService } from "./core/MapperService";
-import { ResponseProcessor } from "./core/ResponseProcessor";
-import { parseUnifiedMapperOutput } from "../shared/parsing-utils";
 
 // ============================================================================
 // FEATURE FLAGS (Source of Truth)
@@ -482,26 +479,24 @@ async function initializeGlobalServices(injectedPrefs = {}) {
       const contextResolver = new ContextResolver(sm);
       services.register('contextResolver', contextResolver);
 
-      const mapperService = new MapperService();
-      services.register('mapperService', mapperService);
+      // MapperService deprecated; semantic mapper handles mapping now.
+      // If backward compatibility is desired, inject an adapter via options instead of registering a global MapperService.
+      // services.register('mapperService', mapperService);
 
-      const responseProcessor = new ResponseProcessor();
-      services.register('responseProcessor', responseProcessor);
-
-      console.log("[SW] ✅ Global services registry ready");
-
-      // Return object map for consumers expecting specific structure
-      return {
-        orchestrator: services.get('orchestrator'),
-        sessionManager: sm,
-        compiler,
-        contextResolver,
-        persistenceLayer: pl,
-        mapperService,
-        responseProcessor,
-        authManager,
-        providerRegistry: services.get('providerRegistry')
-      };
+      // ResponseProcessor removed — previously registered here. If needed, inject via options or service adapter.
+ 
+       console.log("[SW] ✅ Global services registry ready");
+ 
+       // Return object map for consumers expecting specific structure
+       return {
+         orchestrator: services.get('orchestrator'),
+         sessionManager: sm,
+         compiler,
+         contextResolver,
+         persistenceLayer: pl,
+         authManager,
+         providerRegistry: services.get('providerRegistry')
+       };
     } catch (error) {
       console.error("[SW] ❌ Global services initialization failed:", error);
       globalServicesPromise = null;

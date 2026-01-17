@@ -1,5 +1,5 @@
-import { ConciergeService } from './ConciergeService';
-import { StructuralAnalysis } from '../../shared/contract';
+import { ConciergeService } from './ConciergeService/ConciergeService';
+import { StructuralAnalysis } from '../shared/contract';
 
 describe('ConciergeService', () => {
     const mockAnalysis: StructuralAnalysis = {

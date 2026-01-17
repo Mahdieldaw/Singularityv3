@@ -18,10 +18,10 @@ const wdbg = (...args) => {
 };
 
 export class StepExecutor {
-  constructor(orchestrator, mapperService, responseProcessor, healthTracker) {
+  constructor(orchestrator, healthTracker) {
     this.orchestrator = orchestrator;
-    this.mapperService = mapperService;
-    this.responseProcessor = responseProcessor;
+    // MapperService deprecated; mapping handled by new semantic mapper pipeline
+    // ResponseProcessor removed; providers produce normalized { text } already
     this.healthTracker = healthTracker;
   }
 
@@ -200,7 +200,7 @@ export class StepExecutor {
             });
           } catch (_) { }
         },
-        onAllComplete: (results, errors) => {
+        onAllComplete: async (results, errors) => {
           const batchUpdates = {};
           results.forEach((result, providerId) => {
             batchUpdates[providerId] = result;
@@ -370,14 +370,38 @@ export class StepExecutor {
       sourceData.some((s) => s.providerId === pid),
     );
 
-    const mappingPrompt = this.mapperService.buildMappingPrompt(
+    // ══════════════════════════════════════════════════════════════════════
+    // NEW PIPELINE: Shadow -> Semantic -> Traversal
+    // ══════════════════════════════════════════════════════════════════════
+
+    // 1. Import new modules dynamically
+    // Import shadow module once at function scope so callbacks can use its exports without awaiting
+    const shadowModule = await import('../../shadow');
+    const { extractShadowStatements, computeShadowDelta, extractReferencedIds, getTopUnreferenced } = shadowModule;
+    const { buildSemanticMapperPrompt, parseSemanticMapperOutput } = await import('../../ConciergeService/semanticMapper');
+    const { assembleClaims } = await import('../../ConciergeService/claimAssembly');
+    const { buildTraversalGraph } = await import('../../ConciergeService/traversal');
+    const { extractForcingPoints } = await import('../../ConciergeService/forcingPoints');
+
+    // 2. Shadow Extraction (Mechanical)
+    // Map sourceData to expected format (modelIndex, content)
+    const shadowInput = sourceData.map(s => {
+      const idx = citationOrder.findIndex(pid => pid === s.providerId) + 1;
+      return { modelIndex: idx > 0 ? idx : 99, content: s.text };
+    });
+
+    console.log(`[StepExecutor] Extracting shadow statements from ${shadowInput.length} models...`);
+    const shadowResult = extractShadowStatements(shadowInput);
+    console.log(`[StepExecutor] Extracted ${shadowResult.statements.length} shadow statements.`);
+
+    // 3. Build Prompt (LLM)
+    const mappingPrompt = buildSemanticMapperPrompt(
       payload.originalPrompt,
-      sourceData,
-      citationOrder,
+      shadowResult.statements
     );
 
     const promptLength = mappingPrompt.length;
-    console.log(`[StepExecutor] Mapping prompt length for ${payload.mappingProvider}: ${promptLength} chars`);
+    console.log(`[StepExecutor] Semantic Mapper prompt length for ${payload.mappingProvider}: ${promptLength} chars`);
 
     const limits = PROVIDER_LIMITS[payload.mappingProvider];
     if (limits && promptLength > limits.maxInputChars) {
@@ -402,7 +426,7 @@ export class StepExecutor {
               "Mapping",
             );
           },
-          onAllComplete: (results, errors) => {
+          onAllComplete: async (results, errors) => {
             let finalResult = results.get(payload.mappingProvider);
             const providerError = errors?.get?.(payload.mappingProvider);
 
@@ -420,36 +444,115 @@ export class StepExecutor {
               }
             }
 
-            let graphTopology = null;
-            let allOptions = null;
             let mapperArtifact = null;
-
             const rawText = finalResult?.text || "";
 
             if (finalResult?.text) {
-              const unifiedResult = parseUnifiedMapperOutput(finalResult.text);
+              // 4. Parse (New Parser)
+              const parseResult = parseSemanticMapperOutput(rawText, shadowResult.statements);
 
-              graphTopology = unifiedResult.topology;
-              allOptions = unifiedResult.options;
+              if (parseResult.success && parseResult.output) {
+                // 5. Assembly & Traversal (Mechanical)
+                console.log(`[StepExecutor] Assembling claims from ${parseResult.output.claims.length} mapped items...`);
+                const assemblyResult = assembleClaims(
+                  parseResult.output,
+                  shadowResult.statements,
+                  citationOrder.length
+                );
 
-              if (unifiedResult.artifact || unifiedResult.map) {
-                const base = unifiedResult.artifact || unifiedResult.map;
-                mapperArtifact = {
-                  ...base,
-                  query: payload.originalPrompt,
-                  turn: context.turn || 0,
-                  timestamp: new Date().toISOString(),
-                  model_count: citationOrder.length,
+                const traversalGraph = buildTraversalGraph(assemblyResult);
 
-                };
+                // ═══════════════════════════════════════════════════════════════════════
+                // SHADOW DELTA: Compute unreferenced statements and prepare UI-friendly data
+                // ═══════════════════════════════════════════════════════════════════════
+                // Extract which shadow statements were referenced by assembled claims
+                const referencedIds = extractReferencedIds(assemblyResult.claims);
+
+                // Compute delta (what shadow found but semantic mapper didn't use)
+                const shadowDelta = computeShadowDelta(
+                  shadowResult,
+                  referencedIds,
+                  payload.originalPrompt
+                );
+
+                // Get top unreferenced statements for UI display
+                const topUnindexed = getTopUnreferenced(shadowDelta, 10);
+
+                // Debug logging for easier inspection in browser/devtools
+                try {
+                  console.log(`[Shadow Delta] ${shadowDelta.audit.unreferencedCount}/${shadowDelta.audit.shadowStatementCount} unreferenced (${shadowDelta.audit.highSignalUnreferencedCount} high-signal)`);
+                  console.log('[Shadow Debug] Top unindexed:', topUnindexed.slice(0,3).map(u => ({ stance: u.statement.stance, score: u.adjustedScore.toFixed(2), text: u.statement.text.slice(0,80) })));
+                } catch (_) { }
+
+                // 6. Construct Artifact (Legacy Compatibility + New Data)
+                // Flatten new claims to legacy format
+                // After parseSemanticMapperOutput succeeds
+if (parseResult.success && parseResult.output) {
+  console.log(`[StepExecutor] Assembling claims from ${parseResult.output.claims.length} mapped items...`);
+  const assemblyResult = assembleClaims(
+    parseResult.output,
+    shadowResult.statements,
+    citationOrder.length
+  );
+
+  const traversalGraph = buildTraversalGraph(assemblyResult);
+  const forcingPointsResult = extractForcingPoints(traversalGraph);
+  
+  // Shadow Delta
+  const { computeShadowDelta, extractReferencedIds, getTopUnreferenced } = await import('../../shadow');
+  const referencedIds = extractReferencedIds(assemblyResult.claims);
+  const shadowDelta = computeShadowDelta(shadowResult, referencedIds, payload.originalPrompt);
+  const topUnindexed = getTopUnreferenced(shadowDelta, 10);
+  
+  // ═══════════════════════════════════════════════════════════════════════
+  // V2-TO-V1 CONVERSION (Backward Compatibility)
+  // ═══════════════════════════════════════════════════════════════════════
+  const { convertV2toV1 } = await import('../../ConciergeService/v2-to-v1-adapter');
+  
+  const v1Artifact = convertV2toV1(
+    parseResult.output,  // V2 semantic mapper output
+    shadowResult.statements,
+    {
+      query: payload.originalPrompt,
+      turn: context.turn || 0,
+      model_count: citationOrder.length
+    }
+  );
+  
+  // Attach V2-specific data that V1 format can't represent
+  mapperArtifact = {
+    ...v1Artifact,
+    
+    // NEW DATA (not in V1)
+    traversalGraph,
+    forcingPoints: forcingPointsResult.forcingPoints,
+    
+    // SHADOW DATA
+    shadow: {
+      statements: shadowResult.statements,
+      audit: shadowDelta.audit,
+      topUnindexed: topUnindexed,
+      processingTime: shadowDelta.processingTimeMs + shadowResult.meta.processingTimeMs
+    }
+  };
+  
+  console.log(`[StepExecutor] Generated V1-compatible artifact with ${v1Artifact.claims.length} claims, ${v1Artifact.edges.length} edges`);
+}
+
+                // mapperArtifact was built from V2->V1 adapter above (v1Artifact) and has
+                // been augmented with traversalGraph, forcingPoints and shadow data.
+                // Remove legacy fallback that referenced undefined `legacyClaims`/`legacyEdges`.
+
+              } else {
+                console.warn("[StepExecutor] Semantic Mapper parsing failed:", parseResult.errors);
+                // Fallback? Or just fail? For now, we proceed with raw text but no artifact.
               }
 
-              const processed = artifactProcessor.process(unifiedResult.narrative || finalResult.text);
+              // Process raw text for clean display
+              const processed = artifactProcessor.process(finalResult.text);
               finalResult.text = processed.cleanText;
               finalResult.artifacts = processed.artifacts;
-            }
 
-            if (finalResult?.text) {
               streamingManager.dispatchPartialDelta(
                 context.sessionId,
                 step.stepId,
@@ -477,24 +580,23 @@ export class StepExecutor {
             citationOrder.forEach((pid, idx) => {
               citationSourceOrder[idx + 1] = pid;
             });
+            
             const finalResultWithMeta = {
               ...finalResult,
               meta: {
                 citationSourceOrder,
                 rawMappingText: rawText,
-                ...(allOptions ? { allAvailableOptions: allOptions } : {}),
-                ...(graphTopology ? { graphTopology } : {}),
               },
             };
+
+            if (mapperArtifact) {
+              finalResultWithMeta.meta.mapperArtifact = mapperArtifact;
+            }
 
             try {
               if (finalResultWithMeta?.meta) {
                 workflowContexts[payload.mappingProvider] =
                   finalResultWithMeta.meta;
-                wdbg(
-                  `[StepExecutor] Updated workflow context for ${payload.mappingProvider
-                  }: ${Object.keys(finalResultWithMeta.meta).join(",")} `,
-                );
               }
             } catch (_) { }
 
@@ -511,6 +613,18 @@ export class StepExecutor {
         },
       );
     });
+  }
+
+  _mapStanceToType(stance) {
+    switch (stance) {
+      case 'prescriptive': return 'prescriptive';
+      case 'cautionary': return 'prescriptive'; // Warning is a type of prescription
+      case 'prerequisite': return 'conditional';
+      case 'dependent': return 'conditional';
+      case 'assertive': return 'factual';
+      case 'uncertain': return 'speculative';
+      default: return 'factual';
+    }
   }
 
   // Refiner, Antagonist, Explore, Understand, Gauntlet implementations follow similar patterns

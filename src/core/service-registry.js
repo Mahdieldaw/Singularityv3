@@ -38,8 +38,6 @@ export class ServiceRegistry {
     get persistenceLayer() { return this.get('persistenceLayer'); }
     get orchestrator() { return this.get('orchestrator'); }
     get authManager() { return this.get('authManager'); }
-    get mapperService() { return this.get('mapperService'); }
-    get responseProcessor() { return this.get('responseProcessor'); }
 }
 
 export const services = ServiceRegistry.getInstance();

@@ -167,7 +167,11 @@ export class CognitivePipelineHandler {
             context.storedAnalysis = structuralAnalysis; // Store full analysis
             // Also attach to mapperArtifact for the UI
             mapperArtifact.problemStructure = structuralAnalysis.shape;
-            mapperArtifact.fullAnalysis = structuralAnalysis; // Add this for UI components
+            mapperArtifact.fullAnalysis = {
+              ...structuralAnalysis,
+              // Ensure shadow data is present on fullAnalysis for UI consumption
+              shadow: mapperArtifact.shadow || structuralAnalysis.shadow || null
+            };
           }
 
 

@@ -6,7 +6,7 @@ import { SingularityOutputState } from '../../hooks/useSingularityOutput';
 import { CouncilOrbs } from '../CouncilOrbs';
 import { LLM_PROVIDERS_CONFIG } from '../../constants';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { selectedModelsAtom, workflowProgressForTurnFamily, activeSplitPanelAtom, isDecisionMapOpenAtom } from '../../state/atoms';
+import { selectedModelsAtom, workflowProgressForTurnFamily, activeSplitPanelAtom, isDecisionMapOpenAtom, currentSessionIdAtom } from '../../state/atoms';
 import { parseUnifiedMapperOutput } from '../../../shared/parsing-utils';
 import { getLatestResponse } from '../../utils/turn-helpers';
 import { getProviderName } from '../../utils/provider-helpers';
@@ -16,6 +16,7 @@ import { MetricsRibbon } from './MetricsRibbon';
 import StructureGlyph from '../StructureGlyph';
 import { computeProblemStructureFromArtifact, computeStructuralAnalysis } from '../../../src/core/PromptMethods';
 import { MapperArtifact } from '../../../shared/contract';
+import { TraversalGraphView } from '../../../src/ui/components/TraversalGraphView';
 
 interface CognitiveOutputRendererProps {
     aiTurn: AiTurn;
@@ -53,6 +54,7 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
     const workflowProgress = useAtomValue(workflowProgressForTurnFamily(aiTurn.id));
     const setActiveSplitPanel = useSetAtom(activeSplitPanelAtom);
     const setIsDecisionMapOpen = useSetAtom(isDecisionMapOpenAtom);
+    const currentSessionId = useAtomValue(currentSessionIdAtom);
 
     const hasSingularityText = useMemo(() => {
         return String(singularityState.output?.text || "").trim().length > 0;
@@ -295,6 +297,21 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
                             <div className="px-6 py-6 md:px-8 text-sm text-text-muted leading-relaxed font-serif">
                                 <MarkdownDisplay content={mapperNarrative} />
                             </div>
+                            
+                            {/* Traversal Graph Integration */}
+                            {aiTurn.mapperArtifact?.traversalGraph && (
+                                <TraversalGraphView
+                                    traversalGraph={aiTurn.mapperArtifact.traversalGraph}
+                                    forcingPoints={aiTurn.mapperArtifact.forcingPoints || []}
+                                    claims={aiTurn.mapperArtifact.claims || []}
+                                    originalQuery={aiTurn.mapperArtifact.query || ''}
+                                    sessionId={currentSessionId || ''}
+                                    aiTurnId={aiTurn.id}
+                                    onComplete={() => {
+                                        console.log('Traversal synthesis complete!');
+                                    }}
+                                />
+                            )}
                         </div>
                     ) : isStreaming ? (
                         <div className="flex flex-col items-center justify-center p-12 bg-surface-highlight/10 rounded-xl border border-dashed border-border-subtle">
