@@ -47,7 +47,7 @@ export const TraversalGraphView: React.FC<TraversalGraphViewProps> = ({
     try {
       // Send to service worker
       const port = chrome.runtime.connect({ name: 'htos-popup' });
-      
+
       port.postMessage({
         type: 'CONTINUE_COGNITIVE_REQUEST',
         payload: {
@@ -98,7 +98,7 @@ export const TraversalGraphView: React.FC<TraversalGraphViewProps> = ({
       {/* Tiers */}
       {sortedTiers.map((tier: any, idx: number) => {
         const isUnlocked = unlockedTiers.has(tier.tierIndex);
-        const tierClaims = tier.claims.map((id: string) => claims.find(c => c.id === id)).filter(Boolean);
+        const tierClaims = (tier.claimIds || tier.claims || []).map((id: string) => claims.find((c: any) => c.id === id)).filter(Boolean);
 
         return (
           <div key={tier.tierIndex} className="mb-6">
@@ -114,11 +114,10 @@ export const TraversalGraphView: React.FC<TraversalGraphViewProps> = ({
             ))}
 
             {/* Tier header */}
-            <div className={`p-4 rounded-t-xl border-2 border-b-0 ${
-              isUnlocked
+            <div className={`p-4 rounded-t-xl border-2 border-b-0 ${isUnlocked
                 ? 'bg-surface-raised border-brand-500/30'
                 : 'bg-surface-subtle border-border-subtle opacity-50'
-            }`}>
+              }`}>
               <div className="flex items-center gap-2">
                 {isUnlocked ? '🔓' : '🔒'}
                 <span className="font-bold text-text-primary">
@@ -131,11 +130,10 @@ export const TraversalGraphView: React.FC<TraversalGraphViewProps> = ({
             </div>
 
             {/* Tier claims */}
-            <div className={`p-4 rounded-b-xl border-2 border-t-0 ${
-              isUnlocked
+            <div className={`p-4 rounded-b-xl border-2 border-t-0 ${isUnlocked
                 ? 'bg-surface-raised border-brand-500/30'
                 : 'bg-surface-subtle border-border-subtle opacity-50'
-            }`}>
+              }`}>
               <div className="flex gap-3 overflow-x-auto pb-2">
                 {tierClaims.map((claim: any) => (
                   <div

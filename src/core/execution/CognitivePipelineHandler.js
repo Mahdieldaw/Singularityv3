@@ -34,6 +34,59 @@ export class CognitivePipelineHandler {
       // ✅ Populate context so WorkflowEngine/TurnEmitter can see it
       context.mapperArtifact = mapperArtifact;
 
+      // ══════════════════════════════════════════════════════════════════
+      // TRAVERSAL GATING CHECK (Pipeline Pause)
+      // ══════════════════════════════════════════════════════════════════
+      const hasTraversal = !!mapperArtifact.traversalGraph;
+      const hasForcingPoints = Array.isArray(mapperArtifact.forcingPoints) && mapperArtifact.forcingPoints.length > 0;
+      const isTraversalContinuation = request?.isTraversalContinuation || context?.isTraversalContinuation;
+
+      if (hasTraversal && hasForcingPoints && !isTraversalContinuation) {
+        console.log("[CognitiveHandler] Traversal detected with conflicts. Pausing pipeline for user input.");
+
+        // 1. Update Turn Status
+        const aiTurnId = context.canonicalAiTurnId;
+        try {
+          const currentAiTurn = await this.sessionManager.adapter.get("turns", aiTurnId);
+          if (currentAiTurn) {
+            currentAiTurn.pipelineStatus = 'awaiting_traversal';
+            currentAiTurn.mapperArtifact = mapperArtifact; // Ensure artifact is saved
+            await this.sessionManager.adapter.put("turns", currentAiTurn);
+          }
+
+          // 2. Notify UI
+          this.port.postMessage({
+            type: "MAPPER_ARTIFACT_READY",
+            sessionId: context.sessionId,
+            aiTurnId: context.canonicalAiTurnId,
+            artifact: mapperArtifact,
+            singularityOutput: null,
+            singularityProvider: null,
+            pipelineStatus: 'awaiting_traversal'
+          });
+
+          // Send finalized update so usage hooks pick up the status change immediately
+          this.port.postMessage({
+            type: "TURN_FINALIZED",
+            sessionId: context.sessionId,
+            userTurnId: context.canonicalUserTurnId,
+            aiTurnId: aiTurnId,
+            turn: {
+              user: { id: context.canonicalUserTurnId, sessionId: context.sessionId }, // Minimal user turn ref
+              ai: {
+                ...currentAiTurn,
+                pipelineStatus: 'awaiting_traversal'
+              }
+            }
+          });
+
+        } catch (err) {
+          console.error("[CognitiveHandler] Failed to pause pipeline:", err);
+        }
+
+        return false; // Stop execution
+      }
+
       // ✅ Execute Singularity step automatically
       let singularityOutput = null;
       let singularityProviderId = null;
@@ -523,7 +576,9 @@ export class CognitivePipelineHandler {
       const effectiveSessionId = sessionId || aiTurn.sessionId;
       const userTurnId = aiTurn.userTurnId;
       const userTurn = userTurnId ? await adapter.get("turns", userTurnId) : null;
-      const originalPrompt = extractUserMessage(userTurn);
+
+      // Allow overriding prompt for traversal continuation
+      const originalPrompt = payload.userMessage || extractUserMessage(userTurn);
 
       let mapperArtifact = payload.mapperArtifact || aiTurn.mapperArtifact || null;
 
@@ -561,6 +616,8 @@ export class CognitivePipelineHandler {
         canonicalAiTurnId: aiTurnId,
         canonicalUserTurnId: userTurnId,
         userMessage: originalPrompt,
+        // Pass flag to context for orchestration logic if needed
+        isTraversalContinuation: payload.isTraversalContinuation
       };
 
       const executorOptions = {
@@ -587,6 +644,7 @@ export class CognitivePipelineHandler {
           mappingMeta: latestMappingMeta,
           selectedArtifacts: Array.isArray(selectedArtifacts) ? selectedArtifacts : [],
           useThinking: payload.useThinking || false,
+          isTraversalContinuation: payload.isTraversalContinuation
         },
       };
 
@@ -654,6 +712,21 @@ export class CognitivePipelineHandler {
         }
       }
 
+      // Update pipeline status if we were waiting
+      if (aiTurn.pipelineStatus === 'awaiting_traversal') {
+        try {
+          const t = await adapter.get("turns", aiTurnId);
+          if (t) {
+            t.pipelineStatus = 'complete';
+            await adapter.put("turns", t);
+            // Update local reference for emission
+            aiTurn.pipelineStatus = 'complete';
+          }
+        } catch (e) {
+          console.warn("[CognitiveHandler] Failed to update pipeline status:", e);
+        }
+      }
+
       this.port?.postMessage({
         type: "TURN_FINALIZED",
         sessionId: effectiveSessionId,
@@ -686,6 +759,7 @@ export class CognitivePipelineHandler {
             mappingResponses: buckets.mappingResponses,
             singularityResponses: buckets.singularityResponses,
             meta: aiTurn.meta || {},
+            pipelineStatus: aiTurn.pipelineStatus
           },
         },
       });

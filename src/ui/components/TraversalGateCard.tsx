@@ -32,8 +32,8 @@ export const TraversalGateCard: React.FC<TraversalGateCardProps> = ({
   };
 
   const gateIcon = gate.type === 'conditional' ? '🔀' : '🔒';
-  const gateColor = gate.type === 'conditional' 
-    ? 'border-amber-500/50 bg-amber-500/5' 
+  const gateColor = gate.type === 'conditional'
+    ? 'border-amber-500/50 bg-amber-500/5'
     : 'border-blue-500/50 bg-blue-500/5';
 
   return (
@@ -62,11 +62,10 @@ export const TraversalGateCard: React.FC<TraversalGateCardProps> = ({
           )}
 
           {isResolved && (
-            <div className={`px-3 py-1.5 rounded-lg text-xs font-bold ${
-              resolution?.satisfied 
+            <div className={`px-3 py-1.5 rounded-lg text-xs font-bold ${resolution?.satisfied
                 ? 'bg-green-500/10 text-green-500 border border-green-500/30'
                 : 'bg-red-500/10 text-red-500 border border-red-500/30'
-            }`}>
+              }`}>
               {resolution?.satisfied ? '✓ Satisfied' : '✗ Not Applicable'}
             </div>
           )}
@@ -87,10 +86,11 @@ export const TraversalGateCard: React.FC<TraversalGateCardProps> = ({
           <div className="mt-4 space-y-3 animate-in fade-in slide-in-from-top-2">
             {gate.type === 'conditional' && (
               <div>
-                <label className="block text-xs font-medium text-text-muted mb-2">
+                <label className="block text-xs font-medium text-text-muted mb-2" htmlFor={`gate-input-${gate.id}`}>
                   Provide your specific context (optional but recommended):
                 </label>
                 <textarea
+                  id={`gate-input-${gate.id}`}
                   value={userInput}
                   onChange={(e) => setUserInput(e.target.value)}
                   placeholder="E.g., 'I'm building a REST API for a mobile app' or 'This is for a hobby project, not production'"

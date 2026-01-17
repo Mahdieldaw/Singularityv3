@@ -15,16 +15,13 @@ interface ForcingPointResolution {
 interface TraversalState {
   gateResolutions: Map<string, GateResolution>;
   forcingPointResolutions: Map<string, ForcingPointResolution>;
-  currentTier: number;
-  isComplete: boolean;
 }
 
 export function useTraversalState(traversalGraph: any, forcingPoints: any[]) {
   const [state, setState] = useState<TraversalState>({
     gateResolutions: new Map(),
     forcingPointResolutions: new Map(),
-    currentTier: 0,
-    isComplete: false
+
   });
 
   // Resolve a gate
@@ -58,8 +55,8 @@ export function useTraversalState(traversalGraph: any, forcingPoints: any[]) {
   // Get unlocked tiers based on gate resolutions
   const unlockedTiers = useMemo(() => {
     const unlocked = new Set<number>([0]); // Tier 0 always unlocked
-    
-    if (!traversalGraph?.tiers) return unlocked;
+
+    if (!traversalGraph?.tiers || !Array.isArray(traversalGraph.tiers)) return unlocked;
 
     traversalGraph.tiers.forEach((tier: any) => {
       // Check if all gates blocking this tier are satisfied
@@ -82,8 +79,6 @@ export function useTraversalState(traversalGraph: any, forcingPoints: any[]) {
     setState({
       gateResolutions: new Map(),
       forcingPointResolutions: new Map(),
-      currentTier: 0,
-      isComplete: false
     });
   }, []);
 

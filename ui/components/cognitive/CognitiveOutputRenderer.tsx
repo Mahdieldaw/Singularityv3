@@ -156,7 +156,12 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
         p => p.stage === 'thinking' || p.stage === 'streaming'
     );
 
-    const showSingularity = hasSingularityText && activeMode === 'singularity';
+    const isAwaitingTraversal = aiTurn.pipelineStatus === 'awaiting_traversal';
+
+    // Show Singularity if we have text AND mode is active...
+    // UNLESS we are stuck waiting for traversal, in which case we hide Singularity to show graph
+    const showSingularity = hasSingularityText && activeMode === 'singularity' && !isAwaitingTraversal;
+
 
     return (
         <div className="w-full max-w-3xl mx-auto animate-in fade-in duration-500">
@@ -297,15 +302,15 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
                             <div className="px-6 py-6 md:px-8 text-sm text-text-muted leading-relaxed font-serif">
                                 <MarkdownDisplay content={mapperNarrative} />
                             </div>
-                            
+
                             {/* Traversal Graph Integration */}
-                            {aiTurn.mapperArtifact?.traversalGraph && (
+                            {aiTurn.mapperArtifact?.traversalGraph && currentSessionId && (
                                 <TraversalGraphView
                                     traversalGraph={aiTurn.mapperArtifact.traversalGraph}
                                     forcingPoints={aiTurn.mapperArtifact.forcingPoints || []}
                                     claims={aiTurn.mapperArtifact.claims || []}
                                     originalQuery={aiTurn.mapperArtifact.query || ''}
-                                    sessionId={currentSessionId || ''}
+                                    sessionId={currentSessionId}
                                     aiTurnId={aiTurn.id}
                                     onComplete={() => {
                                         console.log('Traversal synthesis complete!');

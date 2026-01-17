@@ -443,6 +443,7 @@ async function initializeOrchestrator() {
     return orchestrator;
   } catch (e) {
     console.error("[SW] Orchestrator init failed", e);
+    throw e;
   }
 }
 
@@ -484,19 +485,19 @@ async function initializeGlobalServices(injectedPrefs = {}) {
       // services.register('mapperService', mapperService);
 
       // ResponseProcessor removed — previously registered here. If needed, inject via options or service adapter.
- 
-       console.log("[SW] ✅ Global services registry ready");
- 
-       // Return object map for consumers expecting specific structure
-       return {
-         orchestrator: services.get('orchestrator'),
-         sessionManager: sm,
-         compiler,
-         contextResolver,
-         persistenceLayer: pl,
-         authManager,
-         providerRegistry: services.get('providerRegistry')
-       };
+
+      console.log("[SW] ✅ Global services registry ready");
+
+      // Return object map for consumers expecting specific structure
+      return {
+        orchestrator: services.get('orchestrator'),
+        sessionManager: sm,
+        compiler,
+        contextResolver,
+        persistenceLayer: pl,
+        authManager,
+        providerRegistry: services.get('providerRegistry')
+      };
     } catch (error) {
       console.error("[SW] ❌ Global services initialization failed:", error);
       globalServicesPromise = null;

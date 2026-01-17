@@ -44,7 +44,8 @@ export function detectChallengerRole(claim: V2Claim, allClaims: V2Claim[]) {
       role = 'anchor';
       challenges = null;
     }
-  } catch (_) { }
+  } catch (e) { }
+  // Optionally log in development: console.warn('detectChallengerRole error:', e);
 
   return { role, challenges };
 }

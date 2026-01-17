@@ -3,6 +3,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 import { AssembledClaim, ClaimAssemblyResult } from './claimAssembly';
+import { TraversalTier, TraversalGate } from '../../shared/contract';
 
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -26,7 +27,7 @@ export interface TraversalGraph {
     tensions: LiveTension[];
 
     // Tier assignments
-    tiers: Map<number, string[]>;
+    tiers: TraversalTier[];
     maxTier: number;
 
     // Root claims (no gates)
@@ -54,10 +55,10 @@ export function buildTraversalGraph(
     const { tiers, maxTier, cycles } = computeTiers(claims);
 
     // Update claim tiers
-    for (const [tier, claimIds] of tiers) {
-        for (const claimId of claimIds) {
+    for (const tier of tiers) {
+        for (const claimId of tier.claimIds) {
             const claim = claimMap.get(claimId);
-            if (claim) claim.tier = tier;
+            if (claim) claim.tier = tier.tierIndex;
         }
     }
 
@@ -128,9 +129,8 @@ export function buildTraversalGraph(
 
 function computeTiers(
     claims: AssembledClaim[]
-): { tiers: Map<number, string[]>; maxTier: number; cycles: string[][] } {
+): { tiers: TraversalTier[]; maxTier: number; cycles: string[][] } {
 
-    const tiers = new Map<number, string[]>();
     const tierAssignment = new Map<string, number>();
     const cycles: string[][] = [];
 
@@ -177,14 +177,58 @@ function computeTiers(
         computeClaimTier(claim.id);
     }
 
-    // Group by tier
+    // Group by tier - use temp map
+    const tempTiers = new Map<number, string[]>();
     let maxTier = 0;
+
     for (const [claimId, tier] of tierAssignment) {
         maxTier = Math.max(maxTier, tier);
-        const existing = tiers.get(tier) || [];
+        const existing = tempTiers.get(tier) || [];
         existing.push(claimId);
-        tiers.set(tier, existing);
+        tempTiers.set(tier, existing);
     }
+
+    // Convert to serializable object structure with gate mapping
+    const tiers: TraversalTier[] = [];
+    const claimMap = new Map(claims.map(c => [c.id, c]));
+
+    for (const [tierIndex, claimIds] of tempTiers) {
+        // Find gates belonging to this tier's claims
+        const gates: TraversalGate[] = [];
+
+        for (const claimId of claimIds) {
+            const claim = claimMap.get(claimId);
+            if (claim) {
+                if (claim.gates.conditionals) {
+                    claim.gates.conditionals.forEach(g => {
+                        gates.push({
+                            ...g,
+                            type: 'conditional',
+                            blockedClaims: [claim.id]
+                        });
+                    });
+                }
+                if (claim.gates.prerequisites) {
+                    claim.gates.prerequisites.forEach(g => {
+                        gates.push({
+                            ...g,
+                            type: 'prerequisite',
+                            blockedClaims: [claim.id]
+                        });
+                    });
+                }
+            }
+        }
+
+        tiers.push({
+            tierIndex,
+            claimIds,
+            gates
+        });
+    }
+
+    // Sort by tier index
+    tiers.sort((a, b) => a.tierIndex - b.tierIndex);
 
     return { tiers, maxTier, cycles };
 }

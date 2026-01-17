@@ -660,6 +660,68 @@ export interface ParsedMapperOutput extends MapperOutput {
   artifact?: MapperArtifact | null;
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// TRAVERSAL LAYER TYPES (Interactive Decision Graph)
+// ═══════════════════════════════════════════════════════════════════════════
+
+export interface TraversalGate {
+  id: string;
+  type: 'conditional' | 'prerequisite';
+  condition: string;
+  blockedClaims: string[];
+  sourceStatementIds: string[];
+}
+
+export interface TraversalTier {
+  tierIndex: number;
+  claimIds: string[];
+  gates: TraversalGate[];
+}
+
+export interface LiveTension {
+  claimAId: string;
+  claimBId: string;
+  sourceStatementIds: string[];
+  isLive: boolean;
+  blockedByGates: string[];
+}
+
+export interface SerializedTraversalGraph {
+  claims: any[]; // AssembledClaim[]
+  tensions: LiveTension[];
+  tiers: TraversalTier[]; // Serializable array format
+  maxTier: number;
+  roots: string[];
+  cycles: string[][];
+}
+
+export type ForcingPointType = 'conditional' | 'prerequisite' | 'conflict';
+
+export interface ConflictOption {
+  claimId: string;
+  label: string;
+}
+
+export interface SerializedForcingPoint {
+  id: string;
+  type: ForcingPointType;
+  tier: number;
+  question: string;
+  condition: string;
+  gateId?: string;
+  claimId?: string;
+  options?: ConflictOption[];
+  tensionSourceIds?: string[];
+  unlocks: string[];
+  prunes: string[];
+  blockedBy: string[];
+  sourceStatementIds: string[];
+}
+// Alias for backward compatibility if needed, using SerializedForcingPoint as main type
+export type ForcingPoint = SerializedForcingPoint;
+
+export type PipelineStatus = 'running' | 'awaiting_traversal' | 'complete' | 'error';
+
 export interface MapperArtifact extends MapperOutput {
   id?: string;
   query?: string;
@@ -671,7 +733,12 @@ export interface MapperArtifact extends MapperOutput {
   fullAnalysis?: StructuralAnalysis;
   narrative?: string;
   anchors?: Array<{ label: string; id: string; position: number }>;
+
+  // Traversal Layer (Interactive Decision Graph)
+  traversalGraph?: SerializedTraversalGraph;
+  forcingPoints?: SerializedForcingPoint[];
 }
+
 
 
 
@@ -1040,6 +1107,8 @@ export interface AiTurn {
   // Cognitive Pipeline Artifacts (Computed)
   mapperArtifact?: MapperArtifact;
   singularityOutput?: SingularityOutput;
+
+  pipelineStatus?: PipelineStatus; // NEW: Pipeline Pause State
 
   meta?: {
     branchPointTurnId?: string;

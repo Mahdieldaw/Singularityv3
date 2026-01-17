@@ -671,66 +671,6 @@ traversalState.resolutions.push({
 });
 }
 
-// 5. Process answer
-
-if (fp.type === 'conditional' || fp.type === 'prerequisite') {
-  if (answer === 'yes') {
-    traversalState.satisfiedGates.set(fp.gateId, true);
-    // Claims in fp.unlocks stay active
-  } else {
-    traversalState.satisfiedGates.set(fp.gateId, false);
-    // Claims in fp.prunes get pruned
-    for (const claimId of fp.prunes) {
-      pruneClaimAndCascade(claimId, traversalState);
-    }
-  }
-}
-
-if (fp.type === 'conflict') {
-  // User chose one claim, rejected the other
-  pruneClaimAndCascade(answer.rejectedClaimId, traversalState);
-}
-
-// 6. Record resolution
-traversalState.resolutions.push({
-  fpId: fp.id,
-  type: fp.type,
-  timestamp: Date.now(),
-  answer
-});
-}
-
-// 5. Process answer
-if (fp.type === 'conditional' || fp.type === 'prerequisite') {
-  if (answer === 'yes') {
-    traversalState.satisfiedGates.set(fp.gateId, true);
-    // Claims in fp.unlocks stay active
-  } else {
-    traversalState.satisfiedGates.set(fp.gateId, false);
-    // Claims in fp.prunes get pruned
-    for (const claimId of fp.prunes) {
-      pruneClaimAndCascade(claimId, traversalState);
-    }
-  }
-}
-
-if (fp.type === 'conflict') {
-  // User chose one claim, rejected the other
-  pruneClaimAndCascade(answer.rejectedClaimId, traversalState);
-}
-
-// 6. Record resolution
-traversalState.resolutions.push({
-  fpId: fp.id,
-  type: fp.type,
-  timestamp: Date.now(),
-  answer
-});
-}
-
-// 5. Process answer
-
-// ...existing code...
 
 ### Question Limit: Preventing Sprawl
 
