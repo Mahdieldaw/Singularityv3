@@ -7,13 +7,12 @@
  */
 
 export class WorkflowCompiler {
-  constructor(sessionManager, config = {}) {
+  constructor(sessionManager) {
     // Kept only for dependency injection - NEVER USED
     this.sessionManager = sessionManager;
 
-    // Store defaults in memory from injected config
     this.defaults = {
-      mapper: config.htos_mapping_provider || null,
+      mapper: null,
     };
   }
 

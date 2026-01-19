@@ -67,20 +67,7 @@ async function handleStartup(reason) {
   // 1. Initialize Auth Manager
   await authManager.initialize();
 
-  // 2. Load User Preferences (Dependency Injection)
-  // We read directly from storage to avoid global state drift
-  let prefs = {};
-  try {
-    prefs = await chrome.storage.local.get([
-      "htos_mapping_provider"
-    ]);
-    console.log("[SW] User preferences loaded:", prefs);
-  } catch (e) {
-    console.warn("[SW] Failed to load preferences:", e);
-  }
-
-  // 3. Initialize Global Services with injected prefs
-  await initializeGlobalServices(prefs);
+  await initializeGlobalServices();
 }
 
 chrome.runtime.onStartup.addListener(() => handleStartup("startup"));
@@ -454,7 +441,7 @@ async function initializeOrchestrator() {
 
 let globalServicesPromise = null;
 
-async function initializeGlobalServices(injectedPrefs = {}) {
+async function initializeGlobalServices() {
   // If already running or complete strings, return it.
   // But we want to support re-init with new prefs if strictly requested (rare).
   // For now, simple singleton promise pattern.
@@ -462,7 +449,7 @@ async function initializeGlobalServices(injectedPrefs = {}) {
 
   globalServicesPromise = (async () => {
     try {
-      console.log("[SW] 🚀 Initializing global services...", injectedPrefs);
+      console.log("[SW] 🚀 Initializing global services...");
 
       // Ensure auth manager is ready (idempotent)
       await authManager.initialize();
@@ -474,8 +461,7 @@ async function initializeGlobalServices(injectedPrefs = {}) {
       await initializeProviders();
       await initializeOrchestrator();
 
-      // Inject prefs into Compiler
-      const compiler = new WorkflowCompiler(sm, injectedPrefs);
+      const compiler = new WorkflowCompiler(sm);
       services.register('compiler', compiler);
 
       const contextResolver = new ContextResolver(sm);
@@ -915,8 +901,19 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request?.$bus) return false;
-  if (request?.type === "htos.keepalive" || request?.type === "htos.activity") {
-    return false;
+  if (request?.type === "htos.keepalive") {
+    sendResponse({ success: true });
+    return true;
+  }
+  if (request?.type === "htos.activity") {
+    try {
+      const lm = services.get("lifecycleManager");
+      if (lm && typeof lm.recordActivity === "function") {
+        lm.recordActivity();
+      }
+    } catch (_) { }
+    sendResponse({ success: true });
+    return true;
   }
   if (request?.type === "GET_HEALTH_STATUS") {
     // Return health

@@ -36,12 +36,23 @@ export interface UseProviderStatusReturn {
 }
 
 export function useProviderStatus(
-  options: UseProviderStatusOptions = {}
+  options: UseProviderStatusOptions = {},
+  enabled: boolean = true,
 ): UseProviderStatusReturn {
   const [status, setStatus] = useAtom(providerAuthStatusAtom);
   const [isVerifying, setIsVerifying] = useState(false);
+  const verifyOnMount = !!options.verifyOnMount;
 
   useEffect(() => {
+    if (!enabled) return;
+    if (
+      typeof chrome === "undefined" ||
+      !chrome?.storage?.local ||
+      !chrome?.runtime?.sendMessage
+    ) {
+      return;
+    }
+
     // 1. Instant load from storage (cached, no network)
     chrome.storage.local.get(['provider_auth_status'], (result) => {
       if (result.provider_auth_status) {
@@ -50,7 +61,7 @@ export function useProviderStatus(
     });
 
     // 2. Optional: verify via API on mount
-    if (options.verifyOnMount) {
+    if (verifyOnMount) {
       setIsVerifying(true);
       chrome.runtime
         .sendMessage({ type: 'VERIFY_AUTH_TOKEN' })
@@ -81,7 +92,7 @@ export function useProviderStatus(
 
     chrome.storage.onChanged.addListener(listener);
     return () => chrome.storage.onChanged.removeListener(listener);
-  }, [setStatus, options.verifyOnMount]);
+  }, [enabled, setStatus, verifyOnMount]);
 
   /**
    * Manually refresh auth status (cookie-based, fast)

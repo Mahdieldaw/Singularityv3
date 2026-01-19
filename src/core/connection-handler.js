@@ -207,6 +207,12 @@ export class ConnectionHandler {
     return async (message) => {
       if (!message || !message.type) return;
 
+      try {
+        if (this.lifecycleManager && typeof this.lifecycleManager.recordActivity === "function") {
+          this.lifecycleManager.recordActivity();
+        }
+      } catch (_) { }
+
       if (message.type !== "keepalive_ping") {
         console.log(`[ConnectionHandler] Received: ${message.type}`);
       }

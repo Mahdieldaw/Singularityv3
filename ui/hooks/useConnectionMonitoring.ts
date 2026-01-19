@@ -6,10 +6,11 @@ import api from "../services/extension-api";
 
 // This hook's only job is to instantiate the PortHealthManager
 // and sync its state to a global Jotai atom.
-export function useConnectionMonitoring() {
+export function useConnectionMonitoring(enabled: boolean = true) {
   const setConnectionStatus = useSetAtom(connectionStatusAtom);
 
   useEffect(() => {
+    if (!enabled) return;
     let disconnectionTimeout: NodeJS.Timeout | null = null;
 
     const unsubscribe = api.onConnectionStateChange((isConnected) => {
@@ -48,7 +49,7 @@ export function useConnectionMonitoring() {
       unsubscribe();
       if (disconnectionTimeout) clearTimeout(disconnectionTimeout);
     };
-  }, [setConnectionStatus]);
+  }, [enabled, setConnectionStatus]);
 
   // This hook has no return value; it's a pure side-effect hook.
 }

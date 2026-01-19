@@ -17,6 +17,7 @@ import {
 
 // Reusable hook for auto-selecting providers
 const useAutoSelectProvider = (
+    enabled: boolean,
     role: 'mapping' | 'singularity',
     currentProvider: string | null,
     isLocked: boolean,
@@ -25,6 +26,8 @@ const useAutoSelectProvider = (
     const authStatus = useAtomValue(providerAuthStatusAtom);
 
     useEffect(() => {
+        if (!enabled) return;
+
         // Skip if no auth data yet
         if (Object.keys(authStatus).length === 0) return;
 
@@ -40,7 +43,7 @@ const useAutoSelectProvider = (
                 setProvider(best);
             }
         }
-    }, [authStatus, currentProvider, isLocked, role, setProvider]);
+    }, [authStatus, currentProvider, enabled, isLocked, role, setProvider]);
 };
 
 /**
@@ -51,7 +54,7 @@ const useAutoSelectProvider = (
  * 
  * Respects user locks - won't auto-change locked providers.
  */
-export function useSmartProviderDefaults() {
+export function useSmartProviderDefaults(enabled: boolean = true) {
     const [mappingProvider, setMappingProvider] = useAtom(mappingProviderAtom);
     const [singularityProvider, setSingularityProvider] = useAtom(singularityProviderAtom);
     const setLocks = useSetAtom(providerLocksAtom);
@@ -62,13 +65,14 @@ export function useSmartProviderDefaults() {
 
     // Load locks from chrome.storage on mount + subscribe to changes
     useEffect(() => {
+        if (!enabled) return;
         getProviderLocks().then(setLocks);
         return subscribeToLockChanges(setLocks);
-    }, [setLocks]);
+    }, [enabled, setLocks]);
 
     // Use extracted logic
-    useAutoSelectProvider('mapping', mappingProvider, locks.mapping, setMappingProvider);
-    useAutoSelectProvider('singularity', singularityProvider, locks.singularity, setSingularityProvider);
+    useAutoSelectProvider(enabled, 'mapping', mappingProvider, locks.mapping, setMappingProvider);
+    useAutoSelectProvider(enabled, 'singularity', singularityProvider, locks.singularity, setSingularityProvider);
 
     useEffect(() => {
         setInitialized(true);

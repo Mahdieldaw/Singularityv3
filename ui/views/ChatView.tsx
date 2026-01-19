@@ -18,7 +18,6 @@ import ChatInput from "../components/ChatInput";
 import WelcomeScreen from "../components/WelcomeScreen";
 import { useChat } from "../hooks/chat/useChat";
 import { SplitPaneRightPanel } from "../components/SplitPaneRightPanel";
-import { useSmartProviderDefaults } from "../hooks/providers/useSmartProviderDefaults";
 import { safeLazy } from "../utils/safeLazy";
 
 // Lazy load CouncilOrbsVertical - defers orb machinery for faster initial load
@@ -44,10 +43,6 @@ export default function ChatView() {
   const isDecisionMapOpen = useAtomValue(isDecisionMapOpenAtom);
   const setDecisionMapOpen = useSetAtom(isDecisionMapOpenAtom);
   const chatInputHeight = useAtomValue(chatInputHeightAtom);
-
-
-  // Smart Defaults
-  useSmartProviderDefaults();
 
   const virtuosoRef = useRef<VirtuosoHandle | null>(null);
   const { selectChat } = useChat();

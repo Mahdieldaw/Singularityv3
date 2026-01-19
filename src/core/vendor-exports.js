@@ -5,7 +5,7 @@
  */
 
 // Vendor controllers (from core/vendor dir)
-export { BusController, utils, env } from "../HTOS/BusController.js";
+export { BusController, utils } from "../HTOS/BusController.js";
 export {
   NetRulesManager,
   CSPController,
@@ -16,8 +16,3 @@ export {
 
 // Core exports
 export { LifecycleManager } from "./lifecycle-manager.js";
-export {
-  HTOSRequestLifecycleManager,
-  HTOSUnifiedRequestController,
-  createHTOSRequestController,
-} from "./request-lifecycle-manager.js";

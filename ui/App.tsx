@@ -1,4 +1,4 @@
-import { useRef, Suspense, useCallback, useEffect } from "react";
+import { useRef, Suspense, useCallback } from "react";
 import { useAtom, useAtomValue } from "jotai";
 import { usePortMessageHandler } from "./hooks/chat/usePortMessageHandler";
 import { useConnectionMonitoring } from "./hooks/useConnectionMonitoring";
@@ -14,29 +14,29 @@ import api from "./services/extension-api"; // Import API
 
 const SettingsPanel = safeLazy(() => import("./components/SettingsPanel"));
 import { Toast } from "./components/Toast";
-import { isHistoryPanelOpenAtom, connectionStatusAtom, mappingProviderAtom, singularityProviderAtom } from "./state/atoms"; // Import connection atom
+import { isHistoryPanelOpenAtom, connectionStatusAtom } from "./state/atoms"; // Import connection atom
 
 import { useInitialization } from "./hooks/useInitialization";
 import { useSmartProviderDefaults } from "./hooks/providers/useSmartProviderDefaults";
+import { useProviderStatus } from "./hooks/providers/useProviderStatus";
 import { useOnClickOutside } from "usehooks-ts";
 import { useKey } from "./hooks/ui/useKey";
 
 export default function App() {
   // This is now the entry point for all startup logic.
   const isInitialized = useInitialization();
-  useSmartProviderDefaults();
+  useProviderStatus({}, isInitialized);
+  useSmartProviderDefaults(isInitialized);
 
   // Initialize other global side effects that can run after init
-  usePortMessageHandler();
-  useConnectionMonitoring();
+  usePortMessageHandler(isInitialized);
+  useConnectionMonitoring(isInitialized);
   useHistoryLoader(isInitialized); // Pass the flag to the history loader
   // Non-destructive loading guard: surfaces alerts when idle while loading
   useResponsiveLoadingGuard({ idleWarnMs: 15000, idleCriticalMs: 45000 });
 
   const [isHistoryOpen, setIsHistoryOpen] = useAtom(isHistoryPanelOpenAtom);
   const connectionStatus = useAtomValue(connectionStatusAtom);
-  const mappingProvider = useAtomValue(mappingProviderAtom);
-  const singularityProvider = useAtomValue(singularityProviderAtom);
 
   const historyPanelRef = useRef<HTMLDivElement>(null);
 
@@ -48,18 +48,6 @@ export default function App() {
 
   useOnClickOutside(historyPanelRef, closePanel);
   useKey("Escape", closePanel);
-
-  useEffect(() => {
-    try {
-      chrome?.storage?.local?.set?.({ htos_mapping_provider: mappingProvider });
-    } catch (_) { }
-  }, [mappingProvider]);
-
-  useEffect(() => {
-    try {
-      chrome?.storage?.local?.set?.({ htos_singularity_provider: singularityProvider });
-    } catch (_) { }
-  }, [singularityProvider]);
 
   // THE INITIALIZATION BARRIER
   if (!isInitialized) {

@@ -206,13 +206,6 @@ export class StepExecutor {
             batchUpdates[providerId] = result;
           });
 
-          // ✅ CRITICAL: Update in-memory cache SYNCHRONOUSLY
-          options.persistenceCoordinator.updateProviderContextsBatch(
-            context.sessionId,
-            batchUpdates,
-            { skipSave: true, contextRole: "batch" },
-          );
-
           // Update contexts async
           options.persistenceCoordinator.persistProviderContextsAsync(context.sessionId, batchUpdates, "batch");
 

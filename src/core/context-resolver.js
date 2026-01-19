@@ -73,38 +73,30 @@ export class ContextResolver {
         `[ContextResolver] Last turn ${session.lastTurnId} not found`,
       );
 
-    // Prefer turn-scoped provider contexts
-    // Normalization: stored shape may be either { [pid]: meta } or { [pid]: { meta } }
-    const turnContexts = lastTurn.providerContexts || {};
-    const normalized = {};
-    for (const [pid, ctx] of Object.entries(turnContexts)) {
-      normalized[pid] = ctx && ctx.meta ? ctx.meta : ctx;
-    }
+    const sessionContexts = await this.sessionManager.getProviderContexts(
+      sessionId,
+      "default-thread",
+      { contextRole: "batch" },
+    );
 
     // PERMISSIVE EXTEND LOGIC:
     // 1. Iterate over requested providers
     // 2. If forced reset -> New Joiner
-    // 3. If context exists (prefer :batch suffix) -> Continue
+    // 3. If context exists -> Continue
     // 4. If no context -> New Joiner
     const resolvedContexts = {};
     const forcedResetSet = new Set(request.forcedContextReset || []);
 
     for (const pid of (request.providers || [])) {
-      // ✅ CRITICAL FIX: Look for role-suffixed context (batch) first
-      const batchPid = `${pid}:batch`;
-
       if (forcedResetSet.has(pid)) {
         // Case 1: Forced Reset
         resolvedContexts[pid] = { isNewJoiner: true };
-      } else if (normalized[batchPid]) {
-        // Case 2: Batch Context Exists -> Continue
-        // We map the scoped context back to the raw PID for the step payload
-        resolvedContexts[pid] = normalized[batchPid];
-      } else if (normalized[pid]) {
-        // Case 3: Legacy/Default Context Exists -> Continue
-        resolvedContexts[pid] = normalized[pid];
       } else {
-        // Case 4: No Context -> New Joiner
+        const meta = sessionContexts?.[pid]?.meta;
+        if (meta && typeof meta === "object" && Object.keys(meta).length > 0) {
+          resolvedContexts[pid] = meta;
+          continue;
+        }
         resolvedContexts[pid] = { isNewJoiner: true };
       }
     }

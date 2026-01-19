@@ -76,7 +76,7 @@ function extractProviderFromStepId(
   return match ? match[1] : null;
 }
 
-export function usePortMessageHandler() {
+export function usePortMessageHandler(enabled: boolean = true) {
   const setTurnsMap = useSetAtom(turnsMapAtom);
   const setTurnIds = useSetAtom(turnIdsAtom);
   const setCurrentSessionId = useSetAtom(currentSessionIdAtom);
@@ -908,12 +908,18 @@ export function usePortMessageHandler() {
 
   // Register handler with API
   useEffect(() => {
+    if (!enabled) {
+      api.setPortMessageHandler(null);
+      streamingBufferRef.current?.clear();
+      return;
+    }
+
     api.setPortMessageHandler(handler);
     return () => {
       api.setPortMessageHandler(null);
       streamingBufferRef.current?.clear();
     };
-  }, [handler]);
+  }, [enabled, handler]);
 
   return { streamingBufferRef };
 }

@@ -1,7 +1,5 @@
 import { EXAMPLE_PROMPT } from "../constants";
 import logoIcon from "../assets/logos/logo-icon.png";
-import { useProviderStatus } from "../hooks/providers/useProviderStatus";
-import { useSmartProviderDefaults } from "../hooks/providers/useSmartProviderDefaults";
 
 interface WelcomeScreenProps {
   onSendPrompt?: (prompt: string) => void;
@@ -9,9 +7,6 @@ interface WelcomeScreenProps {
 }
 
 const WelcomeScreen = ({ onSendPrompt, isLoading }: WelcomeScreenProps) => {
-  useProviderStatus();
-  useSmartProviderDefaults();
-
   return (
     <div className="flex flex-col items-center justify-center h-full text-center p-10 pb-40 relative">
       {/* Orb Icon */}

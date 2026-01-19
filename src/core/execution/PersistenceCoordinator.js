@@ -16,7 +16,7 @@ export class PersistenceCoordinator {
           this.sessionManager.updateProviderContextsBatch(
             sessionId,
             updates,
-            { skipSave: true, contextRole },
+            { contextRole },
           );
           this.sessionManager.saveSession(sessionId);
         } catch (e) {
@@ -164,4 +164,3 @@ export class PersistenceCoordinator {
     );
   }
 }
-
