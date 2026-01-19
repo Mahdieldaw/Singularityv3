@@ -123,8 +123,12 @@ export function assembleClaims(
                 requiredClaim.enables.push(claim.id);
             }
         }
-
         // Explicit enables from mapper are already on claim.enables
+    }
+
+    // Deduplicate enables for all claims
+    for (const claim of claims) {
+        claim.enables = Array.from(new Set(claim.enables));
     }
 
     // Compute meta

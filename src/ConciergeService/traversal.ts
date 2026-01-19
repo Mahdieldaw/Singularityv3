@@ -183,7 +183,7 @@ function computeTiers(
     const tempTiers = new Map<number, string[]>();
     let maxTier = 0;
 
-    for (const [claimId, tier] of Array.from(tierAssignment.entries())) {
+    for (const [claimId, tier] of tierAssignment) {
         maxTier = Math.max(maxTier, tier);
         const existing = tempTiers.get(tier) || [];
         existing.push(claimId);
@@ -194,7 +194,7 @@ function computeTiers(
     const tiers: TraversalTier[] = [];
     const claimMap = new Map(claims.map(c => [c.id, c]));
 
-    for (const [tierIndex, claimIds] of Array.from(tempTiers.entries())) {
+    for (const [tierIndex, claimIds] of tempTiers) {
         // Find gates belonging to this tier's claims
         const gates: TraversalGate[] = [];
 

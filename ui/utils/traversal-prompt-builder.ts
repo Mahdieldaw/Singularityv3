@@ -1,9 +1,32 @@
+export interface GateResolution {
+  satisfied: boolean;
+  userInput?: string;
+  label?: string;
+  question?: string;
+  condition?: string;
+}
+
+export interface ForcingPointResolution {
+  selectedClaimId: string;
+}
+
+export interface Claim {
+  id: string;
+  label: string;
+  text?: string;
+}
+
+export interface Gate {
+  question?: string;
+  condition?: string;
+}
+
 export function buildTraversalContinuationPrompt(
   originalQuery: string,
-  gateResolutions: Map<string, any>,
-  forcingPointResolutions: Map<string, any>,
-  claims: any[],
-  gatesMap?: Map<string, any>
+  gateResolutions: Map<string, GateResolution>,
+  forcingPointResolutions: Map<string, ForcingPointResolution>,
+  claims: Claim[],
+  gatesMap: Map<string, Gate>
 ): string {
   const parts: string[] = [];
 

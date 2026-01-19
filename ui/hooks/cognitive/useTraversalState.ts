@@ -21,7 +21,6 @@ export function useTraversalState(traversalGraph: any, forcingPoints: any[]) {
   const [state, setState] = useState<TraversalState>({
     gateResolutions: new Map(),
     forcingPointResolutions: new Map(),
-
   });
 
   // Resolve a gate

@@ -6,12 +6,7 @@ import { SingularityOutputState } from '../../hooks/useSingularityOutput';
 import { CouncilOrbs } from '../CouncilOrbs';
 import { LLM_PROVIDERS_CONFIG } from '../../constants';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { selectedModelsAtom, workflowProgressForTurnFamily, activeSplitPanelAtom, isDecisionMapOpenAtom, currentSessionIdAtom } from '../../state/atoms';
-import { parseUnifiedMapperOutput } from '../../../shared/parsing-utils';
-import { getLatestResponse } from '../../utils/turn-helpers';
-import { getProviderName } from '../../utils/provider-helpers';
-import MarkdownDisplay from '../MarkdownDisplay';
-import { CopyButton } from '../CopyButton';
+import { selectedModelsAtom, workflowProgressForTurnFamily, activeSplitPanelAtom, isDecisionMapOpenAtom, currentSessionIdAtom, turnStreamingStateFamily } from '../../state/atoms';
 import { MetricsRibbon } from './MetricsRibbon';
 import StructureGlyph from '../StructureGlyph';
 import { computeProblemStructureFromArtifact, computeStructuralAnalysis } from '../../../src/core/PromptMethods';
@@ -27,7 +22,7 @@ interface CognitiveOutputRendererProps {
 /**
  * Orchestrates the Singularity Response Flow:
  * 1. Batch Streaming: Orbs showing progress
- * 2. Mapper Ready: MetricsRibbon + StructureGlyph + Landscape Narrative appear
+ * 2. Mapper Ready: MetricsRibbon + StructureGlyph appear
  * 3. Concierge Ready: Singularity response crowns the view
  */
 export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = ({
@@ -52,6 +47,7 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
 
     const selectedModels = useAtomValue(selectedModelsAtom);
     const workflowProgress = useAtomValue(workflowProgressForTurnFamily(aiTurn.id));
+    const streamingState = useAtomValue(turnStreamingStateFamily(aiTurn.id));
     const setActiveSplitPanel = useSetAtom(activeSplitPanelAtom);
     const setIsDecisionMapOpen = useSetAtom(isDecisionMapOpenAtom);
     const currentSessionId = useAtomValue(currentSessionIdAtom);
@@ -71,35 +67,18 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
 
     useEffect(() => {
         if (!hasSingularityText || hasAutoSwitched || hasUserOverride) return;
+        if (aiTurn.pipelineStatus && aiTurn.pipelineStatus !== 'complete') return;
         if (activeMode !== 'singularity') {
             setActiveModeInternal('singularity');
         }
         setHasAutoSwitched(true);
-    }, [hasSingularityText, hasAutoSwitched, hasUserOverride, activeMode]);
+    }, [hasSingularityText, hasAutoSwitched, hasUserOverride, activeMode, aiTurn.pipelineStatus]);
 
-    // Get mapper data
-    const activeMapperPid = useMemo(() => {
-        if (aiTurn.meta?.mapper) return aiTurn.meta.mapper;
+    const mapperProviderId = useMemo(() => {
+        if (aiTurn.meta?.mapper) return String(aiTurn.meta.mapper);
         const keys = Object.keys(aiTurn.mappingResponses || {});
-        return keys.length > 0 ? keys[0] : null;
+        return keys.length > 0 ? String(keys[0]) : null;
     }, [aiTurn.meta?.mapper, aiTurn.mappingResponses]);
-
-    const latestMapping = useMemo(() => {
-        if (!activeMapperPid) return null;
-        return getLatestResponse((aiTurn.mappingResponses || {})[activeMapperPid]);
-    }, [aiTurn.mappingResponses, activeMapperPid]);
-
-    const mapperNarrative = useMemo(() => {
-        const fromMeta = String((latestMapping?.meta as any)?.rawMappingText || "");
-        const fromText = String(latestMapping?.text || "");
-        const raw = fromMeta && fromMeta.length >= fromText.length ? fromMeta : fromText;
-        const parsed = parseUnifiedMapperOutput(raw);
-        return parsed.narrative || "";
-    }, [latestMapping]);
-
-    const mapperProviderName = useMemo(() => {
-        return activeMapperPid ? getProviderName(activeMapperPid) : "";
-    }, [activeMapperPid]);
 
     // Visible providers for orbs
     const visibleProviderIds = useMemo(() => {
@@ -111,18 +90,18 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
     const orbProviderIds = useMemo(() => {
         const ids = [
             ...visibleProviderIds,
-            ...(activeMapperPid ? [String(activeMapperPid)] : []),
+            ...(mapperProviderId ? [String(mapperProviderId)] : []),
         ].filter(Boolean).map(String);
         return Array.from(new Set(ids));
-    }, [activeMapperPid, visibleProviderIds]);
+    }, [mapperProviderId, visibleProviderIds]);
 
     const orbVoiceProviderId = useMemo(() => {
-        const fromMeta = activeMapperPid ? String(activeMapperPid) : null;
+        const fromMeta = mapperProviderId ? String(mapperProviderId) : null;
         if (fromMeta) return fromMeta;
         const fromMapping = Object.keys(aiTurn.mappingResponses || {})[0];
         if (fromMapping) return String(fromMapping);
         return orbProviderIds[0] ? String(orbProviderIds[0]) : null;
-    }, [activeMapperPid, aiTurn.mappingResponses, orbProviderIds]);
+    }, [mapperProviderId, aiTurn.mappingResponses, orbProviderIds]);
 
     const isWorkflowSettled = useMemo(() => {
         const states = Object.values(workflowProgress || {});
@@ -152,15 +131,32 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
         }
     }, [aiTurn.mapperArtifact]);
 
-    const isStreaming = Object.values(workflowProgress).some(
-        p => p.stage === 'thinking' || p.stage === 'streaming'
-    );
-
     const isAwaitingTraversal = aiTurn.pipelineStatus === 'awaiting_traversal';
+    const hasTraversalGraph = !!aiTurn.mapperArtifact?.traversalGraph && !!currentSessionId;
+    const isPipelineComplete = !aiTurn.pipelineStatus || aiTurn.pipelineStatus === 'complete';
+    const isRoundActive = streamingState.isLoading || isAwaitingTraversal;
 
     // Show Singularity if we have text AND mode is active...
-    // UNLESS we are stuck waiting for traversal, in which case we hide Singularity to show graph
-    const showSingularity = hasSingularityText && activeMode === 'singularity' && !isAwaitingTraversal;
+    const showSingularity = hasSingularityText && activeMode === 'singularity' && isPipelineComplete;
+
+    if (isAwaitingTraversal && hasTraversalGraph) {
+        return (
+            <div className="w-full max-w-3xl mx-auto animate-in fade-in duration-500">
+                <TraversalGraphView
+                    traversalGraph={aiTurn.mapperArtifact!.traversalGraph!}
+                    forcingPoints={aiTurn.mapperArtifact!.forcingPoints || []}
+                    claims={aiTurn.mapperArtifact!.claims || []}
+                    originalQuery={aiTurn.mapperArtifact!.query || ''}
+                    sessionId={currentSessionId!}
+                    aiTurnId={aiTurn.id}
+                    onComplete={() => {
+                        setHasUserOverride(false);
+                        setActiveModeInternal('singularity');
+                    }}
+                />
+            </div>
+        );
+    }
 
 
     return (
@@ -168,7 +164,7 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
             {/* === UNIFIED HEADER (Toggle + Orbs + Metrics) === */}
             <div className="flex flex-col gap-6 mb-8">
                 {/* View Toggle */}
-                {hasSingularityText && (
+                {hasSingularityText && isPipelineComplete && (
                     <div className="flex justify-center">
                         <button
                             onClick={() => setActiveMode(showSingularity ? 'artifact' : 'singularity')}
@@ -192,11 +188,11 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
                             turnId={aiTurn.id}
                             voiceProviderId={orbVoiceProviderId}
                             visibleProviderIds={
-                                !isStreaming && isWorkflowSettled && !isOrbTrayExpanded
+                                !isRoundActive && isWorkflowSettled && isPipelineComplete && !isOrbTrayExpanded
                                     ? (orbVoiceProviderId ? [String(orbVoiceProviderId)] : [])
                                     : orbProviderIds
                             }
-                            variant={isStreaming ? "active" : "historical"}
+                            variant={isRoundActive ? "active" : "historical"}
                             workflowProgress={workflowProgress}
                             onOrbClick={(pid) => {
                                 // Orbs strictly control the ModelResponsePanel selection, not the Singularity Main View
@@ -207,7 +203,7 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
                 </div>
 
                 {/* Structural Summary (Ribbon + Glyph) */}
-                {structuralAnalysis && (
+                {isPipelineComplete && structuralAnalysis && (
                     <div className="space-y-4 animate-in fade-in slide-in-from-top-2 duration-500">
                         <MetricsRibbon
                             artifact={aiTurn.mapperArtifact}
@@ -251,26 +247,26 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
             ) : (
                 /* === INTERIM / ANALYSIS BUBBLE === */
                 <div className="animate-in fade-in duration-500">
-                    {mapperNarrative ? (
+                    {!isPipelineComplete && isRoundActive ? (
+                        <div className="flex flex-col items-center justify-center p-12 bg-surface-highlight/10 rounded-xl border border-dashed border-border-subtle">
+                            <div className="text-3xl mb-4 animate-pulse">🧩</div>
+                            <div className="text-text-secondary font-medium">
+                                Gathering perspectives...
+                            </div>
+                            <div className="text-xs text-text-muted mt-2 text-center">
+                                Experts are deliberating. Analysis will appear shortly.
+                            </div>
+                        </div>
+                    ) : isPipelineComplete && aiTurn.mapperArtifact ? (
                         <div className="bg-surface border border-border-subtle rounded-2xl overflow-hidden shadow-sm">
                             <div className="px-4 py-3 border-b border-border-subtle bg-surface-highlight/10 flex items-center justify-between">
                                 <div className="flex items-center gap-2">
-                                    <span className="text-lg">📖</span>
+                                    <span className="text-lg">🧠</span>
                                     <span className="text-xs font-semibold text-text-secondary uppercase tracking-wide">
-                                        The Landscape
+                                        Analysis
                                     </span>
-                                    {mapperProviderName && (
-                                        <span className="text-[11px] text-text-tertiary">
-                                            via {mapperProviderName}
-                                        </span>
-                                    )}
                                 </div>
                                 <div className="flex items-center gap-2">
-                                    <CopyButton
-                                        text={mapperNarrative}
-                                        label="Copy mapper narrative"
-                                        variant="icon"
-                                    />
                                     {aiTurn.mapperArtifact && onArtifactSelect && (
                                         <button
                                             onClick={() => onArtifactSelect({
@@ -298,34 +294,6 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
                                         <span>Map</span>
                                     </button>
                                 </div>
-                            </div>
-                            <div className="px-6 py-6 md:px-8 text-sm text-text-muted leading-relaxed font-serif">
-                                <MarkdownDisplay content={mapperNarrative} />
-                            </div>
-
-                            {/* Traversal Graph Integration */}
-                            {aiTurn.mapperArtifact?.traversalGraph && currentSessionId && (
-                                <TraversalGraphView
-                                    traversalGraph={aiTurn.mapperArtifact.traversalGraph}
-                                    forcingPoints={aiTurn.mapperArtifact.forcingPoints || []}
-                                    claims={aiTurn.mapperArtifact.claims || []}
-                                    originalQuery={aiTurn.mapperArtifact.query || ''}
-                                    sessionId={currentSessionId}
-                                    aiTurnId={aiTurn.id}
-                                    onComplete={() => {
-                                        console.log('Traversal synthesis complete!');
-                                    }}
-                                />
-                            )}
-                        </div>
-                    ) : isStreaming ? (
-                        <div className="flex flex-col items-center justify-center p-12 bg-surface-highlight/10 rounded-xl border border-dashed border-border-subtle">
-                            <div className="text-3xl mb-4 animate-pulse">🧩</div>
-                            <div className="text-text-secondary font-medium">
-                                Gathering perspectives...
-                            </div>
-                            <div className="text-xs text-text-muted mt-2 text-center">
-                                Experts are deliberating. Analysis will appear shortly.
                             </div>
                         </div>
                     ) : null}

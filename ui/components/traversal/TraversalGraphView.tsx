@@ -1,10 +1,12 @@
 import React from 'react';
+import { useAtomValue } from 'jotai';
 import { useTraversalState } from '../../hooks/cognitive/useTraversalState';
 import { TraversalGateCard } from './TraversalGateCard';
 import { TraversalForcingPointCard } from './TraversalForcingPointCard';
 import { buildTraversalContinuationPrompt } from '../../utils/traversal-prompt-builder';
 import type { Claim, ForcingPoint, SerializedTraversalGraph, TraversalGate } from '../../../shared/contract';
 import { CONTINUE_COGNITIVE_WORKFLOW, WORKFLOW_STEP_UPDATE } from '../../../shared/messaging';
+import { singularityProviderAtom } from '../../state/atoms';
 
 interface TraversalGraphViewProps {
   traversalGraph: SerializedTraversalGraph;
@@ -41,6 +43,7 @@ export const TraversalGraphView: React.FC<TraversalGraphViewProps> = ({
 
   const [isSubmitting, setIsSubmitting] = React.useState(false);
   const [submissionError, setSubmissionError] = React.useState<string | null>(null);
+  const singularityProvider = useAtomValue(singularityProviderAtom);
 
   const handleSubmitToConcierge = async () => {
     setIsSubmitting(true);
@@ -67,15 +70,21 @@ export const TraversalGraphView: React.FC<TraversalGraphViewProps> = ({
       const cleanup = () => {
         try {
           if (timeoutId) clearTimeout(timeoutId);
-        } catch (_) { }
+        } catch (e) {
+          console.debug('[TraversalGraphView] Error clearing timeout:', e);
+        }
         try {
           if (port && messageListener) {
             port.onMessage.removeListener(messageListener);
           }
-        } catch (_) { }
+        } catch (e) {
+          console.debug('[TraversalGraphView] Error removing message listener:', e);
+        }
         try {
           port?.disconnect();
-        } catch (_) { }
+        } catch (e) {
+          console.debug('[TraversalGraphView] Error disconnecting port:', e);
+        }
       };
 
       messageListener = (msg: any) => {
@@ -128,7 +137,6 @@ export const TraversalGraphView: React.FC<TraversalGraphViewProps> = ({
       } catch (_) { }
       try { port?.disconnect(); } catch (_) { }
     }
-
   };
 
   if (!Array.isArray(traversalGraph?.tiers)) {

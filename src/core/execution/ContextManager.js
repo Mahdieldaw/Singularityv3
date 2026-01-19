@@ -15,7 +15,7 @@ export class ContextManager {
    * 2. Batch step context (medium priority)
    * 3. Persisted context (fallback)
    */
-  resolveProviderContext(
+  async resolveProviderContext(
     providerId,
     context,
     payload,
@@ -82,7 +82,7 @@ export class ContextManager {
 
     // Tier 3: Last resort use persisted context (may be stale across workflow runs)
     try {
-      const persisted = this.sessionManager.getProviderContexts(
+      const persisted = await this.sessionManager.getProviderContexts(
         context.sessionId,
         context.threadId || "default-thread",
       );

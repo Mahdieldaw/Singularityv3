@@ -8,6 +8,7 @@ import { CognitivePipelineHandler } from './execution/CognitivePipelineHandler';
 import { parseMapperArtifact } from '../../shared/parsing-utils';
 
 export class WorkflowEngine {
+  /* _options: Reserved for future configuration or interface compatibility */
   constructor(orchestrator, sessionManager, port, _options = {}) {
     this.orchestrator = orchestrator;
     this.sessionManager = sessionManager;

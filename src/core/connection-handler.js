@@ -520,9 +520,6 @@ export class ConnectionHandler {
         } catch (_) { }
       }
 
-      // NOTE: TURN_CREATED now emits from WorkflowEngine after persistence
-      // to ensure authoritative IDs. We no longer emit here to avoid
-      // premature/non-canonical IDs.
 
       // ========================================================================
       // Execute

@@ -109,8 +109,8 @@ export function extractForcingPoints(
             const tier = requiredClaim.tier;
 
             const blockedBy: string[] = [];
-            for (const condGate of requiredClaim.gates.conditionals) {
-                const blockingFpId = gateToFp.get(condGate.id);
+            for (const conditionalGate of requiredClaim.gates.conditionals) {
+                const blockingFpId = gateToFp.get(conditionalGate.id);
                 if (blockingFpId) blockedBy.push(blockingFpId);
             }
             for (const prereqGate of requiredClaim.gates.prerequisites) {

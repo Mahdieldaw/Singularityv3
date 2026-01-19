@@ -462,45 +462,99 @@ export class StepExecutor {
 
                 const traversalGraph = buildTraversalGraph(assemblyResult);
                 const forcingPointsResult = extractForcingPoints(traversalGraph);
-
-                // Shadow Delta
-                const referencedIds = extractReferencedIds(assemblyResult.claims);
-                const shadowDelta = computeShadowDelta(shadowResult, referencedIds, payload.originalPrompt);
-                const topUnindexed = getTopUnreferenced(shadowDelta, 10);
-
-                // ═══════════════════════════════════════════════════════════════════════
-                // V2-TO-V1 CONVERSION (Backward Compatibility)
-                // ═══════════════════════════════════════════════════════════════════════
-                const { convertV2toV1 } = await import('../../ConciergeService/v2-to-v1-adapter');
-
-                const v1Artifact = convertV2toV1(
-                  parseResult.output,  // V2 semantic mapper output
-                  shadowResult.statements,
-                  {
-                    query: payload.originalPrompt,
-                    turn: context.turn || 0,
-                    model_count: citationOrder.length
-                  }
-                );
-
-                // Attach V2-specific data that V1 format can't represent
-                mapperArtifact = {
-                  ...v1Artifact,
-
-                  // NEW DATA (not in V1)
-                  traversalGraph,
-                  forcingPoints: forcingPointsResult.forcingPoints,
-
-                  // SHADOW DATA
-                  shadow: {
-                    statements: shadowResult.statements,
-                    audit: shadowDelta.audit,
-                    topUnindexed: topUnindexed,
-                    processingTime: shadowDelta.processingTimeMs + shadowResult.meta.processingTimeMs
-                  }
+                const serializedTraversalGraph = {
+                  claims: (traversalGraph?.claims || []).map((c) => ({
+                    id: c.id,
+                    label: c.label,
+                    description: c.description,
+                    stance: c.stance,
+                    gates: {
+                      conditionals: (c?.gates?.conditionals || []).map((g) => ({
+                        id: g.id,
+                        condition: g.condition,
+                        question: g.question,
+                        sourceStatementIds: g.sourceStatementIds,
+                      })),
+                      prerequisites: (c?.gates?.prerequisites || []).map((g) => ({
+                        id: g.id,
+                        claimId: g.claimId,
+                        condition: g.condition,
+                        question: g.question,
+                        sourceStatementIds: g.sourceStatementIds,
+                      })),
+                    },
+                    enables: Array.isArray(c.enables) ? c.enables : [],
+                    conflicts: (c?.conflicts || []).map((edge) => ({
+                      claimId: edge.claimId,
+                      question: edge.question,
+                      sourceStatementIds: edge.sourceStatementIds,
+                      nature: edge.nature,
+                    })),
+                    sourceStatementIds: Array.isArray(c.sourceStatementIds) ? c.sourceStatementIds : [],
+                    supporterModels: Array.isArray(c.supporterModels) ? c.supporterModels : [],
+                    supportRatio: typeof c.supportRatio === 'number' ? c.supportRatio : 0,
+                    hasConditionalSignal: !!c.hasConditionalSignal,
+                    hasSequenceSignal: !!c.hasSequenceSignal,
+                    hasTensionSignal: !!c.hasTensionSignal,
+                    tier: typeof c.tier === 'number' ? c.tier : 0,
+                  })),
+                  tensions: traversalGraph?.tensions || [],
+                  tiers: traversalGraph?.tiers || [],
+                  maxTier: typeof traversalGraph?.maxTier === 'number' ? traversalGraph.maxTier : 0,
+                  roots: traversalGraph?.roots || [],
+                  cycles: traversalGraph?.cycles || [],
                 };
 
-                console.log(`[StepExecutor] Generated V1-compatible artifact with ${v1Artifact.claims.length} claims, ${v1Artifact.edges.length} edges`);
+                try {
+                  // Shadow Delta
+                  const referencedIds = extractReferencedIds(assemblyResult.claims);
+                  const shadowDelta = computeShadowDelta(shadowResult, referencedIds, payload.originalPrompt);
+                  const topUnindexed = getTopUnreferenced(shadowDelta, 10);
+
+                  // ═══════════════════════════════════════════════════════════════════════
+                  // V2-TO-V1 CONVERSION (Backward Compatibility)
+                  // ═══════════════════════════════════════════════════════════════════════
+                  const { convertV2toV1 } = await import('../../ConciergeService/v2-to-v1-adapter');
+
+                  const v1Artifact = convertV2toV1(
+                    parseResult.output,  // V2 semantic mapper output
+                    shadowResult.statements,
+                    {
+                      query: payload.originalPrompt,
+                      turn: context.turn || 0,
+                      model_count: citationOrder.length
+                    }
+                  );
+
+                  // Attach V2-specific data that V1 format can't represent
+                  mapperArtifact = {
+                    ...v1Artifact,
+
+                    // NEW DATA (not in V1)
+                    traversalGraph: serializedTraversalGraph,
+                    forcingPoints: forcingPointsResult.forcingPoints,
+
+                    // SHADOW DATA
+                    shadow: {
+                      statements: shadowResult.statements,
+                      audit: shadowDelta.audit,
+                      topUnindexed: topUnindexed,
+                      processingTime: (shadowDelta.processingTimeMs || 0) + (shadowResult.meta?.processingTimeMs || 0)
+                    }
+                  };
+
+                  console.log(`[StepExecutor] Generated V1-compatible artifact with ${v1Artifact.claims.length} claims, ${v1Artifact.edges.length} edges`);
+                } catch (err) {
+                  // processLogger.error or console.error with context
+                  console.error('[StepExecutor] Shadow/V2-V1 conversion failed:', err);
+                  console.debug('Context:', {
+                    originalPrompt: payload.originalPrompt,
+                    turn: context.turn,
+                    citationCount: citationOrder.length,
+                    error: err.message
+                  });
+                  throw err; // Rethrow to handle consistently upstream
+                }
 
 
                 // mapperArtifact was built from V2->V1 adapter above (v1Artifact) and has

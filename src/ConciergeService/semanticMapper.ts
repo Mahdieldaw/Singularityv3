@@ -17,26 +17,57 @@ export function buildSemanticMapperPrompt(
   shadowStatements: ShadowStatement[]
 ): string {
 
-  // Format shadow statements with metadata
-  const statementBlock = shadowStatements.map(stmt => {
-    const signals = [];
-    if (stmt.signals.sequence) signals.push('SEQ');
+  const groupedByModel: Record<string, Array<{ id: string; text: string; stance: string; signals: string[] }>> = {};
+  for (const stmt of shadowStatements) {
+    const key = `model_${stmt.modelIndex}`;
+    const signals: string[] = [];
     if (stmt.signals.tension) signals.push('TENS');
+    if (stmt.signals.sequence) signals.push('SEQ');
     if (stmt.signals.conditional) signals.push('COND');
 
-    const signalTag = signals.length > 0 ? ` [${signals.join(',')}]` : '';
-    const stanceTag = stmt.stance;
+    if (!groupedByModel[key]) groupedByModel[key] = [];
+    groupedByModel[key].push({
+      id: stmt.id,
+      text: stmt.text,
+      stance: stmt.stance,
+      signals
+    });
+  }
 
-    return `[${stmt.id}] (${stanceTag}${signalTag}): "${stmt.text}"`;
-  }).join('\n\n');
+  const statementBlock = JSON.stringify(groupedByModel, null, 2);
 
-  return `You are the Semantic Cartographer.
+  return `Semantic Cartographer — Descriptive Core Prompt
+You find yourself standing in a landscape made entirely of positions.
+Each position is an island — an idea that could stand on its own, be rejected, or be held only if certain things are true.
+At first, these islands look scattered.
+But as you look closer, you notice thin threads between them.
+Some threads show order — one island can only be reached after another is settled.
+Some show dependence — an island exists only if another one already holds.
+And some reveal exclusion — standing on one island collapses another entirely.
 
-The shadow layer has extracted raw statements from model responses and classified their stance—prescriptive action, cautionary warning, prerequisite ordering, dependent sequencing, assertive fact, or uncertain speculation.
+Your task is to reveal this landscape.
 
-Your mandate is different: you find the claims these statements support, the conditions under which claims hold, and where those claims conflict.
+You are given a set of statements.
+They are fragments — partial views of the islands beneath them.
 
-The user asked a question. The models answered. Their answers have been decomposed into individual statements, each tagged with its stance and structural signals. Your task is to build the map.
+Your first job is to discover the islands:
+Group statements that point to the same position into a single claim.
+Name each claim with a short verb phrase — something that could be accepted, rejected, or conditioned.
+
+Your second job is to trace the threads:
+• When a claim only applies if some condition is true, that is a conditional gate.
+• When a claim’s validity depends on another claim being true, that is a prerequisite gate.
+• When the conditions of one claim prevent another from surviving, that is a conflict.
+
+These threads are not decoration.
+They are the structure that determines which paths are possible.
+
+For every gate or conflict you identify, ask the question that would resolve it.
+Not abstractly — as a human decision would actually be made.
+
+You do not choose paths.
+You do not collapse the landscape.
+You make the structure visible, so choice can occur without confusion.
 
 <user_query>
 "${userQuery}"
@@ -46,40 +77,16 @@ The user asked a question. The models answered. Their answers have been decompos
 ${statementBlock}
 </shadow_statements>
 
-# What You Build
+Then (only then) you append the schema.
 
-A claim is a position—something the user might accept, reject, or condition. Multiple statements can support the same claim. Where statements converge on the same position, group them. Where they diverge, separate them.
+# Schema Lock (Strict)
+- Respond with a single JSON object only (no markdown, no prose).
+- Do not output an "edges" field anywhere.
+- Do not output "sequence" or "tension" arrays.
+- The only relationship fields are "enables" and "conflicts".
+- Every gate and every conflict must include a non-empty "question".
 
-Each claim has:
-- A canonical **label** (verb phrase, concise, required)
-- Optional **description** (clarification only, non-authoritative)
-- A **stance** (inherited from source statements)
-
-Some claims only hold under conditions. Extract these as **gates**:
-
-1. **Conditional gates** ("if X") — Does this situation apply?
-2. **Prerequisite gates** ("requires X") — Is this other claim satisfied first?
-
-Gates must include:
-- **condition**: the dependency or context
-- **question**: a yes/no question in natural language
-- **sourceStatementIds**: provenance (REQUIRED)
-
-Some claims conflict. When two claims genuinely oppose each other—resource competition, optimization trade-offs, mutually exclusive paths—mark the **conflict**.
-
-Conflicts must include:
-- **claimId**: the conflicting claim
-- **question**: which matters more / which path to take
-- **sourceStatementIds**: provenance (REQUIRED)
-
-If you cannot cite statements proving a conflict exists, do not output it.
-
-You do not decide. You do not synthesize. You map the decision landscape.
-
-# Output Format
-
-Respond with a single JSON object. The structure mirrors what you found in the statements: claims with their gates and conflicts, all bound to shadow statement IDs for provenance.
-
+# Output Format (JSON Only)
 <output_schema>
 {
   "claims": [
@@ -122,74 +129,21 @@ Respond with a single JSON object. The structure mirrors what you found in the s
 }
 </output_schema>
 
-# Field Specifications
+# Field Names
+Claims: id, label, description?, stance, gates, enables, conflicts, sourceStatementIds
+Conditional gate: id, condition, question, sourceStatementIds
+Prerequisite gate: id, claimId, condition, question, sourceStatementIds
+Conflict: claimId, question, sourceStatementIds, nature?
 
-**Claims:**
-- **id**: sequential, "c_0", "c_1", ...
-- **label**: verb phrase, canonical, concise (required)
-- **description**: optional clarification (omit if label suffices)
-- **stance**: dominant stance from source statements
+# ID Conventions
+Claims: "c_0", "c_1", ...
+Conditional gates: "cg_0", "cg_1", ...
+Prerequisite gates: "pg_0", "pg_1", ...
 
-**Gates:**
-- **Conditional**: id "cg_N", condition text, **question** (natural language), sourceStatementIds
-- **Prerequisite**: id "pg_N", claimId (required claim), condition text, **question** (natural language), sourceStatementIds
-
-**Relationships:**
-- **enables**: claim IDs this facilitates (use sparingly—most sequence is captured by prerequisite gates)
-- **conflicts**: array of ConflictEdge objects with claimId, **question**, sourceStatementIds (REQUIRED), optional nature
-
-**Provenance (non-negotiable):**
-- Every gate: ≥1 sourceStatementId
-- Every conflict: ≥1 sourceStatementId
-- Every claim: ≥1 sourceStatementId
-
-If you cannot cite supporting statements, do not output the relationship.
-
-# Extraction Rules
-
-**Conditional gates:**
-Extract when statements use "if X", "when Y", "assuming Z" and the condition genuinely determines whether the claim exists in the decision space.
-
-Not every conditional creates a gate—only those that partition the problem.
-
-**Prerequisite gates:**
-Extract when statements indicate hard dependencies: "before doing X", "requires Y first", "after Z is established".
-
-Only create a gate if one claim cannot be acted on until another is satisfied.
-
-**Enables (use sparingly):**
-Only use if a claim facilitates another WITHOUT being a hard requirement.
-
-Example: "TypeScript makes validation easier" (enables, but doesn't require)
-
-Most sequence is captured by prerequisite gates. Do not duplicate.
-
-**Conflicts (provenance required):**
-Extract when claims genuinely oppose each other:
-- Resource competition (memory vs. speed)
-- Optimization trade-offs (latency vs. flexibility)
-- Mutually exclusive paths (REST vs. GraphQL)
-
-Tension signals ("however", "but") are hints, not proof. Verify the conflict is real before outputting.
-
-Each conflict must have a **question** that captures the choice: "Which matters more: X or Y?"
-
-# What You Do Not Do
-
-You do not:
-- Identify gaps (Shadow Delta handles this)
-- Generate claims from your own knowledge
-- Resolve conflicts or recommend choices
-- Invent structure not evidenced in statements
-
-The structure you extract feeds a traversal system that:
-- Computes tiers from gate dependencies
-- Identifies forcing points where users must choose
-- Builds personalized decision paths
-
-Your role is extraction, not interpretation.
-
-Be rigorous with provenance. Be honest about structure. Let the statements speak.
+# Provenance Requirements (Non-Negotiable)
+- Every claim must include ≥1 sourceStatementId.
+- Every gate must include ≥1 sourceStatementId.
+- Every conflict must include ≥1 sourceStatementId.
 
 Generate the map now.
 `;

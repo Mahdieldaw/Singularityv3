@@ -1,12 +1,8 @@
 import React, { useState } from 'react';
+import type { TraversalGate } from '../../../shared/contract';
 
 interface TraversalGateCardProps {
-  gate: {
-    id: string;
-    type: 'conditional' | 'prerequisite';
-    condition: string;
-    blockedClaims: string[];
-  };
+  gate: TraversalGate;
   isResolved: boolean;
   resolution?: { satisfied: boolean; userInput?: string };
   onResolve: (gateId: string, satisfied: boolean, userInput?: string) => void;
@@ -27,7 +23,6 @@ export const TraversalGateCard: React.FC<TraversalGateCardProps> = ({
 
   const handleResolve = (satisfied: boolean) => {
     if (gate.type === 'conditional' && satisfied && !userInput.trim()) {
-      // For conditional gates, require user context
       setExpanded(true);
       return;
     }
@@ -48,7 +43,7 @@ export const TraversalGateCard: React.FC<TraversalGateCardProps> = ({
             <span className="text-2xl">{gateIcon}</span>
             <div>
               <div className="text-sm font-bold text-text-primary">
-                {gate.type === 'conditional' ? 'Context Gate' : 'Prerequisite Gate'}
+                {gate.type === 'conditional' ? 'Conditional Gate' : 'Prerequisite Gate'}
               </div>
               <div className="text-xs text-text-muted">
                 Blocks {gate.blockedClaims.length} claim(s) in next tier
@@ -75,7 +70,10 @@ export const TraversalGateCard: React.FC<TraversalGateCardProps> = ({
           )}
         </div>
 
-        <div className="mt-2 text-sm text-text-primary">
+        <div className="mt-2 text-sm font-bold text-text-primary">
+          {gate.question}
+        </div>
+        <div className="mt-1 text-xs text-text-muted">
           {gate.condition}
         </div>
 

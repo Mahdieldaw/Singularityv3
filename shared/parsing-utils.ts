@@ -1076,6 +1076,14 @@ export function parseSemanticMapperOutput(
         const claim = parsed.claims[i];
         const claimContext = `claim[${i}]`;
 
+        // Disallow legacy contract fields
+        if (claim && typeof claim === 'object' && 'edges' in claim) {
+            errors.push({
+                field: `${claimContext}.edges`,
+                issue: 'Legacy field not allowed. Use enables[] and conflicts[] instead of edges.*',
+            });
+        }
+
         // Required fields
         if (!claim.id) {
             errors.push({ field: `${claimContext}.id`, issue: 'Missing claim ID' });
@@ -1112,13 +1120,13 @@ export function parseSemanticMapperOutput(
             errors.push({ field: `${claimContext}.gates`, issue: 'Missing gates object' });
         } else {
             // Conditional gates
-            if (!claim.gates.conditionals) {
-                claim.gates.conditionals = []; // Auto-fix
-            } else if (!Array.isArray(claim.gates.conditionals)) {
+            if (!(claim.gates as any).conditionals) {
+                (claim.gates as any).conditionals = []; // Auto-fix
+            } else if (!Array.isArray((claim.gates as any).conditionals)) {
                 errors.push({ field: `${claimContext}.gates.conditionals`, issue: 'Must be an array' });
             } else {
-                for (let j = 0; j < claim.gates.conditionals.length; j++) {
-                    const gate = claim.gates.conditionals[j];
+                for (let j = 0; j < (claim.gates as any).conditionals.length; j++) {
+                    const gate = (claim.gates as any).conditionals[j];
                     const gateContext = `${claimContext}.gates.conditionals[${j}]`;
 
                     if (!gate.id) {
@@ -1143,7 +1151,7 @@ export function parseSemanticMapperOutput(
                     } else if (validStatementIds) {
                         for (const sid of gate.sourceStatementIds) {
                             if (!validStatementIds.has(sid)) {
-                                warnings.push(`Gate ${gate.id} references unknown statement: ${sid}`);
+                            warnings.push(`Gate ${gate.id} references unknown statement: ${sid}`);
                             }
                         }
                     }

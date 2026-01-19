@@ -10,7 +10,7 @@ import { Stance } from '../shadow';
 
 /**
  * Conditional Gate (Tier 0)
- * "If X" - a condition that must hold for this claim to exist in the decision space
+ * "If/when X" - a condition that determines whether this claim applies
  */
 export interface ConditionalGate {
     id: string;                    // "cg_0", "cg_1"

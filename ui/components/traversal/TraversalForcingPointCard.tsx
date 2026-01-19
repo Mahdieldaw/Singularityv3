@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
 
+import { Claim } from '../../../shared/contract';
+
 interface ForcingPointOption {
   claimId: string;
   label: string;
@@ -14,7 +16,7 @@ interface TraversalForcingPointCardProps {
     condition: string;
     options?: ForcingPointOption[];
   };
-  claims: any[];
+  claims: Claim[];
   isResolved: boolean;
   resolution?: { selectedClaimId: string; selectedLabel: string };
   onResolve: (forcingPointId: string, claimId: string, label: string) => void;
@@ -124,21 +126,25 @@ export const TraversalForcingPointCard: React.FC<TraversalForcingPointCardProps>
               onClick={() => !isResolved && setSelectedOption(option.claimId)}
               disabled={isResolved}
               className={`w-full p-4 rounded-lg border-2 text-left transition-all ${isThisResolved
-                  ? 'border-green-500 bg-green-500/10'
-                  : isSelected
-                    ? 'border-brand-500 bg-brand-500/10'
-                    : 'border-border-subtle bg-surface-raised hover:border-brand-500/50'
+                ? 'border-green-500 bg-green-500/10'
+                : isSelected
+                  ? 'border-brand-500 bg-brand-500/10'
+                  : 'border-border-subtle bg-surface-raised hover:border-brand-500/50'
                 } ${isResolved && !isThisResolved ? 'opacity-40' : ''}`}
+              role="radio"
+              aria-checked={isThisResolved || isSelected}
+              aria-disabled={isResolved}
+              aria-label={option.label}
             >
               <div className="flex items-start gap-3">
                 <div className={`mt-0.5 w-5 h-5 rounded-full border-2 flex items-center justify-center ${isThisResolved
-                    ? 'border-green-500 bg-green-500'
-                    : isSelected
-                      ? 'border-brand-500 bg-brand-500'
-                      : 'border-border-subtle'
+                  ? 'border-green-500 bg-green-500'
+                  : isSelected
+                    ? 'border-brand-500 bg-brand-500'
+                    : 'border-border-subtle'
                   }`}>
                   {(isSelected || isThisResolved) && (
-                    <span className="text-white text-xs">✓</span>
+                    <span className="text-white text-xs" aria-hidden="true">✓</span>
                   )}
                 </div>
 

@@ -19,8 +19,8 @@ import {
 import { isExcluded } from './ExclusionRules';
 
 // Performance limits
-const SENTENCE_LIMIT = 500;
-const CANDIDATE_LIMIT = 200;
+const SENTENCE_LIMIT = 2000;
+const CANDIDATE_LIMIT = 2000;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // TYPES
@@ -98,7 +98,6 @@ function isSubstantive(sentence: string): boolean {
 
     // Length checks
     if (words.length < 5) return false;
-    if (words.length > 100) return false; // Probably a run-on or split issue
 
     // Filter meta-commentary
     const metaPatterns = [
