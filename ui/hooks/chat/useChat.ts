@@ -26,6 +26,7 @@ import type {
   ProviderKey,
   PrimitiveWorkflowRequest,
 } from "../../../shared/contract";
+import { DEFAULT_THREAD } from "../../../shared/messaging";
 import { LLM_PROVIDERS_CONFIG } from "../../constants";
 import { computeThinkFlag } from "../../../src/think/computeThinkFlag.js";
 
@@ -339,7 +340,7 @@ export function useChat() {
               id: round.aiTurnId || `ai-${round.completedAt || Date.now()}`,
               userTurnId: round.userTurnId,
               sessionId: fullSession.sessionId,
-              threadId: "default-thread",
+              threadId: DEFAULT_THREAD,
               createdAt: round.completedAt || round.createdAt || Date.now(),
               batchResponses,
 

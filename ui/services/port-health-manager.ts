@@ -7,19 +7,20 @@ export class PortHealthManager {
 
   // Relaxed health check and reconnect strategy to reduce churn
   private readonly HEALTH_CHECK_INTERVAL = 10000; // 10s (reduced from 30s)
+  private readonly SW_PROBE_TIMEOUT_MS = 2000;
+  private readonly SW_PROBE_COOLDOWN_MS = 15000;
   private readonly RECONNECT_DELAY = 2000; // base delay
   private readonly RECONNECT_JITTER_MS = 500; // random jitter
   private readonly RECONNECT_MAX_DELAY_MS = 30000; // 30s cap
   private readonly MAX_RECONNECT_ATTEMPTS = 5;
 
-  // Throttle constants
-  private readonly ACTIVITY_THROTTLE_MS = 5000; // Only send activity ping every 5s max
-  private lastActivitySent = 0;
-
   private reconnectAttempts = 0;
   private isConnected = false;
   private isReconnecting = false;
   private lastPongTimestamp = 0;
+  private healthCheckInFlight = false;
+  private swProbePromise: Promise<boolean> | null = null;
+  private lastSwProbeAt = 0;
 
   private readyResolve: (() => void) | null = null;
   private readyReject: ((reason?: any) => void) | null = null;
@@ -107,18 +108,7 @@ export class PortHealthManager {
     if (this.healthCheckInterval) clearInterval(this.healthCheckInterval);
 
     this.healthCheckInterval = window.setInterval(() => {
-      this.sendKeepalivePing();
-
-      if (this.isConnected) {
-        const timeSinceLastPong = Date.now() - this.lastPongTimestamp;
-        // Be more tolerant before declaring unhealthy
-        if (timeSinceLastPong > this.HEALTH_CHECK_INTERVAL * 3) {
-          console.warn(
-            "[PortHealthManager] No pong received, port may be unhealthy",
-          );
-          this.handleUnhealthyPort();
-        }
-      }
+      void this.tickHealthCheck();
     }, this.HEALTH_CHECK_INTERVAL);
   }
 
@@ -129,34 +119,93 @@ export class PortHealthManager {
     }
   }
 
+  private async sendMessageWithTimeout<T = any>(
+    message: any,
+    timeoutMs: number,
+  ): Promise<T | null> {
+    try {
+      const p = new Promise<T>((resolve, reject) => {
+        try {
+          chrome.runtime.sendMessage(message, (resp) => {
+            const err = chrome.runtime.lastError;
+            if (err) {
+              reject(new Error(err.message));
+              return;
+            }
+            resolve(resp as T);
+          });
+        } catch (e) {
+          reject(e);
+        }
+      });
+
+      return (await Promise.race([
+        p,
+        new Promise<null>((resolve) =>
+          window.setTimeout(() => resolve(null), timeoutMs),
+        ),
+      ])) as T | null;
+    } catch {
+      return null;
+    }
+  }
+
+  private async probeServiceWorker(): Promise<boolean> {
+    if (this.swProbePromise) return this.swProbePromise;
+
+    const now = Date.now();
+    if (now - this.lastSwProbeAt < this.SW_PROBE_COOLDOWN_MS) return false;
+    this.lastSwProbeAt = now;
+
+    this.swProbePromise = (async () => {
+      try {
+        const resp = await this.sendMessageWithTimeout(
+          { type: "GET_HEALTH_STATUS", timestamp: Date.now() },
+          this.SW_PROBE_TIMEOUT_MS,
+        );
+        return !!resp;
+      } finally {
+        this.swProbePromise = null;
+      }
+    })();
+
+    return this.swProbePromise;
+  }
+
+  private async tickHealthCheck() {
+    if (this.healthCheckInFlight) return;
+    this.healthCheckInFlight = true;
+    try {
+      this.sendKeepalivePing();
+
+      if (!this.isConnected) return;
+
+      const timeSinceLastPong = Date.now() - this.lastPongTimestamp;
+      if (timeSinceLastPong <= this.HEALTH_CHECK_INTERVAL * 3) return;
+
+      const before = this.lastPongTimestamp;
+      const didWake = await this.probeServiceWorker();
+
+      if (this.lastPongTimestamp !== before) return;
+
+      if (didWake) {
+        console.warn(
+          "[PortHealthManager] SW responsive but port stalled, reconnecting",
+        );
+      } else {
+        console.warn(
+          "[PortHealthManager] No pong received, port may be unhealthy",
+        );
+      }
+      this.handleUnhealthyPort();
+    } finally {
+      this.healthCheckInFlight = false;
+    }
+  }
+
   private handleMessage(message: any) {
     // Any inbound traffic indicates the port is alive; update timestamp first
     this.lastPongTimestamp = Date.now();
-
-    // Notify SW of activity so lifecycle manager can record activity (best-effort)
-    // FIX: THROTTLED to prevent flooding SW with thousands of messages during streaming
-    const now = Date.now();
-    if (now - this.lastActivitySent > this.ACTIVITY_THROTTLE_MS) {
-      this.lastActivitySent = now;
-      try {
-        if (
-          chrome &&
-          chrome.runtime &&
-          typeof chrome.runtime.sendMessage === "function"
-        ) {
-          chrome.runtime.sendMessage(
-            { type: "htos.activity", timestamp: now },
-            () => {
-              try {
-                if (chrome.runtime && chrome.runtime.lastError) {
-                  /* ignore transient delivery errors */
-                }
-              } catch (_) { }
-            },
-          );
-        }
-      } catch (e) { }
-    }
 
     if (message.type === "KEEPALIVE_PONG") {
       if (!this.isConnected) {

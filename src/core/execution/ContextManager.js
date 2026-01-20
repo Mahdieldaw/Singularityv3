@@ -1,3 +1,4 @@
+import { DEFAULT_THREAD } from '../../../shared/messaging.js';
 
 const WORKFLOW_DEBUG = false;
 const wdbg = (...args) => {
@@ -84,7 +85,7 @@ export class ContextManager {
     try {
       const persisted = await this.sessionManager.getProviderContexts(
         context.sessionId,
-        context.threadId || "default-thread",
+        context.threadId || DEFAULT_THREAD,
       );
       const persistedMeta = persisted?.[providerId]?.meta;
       if (persistedMeta && Object.keys(persistedMeta).length > 0) {

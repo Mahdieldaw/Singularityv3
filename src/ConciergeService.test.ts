@@ -201,10 +201,10 @@ describe('ConciergeService', () => {
         ];
 
         const prompt = buildSemanticMapperPrompt('Q', shadowStatements as any);
-        const match = prompt.match(/<shadow_statements>\s*([\s\S]*?)\s*<\/shadow_statements>/);
+        const match = prompt.match(/<shadow_paragraphs>\s*([\s\S]*?)\s*<\/shadow_paragraphs>/);
         expect(match).not.toBeNull();
         const obj = JSON.parse(String(match?.[1] || '{}'));
-        expect(obj.model_1?.[0]).toEqual({ id: 's_0', text: 'A', stance: 'assertive', signals: ['TENS'] });
-        expect(obj.model_2?.[0]).toEqual({ id: 's_1', text: 'B', stance: 'cautionary', signals: ['SEQ', 'COND'] });
+        expect(obj.model_1?.[0]?.statements?.[0]).toEqual({ id: 's_0', text: 'A', stance: 'assertive', signals: ['TENS'] });
+        expect(obj.model_2?.[0]?.statements?.[0]).toEqual({ id: 's_1', text: 'B', stance: 'cautionary', signals: ['SEQ', 'COND'] });
     });
 });

@@ -3,6 +3,7 @@
 import { WorkflowEngine } from "./workflow-engine.js";
 import { runPreflight, createAuthErrorMessage } from './preflight-validator.js';
 import { authManager } from './auth-manager.js';
+import { DEFAULT_THREAD } from '../../shared/messaging.js';
 // Note: ContextResolver is now available via services; we don't import it directly here
 
 /**
@@ -183,7 +184,7 @@ export class ConnectionHandler {
             type: "ai",
             userTurnId: userTurnId || "unknown",
             sessionId,
-            threadId: aiTurn.threadId || "default-thread",
+            threadId: aiTurn.threadId || DEFAULT_THREAD,
             createdAt: aiTurn.createdAt || Date.now(),
             batchResponses: buckets.batchResponses,
             mappingResponses: buckets.mappingResponses,
@@ -191,6 +192,7 @@ export class ConnectionHandler {
             meta: aiTurn.meta || {},
             mapperArtifact: aiTurn.mapperArtifact,
             singularityOutput: inferredSingularityOutput,
+            pipelineStatus: aiTurn.pipelineStatus,
           },
         },
       });
@@ -207,13 +209,21 @@ export class ConnectionHandler {
     return async (message) => {
       if (!message || !message.type) return;
 
+      if (message.type === "KEEPALIVE_PING") {
+        this.port.postMessage({
+          type: "KEEPALIVE_PONG",
+          timestamp: Date.now(),
+        });
+        return;
+      }
+
       try {
         if (this.lifecycleManager && typeof this.lifecycleManager.recordActivity === "function") {
           this.lifecycleManager.recordActivity();
         }
       } catch (_) { }
 
-      if (message.type !== "keepalive_ping") {
+      if (message.type !== "KEEPALIVE_PING") {
         console.log(`[ConnectionHandler] Received: ${message.type}`);
       }
 
@@ -228,13 +238,6 @@ export class ConnectionHandler {
             } else {
               console.warn('[ConnectionHandler] Retry requested but workflowEngine is not ready');
             }
-            break;
-
-          case "KEEPALIVE_PING":
-            this.port.postMessage({
-              type: "KEEPALIVE_PONG",
-              timestamp: Date.now(),
-            });
             break;
 
           case "reconnect":
@@ -287,16 +290,6 @@ export class ConnectionHandler {
 
       return;
     }
-
-    // Record activity
-    try {
-      if (
-        this.lifecycleManager &&
-        typeof this.lifecycleManager.recordActivity === "function"
-      ) {
-        this.lifecycleManager.recordActivity();
-      }
-    } catch (e) { }
 
     try {
       this.lifecycleManager?.activateWorkflowMode();
@@ -466,7 +459,7 @@ export class ConnectionHandler {
         : null;
       const effectiveProviders =
         Array.isArray(firstPromptStep?.payload?.providers) &&
-        firstPromptStep.payload.providers.length > 0
+          firstPromptStep.payload.providers.length > 0
           ? firstPromptStep.payload.providers
           : (executeRequest.providers || []);
       // ========================================================================

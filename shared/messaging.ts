@@ -1,5 +1,5 @@
-// shared/messaging.ts
 // Centralized message type constants used between UI and background SW
+export const DEFAULT_THREAD = "default-thread";
 
 export const EXECUTE_WORKFLOW = "EXECUTE_WORKFLOW";
 export const CONTINUE_COGNITIVE_WORKFLOW = "CONTINUE_COGNITIVE_WORKFLOW";

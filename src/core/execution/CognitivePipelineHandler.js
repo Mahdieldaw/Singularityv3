@@ -1,5 +1,6 @@
 import { parseMapperArtifact } from '../../../shared/parsing-utils';
 import { extractUserMessage } from '../context-utils.js';
+import { DEFAULT_THREAD } from '../../../shared/messaging.js';
 
 export class CognitivePipelineHandler {
   constructor(port, persistenceCoordinator, sessionManager) {
@@ -755,7 +756,7 @@ export class CognitivePipelineHandler {
             type: "ai",
             userTurnId: userTurnId || "unknown",
             sessionId: effectiveSessionId,
-            threadId: aiTurn.threadId || "default-thread",
+            threadId: aiTurn.threadId || DEFAULT_THREAD,
             createdAt: aiTurn.createdAt || Date.now(),
             batchResponses: buckets.batchResponses,
             mappingResponses: buckets.mappingResponses,

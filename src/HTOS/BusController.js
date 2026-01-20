@@ -25,8 +25,6 @@ const utils = {
     map: (e) => e instanceof Map,
     set: (e) => e instanceof Set,
     url: (e) => e instanceof URL,
-    blob: (e) => e instanceof Blob,
-    file: (e) => e instanceof File,
     error: (e) => e instanceof Error,
     regexp: (e) => e instanceof RegExp,
     array: (e) => Array.isArray(e),
@@ -65,30 +63,6 @@ const utils = {
       timeout: a - r,
     });
   },
-
-  // Object URL utilities
-  objectUrl: {
-    create(e, a = !1) {
-      if (!URL.createObjectURL) {
-        // Fallback for environments without URL.createObjectURL
-        console.warn("URL.createObjectURL not available");
-        return null;
-      }
-      const o = URL.createObjectURL(e);
-      if (a) {
-        const timeout = utils.is.number(a) ? a : 60000;
-        setTimeout(() => URL.revokeObjectURL(o), timeout);
-      }
-      return o;
-    },
-    revoke(e) {
-      if (!URL.revokeObjectURL) {
-        console.warn("URL.revokeObjectURL not available");
-        return;
-      }
-      URL.revokeObjectURL(e);
-    },
-  },
 };
 
 // =============================================================================
@@ -97,13 +71,10 @@ const utils = {
 
 const env = {
   getLocus: () => {
-    const { protocol: e, host: t, pathname: n, href: a } = location;
-    // normalize for robust comparisons
-    const _href = String(a || "").toLowerCase();
-    const _path = String(n || "").toLowerCase();
+    const { pathname, href } = location;
+    const _href = String(href || "").toLowerCase();
+    const _path = String(pathname || "").toLowerCase();
 
-    // --- START OF FIX ---
-    // Recognize oi loader paths and local dev variants in multiple forms.
     if (
       _href === "https://htos.io/oi" ||
       _href === "http://localhost:3000/oi" ||
@@ -112,19 +83,12 @@ const env = {
     ) {
       return "oi";
     }
-    // --- END OF FIX ---
 
-    return e !== "chrome-extension:" && chrome?.runtime?.getURL
-      ? "cs"
-      : t === "localhost:3050"
-        ? "fg"
-        : e !== "chrome-extension:"
-          ? "nj"
-          : n === "/HTOS.html"
-            ? "pp"
-            : n === "/offscreen.html"
-              ? "os"
-              : "bg";
+    if (pathname === "/offscreen.html") {
+      return "os";
+    }
+
+    return "bg";
   },
 };
 
@@ -157,23 +121,11 @@ const BusController = {
     this._handlers = {};
 
     // Context-specific initialization
-    if (this._is("pp")) {
-      this._setupPp();
-      this._tabId = await this.getTabId();
-    } else if (this._is("bg")) {
-      this._blobs = {};
-      // Use a consistent channel for BG<->OS blob marshalling
-      this._channel = new BroadcastChannel("htos-bus-channel");
+    if (this._is("bg")) {
       this._setupBg();
-    } else if (this._is("cs")) {
-      await this._setupCs();
-    } else if (this._is("nj")) {
-      this._setupNj();
     } else if (this._is("os")) {
       // Offscreen context: we'll initialize iframe-related plumbing in _setupOs
       this._iframe = null;
-      // Use the same channel as BG for blob marshalling
-      this._channel = new BroadcastChannel("htos-bus-channel");
       this._setupOs();
     } else if (this._is("oi")) {
       this._setupOi();
@@ -198,23 +150,9 @@ const BusController = {
   },
 
   async send(e, ...n) {
-    if (utils.is.numeric(e)) {
-      const t = Number(e);
-      return (
-        (e = n[0]),
-        (n = n.slice(1)),
-        await this._pick([
-          this._sendToCs(t, e, ...n),
-          this._sendToExt(t, e, ...n),
-        ])
-      );
-    }
-
-    if (this._is("pp")) return await this._sendToExt(e, ...n);
-    if (this._is("nj")) return await this._sendToPage(e, ...n);
     if (this._is("oi")) return await this._sendToParent(e, ...n);
 
-    if (this._is("bg", "cs", "os"))
+    if (this._is("bg", "os"))
       return await this._pick([
         this._sendToExt(e, ...n),
         this._callHandlers(
@@ -226,12 +164,6 @@ const BusController = {
           (e) => e.proxy,
         ),
       ]);
-
-    if (this._is("fg")) {
-      if (e === "store.actions") return;
-      if (e === "idb.change") return;
-      console.log("Bus log:", e, ...n);
-    }
   },
 
   async call(e, ...t) {
@@ -250,13 +182,7 @@ const BusController = {
   },
 
   async getTabId() {
-    if (this._is("bg")) return null;
-    if (this._is("pp")) {
-      const tabId = new URL(location.href).searchParams.get("tabId");
-      if (tabId) return Number(tabId);
-    }
-    const { tabId: e } = await this.send("bus.getTabData");
-    return e;
+    return null;
   },
 
   // =============================================================================
@@ -264,10 +190,7 @@ const BusController = {
   // =============================================================================
 
   _on(e, t, n, a = null) {
-    (this._handlers[e] || (this._handlers[e] = []),
-      this._is("cs", "nj", "oi") &&
-        this._handlers[e].length === 0 &&
-        this._sendToProxier("bus.proxy", e, !0));
+    this._handlers[e] || (this._handlers[e] = []);
 
     const o = {
       fn: n,
@@ -287,9 +210,6 @@ const BusController = {
 
     if (this._handlers[e].length === 0) {
       delete this._handlers[e];
-      if (this._is("cs", "nj", "oi")) {
-        this._sendToProxier("bus.proxy", e, !1);
-      }
     }
   },
 
@@ -297,97 +217,12 @@ const BusController = {
   // CONTEXT-SPECIFIC SETUP METHODS
   // =============================================================================
 
-  _setupPp() {
-    // Popup setup - minimal implementation
-  },
-
   _setupBg() {
-    // For blob handling with OS - already initialized in init() as this._channel
-
-    chrome.runtime.onMessage.addListener((e, t, n) => {
+    chrome.runtime.onMessage.addListener((e, _t, n) => {
       if (!this._isBusMsg(e)) return false; // Do NOT keep the channel open for non-bus messages
-
-      const a = t.tab?.id || null;
-
-      if (e.name === "bus.proxy") {
-        return void (async () => {
-          const [t, n2] = await this._deserialize(e.argsStr);
-          if (!a) return;
-          const o = `cs-${a}`;
-          n2
-            ? this._on(t, o, (...e2) => this._sendToCs(a, t, ...e2))
-            : this._off(t, o);
-        })();
-      }
-
-      if (e.name === "bus.removeCsProxies") {
-        // When a request arrives to remove content-script proxies, use the
-        // sender's tab id (stored in `a`) to remove all handlers that were
-        // registered with the proxy key `cs-<tabId>`.
-        try {
-          if (a) {
-            this._removeProxyHandlers(`cs-${a}`);
-          }
-        } catch (err) {
-          console.warn(
-            "[BusController] Failed to remove CS proxies for tab:",
-            a,
-            err,
-          );
-        }
-        return;
-      }
-
-      if (e.name === "bus.getTabData") {
-        const windowId = t.tab?.windowId || null;
-        return (
-          n(
-            this._serialize({
-              tabId: a,
-              windowId: windowId,
-            }),
-          ),
-          !0
-        );
-      }
-
-      if (e.name === "bus.sendToCs") {
-        return (
-          (async () => {
-            const t2 = await this._deserialize(e.argsStr),
-              a2 = await this._sendToCs(...t2);
-            n(this._serialize(a2));
-          })(),
-          !0
-        );
-      }
-
-      if (e.name === "bus.blobIdToObjectUrl") {
-        return (
-          (async () => {
-            const [t3] = await this._deserialize(e.argsStr),
-              a3 = await this._blobIdToObjectUrl(t3);
-            n(this._serialize(a3));
-          })(),
-          !0
-        );
-      }
-
-      const o = this._callHandlers(e, (e2) => e2.proxy !== `cs-${a}`);
+      const o = this._callHandlers(e);
       return o ? (o.then(this._serialize).then(n), !0) : undefined;
     });
-
-    chrome.tabs.onRemoved.addListener((e) => {
-      this._removeProxyHandlers(`cs-${e}`);
-    });
-  },
-
-  async _setupCs() {
-    // Content script setup - minimal implementation
-  },
-
-  _setupNj() {
-    // Injected script setup - minimal implementation
   },
 
   _setupOs() {
@@ -566,27 +401,13 @@ const BusController = {
                 error: "Failed to communicate with the offscreen iframe.",
               }),
             );
-          } catch (_) {}
+          } catch (_) { }
         }
       })();
 
       return true; // Keep the message channel open for the async response.
     });
 
-    // LISTENER 3: Blob marshalling between BG and OS via BroadcastChannel
-    this._channel.addEventListener("message", ({ data }) => {
-      try {
-        if (!data || !data.reqId) return;
-        const { blob, reqId } = data;
-        const objectUrl = utils.objectUrl.create(blob, true);
-        this._channel.postMessage({ resId: reqId, objectUrl });
-      } catch (e) {
-        console.warn(
-          "[BusController-os] Failed handling blob marshalling message:",
-          e,
-        );
-      }
-    });
   },
 
   _setupOi() {
@@ -651,37 +472,6 @@ const BusController = {
     return await this._deserialize(s);
   },
 
-  async _sendToCs(e, t, ...n) {
-    if (!chrome.tabs?.sendMessage)
-      return await this.send("bus.sendToCs", e, t, ...n);
-
-    const a = this._serialize(n),
-      o = this._createBusMsg({
-        name: t,
-        argsStr: a,
-        target: "cs",
-      }),
-      i = await new Promise((t) => {
-        chrome.tabs.sendMessage(e, o, (e) => {
-          chrome.runtime.lastError ? t(null) : t(e);
-        });
-      });
-
-    return await this._deserialize(i);
-  },
-
-  async _sendToPage(e, ...t) {
-    const n = this._generateId(),
-      a = this._createBusMsg({
-        name: e,
-        args: t,
-        reqId: n,
-        locus: this._locus,
-      });
-
-    return (window.postMessage(a, "*"), await this._waitForResponseMessage(n));
-  },
-
   async _sendToIframe(e, ...t) {
     if (!this._iframe) return null;
 
@@ -714,100 +504,23 @@ const BusController = {
     return (parent.postMessage(a, "*"), await this._waitForResponseMessage(n));
   },
 
-  async _sendToProxier(e, ...t) {
-    return this._is("cs")
-      ? await this._sendToExt(e, ...t)
-      : this._is("nj")
-        ? await this._sendToPage(e, ...t)
-        : this._is("oi")
-          ? await this._sendToParent(e, ...t)
-          : undefined;
-  },
-
   // =============================================================================
-  // SERIALIZATION & BLOB HANDLING
+  // SERIALIZATION
   // =============================================================================
 
   _serialize(e) {
-    return utils.is.nil(e)
-      ? null
-      : JSON.stringify(e, (_key, t) => {
-          if (utils.is.blob(t)) {
-            if (this._is("bg")) {
-              const newId = this._generateId();
-              return ((this._blobs[newId] = t), `bus.blob.${newId}`);
-            }
-            return `bus.blob.${utils.objectUrl.create(t, !0)}`;
-          }
-          return utils.is.error(t) ? `bus.error.${t.message}` : t;
-        });
+    if (utils.is.nil(e)) return null;
+    return JSON.stringify(e, (_key, t) => {
+      return utils.is.error(t) ? `bus.error.${t.message}` : t;
+    });
   },
 
   async _deserialize(e) {
     if (!utils.is.string(e)) return null;
-
-    const t = new Map(),
-      n = JSON.parse(e, (_key, n) => {
-        const o = utils.is.string(n);
-        return o && n.startsWith("bus.blob.")
-          ? (t.set(n, n.slice("bus.blob.".length)), n)
-          : o && n.startsWith("bus.error.")
-            ? new Error(n.slice("bus.error.".length))
-            : n;
-      });
-
-    await Promise.all(
-      Array.from(t.keys()).map(async (e) => {
-        let n;
-        const a = t.get(e);
-        n = a.startsWith("blob:")
-          ? a
-          : await this._sendToExt("bus.blobIdToObjectUrl", a);
-        const o = await fetch(n).then((e) => e.blob());
-        t.set(e, o);
-      }),
-    );
-
-    return this._applyBlobs(n, t);
-  },
-
-  _applyBlobs(e, t) {
-    if (t.has(e)) return t.get(e);
-    if (utils.is.array(e) || utils.is.object(e))
-      for (const n in e) e[n] = this._applyBlobs(e[n], t);
-    return e;
-  },
-
-  async _blobIdToObjectUrl(e) {
-    const t = this._blobs[e];
-    let n;
-
-    if (utils.is.string(t)) {
-      n = t;
-    } else {
-      n = await this._blobToObjectUrl(t);
-      this._blobs[e] = n;
-    }
-
-    setTimeout(() => delete this._blobs[e], 60000);
-    return n;
-  },
-
-  async _blobToObjectUrl(e) {
-    const t = this._generateId();
-
-    this._channel.postMessage({
-      reqId: t,
-      blob: e,
-    });
-
-    return await new Promise((e) => {
-      const n = ({ data: a }) => {
-        if (!a || a.resId !== t) return;
-        this._channel.removeEventListener("message", n);
-        e(a.objectUrl);
-      };
-      this._channel.addEventListener("message", n);
+    return JSON.parse(e, (_key, n) => {
+      return utils.is.string(n) && n.startsWith("bus.error.")
+        ? new Error(n.slice("bus.error.".length))
+        : n;
     });
   },
 
@@ -892,16 +605,16 @@ const BusController = {
     e.length === 0
       ? null
       : await new Promise((t) => {
-          let n = 0;
-          e.forEach(async (o) => {
-            const i = await o;
-            return utils.is.nil(i)
-              ? n === e.length - 1
-                ? t(null)
-                : void n++
-              : t(i);
-          });
-        }),
+        let n = 0;
+        e.forEach(async (o) => {
+          const i = await o;
+          return utils.is.nil(i)
+            ? n === e.length - 1
+              ? t(null)
+              : void n++
+            : t(i);
+        });
+      }),
 };
 
 // =============================================================================
@@ -910,10 +623,3 @@ const BusController = {
 
 // For ES6 modules
 export { BusController, utils, env };
-
-// For global browser usage
-if (typeof window !== "undefined") {
-  window["HTOSBusController"] = BusController;
-  window["HTOSBusUtils"] = utils;
-  window["HTOSEnv"] = env;
-}

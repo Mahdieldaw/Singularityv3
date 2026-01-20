@@ -32,6 +32,7 @@ import { normalizeProviderId } from "../../utils/provider-id-mapper";
 import api from "../../services/extension-api";
 import type { TurnMessage, UserTurn, AiTurn, ProviderKey } from "../../types";
 import { LLM_PROVIDERS_CONFIG } from "../../constants";
+import { DEFAULT_THREAD } from "../../../shared/messaging";
 
 const PORT_DEBUG_UI = false;
 
@@ -870,12 +871,46 @@ export function usePortMessageHandler(enabled: boolean = true) {
         }
 
         case "MAPPER_ARTIFACT_READY": {
-          const { aiTurnId, artifact, singularityOutput, pipelineStatus } = message as any;
+          const {
+            aiTurnId,
+            artifact,
+            singularityOutput,
+            pipelineStatus,
+            sessionId: msgSessionId,
+          } = message as any;
           if (!aiTurnId) return;
+
+          if (msgSessionId) {
+            if (!currentSessionId || currentSessionId === msgSessionId) {
+              setCurrentSessionId(msgSessionId);
+            }
+          }
 
           setTurnsMap((draft: Map<string, TurnMessage>) => {
             const existing = draft.get(aiTurnId);
-            if (!existing || existing.type !== "ai") return;
+            if (!existing) {
+              const now = Date.now();
+              const baseTurn: AiTurn = {
+                type: "ai",
+                id: aiTurnId,
+                sessionId: msgSessionId ?? currentSessionId ?? null,
+                threadId: DEFAULT_THREAD,
+                userTurnId: "unknown",
+                createdAt: now,
+                batchResponses: {},
+                mappingResponses: {},
+                singularityResponses: {},
+                meta: { isOptimistic: false },
+              };
+              draft.set(aiTurnId, {
+                ...baseTurn,
+                mapperArtifact: artifact,
+                ...(singularityOutput ? { singularityOutput } : {}),
+                ...(pipelineStatus ? { pipelineStatus } : {}),
+              });
+              return;
+            }
+            if (existing.type !== "ai") return;
             const aiTurn = existing as AiTurn;
 
             // Update with cognitive artifacts
@@ -902,6 +937,20 @@ export function usePortMessageHandler(enabled: boolean = true) {
       selectedModels,
       mappingEnabled,
       mappingProvider,
+      setLastActivityAt,
+      setWorkflowProgress,
+      setProviderErrors,
+      setWorkflowDegraded,
+      setActiveSplitPanel,
+      isSplitOpen,
+      activeSplitPanel,
+      setHasAutoOpenedPane,
+      isSplitOpenRef,
+      activeSplitPanelRef,
+      activeAiTurnIdRef,
+      setActiveRecomputeState,
+      setLastStreamingProvider,
+      hasAutoOpenedPane,
 
     ],
   );

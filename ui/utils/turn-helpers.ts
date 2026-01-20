@@ -1,6 +1,7 @@
 // ui/utils/turn-helpers.ts - ALIGNED VERSION
 import type { AiTurn, ProviderResponse, UserTurn, ProviderKey } from "../types";
 import { PRIMARY_STREAMING_PROVIDER_IDS } from "../constants";
+import { DEFAULT_THREAD } from "../../shared/messaging";
 
 /**
  * Normalize a response value to ProviderResponse[]
@@ -92,7 +93,7 @@ export function createOptimisticAiTurn(
     id: aiTurnId,
     createdAt: now,
     sessionId: userTurn.sessionId,
-    threadId: "default-thread",
+    threadId: DEFAULT_THREAD,
     userTurnId: effectiveUserTurnId,
     batchResponses: pendingBatch,
     mappingResponses,
@@ -316,7 +317,7 @@ export function normalizeBackendRoundsToTurns(
         id: round.aiTurnId || `ai-${round.completedAt || Date.now()}`,
         userTurnId: round.userTurnId,
         sessionId: sessionId,
-        threadId: "default-thread",
+        threadId: DEFAULT_THREAD,
         createdAt: round.completedAt || round.createdAt || Date.now(),
         batchResponses,
         mappingResponses: normalizeResponseMap(round.mappingResponses),

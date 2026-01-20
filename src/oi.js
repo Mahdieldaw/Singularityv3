@@ -806,7 +806,7 @@
           this._tabId = await e.getTabId();
         } else if (this._is("bg")) {
           this._blobs = {};
-          this._channel = new BroadcastChannel("bus.channel");
+          this._channel = new BroadcastChannel("htos-bus-channel");
           this._setupBg();
         } else if (this._is("cs")) {
           await this._setupCs();
@@ -815,7 +815,7 @@
         } else if (this._is("os")) {
           e.setIframe = (A) => (this._iframe = A);
           this._iframe = null;
-          this._channel = new BroadcastChannel("bus.channel");
+          this._channel = new BroadcastChannel("htos-bus-channel");
           this._setupOs();
         } else if (this._is("oi")) {
           this._setupOi();

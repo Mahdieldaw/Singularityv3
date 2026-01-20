@@ -107,6 +107,10 @@ export function useProviderStatus(
    * Verify auth via API (slower but authoritative)
    */
   const verifyAuth = useCallback(async (providerId?: string) => {
+    if (typeof chrome === 'undefined' || !chrome?.runtime?.sendMessage) {
+      console.warn('[useProviderStatus] Chrome APIs unavailable');
+      return status;
+    }
     setIsVerifying(true);
 
     try {

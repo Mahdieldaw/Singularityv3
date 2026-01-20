@@ -35,4 +35,3 @@ export const SplitPaneRightPanel = React.memo(() => {
 });
 
 SplitPaneRightPanel.displayName = 'SplitPaneRightPanel';
-

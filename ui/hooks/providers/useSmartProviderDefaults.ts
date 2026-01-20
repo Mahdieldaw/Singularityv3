@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import {
     providerAuthStatusAtom,
@@ -60,9 +60,6 @@ export function useSmartProviderDefaults(enabled: boolean = true) {
     const setLocks = useSetAtom(providerLocksAtom);
     const locks = useAtomValue(providerLocksAtom);
 
-    // Track if we've done initial selection to avoid flash
-    const [initialized, setInitialized] = useState(false);
-
     // Load locks from chrome.storage on mount + subscribe to changes
     useEffect(() => {
         if (!enabled) return;
@@ -73,10 +70,4 @@ export function useSmartProviderDefaults(enabled: boolean = true) {
     // Use extracted logic
     useAutoSelectProvider(enabled, 'mapping', mappingProvider, locks.mapping, setMappingProvider);
     useAutoSelectProvider(enabled, 'singularity', singularityProvider, locks.singularity, setSingularityProvider);
-
-    useEffect(() => {
-        setInitialized(true);
-    }, []);
-
-    return { isInitialized: initialized };
 }

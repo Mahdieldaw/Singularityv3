@@ -44,7 +44,7 @@ const IframeController = {
     // Pass the extension oi.js URL to the oi host via window.name (like reference)
     try {
       iframe.name = `offscreen-iframe | ${chrome.runtime.getURL("oi.js")}`;
-    } catch (_) {}
+    } catch (_) { }
 
     // Append iframe to the document and register it immediately with the bus.
     // Simpler, robust flow: do not wait for a custom "oi.initialized" postMessage
@@ -208,26 +208,79 @@ const UtilsController = {
 const OffscreenBootstrap = {
   // Bus discovery shim - probes multiple global names for tolerant discovery
   _discoverBus() {
-    const candidates = [
-      { name: "BusController", ref: window["BusController"] },
-      { name: "HTOSBusController", ref: window["HTOSBusController"] },
-      { name: "__htos_global.$bus", ref: window["__htos_global"]?.$bus },
-      { name: "window.bus", ref: window["bus"] },
-    ];
-
-    for (const candidate of candidates) {
-      if (candidate.ref && typeof candidate.ref.init === "function") {
-        console.log(
-          `[OffscreenBootstrap] Bus discovery: using ${candidate.name}`,
-        );
-        return candidate.ref;
-      }
+    // Check for existing bus (hot reload scenario)
+    if (window["bus"] && typeof window["bus"].init === "function") {
+      console.log("[OffscreenBootstrap] Using existing window.bus");
+      return window["bus"];
     }
 
-    console.warn(
-      "[OffscreenBootstrap] Bus discovery: no suitable bus controller found, falling back to BusController",
-    );
+    // Standard path: use ESM import
+    console.log("[OffscreenBootstrap] Using imported BusController");
     return BusController;
+  },
+
+  _startSwHeartbeat() {
+    if (this._swHeartbeatTimer) return;
+    this._heartbeatConsecutiveFailures = 0;
+    this._heartbeatTotalFailures = 0;
+    this._heartbeatTotalSuccesses = 0;
+    this._heartbeatLastSuccessAt = null;
+    this._heartbeatLastFailureAt = null;
+    this._heartbeatLastError = null;
+    this._swHeartbeatTimer = setInterval(async () => {
+      try {
+        const res = chrome.runtime.sendMessage({
+          type: "offscreen.heartbeat",
+          timestamp: Date.now(),
+        });
+        if (res && typeof res.then === "function") {
+          await res;
+        }
+        this._heartbeatTotalSuccesses += 1;
+        this._heartbeatConsecutiveFailures = 0;
+        this._heartbeatLastSuccessAt = Date.now();
+        this._heartbeatLastError = null;
+      } catch (e) {
+        this._heartbeatTotalFailures += 1;
+        this._heartbeatConsecutiveFailures += 1;
+        this._heartbeatLastFailureAt = Date.now();
+        this._heartbeatLastError =
+          e && typeof e === "object" && "message" in e ? String(e.message) : String(e);
+
+        try {
+          if (this._heartbeatConsecutiveFailures >= 5) {
+            console.error(
+              "[OffscreenBootstrap] CRITICAL: offscreen heartbeat failing repeatedly",
+              {
+                consecutiveFailures: this._heartbeatConsecutiveFailures,
+                lastError: this._heartbeatLastError,
+              },
+            );
+          } else if (this._heartbeatConsecutiveFailures === 1) {
+            console.warn("[OffscreenBootstrap] Offscreen heartbeat failed (first)", {
+              lastError: this._heartbeatLastError,
+            });
+          } else {
+            console.warn("[OffscreenBootstrap] Offscreen heartbeat still failing", {
+              consecutiveFailures: this._heartbeatConsecutiveFailures,
+              lastError: this._heartbeatLastError,
+            });
+          }
+        } catch (_) { }
+      }
+    }, 25000);
+  },
+
+  _getHeartbeatStatus() {
+    return {
+      isRunning: !!this._swHeartbeatTimer,
+      consecutiveFailures: Number(this._heartbeatConsecutiveFailures || 0),
+      totalFailures: Number(this._heartbeatTotalFailures || 0),
+      totalSuccesses: Number(this._heartbeatTotalSuccesses || 0),
+      lastSuccessAt: this._heartbeatLastSuccessAt || null,
+      lastFailureAt: this._heartbeatLastFailureAt || null,
+      lastError: this._heartbeatLastError || null,
+    };
   },
 
   async init() {
@@ -253,6 +306,8 @@ const OffscreenBootstrap = {
       console.log(
         "[OffscreenBootstrap] All specialized controllers initialized successfully",
       );
+
+      this._startSwHeartbeat();
 
       console.log(
         "[OffscreenBootstrap] Initialization completed successfully.",

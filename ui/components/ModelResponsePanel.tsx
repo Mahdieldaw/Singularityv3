@@ -185,6 +185,39 @@ export const ModelResponsePanel: React.FC<ModelResponsePanelProps> = React.memo(
         };
     }, [turnIds, turnsMap, shownTurnId]);
 
+    const allBatchResponsesText = useMemo(() => {
+        const t: any = turnsMap.get(shownTurnId);
+        const batch = t && t.type === "ai" ? (t as any).batchResponses : null;
+        if (!batch || typeof batch !== "object") return "";
+
+        const normalized: Record<string, any> = {};
+        Object.entries(batch as Record<string, any>).forEach(([pid, val]) => {
+            const arr = Array.isArray(val) ? val : [val];
+            const latest = arr[arr.length - 1];
+            if (latest && typeof latest === "object") {
+                normalized[String(pid)] = latest;
+            }
+        });
+
+        const ordered = LLM_PROVIDERS_CONFIG.map((p) => String(p.id));
+        const extras = Object.keys(normalized)
+            .filter((pid) => !ordered.includes(pid))
+            .sort();
+
+        const parts: string[] = [];
+        [...ordered, ...extras].forEach((pid) => {
+            const resp = normalized[pid];
+            const text = String(resp?.text || "").trim();
+            if (!text) return;
+            const providerName =
+                LLM_PROVIDERS_CONFIG.find((p) => String(p.id) === pid)?.name || pid;
+            parts.push(formatProviderResponseForMd(resp, providerName));
+        });
+
+        if (parts.length === 0) return "";
+        return `## Raw Council Outputs (${parts.length} Models)\n\n${parts.join("\n")}`.trim();
+    }, [turnsMap, shownTurnId]);
+
     // Branching visual state
     const isBranching = activeRecompute?.providerId === shownProviderId &&
         activeRecompute?.aiTurnId === shownTurnId &&
@@ -300,6 +333,15 @@ export const ModelResponsePanel: React.FC<ModelResponsePanelProps> = React.memo(
                             variant="icon"
                         />
                     )}
+
+                    <CopyButton
+                        text={allBatchResponsesText}
+                        label="Copy all council outputs"
+                        variant="icon"
+                        disabled={!allBatchResponsesText}
+                    >
+                        All
+                    </CopyButton>
 
                     <button
                         onClick={onClose}

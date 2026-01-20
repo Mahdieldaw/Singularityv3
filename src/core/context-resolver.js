@@ -4,6 +4,7 @@ import {
   findLatestMappingOutput,
   extractUserMessage
 } from './context-utils.js';
+import { DEFAULT_THREAD } from '../../shared/messaging.js';
 
 /**
  * ContextResolver
@@ -56,7 +57,7 @@ export class ContextResolver {
 
   // extend: fetch last turn and extract provider contexts for requested providers
   async _resolveExtend(request) {
-    const sessionId = request.sessionId;
+    const { sessionId, threadId = DEFAULT_THREAD } = request;
     if (!sessionId)
       throw new Error("[ContextResolver] Extend requires sessionId");
 
@@ -75,7 +76,7 @@ export class ContextResolver {
 
     const sessionContexts = await this.sessionManager.getProviderContexts(
       sessionId,
-      "default-thread",
+      threadId,
       { contextRole: "batch" },
     );
 

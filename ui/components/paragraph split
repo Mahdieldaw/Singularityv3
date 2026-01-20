@@ -1,0 +1,172 @@
+4) Data Model Additions
+4.1 Shadow Paragraph Projection (derived)
+Implement paragraph projection as a pure derived layer (no new extraction, no new judgment).
+Prefer adding this to an existing src/shadow module unless it grows too large.
+
+TypeScript
+
+export interface ShadowParagraph {
+  id: string; // "p_0", "p_1", ...
+  modelIndex: number;
+
+  paragraphIndex: number;
+
+  text: string;                 // derived paragraph text (see Projection algorithm)
+  statementIds: string[];       // the shadow statement IDs contained in this paragraph
+
+  // “same rules” summary fields derived from statements:
+  dominantStance: Stance;       // computed from member statements’ stances + confidence
+  confidence: number;           // derived (see below)
+  signals: { sequence: boolean; tension: boolean; conditional: boolean }; // OR aggregation
+
+  // Optional operational fields (not required for semantic mapping)
+  truncated?: boolean;          // true if text was clipped for prompt budget
+}
+Important: This paragraph layer MUST be derived from already-filtered ShadowStatements.
+FLAG: Do NOT use ShadowStatement.fullParagraph as paragraph text by default.
+Reason: fullParagraph can contain excluded/meta sentences that did not survive extraction, which would reintroduce non-authoritative content into the semantic prompt.
+
+4.2 Paragraph Clusters (hint layer)
+Implement paragraph clustering as a hint-only layer (no policy, no forced merges).
+Prefer adding this to an existing src/shadow module unless it grows too large.
+
+TypeScript
+
+export interface ParagraphCluster {
+  id: string;                   // "pc_0", ...
+  paragraphIds: string[];       // in encounter order
+  statementIds: string[];       // union of statementIds for provenance assistance (still hints)
+  representativeParagraphId: string; // medoid/first paragraph id
+  representativeText: string;   // from representative paragraph
+
+  cohesion: number;             // 0..1
+  uncertain: boolean;
+  uncertaintyReasons: string[]; // e.g. ["low_cohesion", "stance_diversity", "oversized"]
+
+  // Expansion payload only when uncertain === true
+  expansion?: {
+    memberParagraphs: Array<{
+      paragraphId: string;
+      modelIndex: number;
+      text: string;
+      statementIds: string[];
+      dominantStance: Stance;
+      signals: { sequence: boolean; tension: boolean; conditional: boolean };
+    }>;
+  };
+}
+5) Paragraph Projection Requirements (“parallel paragraph extraction layer”)
+5.1 What “same rules as sentence statements” means here
+Because you already run:
+
+substantiveness filtering,
+stance classification,
+exclusion rules,
+signal detection
+…at sentence level, the cleanest meaning of “same rules” is:
+
+Paragraphs are constructed only from sentences that survived Shadow extraction, and their stance/signals/confidence are derived from the same classified statements.
+
+This avoids contradictions like “sentence excluded but paragraph contains it and is presented as a coherent unit.”
+
+5.2 Projection algorithm (mechanical)
+Input: ShadowStatement[]
+Output: ShadowParagraph[]
+
+Grouping key:
+
+(modelIndex, location.paragraphIndex)
+For each group:
+
+statementIds = group sorted by location.sentenceIndex (asc), then map(s => s.id)
+text = join group texts in sentence order with single spaces
+  - text is derived from statement.text ONLY (no raw fullParagraph)
+  - if you want more coherence later, the only safe expansion is adding MORE shadow statements, not raw paragraph text
+signals = OR of member statement signals
+dominantStance: choose stance with highest aggregate weight
+Suggested weight per statement = confidence (or confidence * stancePriorityWeight)
+confidence: e.g. max(member.confidence) or avg (pick one deterministic rule; max is simplest)
+Optional truncation rule (recommended):
+- Clip text to MAX_PARAGRAPH_CHARS (e.g. 600–1000) to control prompt growth.
+- If clipped, set truncated=true and keep full statement list (IDs+texts) intact.
+5.3 IDs
+Paragraph IDs must be deterministic:
+
+Sort paragraphs by (modelIndex asc, paragraphIndex asc) then assign p_0...
+Or preserve encounter order from original statement stream (also deterministic).
+Note: ID stability across runs is not required as long as it is deterministic for a given ShadowStatement[] input, because semantic outputs must cite s_* IDs only.
+6) Clustering Requirements (paragraph-level)
+6.1 Why paragraphs are the clustering unit
+Sentences are too small; clustering them produces “shard clusters”
+Paragraphs restore coherence without changing the authoritative unit (statements)
+6.2 Clustering algorithm (v1)
+Implement a deterministic, fully-mechanical baseline first:
+
+Tokenize paragraph text (stopword removal similar to ShadowDelta’s extractSignificantWords)
+Similarity = Jaccard(tokenSetA, tokenSetB)
+Conservative merge threshold (prefer false splits over false merges)
+Example: threshold = 0.45 for paragraphs (tune later)
+Clustering method:
+
+Simple greedy assignment or HAC-like (agent chooses)
+Determinism required (stable ordering decisions)
+FLAG: Cluster representative selection must be deterministic (tie-break by paragraphId).
+6.3 Cluster cohesion scoring
+Cohesion must exist so we can detect uncertainty. Options:
+
+Average similarity of each member to representative (medoid)
+Or minimum similarity within cluster (more conservative)
+6.4 Uncertainty rules (must implement)
+A cluster is uncertain if any of these are true:
+
+cohesion < LOW_COHESION_THRESHOLD (e.g. 0.35)
+stance diversity inside cluster is high:
+e.g. cluster contains both prescriptive and cautionary, or many different stances
+conflicting signals:
+tension-heavy + conditional-heavy mixed can indicate merged nuance
+cluster size too large:
+e.g. paragraphIds.length > 8 (often indicates over-grouping)
+6.5 Uncertainty expansion payload
+When uncertain === true, include extra context to prevent “proto claim masking”:
+
+Add expansion.memberParagraphs with:
+either all member paragraphs (if not too large),
+or a bounded sample:
+include representative paragraph
+include the most “distant” paragraph from representative
+include 1–3 additional diverse members
+Note: This does not alter ordering or drop statements; it is purely extra info.
+Prompt-budget constraint (required):
+- Expansion MUST be bounded by max paragraphs and max chars so StepExecutor doesn’t throw INPUT_TOO_LONG.
+
+7) Semantic Prompt Integration Requirements
+7.1 
+(Recommended) stop pretty-printing JSON to reduce accidental prompt bloat:
+use JSON.stringify(obj) rather than indenting
+7.2 Required codebase changes (what your agent should do)
+1) buildSemanticMapperPrompt() changes
+Compute paragraphs/clusters mechanically from ShadowStatement[] and embed them into the prompt.
+Recommended structure:
+- <shadow_paragraphs> groupedByModel => paragraphs => statements
+- <paragraph_clusters> hint layer (optional if prompt budget is tight)
+Update instructions:
+- “Paragraphs/clusters are hints for grouping. All outputs must cite sourceStatementIds (s_*) only.”
+- “Never cite paragraph IDs (p_*) or cluster IDs (pc_*).”
+- “If a cluster is uncertain=true, treat it as a warning: split rather than merge.”
+Implementation placement (min-change):
+- Keep StepExecutor unchanged by doing paragraph projection + clustering inside buildSemanticMapperPrompt().
+2) Paragraph projector
+Derived from ShadowStatement[]
+Produces ShadowParagraph[] with deterministic IDs and stable ordering.
+3) Paragraph clusterer
+Takes ShadowParagraph[] and returns ParagraphCluster[] with cohesion + uncertainty.
+4) Keep internal invariants
+- Semantic output validation continues to validate ONLY s_* IDs against the full ShadowStatement set.
+- Shadow Delta continues to compare referenced IDs vs all shadow IDs.
+Note: extractReferencedIds already includes claim gates and conflicts.
+Summary
+Yes, sending both full statements and full paragraph text is wasteful.
+No, we don’t need to do that.
+The right approach is one prompt surface: paragraphs that contain the statements.
+Clustering uncertainty is handled by conservative thresholds + bounded expansions, not duplicated raw paragraphs.
+7.3 Add <paragraph_clusters> block (hints)

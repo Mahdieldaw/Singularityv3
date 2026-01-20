@@ -6,7 +6,6 @@
  *
  * Build-phase safe: emitted to dist/adapters/*
  */
-import { BusController } from "../core/vendor-exports.js";
 import { ArtifactProcessor } from "../../shared/artifact-processor";
 
 // Provider-specific debug flag (off by default)
@@ -56,6 +55,8 @@ export class GeminiProviderError extends Error {
       failedToExtractToken: this.type === "failedToExtractToken",
       failedToReadResponse: this.type === "failedToReadResponse",
       noGeminiAccess: this.type === "noGeminiAccess",
+      streamTimeout: this.type === "streamTimeout",
+      zombieStream: this.type === "zombieStream",
       aborted: this.type === "aborted",
       network: this.type === "network",
       unknown: this.type === "unknown",
@@ -123,13 +124,36 @@ export class GeminiSessionApi {
       "f.req": JSON.stringify([null, JSON.stringify([[prompt], null, cursor])]),
     });
 
+    const internalAbortController = new AbortController();
+    if (signal) {
+      if (signal.aborted) {
+        try { internalAbortController.abort(); } catch (_) { }
+      } else {
+        try {
+          signal.addEventListener(
+            "abort",
+            () => {
+              try { internalAbortController.abort(); } catch (_) { }
+            },
+            { once: true },
+          );
+        } catch (_) { }
+      }
+    }
+
+    let abortHint = null;
+    const abortWith = (type, details) => {
+      if (!abortHint) abortHint = { type, details };
+      try { internalAbortController.abort(); } catch (_) { }
+    };
+
     const response = await this._fetch(url, {
       method: "POST",
       headers: {
         "content-type": "application/x-www-form-urlencoded;charset=UTF-8",
         "x-goog-ext-525001261-jspb": modelConfig.header,
       },
-      signal,
+      signal: internalAbortController.signal,
       query: {
         bl: token.bl,
         rt: "c",
@@ -166,25 +190,192 @@ export class GeminiSessionApi {
     /** @type {any} */
     let u;
     try {
-      // Gemini returns an XSSI prefix like ")]}'" followed by multiple JSON lines.
-      const raw = await response.text();
-      const cleaned = raw.replace(/^\)\]\}'\s*\n?/, "").trim();
-      const jsonLines = cleaned
-        .split("\n")
-        .filter((line) => line.trim().startsWith("["));
-      if (jsonLines.length === 0)
-        throw new Error("No JSON lines detected in response");
-      // Parse all JSON lines (robust to multi-line responses)
-      parsedLines = jsonLines
-        .map((line) => {
-          try {
-            return JSON.parse(line);
-          } catch (e) {
-            return null;
+      const TTFT_TIMEOUT_MS = 90000;
+      const READ_GAP_TIMEOUT_MS = 45000;
+      const MEANINGFUL_GAP_TIMEOUT_MS = 30000;
+      const NULL_SPAM_WINDOW_MS = 15000;
+      const NULL_SPAM_THRESHOLD = 3;
+
+      let ttftMet = false;
+      let ttftTimer = setTimeout(() => {
+        abortWith("streamTimeout", { stage: "ttft", timeoutMs: TTFT_TIMEOUT_MS });
+      }, TTFT_TIMEOUT_MS);
+
+      let lastMeaningfulAt = 0;
+      let lastMeaningfulTextLen = 0;
+      let nullSpamWindowStart = Date.now();
+      let nullSpamCount = 0;
+
+      const looksLikeNullSpamPayload = (t) => {
+        if (!Array.isArray(t) || t.length < 10) return false;
+        let nonNullCount = 0;
+        for (let i = 0; i < t.length; i++) {
+          const v = t[i];
+          if (v !== null && v !== undefined) nonNullCount++;
+          if (nonNullCount > 2) return false;
+        }
+        const tail = t[t.length - 1];
+        return Array.isArray(tail) && typeof tail[0] === "number";
+      };
+
+      const reader = response.body?.getReader?.();
+      if (reader) {
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let strippedXssi = false;
+
+        try {
+          while (true) {
+            let readTimer = null;
+            let readResult;
+            try {
+              readResult = await Promise.race([
+                reader.read(),
+                new Promise((_, reject) => {
+                  readTimer = setTimeout(() => reject(new Error("READ_GAP_TIMEOUT")), READ_GAP_TIMEOUT_MS);
+                }),
+              ]);
+            } catch (e) {
+              if (String(e)?.includes("READ_GAP_TIMEOUT")) {
+                abortWith("streamTimeout", { stage: "read_gap", timeoutMs: READ_GAP_TIMEOUT_MS });
+              }
+              throw e;
+            } finally {
+              if (readTimer) clearTimeout(readTimer);
+            }
+
+            const { done, value } = readResult;
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+
+            if (!strippedXssi) {
+              buffer = buffer.replace(/^\)\]\}'\s*\n?/, "");
+              strippedXssi = true;
+            }
+
+            const lines = buffer.split("\n");
+            buffer = lines.pop() || "";
+
+            for (const rawLine of lines) {
+              const line = rawLine.trim();
+              if (!line) continue;
+              if (/^\d+$/.test(line)) continue;
+              if (!line.startsWith("[")) continue;
+
+              let L;
+              try {
+                L = JSON.parse(line);
+              } catch (_) {
+                continue;
+              }
+              if (!L) continue;
+
+              parsedLines.push(L);
+
+              if (!c && parsedLines.length === 1) {
+                try {
+                  c = parsedLines[0]?.[0]?.[5]?.[0] ?? null;
+                } catch (_) { }
+              }
+
+              for (const entry of L) {
+                if (!Array.isArray(entry) || entry[0] !== "wrb.fr") continue;
+
+                if (typeof entry[2] !== "string") {
+                  const tail = entry[entry.length - 1];
+                  if (Array.isArray(tail) && typeof tail[0] === "number") {
+                    const now = Date.now();
+                    if (now - nullSpamWindowStart > NULL_SPAM_WINDOW_MS) {
+                      nullSpamWindowStart = now;
+                      nullSpamCount = 0;
+                    }
+                    nullSpamCount++;
+                  }
+                  continue;
+                }
+
+                let t;
+                try {
+                  t = JSON.parse(entry[2]);
+                } catch (_) {
+                  continue;
+                }
+
+                const text = t?.[0]?.[0] || t?.[4]?.[0]?.[1]?.[0] || "";
+                if (text && text.trim().length > 0) {
+                  if (ttftTimer) {
+                    clearTimeout(ttftTimer);
+                    ttftTimer = null;
+                  }
+                  ttftMet = true;
+
+                  const baseCursor = Array.isArray(t?.[1]) ? t[1] : [];
+                  const tail = t?.[4]?.[0]?.[0];
+                  const nextCursor = tail !== undefined ? [...baseCursor, tail] : baseCursor;
+
+                  if (!u || (typeof text === "string" && text.length >= (u.text?.length || 0))) {
+                    u = { text, cursor: nextCursor };
+                  }
+
+                  if ((u?.text?.length || 0) > lastMeaningfulTextLen) {
+                    lastMeaningfulTextLen = u.text.length;
+                    lastMeaningfulAt = Date.now();
+                    nullSpamWindowStart = lastMeaningfulAt;
+                    nullSpamCount = 0;
+                  }
+                  continue;
+                }
+
+                if (looksLikeNullSpamPayload(t)) {
+                  const now = Date.now();
+                  if (now - nullSpamWindowStart > NULL_SPAM_WINDOW_MS) {
+                    nullSpamWindowStart = now;
+                    nullSpamCount = 0;
+                  }
+                  nullSpamCount++;
+                }
+              }
+
+              if (!ttftMet && nullSpamCount >= NULL_SPAM_THRESHOLD) {
+                abortWith("zombieStream", { stage: "null_spam", windowMs: NULL_SPAM_WINDOW_MS, count: nullSpamCount });
+                this._throw("zombieStream", "Gemini stream stalling (timeout): repeated null frames");
+              }
+
+              if (ttftMet && lastMeaningfulAt > 0) {
+                const now = Date.now();
+                if (now - lastMeaningfulAt > MEANINGFUL_GAP_TIMEOUT_MS && nullSpamCount >= NULL_SPAM_THRESHOLD) {
+                  abortWith("zombieStream", { stage: "meaningful_gap", gapMs: now - lastMeaningfulAt, count: nullSpamCount });
+                  this._throw("zombieStream", "Gemini stream stalling (timeout): no meaningful progress");
+                }
+              }
+            }
           }
-        })
-        .filter(Boolean);
+        } finally {
+          if (ttftTimer) clearTimeout(ttftTimer);
+          try { reader.releaseLock(); } catch (_) { }
+        }
+      } else {
+        const raw = await response.text();
+        const cleaned = raw.replace(/^\)\]\}'\s*\n?/, "").trim();
+        const jsonLines = cleaned
+          .split("\n")
+          .filter((line) => line.trim().startsWith("["));
+        if (jsonLines.length === 0)
+          throw new Error("No JSON lines detected in response");
+        parsedLines = jsonLines
+          .map((line) => {
+            try {
+              return JSON.parse(line);
+            } catch (e) {
+              return null;
+            }
+          })
+          .filter(Boolean);
+      }
     } catch (e) {
+      if (this.isOwnError(e)) throw e;
+      if (abortHint?.type) this._throw(abortHint.type, abortHint.details);
       this._throw("failedToReadResponse", { step: "data", error: e });
     }
 
@@ -522,31 +713,7 @@ export class GeminiProviderController {
 
   async init() {
     if (this.initialized) return;
-    // Register with BusController for cross-context communication
-    if (typeof BusController !== "undefined") {
-      BusController.on(
-        "gemini-provider.ask",
-        this._handleAskRequest.bind(this),
-      );
-      BusController.on(
-        "gemini-provider.fetchToken",
-        this._handleFetchTokenRequest.bind(this),
-      );
-    }
     this.initialized = true;
-  }
-
-  async _handleAskRequest(payload) {
-    return await this.api.ask(
-      payload.prompt,
-      payload.options || {},
-      payload.retrying || false,
-      payload.coldStartRetries || 0,
-    );
-  }
-
-  async _handleFetchTokenRequest() {
-    return await this.api._fetchToken();
   }
 
   /**

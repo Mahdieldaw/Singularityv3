@@ -6,7 +6,6 @@
  *
  * Build-phase safe: emitted to dist/adapters/*
  */
-import { BusController } from "../core/vendor-exports.js";
 import { ProviderDNRGate } from "../core/dnr-utils.js";
 
 // Provider-specific debug flag (off by default)
@@ -613,58 +612,9 @@ export class ClaudeProviderController {
     this.api = new ClaudeSessionApi(dependencies);
   }
   async init() {
-    if (this.initialized) {
-      return;
-    }
-    // Register with bus controller if available
-    if (typeof BusController !== "undefined" && BusController.on) {
-      BusController.on("claude.ask", this._handleAskRequest.bind(this));
-      BusController.on(
-        "claude.setChatTitle",
-        this._handleSetTitleRequest.bind(this),
-      );
-      BusController.on(
-        "claude.deleteChat",
-        this._handleDeleteChatRequest.bind(this),
-      );
-      BusController.on(
-        "claude.fetchOrgId",
-        this._handleFetchOrgIdRequest.bind(this),
-      );
-      BusController.on(
-        "claude.updateModels",
-        this._handleUpdateModelsRequest.bind(this),
-      );
-    }
-    // Update available models
+    if (this.initialized) return;
     this.api.updateModels();
     this.initialized = true;
-  }
-  // =============================================================================
-  // BUS EVENT HANDLERS
-  // =============================================================================
-  async _handleAskRequest(payload) {
-    return await this.api.ask(
-      payload.prompt,
-      payload.options || {},
-      payload.onChunk || (() => { }),
-    );
-  }
-  async _handleSetTitleRequest(payload) {
-    return await this.api.setChatTitle(
-      payload.chatId,
-      payload.title,
-      payload.orgId,
-    );
-  }
-  async _handleDeleteChatRequest(payload) {
-    return await this.api.deleteChat(payload.chatId, payload.orgId);
-  }
-  async _handleFetchOrgIdRequest() {
-    return await this.api.fetchOrgId();
-  }
-  _handleUpdateModelsRequest() {
-    this.api.updateModels();
   }
   // =============================================================================
   // PUBLIC API

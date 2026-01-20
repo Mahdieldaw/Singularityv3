@@ -5,6 +5,8 @@
  * Phase 3 completion: Zero database access, fully synchronous.
  * All data comes from ResolvedContext parameter.
  */
+import { DEFAULT_THREAD } from '../../shared/messaging.js';
+
 
 export class WorkflowCompiler {
   constructor(sessionManager) {
@@ -264,7 +266,7 @@ export class WorkflowCompiler {
 
     return {
       sessionId,
-      threadId: "default-thread",
+      threadId: DEFAULT_THREAD,
       targetUserTurnId:
         context.type === "recompute" ? context.sourceTurnId : "",
       sessionCreated,

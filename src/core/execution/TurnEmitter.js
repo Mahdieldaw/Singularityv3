@@ -1,3 +1,4 @@
+import { DEFAULT_THREAD } from '../../../shared/messaging.js';
 
 export class TurnEmitter {
   constructor(port) {
@@ -175,7 +176,7 @@ export class TurnEmitter {
         type: "ai",
         userTurnId: userTurn.id,
         sessionId: context.sessionId,
-        threadId: "default-thread",
+        threadId: DEFAULT_THREAD,
         createdAt: timestamp,
         batchResponses,
         mappingResponses,

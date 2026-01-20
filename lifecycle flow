@@ -1,0 +1,91 @@
+Startup Timeline (Extension → WelcomeScreen idle)
+
+- Chrome loads the MV3 service worker via "background.service_worker": "bg.js" in manifest.json . The built worker is bg.js which contains the compiled sw-entry.js .
+- Service worker boot (module eval) : sw-entry.js
+  - Binds fetch , sets self["BusController"] = BusController .
+  - Registers listeners:
+    - chrome.runtime.onStartup → handleStartup("startup")
+    - chrome.runtime.onInstalled → handleStartup("installed: …")
+    - chrome.runtime.onMessage → handleUnifiedMessage(...) (request/response API)
+    - chrome.runtime.onConnect → Port handler for "htos-popup" (UI realtime channel)
+    - chrome.action.onClicked → opens UI tab ui/index.html
+  - Immediately calls handleStartup("initial-load") at the bottom. In dist you can see that call in bg.js .
+- SW handleStartup(reason) : sw-entry.js
+  - await authManager.initialize() → auth-manager.js loads cached auth, installs cookie listeners, does an initial cookie scan.
+  - Loads prefs from chrome.storage.local (currently htos_mapping_provider ).
+  - Calls initializeGlobalServices(prefs) (one-time singleton).
+- Global services init : sw-entry.js
+  - Infrastructure : sw-entry.js
+    - NetRulesManager.init() → NetRulesManager.js clears session DNR rules + starts cleanup alarm.
+    - CSPController.init() , UserAgentController.init() , ArkoseController.init()
+    - DNRUtils.initialize() → dnr-utils.js
+    - OffscreenController.init() creates offscreen.html if needed → sw-entry.js
+    - BusController.init() → BusController.js (service worker side bus) and stores self["bus"] .
+  - Persistence : initializePersistenceLayer() + SessionManager.initialize() → sw-entry.js
+  - Providers : initializeProviders() builds provider registry of controllers+adapters → sw-entry.js
+  - Orchestrator + lifecycle : initializeOrchestrator() creates LifecycleManager + FaultTolerantOrchestrator → sw-entry.js , lifecycle code: lifecycle-manager.js
+Offscreen + oi iframe (happens during SW infra init)
+
+- chrome.offscreen.createDocument({ url: "offscreen.html" }) loads offscreen.html → which loads the built offscreen.js .
+- The source entrypoint is offscreen-entry.js which runs OffscreenBootstrap.init() .
+- Offscreen bootstrap:
+  - Initializes BusController in offscreen context, exposes window.bus → OffscreenBootstrap.js
+  - Creates hidden iframe to oi.html and calls window.bus.setIframe(iframe) so SW↔offscreen↔iframe routing works → OffscreenBootstrap.js
+  - Periodically polls startup.oiReady via bus and restarts iframe if needed → OffscreenBootstrap.js
+UI boot → WelcomeScreen idle
+
+- Action click opens chrome.runtime.getURL("ui/index.html") → sw-entry.js . Built UI entry is dist/ui/index.html , source entry is ui/index.tsx .
+- React mounts App.tsx :
+  - Initialization barrier : useInitialization() sets Extension ID and resets all UI atoms → useInitialization.ts
+  - Once initialized, it renders ChatView .
+- ChatView decides idle vs chat by showWelcomeAtom = turnIds.length === 0 → atoms.ts and renders WelcomeScreen.tsx .
+- Welcome screen side-effects:
+  - useProviderStatus() loads cached auth from storage and triggers a cookie refresh via REFRESH_AUTH_STATUS → useProviderStatus.ts
+  - That hits SW handleUnifiedMessage → authManager.getAuthStatus(true) and writes provider_auth_status back to storage → sw-entry.js , then UI updates via chrome.storage.onChanged .
+  - useSmartProviderDefaults() may auto-pick mapping/singularity providers once auth status is known → useSmartProviderDefaults.ts
+Ports + “handler ready” handshake (not required for idle screen, but becomes critical on first turn)
+
+- UI sets a port message handler in usePortMessageHandler.ts and uses extension-api.ts + port-health-manager.ts to connect when needed.
+- SW accepts chrome.runtime.onConnect for "htos-popup" and constructs a ConnectionHandler , which sends HANDLER_READY .
+- Keepalive: UI sends KEEPALIVE_PING , SW answers KEEPALIVE_PONG in connection-handler.js
+Files you listed, placed on the actual “startup→idle” route
+
+- SW boot + infra: sw-entry.js , vendor-exports.js , NetRulesManager.js , BusController.js , auth-manager.js , request-lifecycle-manager.js (exported/available; not a required startup dependency in sw-entry)
+- UI boot + idle: useInitialization.ts , App.tsx , ChatView.tsx , WelcomeScreen.tsx
+
+
+
+UI → SW (Prompt Submission → TURN_CREATED)
+
+User hits send in ChatInput.tsx → useChat().sendMessage() in useChat.ts builds a PrimitiveWorkflowRequest (initialize | extend | recompute) and calls api.executeWorkflow(...).
+executeWorkflow in extension-api.ts ensures a runtime port and posts { type: EXECUTE_WORKFLOW, payload }.
+Service worker accepts the port in sw-entry.js and instantiates ConnectionHandler.
+ConnectionHandler._handleExecuteWorkflow does:
+Idempotency early-exit (metadata record): re-emit TURN_CREATED, and if provider responses already exist, emit TURN_FINALIZED from persistence.
+contextResolver.resolve(...) (context-resolver.js) to fetch the minimal continuation context (last turn, per-provider contexts, prior summary, and “previousAnalysis” structural info).
+Preflight provider filtering/defaults (runPreflight) before compile.
+compiler.compile(...) (workflow-compiler.js) to generate steps (prompt batch, optional mapping, and sometimes direct singularity when gated).
+Emits TURN_CREATED with authoritative providers + mapping provider (still emitted here even though a note says it “moved”): see connection-handler.js.
+Persistence / Cache / Context Bridging (Where “Truth” Lives)
+
+Inflight metadata + idempotency mapping: written during TURN_CREATED emission to avoid duplicate fanout and support reconnect “rehydrate” behavior (connection-handler.js).
+Extend context resolution (persistence-backed):
+Pulls session → lastTurnId → lastTurn.providerContexts; prefers role-suffixed keys like ${pid}:batch (context-resolver.js).
+Also resolves previousAnalysis by reading stored structural analysis or computing it from mapper artifacts (context-resolver.js).
+Reactive bridge injection (context bridging into the next prompt):
+previousAnalysis (structural signals) is used to build an injected “bridgeContext” before prompt fanout in StepExecutor.executePromptStep.
+Provider-context caching + persistence:
+After batch completes, StepExecutor updates provider contexts in-memory immediately and persists async via PersistenceCoordinator (StepExecutor.js).
+Final canonical persistence happens through SessionManager.persist(...) via WorkflowEngine _persistAndFinalize and also per-step via upsertProviderResponse (workflow-engine.js, SessionManager.js).
+Streaming → UI Render → TURN_FINALIZED
+
+Backend streaming deltas: StepExecutor.executePromptStep calls streamingManager.dispatchPartialDelta(...) which emits PARTIAL_RESULT (StepExecutor.js, StreamingManager.js).
+UI port handler wiring:
+usePortMessageHandler() registers the port message handler into api.setPortMessageHandler(...) (usePortMessageHandler.ts); it is installed in App.tsx.
+TURN_CREATED creates/updates turns and sets activeAiTurnId (usePortMessageHandler.ts).
+PARTIAL_RESULT appends streaming deltas into the active AI turn via a StreamingBuffer (usePortMessageHandler.ts).
+TURN_FINALIZED flushes streaming buffer, merges canonical turn payload, clears loading/UI phase, clears active AI id (usePortMessageHandler.ts).
+Backend finalization is emitted by TurnEmitter.emitTurnFinalized after _persistAndFinalize in workflow-engine.js.
+Offscreen / Context Bridging via Bus (oi.js)
+
+The BroadcastChannel("bus.channel") you’re looking at in oi.js is the cross-context “bus” backbone: bg and os loci both create the channel, and oi participates via postMessage bridging. This is separate from the chat workflow port (UI↔SW), but it’s the mechanism enabling other extension contexts (offscreen iframe, background-like contexts) to exchange events/data without being in the same DOM/runtime.

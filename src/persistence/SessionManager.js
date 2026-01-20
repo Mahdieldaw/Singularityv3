@@ -2,6 +2,7 @@
 // Supports both legacy chrome.storage and new persistence layer via feature flag
 
 import { SimpleIndexedDBAdapter } from "./SimpleIndexedDBAdapter.js";
+import { DEFAULT_THREAD } from "../../shared/messaging.js";
 
 
 
@@ -173,8 +174,8 @@ export class SessionManager {
       title: String(request.userMessage || "").slice(0, 50),
       createdAt: now,
       lastActivity: now,
-      defaultThreadId: "default-thread",
-      activeThreadId: "default-thread",
+      defaultThreadId: DEFAULT_THREAD,
+      activeThreadId: DEFAULT_THREAD,
       turnCount: 2,
       isActive: true,
       lastTurnId: null,
@@ -187,7 +188,7 @@ export class SessionManager {
 
     // 2) Default thread
     const defaultThread = {
-      id: "default-thread",
+      id: DEFAULT_THREAD,
       sessionId,
       parentThreadId: null,
       branchPointTurnId: null,
@@ -209,7 +210,7 @@ export class SessionManager {
       type: "user",
       role: "user",
       sessionId,
-      threadId: "default-thread",
+      threadId: DEFAULT_THREAD,
       createdAt: now,
       updatedAt: now,
       text: userText,
@@ -235,7 +236,7 @@ export class SessionManager {
       type: "ai",
       role: "assistant",
       sessionId,
-      threadId: "default-thread",
+      threadId: DEFAULT_THREAD,
       userTurnId,
       createdAt: now,
       updatedAt: now,
@@ -334,7 +335,7 @@ export class SessionManager {
       type: "user",
       role: "user",
       sessionId,
-      threadId: "default-thread",
+      threadId: DEFAULT_THREAD,
       createdAt: now,
       updatedAt: now,
       text: userText,
@@ -366,7 +367,7 @@ export class SessionManager {
       type: "ai",
       role: "assistant",
       sessionId,
-      threadId: "default-thread",
+      threadId: DEFAULT_THREAD,
       userTurnId,
       createdAt: now,
       updatedAt: now,
@@ -737,7 +738,7 @@ export class SessionManager {
 
       // Create default thread
       const defaultThread = {
-        id: "default-thread",
+        id: DEFAULT_THREAD,
         sessionId: sessionId,
         parentThreadId: null,
         branchPointTurnId: null,
@@ -955,7 +956,7 @@ export class SessionManager {
           id: `ctx-${sessionId}-${providerId}-${Date.now()}`,
           sessionId: sessionId,
           providerId: providerId,
-          threadId: "default-thread",
+          threadId: DEFAULT_THREAD,
           contextData: {},
           isActive: true,
           createdAt: Date.now(),
@@ -1038,7 +1039,7 @@ export class SessionManager {
             id: `ctx-${sessionId}-${effectivePid}-${now}-${Math.random().toString(36).slice(2, 8)}`,
             sessionId,
             providerId: effectivePid,
-            threadId: "default-thread",
+            threadId: DEFAULT_THREAD,
             contextData: {},
             isActive: true,
             createdAt: now,
@@ -1084,7 +1085,7 @@ export class SessionManager {
    * @param {string} _threadId
    * @param {Object} options { contextRole?: "batch" | "singularity" }
    */
-  async getProviderContexts(sessionId, _threadId = "default-thread", options = {}) {
+  async getProviderContexts(sessionId, _threadId = DEFAULT_THREAD, options = {}) {
     const { contextRole = null } = options;
     try {
       if (!sessionId) {

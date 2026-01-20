@@ -515,18 +515,40 @@ async function initializeGlobalInfrastructure() {
 // ============================================================================
 const OffscreenController = {
   _initialized: false,
+  async isReady() {
+    try {
+      if (this._initialized) return true;
+      if (await chrome.offscreen.hasDocument()) {
+        this._initialized = true;
+        return true;
+      }
+      return false;
+    } catch (_) {
+      return false;
+    }
+  },
   async init() {
     if (this._initialized) return;
-    try {
-      if (!(await chrome.offscreen.hasDocument())) {
-        await chrome.offscreen.createDocument({
-          url: "offscreen.html",
-          reasons: [chrome.offscreen.Reason.BLOBS, chrome.offscreen.Reason.DOM_PARSER],
-          justification: "HTOS needs persistent offscreen DOM.",
-        });
+    const maxAttempts = 3;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        if (!(await chrome.offscreen.hasDocument())) {
+          await chrome.offscreen.createDocument({
+            url: "offscreen.html",
+            reasons: [chrome.offscreen.Reason.BLOBS, chrome.offscreen.Reason.DOM_PARSER],
+            justification: "HTOS needs persistent offscreen DOM.",
+          });
+        }
+        console.log("[SW] Offscreen document ready");
+        this._initialized = true;
+        return;
+      } catch (e) {
+        console.error(`[SW] Offscreen init failed (attempt ${attempt}/${maxAttempts})`, e);
+        if (attempt < maxAttempts) {
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+        }
       }
-    } catch (_) { }
-    this._initialized = true;
+    }
   }
 };
 
@@ -901,6 +923,10 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request?.$bus) return false;
+  if (request?.type === "offscreen.heartbeat") {
+    sendResponse({ alive: true });
+    return true;
+  }
   if (request?.type === "htos.keepalive") {
     sendResponse({ success: true });
     return true;
