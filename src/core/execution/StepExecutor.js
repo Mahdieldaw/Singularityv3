@@ -598,6 +598,7 @@ export class StepExecutor {
               meta: {
                 citationSourceOrder,
                 rawMappingText: rawText,
+                semanticMapperPrompt: mappingPrompt,
               },
             };
 

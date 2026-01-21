@@ -85,6 +85,10 @@ export class WorkflowEngine {
       const mode = request.mode || "auto";
       context.mode = mode;
 
+      try {
+        await this._persistCheckpoint(request, context, resolvedContext);
+      } catch (_) { }
+
       // VALIDATION: Ensure only foundation/singularity steps are present in the main loop
       const invalidSteps = steps.filter(s => !['prompt', 'mapping', 'singularity'].includes(s.type));
       if (invalidSteps.length > 0) {
@@ -107,8 +111,19 @@ export class WorkflowEngine {
         );
 
         if (haltReason) {
-          await this._haltWorkflow(request, context, steps, stepResults, resolvedContext, haltReason);
-          return;
+          if (haltReason === "awaiting_traversal") {
+            this.port.postMessage({
+              type: "WORKFLOW_COMPLETE",
+              sessionId: context.sessionId,
+              workflowId: request.workflowId,
+              finalResults: Object.fromEntries(stepResults),
+              haltReason,
+            });
+            return;
+          } else {
+            await this._haltWorkflow(request, context, steps, stepResults, resolvedContext, haltReason);
+            return;
+          }
         }
       }
 
@@ -224,7 +239,7 @@ export class WorkflowEngine {
     }
 
     if (step.type === 'mapping') {
-      const shouldHalt = await this.cognitiveHandler.orchestrateSingularityPhase(
+      const orchestrationResult = await this.cognitiveHandler.orchestrateSingularityPhase(
         request,
         context,
         steps,
@@ -234,9 +249,16 @@ export class WorkflowEngine {
         this.stepExecutor,
         this.streamingManager,
       );
-      if (shouldHalt) {
+      if (orchestrationResult === "awaiting_traversal") {
+        return "awaiting_traversal";
+      }
+      if (orchestrationResult) {
         return "singularity_orchestration_complete";
       }
+    }
+
+    if (step.type === "singularity" && result === "awaiting_traversal") {
+      return "awaiting_traversal";
     }
 
     return null;
@@ -357,6 +379,7 @@ export class WorkflowEngine {
       mapperArtifact: context?.mapperArtifact,
       singularityOutput: context?.singularityOutput,
       storedAnalysis: context?.storedAnalysis,
+      runId: context?.runId || request?.context?.runId,
     };
     if (resolvedContext?.type === "recompute") {
       persistRequest.sourceTurnId = resolvedContext.sourceTurnId;
@@ -399,6 +422,26 @@ export class WorkflowEngine {
     });
 
     this.turnEmitter.emitTurnFinalized(context, steps, stepResults, resolvedContext, this.currentUserMessage);
+  }
+
+  async _persistCheckpoint(request, context, resolvedContext) {
+    if (!resolvedContext || resolvedContext.type === "recompute") return;
+    if (!context?.canonicalUserTurnId || !context?.canonicalAiTurnId) return;
+
+    await this.persistenceCoordinator.persistWorkflowResult(
+      {
+        type: resolvedContext.type,
+        sessionId: context.sessionId,
+        userMessage: this.currentUserMessage,
+        canonicalUserTurnId: context.canonicalUserTurnId,
+        canonicalAiTurnId: context.canonicalAiTurnId,
+        partial: true,
+        pipelineStatus: "in_progress",
+        runId: context?.runId || request?.context?.runId,
+      },
+      resolvedContext,
+      { batchOutputs: {}, mappingOutputs: {}, singularityOutputs: {} },
+    );
   }
 
   async handleRetryRequest(message) {

@@ -10,6 +10,19 @@ import {
 } from '../../utils/ErrorHandler.js';
 import { buildReactiveBridge } from '../../services/ReactiveBridge';
 import { PROMPT_TEMPLATES } from '../templates/prompt-templates.js';
+import {
+  computeShadowDelta,
+  extractReferencedIds,
+  extractShadowStatements,
+  getTopUnreferenced,
+} from '../../shadow';
+import {
+  buildSemanticMapperPrompt,
+  parseSemanticMapperOutput,
+} from '../../ConciergeService/semanticMapper';
+import { assembleClaims } from '../../ConciergeService/claimAssembly';
+import { buildTraversalGraph } from '../../ConciergeService/traversal';
+import { extractForcingPoints } from '../../ConciergeService/forcingPoints';
 // computeExplore import removed (unused)
 // persona signal injections removed (absorbed by Concierge)
 
@@ -92,7 +105,10 @@ export class StepExecutor {
         completedCount: 0,
         totalCount: providers.length,
       });
-    } catch (_) { }
+    } catch (err) {
+      wdbg('[StepExecutor] StepExecutor progress update failed', err);
+      if (err?.stack) wdbg('[StepExecutor] StepExecutor progress update stack', err.stack);
+    }
 
     const promptLength = enhancedPrompt.length;
     const allowedProviders = [];
@@ -367,15 +383,6 @@ export class StepExecutor {
     // ══════════════════════════════════════════════════════════════════════
     // NEW PIPELINE: Shadow -> Semantic -> Traversal
     // ══════════════════════════════════════════════════════════════════════
-
-    // 1. Import new modules dynamically
-    // Import shadow module once at function scope so callbacks can use its exports without awaiting
-    const shadowModule = await import('../../shadow');
-    const { extractShadowStatements, computeShadowDelta, extractReferencedIds, getTopUnreferenced } = shadowModule;
-    const { buildSemanticMapperPrompt, parseSemanticMapperOutput } = await import('../../ConciergeService/semanticMapper');
-    const { assembleClaims } = await import('../../ConciergeService/claimAssembly');
-    const { buildTraversalGraph } = await import('../../ConciergeService/traversal');
-    const { extractForcingPoints } = await import('../../ConciergeService/forcingPoints');
 
     // 2. Shadow Extraction (Mechanical)
     // Map sourceData to expected format (modelIndex, content)
@@ -697,7 +704,8 @@ export class StepExecutor {
               }
             }
           } catch (e) {
-            throw new Error(`Could not find corresponding AI turn for ${turnId} (text fallback failed)`);
+            const err = new Error(`Could not find corresponding AI turn for ${turnId} (text fallback failed)`, { cause: e });
+            console.warn('[StepExecutor] Text fallback failed while resolving historical sources:', err);
           }
         }
 

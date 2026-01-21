@@ -1,4 +1,4 @@
-import React, { useMemo, useEffect, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { AiTurn } from '../../types';
 import { useSingularityMode } from '../../hooks/cognitive/useCognitiveMode';
 import SingularityOutputView from './SingularityOutputView';
@@ -6,7 +6,7 @@ import { SingularityOutputState } from '../../hooks/useSingularityOutput';
 import { CouncilOrbs } from '../CouncilOrbs';
 import { LLM_PROVIDERS_CONFIG } from '../../constants';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { selectedModelsAtom, workflowProgressForTurnFamily, activeSplitPanelAtom, isDecisionMapOpenAtom, currentSessionIdAtom, turnStreamingStateFamily } from '../../state/atoms';
+import { selectedModelsAtom, workflowProgressForTurnFamily, activeSplitPanelAtom, currentSessionIdAtom, turnStreamingStateFamily } from '../../state/atoms';
 import { MetricsRibbon } from './MetricsRibbon';
 import StructureGlyph from '../StructureGlyph';
 import { computeProblemStructureFromArtifact, computeStructuralAnalysis } from '../../../src/core/PromptMethods';
@@ -16,7 +16,6 @@ import { TraversalGraphView } from '../traversal/TraversalGraphView';
 interface CognitiveOutputRendererProps {
     aiTurn: AiTurn;
     singularityState: SingularityOutputState;
-    onArtifactSelect?: (artifact: { title: string; identifier: string; content: string }) => void;
 }
 
 /**
@@ -28,9 +27,8 @@ interface CognitiveOutputRendererProps {
 export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = ({
     aiTurn,
     singularityState,
-    onArtifactSelect
 }) => {
-    const [activeMode, setActiveModeInternal] = useState<'artifact' | 'singularity'>('artifact');
+    const [viewOverride, setViewOverride] = useState<null | 'traverse' | 'response'>(null);
     const { runSingularity } = useSingularityMode(aiTurn.id);
 
     // Derived transition state
@@ -38,7 +36,7 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
 
     // Helper for recomputing singularity
     const triggerAndSwitch = async (options: any = {}) => {
-        setActiveModeInternal('singularity');
+        setViewOverride('response');
         if (options.providerId) {
             singularityState.setPinnedProvider(options.providerId);
         }
@@ -49,30 +47,13 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
     const workflowProgress = useAtomValue(workflowProgressForTurnFamily(aiTurn.id));
     const streamingState = useAtomValue(turnStreamingStateFamily(aiTurn.id));
     const setActiveSplitPanel = useSetAtom(activeSplitPanelAtom);
-    const setIsDecisionMapOpen = useSetAtom(isDecisionMapOpenAtom);
     const currentSessionId = useAtomValue(currentSessionIdAtom);
 
     const hasSingularityText = useMemo(() => {
         return String(singularityState.output?.text || "").trim().length > 0;
     }, [singularityState.output]);
 
-    const [hasAutoSwitched, setHasAutoSwitched] = useState(false);
-    const [hasUserOverride, setHasUserOverride] = useState(false);
     const [isOrbTrayExpanded, setIsOrbTrayExpanded] = useState(false);
-
-    const setActiveMode = (mode: 'artifact' | 'singularity') => {
-        setHasUserOverride(true);
-        setActiveModeInternal(mode);
-    };
-
-    useEffect(() => {
-        if (!hasSingularityText || hasAutoSwitched || hasUserOverride) return;
-        if (aiTurn.pipelineStatus && aiTurn.pipelineStatus !== 'complete') return;
-        if (activeMode !== 'singularity') {
-            setActiveModeInternal('singularity');
-        }
-        setHasAutoSwitched(true);
-    }, [hasSingularityText, hasAutoSwitched, hasUserOverride, activeMode, aiTurn.pipelineStatus]);
 
     const mapperProviderId = useMemo(() => {
         if (aiTurn.meta?.mapper) return String(aiTurn.meta.mapper);
@@ -136,42 +117,30 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
     const isPipelineComplete = !aiTurn.pipelineStatus || aiTurn.pipelineStatus === 'complete';
     const isRoundActive = streamingState.isLoading || isAwaitingTraversal;
 
-    // Show Singularity if we have text AND mode is active...
-    const showSingularity = hasSingularityText && activeMode === 'singularity' && isPipelineComplete;
+    const canShowTraversal = hasTraversalGraph;
+    const canShowResponse = isPipelineComplete && (hasSingularityText || singularityState.isLoading || singularityState.isError);
 
-    if (isAwaitingTraversal && hasTraversalGraph) {
-        return (
-            <div className="w-full max-w-3xl mx-auto animate-in fade-in duration-500">
-                <TraversalGraphView
-                    traversalGraph={aiTurn.mapperArtifact!.traversalGraph!}
-                    forcingPoints={aiTurn.mapperArtifact!.forcingPoints || []}
-                    claims={aiTurn.mapperArtifact!.claims || []}
-                    originalQuery={aiTurn.mapperArtifact!.query || ''}
-                    sessionId={currentSessionId!}
-                    aiTurnId={aiTurn.id}
-                    onComplete={() => {
-                        setHasUserOverride(false);
-                        setActiveModeInternal('singularity');
-                    }}
-                />
-            </div>
-        );
-    }
+    const currentView: 'loading' | 'traverse' | 'response' = useMemo(() => {
+        if (isAwaitingTraversal && canShowTraversal) return 'traverse';
+        if (viewOverride === 'traverse' && canShowTraversal) return 'traverse';
+        if (viewOverride === 'response' && canShowResponse) return 'response';
+        if (canShowResponse) return 'response';
+        return 'loading';
+    }, [isAwaitingTraversal, canShowTraversal, viewOverride, canShowResponse]);
 
 
     return (
         <div className="w-full max-w-3xl mx-auto animate-in fade-in duration-500">
             {/* === UNIFIED HEADER (Toggle + Orbs + Metrics) === */}
             <div className="flex flex-col gap-6 mb-8">
-                {/* View Toggle */}
-                {hasSingularityText && isPipelineComplete && (
+                {canShowTraversal && canShowResponse && (
                     <div className="flex justify-center">
                         <button
-                            onClick={() => setActiveMode(showSingularity ? 'artifact' : 'singularity')}
+                            onClick={() => setViewOverride(currentView === 'response' ? 'traverse' : 'response')}
                             className="flex items-center gap-2 px-4 py-2 rounded-full bg-surface-raised border border-border-subtle hover:bg-surface-highlight text-sm font-medium text-text-secondary transition-all shadow-sm"
                         >
-                            <span>{showSingularity ? '🗺️' : '✨'}</span>
-                            <span>{showSingularity ? 'See Analysis' : 'Back to Response'}</span>
+                            <span>{currentView === 'response' ? '🧭' : '✨'}</span>
+                            <span>{currentView === 'response' ? 'Back to Traverse' : 'Back to Response'}</span>
                         </button>
                     </div>
                 )}
@@ -222,7 +191,6 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
                                         claimCount={aiTurn.mapperArtifact?.claims?.length || 0}
                                         width={320}
                                         height={140}
-                                        onClick={() => setIsDecisionMapOpen({ turnId: aiTurn.id })}
                                     />
                                     <div className="text-[11px] text-text-muted italic">
                                         {problemStructure.confidence > 0.7
@@ -237,66 +205,36 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
             </div>
 
             {/* === MAIN CONTENT AREA === */}
-            {showSingularity ? (
+            {currentView === 'response' ? (
                 <SingularityOutputView
                     aiTurn={aiTurn}
                     singularityState={singularityState}
                     onRecompute={triggerAndSwitch}
                     isLoading={isTransitioning}
                 />
-            ) : (
-                /* === INTERIM / ANALYSIS BUBBLE === */
+            ) : currentView === 'traverse' && canShowTraversal ? (
                 <div className="animate-in fade-in duration-500">
-                    {!isPipelineComplete && isRoundActive ? (
-                        <div className="flex flex-col items-center justify-center p-12 bg-surface-highlight/10 rounded-xl border border-dashed border-border-subtle">
-                            <div className="text-3xl mb-4 animate-pulse">🧩</div>
-                            <div className="text-text-secondary font-medium">
-                                Gathering perspectives...
-                            </div>
-                            <div className="text-xs text-text-muted mt-2 text-center">
-                                Experts are deliberating. Analysis will appear shortly.
-                            </div>
+                    <TraversalGraphView
+                        traversalGraph={aiTurn.mapperArtifact!.traversalGraph!}
+                        forcingPoints={aiTurn.mapperArtifact!.forcingPoints || []}
+                        claims={aiTurn.mapperArtifact!.claims || []}
+                        originalQuery={aiTurn.mapperArtifact!.query || ''}
+                        sessionId={currentSessionId!}
+                        aiTurnId={aiTurn.id}
+                        onComplete={() => setViewOverride('response')}
+                    />
+                </div>
+            ) : (
+                <div className="animate-in fade-in duration-500">
+                    <div className="flex flex-col items-center justify-center p-12 bg-surface-highlight/10 rounded-xl border border-dashed border-border-subtle">
+                        <div className="text-3xl mb-4 animate-pulse">🧩</div>
+                        <div className="text-text-secondary font-medium">
+                            Gathering perspectives...
                         </div>
-                    ) : isPipelineComplete && aiTurn.mapperArtifact ? (
-                        <div className="bg-surface border border-border-subtle rounded-2xl overflow-hidden shadow-sm">
-                            <div className="px-4 py-3 border-b border-border-subtle bg-surface-highlight/10 flex items-center justify-between">
-                                <div className="flex items-center gap-2">
-                                    <span className="text-lg">🧠</span>
-                                    <span className="text-xs font-semibold text-text-secondary uppercase tracking-wide">
-                                        Analysis
-                                    </span>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                    {aiTurn.mapperArtifact && onArtifactSelect && (
-                                        <button
-                                            onClick={() => onArtifactSelect({
-                                                title: "Mapper Artifact",
-                                                identifier: `artifact-${aiTurn.id}`,
-                                                content: JSON.stringify(aiTurn.mapperArtifact, null, 2)
-                                            })}
-                                            className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-surface-raised hover:bg-surface-highlight border border-border-subtle text-xs text-text-secondary transition-colors"
-                                            title="View Artifact"
-                                        >
-                                            <span>📄</span>
-                                            <span>Artifact</span>
-                                        </button>
-                                    )}
-                                    <button
-                                        onClick={() => setIsDecisionMapOpen({ turnId: aiTurn.id })}
-                                        className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-surface-raised hover:bg-surface-highlight border border-border-subtle text-xs text-text-secondary transition-colors"
-                                        title="Open Decision Map"
-                                    >
-                                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                            <rect width="18" height="18" x="3" y="3" rx="2" ry="2" />
-                                            <line x1="3" x2="21" y1="9" y2="9" />
-                                            <line x1="9" x2="9" y1="21" y2="9" />
-                                        </svg>
-                                        <span>Map</span>
-                                    </button>
-                                </div>
-                            </div>
+                        <div className="text-xs text-text-muted mt-2 text-center">
+                            Exploring council outputs. Decision traversal will appear when ready.
                         </div>
-                    ) : null}
+                    </div>
                 </div>
             )}
         </div>

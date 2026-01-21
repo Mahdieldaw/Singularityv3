@@ -23,13 +23,6 @@ export class LifecycleManager {
     return Date.now() - this.lastActivity;
   }
 
-  activateWorkflowMode() {
-    this.recordActivity();
-  }
-
-  deactivateWorkflowMode() {
-  }
-
   keepalive(enable) {
     if (enable) {
       this.recordActivity();

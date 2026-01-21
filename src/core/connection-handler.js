@@ -223,9 +223,7 @@ export class ConnectionHandler {
         }
       } catch (_) { }
 
-      if (message.type !== "KEEPALIVE_PING") {
-        console.log(`[ConnectionHandler] Received: ${message.type}`);
-      }
+      console.log(`[ConnectionHandler] Received: ${message.type}`);
 
       try {
         switch (message.type) {
@@ -292,7 +290,6 @@ export class ConnectionHandler {
     }
 
     try {
-      this.lifecycleManager?.activateWorkflowMode();
 
       // ========================================================================
       // Idempotency Guard: short-circuit duplicate requests
@@ -490,6 +487,10 @@ export class ConnectionHandler {
         try {
           const key = `inflight:${workflowRequest.context.sessionId}:${aiTurnId}`;
           const runId = crypto.randomUUID();
+          workflowRequest.context = {
+            ...workflowRequest.context,
+            runId,
+          };
           await this.services.sessionManager.adapter.put("metadata", {
             key,
             sessionId: workflowRequest.context.sessionId,
@@ -497,6 +498,7 @@ export class ConnectionHandler {
             type: "inflight_workflow",
             requestType: executeRequest.type,
             userMessage: executeRequest.userMessage,
+            userTurnId,
             providers: effectiveProviders,
             providerMeta: executeRequest.providerMeta || {},
             runId,
@@ -550,8 +552,6 @@ export class ConnectionHandler {
       } catch (e) {
         console.error("[ConnectionHandler] Failed to send error message:", e);
       }
-    } finally {
-      this.lifecycleManager?.deactivateWorkflowMode();
     }
   }
 
@@ -649,9 +649,6 @@ export class ConnectionHandler {
    */
   _cleanup() {
     console.log("[ConnectionHandler] Cleaning up connection");
-
-    // Deactivate lifecycle manager on disconnect
-    this.lifecycleManager?.deactivateWorkflowMode();
 
     // Remove message listener
     if (this.messageHandler) {

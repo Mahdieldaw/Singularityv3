@@ -964,6 +964,17 @@ export const DecisionMapSheet = React.memo(() => {
     return parseUnifiedMapperOutput(String(rawText));
   }, [latestMapping]);
 
+  const rawMappingText = useMemo(() => {
+    const fromMeta = String((latestMapping?.meta as any)?.rawMappingText || '');
+    const fromText = String(latestMapping?.text || '');
+    return fromMeta && fromMeta.length >= fromText.length ? fromMeta : fromText;
+  }, [latestMapping]);
+
+  const semanticMapperPrompt = useMemo(() => {
+    const v = (latestMapping?.meta as any)?.semanticMapperPrompt;
+    return typeof v === 'string' && v.trim() ? v : null;
+  }, [latestMapping]);
+
   const graphTopology = useMemo(() => {
     const meta: any = latestMapping?.meta || null;
     const fromMeta =
@@ -1440,7 +1451,7 @@ export const DecisionMapSheet = React.memo(() => {
                       </div>
                     ) : (
                       <Suspense fallback={<div className="w-full h-full flex items-center justify-center opacity-50"><div className="w-8 h-8 rounded-full border-2 border-brand-500 border-t-transparent animate-spin" /></div>}>
-                        <StructuralDebugPanel analysis={structuralAnalysis} />
+                        <StructuralDebugPanel analysis={structuralAnalysis} semanticMapperPrompt={semanticMapperPrompt} rawMappingText={rawMappingText} />
                       </Suspense>
                     )}
                   </m.div>

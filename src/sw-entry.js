@@ -549,6 +549,8 @@ const OffscreenController = {
         }
       }
     }
+    console.error("[SW] Offscreen init failed after all attempts");
+    throw new Error("Failed to create offscreen document after max retries");
   }
 };
 

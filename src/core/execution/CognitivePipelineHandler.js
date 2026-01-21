@@ -87,7 +87,7 @@ export class CognitivePipelineHandler {
           console.error("[CognitiveHandler] Failed to pause pipeline:", err);
         }
 
-        return false; // Stop execution
+        return "awaiting_traversal"; // Stop execution without finalization
       }
 
       // ✅ Execute Singularity step automatically

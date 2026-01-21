@@ -11,6 +11,62 @@ import { ArtifactProcessor } from "../../shared/artifact-processor";
 // Provider-specific debug flag (off by default)
 const GEMINI_DEBUG = false;
 
+/**
+ * Gemini stream stall detection timeouts (defaults are tuned to avoid false positives):
+ * - ttftTimeoutMs (90s): allows slow "time to first token" before declaring a stall
+ * - readGapTimeoutMs (45s): bounds reader.read() gaps so the stream can't hang indefinitely
+ * - meaningfulGapTimeoutMs (30s): after first progress, fail if no meaningful growth continues
+ * - nullSpamWindowMs (15s): sliding window for counting null/keepalive-like frames
+ * - nullSpamThreshold (3): tolerate a few null frames before declaring a zombie stream
+ */
+function getGeminiStreamTimeoutConfig() {
+  const defaults = {
+    ttftTimeoutMs: 90000,
+    readGapTimeoutMs: 45000,
+    meaningfulGapTimeoutMs: 30000,
+    nullSpamWindowMs: 15000,
+    nullSpamThreshold: 3,
+  };
+
+  const root = typeof globalThis !== "undefined" ? globalThis : {};
+  const env = root?.process?.env || {};
+
+  const globalCfg =
+    root?.__HTOS_CONFIG__?.providers?.gemini?.streamTimeouts ||
+    root?.HTOS_CONFIG?.providers?.gemini?.streamTimeouts ||
+    root?.HTOS_PROVIDER_TIMEOUTS?.gemini ||
+    {};
+
+  const toNonNegativeInt = (value, fallback) => {
+    const n = typeof value === "number" ? value : parseInt(String(value), 10);
+    if (!Number.isFinite(n)) return fallback;
+    const v = Math.floor(n);
+    return v >= 0 ? v : fallback;
+  };
+
+  const read = (key, envKey, fallback) => {
+    if (globalCfg && Object.prototype.hasOwnProperty.call(globalCfg, key)) {
+      return toNonNegativeInt(globalCfg[key], fallback);
+    }
+    if (env && Object.prototype.hasOwnProperty.call(env, envKey)) {
+      return toNonNegativeInt(env[envKey], fallback);
+    }
+    return fallback;
+  };
+
+  return {
+    ttftTimeoutMs: read("ttftTimeoutMs", "HTOS_GEMINI_TTFT_TIMEOUT_MS", defaults.ttftTimeoutMs),
+    readGapTimeoutMs: read("readGapTimeoutMs", "HTOS_GEMINI_READ_GAP_TIMEOUT_MS", defaults.readGapTimeoutMs),
+    meaningfulGapTimeoutMs: read(
+      "meaningfulGapTimeoutMs",
+      "HTOS_GEMINI_MEANINGFUL_GAP_TIMEOUT_MS",
+      defaults.meaningfulGapTimeoutMs,
+    ),
+    nullSpamWindowMs: read("nullSpamWindowMs", "HTOS_GEMINI_NULL_SPAM_WINDOW_MS", defaults.nullSpamWindowMs),
+    nullSpamThreshold: read("nullSpamThreshold", "HTOS_GEMINI_NULL_SPAM_THRESHOLD", defaults.nullSpamThreshold),
+  };
+}
+
 // =============================================================================
 // GEMINI MODELS CONFIGURATION
 // =============================================================================
@@ -190,11 +246,13 @@ export class GeminiSessionApi {
     /** @type {any} */
     let u;
     try {
-      const TTFT_TIMEOUT_MS = 90000;
-      const READ_GAP_TIMEOUT_MS = 45000;
-      const MEANINGFUL_GAP_TIMEOUT_MS = 30000;
-      const NULL_SPAM_WINDOW_MS = 15000;
-      const NULL_SPAM_THRESHOLD = 3;
+      const {
+        ttftTimeoutMs: TTFT_TIMEOUT_MS,
+        readGapTimeoutMs: READ_GAP_TIMEOUT_MS,
+        meaningfulGapTimeoutMs: MEANINGFUL_GAP_TIMEOUT_MS,
+        nullSpamWindowMs: NULL_SPAM_WINDOW_MS,
+        nullSpamThreshold: NULL_SPAM_THRESHOLD,
+      } = getGeminiStreamTimeoutConfig();
 
       let ttftMet = false;
       let ttftTimer = setTimeout(() => {
@@ -338,14 +396,12 @@ export class GeminiSessionApi {
               }
 
               if (!ttftMet && nullSpamCount >= NULL_SPAM_THRESHOLD) {
-                abortWith("zombieStream", { stage: "null_spam", windowMs: NULL_SPAM_WINDOW_MS, count: nullSpamCount });
                 this._throw("zombieStream", "Gemini stream stalling (timeout): repeated null frames");
               }
 
               if (ttftMet && lastMeaningfulAt > 0) {
                 const now = Date.now();
                 if (now - lastMeaningfulAt > MEANINGFUL_GAP_TIMEOUT_MS && nullSpamCount >= NULL_SPAM_THRESHOLD) {
-                  abortWith("zombieStream", { stage: "meaningful_gap", gapMs: now - lastMeaningfulAt, count: nullSpamCount });
                   this._throw("zombieStream", "Gemini stream stalling (timeout): no meaningful progress");
                 }
               }

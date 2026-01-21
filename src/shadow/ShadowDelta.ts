@@ -311,7 +311,7 @@ export function formatAuditSummary(delta: ShadowDeltaResult): string {
  * Use this after semantic mapper runs to build the set for computeShadowDelta
  */
 export function extractReferencedIds(
-    claims: any[]
+    claims: ClaimLike[]
 ): Set<string> {
     const ids = new Set<string>();
 
@@ -332,3 +332,12 @@ export function extractReferencedIds(
 
     return ids;
 }
+
+type ClaimLike = {
+    sourceStatementIds?: string[];
+    gates?: {
+        conditionals?: Array<{ sourceStatementIds?: string[] }>;
+        prerequisites?: Array<{ sourceStatementIds?: string[] }>;
+    };
+    conflicts?: Array<{ sourceStatementIds?: string[] }>;
+};

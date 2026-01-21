@@ -40,11 +40,13 @@ export interface ShadowStatement {
         conditional: boolean;      // Gate/condition language
     };
 
-    location: {
-        paragraphIndex: number;
-        sentenceIndex: number;
-    };
+    location: ShadowStatementLocation;
     fullParagraph: string;         // For context/evidence
+}
+
+export interface ShadowStatementLocation {
+    paragraphIndex: number;
+    sentenceIndex: number;
 }
 
 export interface ShadowExtractionResult {

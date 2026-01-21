@@ -1,4 +1,4 @@
-import React, { Suspense } from "react";
+import React, { Suspense, useMemo } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
 import { activeSplitPanelAtom, currentSessionIdAtom } from "../state/atoms";
 import { safeLazy } from "../utils/safeLazy";

@@ -14,6 +14,20 @@
 
 import { BusController } from "./BusController.js";
 
+const logOffscreenError = (message, error) => {
+  try {
+    const candidate =
+      globalThis.processLogger ||
+      globalThis.logger ||
+      (globalThis.window ? globalThis.window.processLogger || globalThis.window.logger : null);
+    if (candidate && typeof candidate.error === "function") {
+      candidate.error(message, error);
+      return;
+    }
+  } catch (_) { }
+  console.error(message, error);
+};
+
 // =============================================================================
 // IFRAME LIFECYCLE CONTROLLER (Essential for Arkose Solver)
 // =============================================================================
@@ -44,7 +58,9 @@ const IframeController = {
     // Pass the extension oi.js URL to the oi host via window.name (like reference)
     try {
       iframe.name = `offscreen-iframe | ${chrome.runtime.getURL("oi.js")}`;
-    } catch (_) { }
+    } catch (err) {
+      logOffscreenError("OffscreenBootstrap error: failed to set iframe.name", err);
+    }
 
     // Append iframe to the document and register it immediately with the bus.
     // Simpler, robust flow: do not wait for a custom "oi.initialized" postMessage
@@ -229,13 +245,10 @@ const OffscreenBootstrap = {
     this._heartbeatLastError = null;
     this._swHeartbeatTimer = setInterval(async () => {
       try {
-        const res = chrome.runtime.sendMessage({
+        await chrome.runtime.sendMessage({
           type: "offscreen.heartbeat",
           timestamp: Date.now(),
         });
-        if (res && typeof res.then === "function") {
-          await res;
-        }
         this._heartbeatTotalSuccesses += 1;
         this._heartbeatConsecutiveFailures = 0;
         this._heartbeatLastSuccessAt = Date.now();
@@ -269,6 +282,18 @@ const OffscreenBootstrap = {
         } catch (_) { }
       }
     }, 25000);
+  },
+
+  _stopSwHeartbeat() {
+    if (!this._swHeartbeatTimer) return;
+    clearInterval(this._swHeartbeatTimer);
+    this._swHeartbeatTimer = null;
+    this._heartbeatConsecutiveFailures = 0;
+    this._heartbeatTotalFailures = 0;
+    this._heartbeatTotalSuccesses = 0;
+    this._heartbeatLastSuccessAt = null;
+    this._heartbeatLastFailureAt = null;
+    this._heartbeatLastError = null;
   },
 
   _getHeartbeatStatus() {

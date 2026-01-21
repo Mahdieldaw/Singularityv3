@@ -168,6 +168,84 @@ export class SessionManager {
 
     const contextSummary = this._buildContextSummary(result, request);
 
+    const userTurnId = request.canonicalUserTurnId || `user-${now}`;
+    const aiTurnId = request.canonicalAiTurnId || `ai-${now}`;
+    const isComplete = !request?.partial;
+    const pipelineStatus = request?.partial
+      ? request?.pipelineStatus
+      : (request?.pipelineStatus || "complete");
+    const runId = request?.runId;
+
+    try {
+      const existingAi = await this.adapter.get("turns", aiTurnId);
+      if (existingAi && (existingAi.type === "ai" || existingAi.role === "assistant")) {
+        const existingUserTurnId = existingAi.userTurnId || userTurnId;
+        try {
+          const existingUser = await this.adapter.get("turns", existingUserTurnId);
+          if (!existingUser) {
+            const userText = request.userMessage || "";
+            await this.adapter.put("turns", {
+              id: existingUserTurnId,
+              type: "user",
+              role: "user",
+              sessionId,
+              threadId: DEFAULT_THREAD,
+              createdAt: existingAi.createdAt || now,
+              updatedAt: now,
+              text: userText,
+              content: userText,
+              sequence: Math.max((existingAi.sequence || 1) - 1, 0),
+            });
+          }
+        } catch (_) { }
+
+        const providerContexts = this._extractContextsFromResult(result);
+        const mapperArtifact = request?.mapperArtifact
+          ? this._toJsonSafe(request.mapperArtifact)
+          : undefined;
+        const storedAnalysis = request?.storedAnalysis
+          ? this._toJsonSafe(request.storedAnalysis)
+          : undefined;
+        const singularityOutput = request?.singularityOutput
+          ? this._toJsonSafe(request.singularityOutput)
+          : undefined;
+
+        const updatedAi = {
+          ...existingAi,
+          updatedAt: now,
+          providerContexts: {
+            ...(existingAi.providerContexts || {}),
+            ...(providerContexts || {}),
+          },
+          isComplete,
+          batchResponseCount: this.countResponses(result.batchOutputs),
+          mappingResponseCount: this.countResponses(result.mappingOutputs),
+          singularityResponseCount: this.countResponses(result.singularityOutputs),
+          ...(mapperArtifact ? { mapperArtifact } : {}),
+          ...(storedAnalysis ? { storedAnalysis } : {}),
+          ...(singularityOutput ? { singularityOutput } : {}),
+          lastContextSummary: contextSummary,
+          ...(pipelineStatus ? { pipelineStatus } : {}),
+        };
+        await this.adapter.put("turns", updatedAi);
+
+        await this._persistProviderResponses(sessionId, aiTurnId, result, now, runId);
+
+        try {
+          const session = await this.adapter.get("sessions", sessionId);
+          if (session) {
+            session.lastTurnId = aiTurnId;
+            if (storedAnalysis) session.lastStructuralTurnId = aiTurnId;
+            session.lastActivity = now;
+            session.updatedAt = now;
+            await this.adapter.put("sessions", session);
+          }
+        } catch (_) { }
+
+        return { sessionId, userTurnId: existingUserTurnId, aiTurnId };
+      }
+    } catch (_) { }
+
     // 1) Create session
     const sessionRecord = {
       id: sessionId,
@@ -203,7 +281,6 @@ export class SessionManager {
     await this.adapter.put("threads", defaultThread);
 
     // 3) User turn
-    const userTurnId = request.canonicalUserTurnId || `user-${now}`;
     const userText = request.userMessage || "";
     const userTurnRecord = {
       id: userTurnId,
@@ -220,7 +297,6 @@ export class SessionManager {
     await this.adapter.put("turns", userTurnRecord);
 
     // 4) AI turn with contexts
-    const aiTurnId = request.canonicalAiTurnId || `ai-${now}`;
     const providerContexts = this._extractContextsFromResult(result);
     const mapperArtifact = request?.mapperArtifact
       ? this._toJsonSafe(request.mapperArtifact)
@@ -241,7 +317,7 @@ export class SessionManager {
       createdAt: now,
       updatedAt: now,
       providerContexts,
-      isComplete: true,
+      isComplete,
       sequence: 1,
       batchResponseCount: this.countResponses(result.batchOutputs),
       mappingResponseCount: this.countResponses(result.mappingOutputs),
@@ -251,6 +327,7 @@ export class SessionManager {
       ...(singularityOutput ? { singularityOutput } : {}),
       lastContextSummary: contextSummary,
       meta: await this._attachRunIdMeta(aiTurnId),
+      ...(pipelineStatus ? { pipelineStatus } : {}),
     };
     await this.adapter.put("turns", aiTurnRecord);
 
@@ -276,7 +353,7 @@ export class SessionManager {
     }
 
     // 5) Provider responses
-    await this._persistProviderResponses(sessionId, aiTurnId, result, now);
+    await this._persistProviderResponses(sessionId, aiTurnId, result, now, runId);
 
     // 6) Update session lastTurnId
     sessionRecord.lastTurnId = aiTurnId;
@@ -295,6 +372,83 @@ export class SessionManager {
     const now = Date.now();
 
     const contextSummary = this._buildContextSummary(result, request);
+    const userTurnId = request.canonicalUserTurnId || `user-${now}`;
+    const aiTurnId = request.canonicalAiTurnId || `ai-${now}`;
+    const isComplete = !request?.partial;
+    const pipelineStatus = request?.partial
+      ? request?.pipelineStatus
+      : (request?.pipelineStatus || "complete");
+    const runId = request?.runId;
+
+    try {
+      const existingAi = await this.adapter.get("turns", aiTurnId);
+      if (existingAi && (existingAi.type === "ai" || existingAi.role === "assistant")) {
+        try {
+          const existingUserTurnId = existingAi.userTurnId || userTurnId;
+          const existingUser = await this.adapter.get("turns", existingUserTurnId);
+          if (!existingUser) {
+            const userText = request.userMessage || "";
+            await this.adapter.put("turns", {
+              id: existingUserTurnId,
+              type: "user",
+              role: "user",
+              sessionId,
+              threadId: DEFAULT_THREAD,
+              createdAt: existingAi.createdAt || now,
+              updatedAt: now,
+              text: userText,
+              content: userText,
+              sequence: Math.max((existingAi.sequence || 1) - 1, 0),
+            });
+          }
+        } catch (_) { }
+
+        const newContexts = this._extractContextsFromResult(result);
+        const mapperArtifact = request?.mapperArtifact
+          ? this._toJsonSafe(request.mapperArtifact)
+          : undefined;
+        const storedAnalysis = request?.storedAnalysis
+          ? this._toJsonSafe(request.storedAnalysis)
+          : undefined;
+        const singularityOutput = request?.singularityOutput
+          ? this._toJsonSafe(request.singularityOutput)
+          : undefined;
+
+        const updatedAi = {
+          ...existingAi,
+          updatedAt: now,
+          providerContexts: {
+            ...(existingAi.providerContexts || {}),
+            ...(newContexts || {}),
+          },
+          isComplete,
+          batchResponseCount: this.countResponses(result.batchOutputs),
+          mappingResponseCount: this.countResponses(result.mappingOutputs),
+          singularityResponseCount: this.countResponses(result.singularityOutputs),
+          ...(mapperArtifact ? { mapperArtifact } : {}),
+          ...(storedAnalysis ? { storedAnalysis } : {}),
+          ...(singularityOutput ? { singularityOutput } : {}),
+          lastContextSummary: contextSummary,
+          ...(pipelineStatus ? { pipelineStatus } : {}),
+        };
+        await this.adapter.put("turns", updatedAi);
+
+        await this._persistProviderResponses(sessionId, aiTurnId, result, now, runId);
+
+        try {
+          const session = await this.adapter.get("sessions", sessionId);
+          if (session) {
+            session.lastTurnId = aiTurnId;
+            if (storedAnalysis) session.lastStructuralTurnId = aiTurnId;
+            session.lastActivity = now;
+            session.updatedAt = now;
+            await this.adapter.put("sessions", session);
+          }
+        } catch (_) { }
+
+        return { sessionId, userTurnId: existingAi.userTurnId || userTurnId, aiTurnId };
+      }
+    } catch (_) { }
 
     // Validate last turn
     if (!context?.lastTurnId) {
@@ -328,7 +482,6 @@ export class SessionManager {
     }
 
     // 1) User turn
-    const userTurnId = request.canonicalUserTurnId || `user-${now}`;
     const userText = request.userMessage || "";
     const userTurnRecord = {
       id: userTurnId,
@@ -352,7 +505,6 @@ export class SessionManager {
     };
 
     // 3) AI turn
-    const aiTurnId = request.canonicalAiTurnId || `ai-${now}`;
     const mapperArtifact = request?.mapperArtifact
       ? this._toJsonSafe(request.mapperArtifact)
       : undefined;
@@ -372,7 +524,7 @@ export class SessionManager {
       createdAt: now,
       updatedAt: now,
       providerContexts: mergedContexts,
-      isComplete: true,
+      isComplete,
       sequence: nextSequence + 1,
       batchResponseCount: this.countResponses(result.batchOutputs),
       mappingResponseCount: this.countResponses(result.mappingOutputs),
@@ -382,6 +534,7 @@ export class SessionManager {
       ...(singularityOutput ? { singularityOutput } : {}),
       lastContextSummary: contextSummary,
       meta: await this._attachRunIdMeta(aiTurnId),
+      ...(pipelineStatus ? { pipelineStatus } : {}),
     };
     await this.adapter.put("turns", aiTurnRecord);
 
@@ -407,7 +560,7 @@ export class SessionManager {
     }
 
     // 4) Provider responses
-    await this._persistProviderResponses(sessionId, aiTurnId, result, now);
+    await this._persistProviderResponses(sessionId, aiTurnId, result, now, runId);
 
     // 5) Update session
     const session = await this.adapter.get("sessions", sessionId);
@@ -556,7 +709,7 @@ export class SessionManager {
    * @param {Object} result
    * @param {number} now
    */
-  async _persistProviderResponses(sessionId, aiTurnId, result, now) {
+  async _persistProviderResponses(sessionId, aiTurnId, result, now, runId = null) {
     const recordsToSave = [];
     let existingResponses = [];
 
@@ -591,8 +744,26 @@ export class SessionManager {
 
     // 1. Batch Responses (versioned)
     for (const [providerId, output] of Object.entries(result?.batchOutputs || {})) {
-      const nextIndex = getNextIndex(providerId, "batch");
-      const respId = `pr-${sessionId}-${aiTurnId}-${providerId}-batch-${nextIndex}-${now}-${count++}`;
+      let existingForRun = null;
+      if (runId) {
+        const matching = existingResponses
+          .filter(
+            (r) =>
+              r &&
+              r.providerId === providerId &&
+              r.responseType === "batch" &&
+              r.meta &&
+              r.meta.runId === runId,
+          )
+          .sort((a, b) => (b.responseIndex ?? 0) - (a.responseIndex ?? 0));
+        existingForRun = matching.length > 0 ? matching[0] : null;
+      }
+
+      const responseIndex = typeof existingForRun?.responseIndex === "number"
+        ? existingForRun.responseIndex
+        : getNextIndex(providerId, "batch");
+      const respId = existingForRun?.id || `pr-${sessionId}-${aiTurnId}-${providerId}-batch-${responseIndex}-${now}-${count++}`;
+      const createdAtKeep = existingForRun?.createdAt || now;
 
       recordsToSave.push({
         id: respId,
@@ -600,11 +771,11 @@ export class SessionManager {
         aiTurnId,
         providerId,
         responseType: "batch",
-        responseIndex: nextIndex,
+        responseIndex,
         text: output?.text || "",
         status: output?.status || "completed",
-        meta: this._safeMeta(output?.meta || {}),
-        createdAt: now,
+        meta: this._safeMeta({ ...(output?.meta || {}), ...(runId ? { runId } : {}) }),
+        createdAt: createdAtKeep,
         updatedAt: now,
         completedAt: now,
       });

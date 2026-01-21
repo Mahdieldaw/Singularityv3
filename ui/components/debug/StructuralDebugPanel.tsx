@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from "react";
 import type { StructuralAnalysis } from "../../../shared/contract";
 import clsx from "clsx";
+import { CopyButton } from "../CopyButton";
 
 export interface DissentVoice {
     id: string;
@@ -15,9 +16,11 @@ export interface DissentVoice {
 
 interface StructuralDebugPanelProps {
     analysis: StructuralAnalysis;
+    semanticMapperPrompt?: string | null;
+    rawMappingText?: string | null;
 }
 
-export const StructuralDebugPanel: React.FC<StructuralDebugPanelProps> = ({ analysis }) => {
+export const StructuralDebugPanel: React.FC<StructuralDebugPanelProps> = ({ analysis, semanticMapperPrompt, rawMappingText }) => {
     const [showRaw, setShowRaw] = useState(false);
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -133,6 +136,41 @@ export const StructuralDebugPanel: React.FC<StructuralDebugPanelProps> = ({ anal
                     {showRaw ? "Hide Raw Data" : "Show Raw Data"}
                 </button>
             </div>
+
+            {(semanticMapperPrompt || rawMappingText) && (
+                <div className="mb-6 space-y-3">
+                    {semanticMapperPrompt && (
+                        <details>
+                            <summary className="cursor-pointer text-xs font-semibold text-text-secondary">
+                                Semantic mapper prompt
+                            </summary>
+                            <div className="mt-2 bg-surface border border-border-subtle rounded-lg overflow-hidden">
+                                <div className="flex items-center justify-end px-2 py-1 border-b border-border-subtle bg-surface-highlight/10">
+                                    <CopyButton text={semanticMapperPrompt} label="Copy semantic mapper prompt" variant="icon" />
+                                </div>
+                                <pre className="text-[11px] leading-snug p-3 overflow-x-auto whitespace-pre-wrap">
+                                    {semanticMapperPrompt}
+                                </pre>
+                            </div>
+                        </details>
+                    )}
+                    {rawMappingText && (
+                        <details>
+                            <summary className="cursor-pointer text-xs font-semibold text-text-secondary">
+                                Raw mapping output
+                            </summary>
+                            <div className="mt-2 bg-surface border border-border-subtle rounded-lg overflow-hidden">
+                                <div className="flex items-center justify-end px-2 py-1 border-b border-border-subtle bg-surface-highlight/10">
+                                    <CopyButton text={rawMappingText} label="Copy raw mapping output" variant="icon" />
+                                </div>
+                                <pre className="text-[11px] leading-snug p-3 overflow-x-auto whitespace-pre-wrap">
+                                    {rawMappingText}
+                                </pre>
+                            </div>
+                        </details>
+                    )}
+                </div>
+            )}
 
             {analysis.landscape.claimCount > 50 && (
                 <div className="mb-4 text-xs text-text-muted">

@@ -18,6 +18,7 @@ import {
   singularityProviderAtom,
   batchAutoRunEnabledAtom,
   turnIdsAtom,
+  turnsMapAtom,
 } from "../state/atoms";
 import { useChat } from "../hooks/chat/useChat";
 import api from "../services/extension-api";
@@ -58,6 +59,7 @@ const ChatInput = ({
 
   const [activeTarget, setActiveTarget] = useAtom(activeProviderTargetAtom); // Keep this as useAtom to read activeTarget
   const turnIds = useAtomValue(turnIdsAtom);
+  const turnsMap = useAtomValue(turnsMapAtom);
   const [currentSessionId] = useAtom(currentSessionIdAtom);
   const setActiveRecomputeState = useSetAtom(activeRecomputeStateAtom);
   const [singularityProvider, setSingularityProvider] = useAtom(singularityProviderAtom);
@@ -213,34 +215,46 @@ const ChatInput = ({
 
   const providerName = activeTarget ? getProviderName(activeTarget.providerId) : "";
   const workflowProgress = useAtomValue(workflowProgressAtom);
+  const latestAiTurn = React.useMemo(() => {
+    for (let i = turnIds.length - 1; i >= 0; i -= 1) {
+      const t = turnsMap.get(turnIds[i]);
+      if (t && (t as any).type === "ai") return t as any;
+    }
+    return null;
+  }, [turnIds, turnsMap]);
+  const isAwaitingTraversal = latestAiTurn?.pipelineStatus === "awaiting_traversal";
+  const isInProgress = latestAiTurn?.pipelineStatus === "in_progress";
+  const showConfigOrbs = !isRoundActive && !isAwaitingTraversal && !isInProgress;
 
   return (
     <div ref={containerRef} className="flex justify-center flex-col items-center pointer-events-auto">
 
-      <div className="relative w-full max-w-[min(900px,calc(100%-24px))] flex justify-center mb-[-8px] z-10 !bg-transparent">
-        <CouncilOrbs
-          providers={LLM_PROVIDERS_CONFIG}
-          voiceProviderId={singularityProvider}
-          variant="active"
-          workflowProgress={workflowProgress as any}
-          isSingularityMode={!batchAutoRunEnabled}
-          forceGating={!batchAutoRunEnabled && turnIds.length > 0}
-          collapsed={!isRoundActive} // Collapse when NOT streaming (idle/finished)
-          onCrownMove={(pid) => {
-            setSingularityProvider(pid);
-            try {
-              chrome?.storage?.local?.set?.({
-                provider_lock_settings: {
-                  singularity_locked: true,
-                  singularity_provider: pid
-                }
-              });
-            } catch (e) {
-              console.error("Failed to save singularity selection:", e);
-            }
-          }}
-        />
-      </div>
+      {showConfigOrbs && (
+        <div className="relative w-full max-w-[min(900px,calc(100%-24px))] flex justify-center mb-[-8px] z-10 !bg-transparent">
+          <CouncilOrbs
+            providers={LLM_PROVIDERS_CONFIG}
+            voiceProviderId={singularityProvider}
+            variant="active"
+            workflowProgress={workflowProgress as any}
+            isSingularityMode={!batchAutoRunEnabled}
+            forceGating={!batchAutoRunEnabled && turnIds.length > 0}
+            collapsed={!isRoundActive}
+            onCrownMove={(pid) => {
+              setSingularityProvider(pid);
+              try {
+                chrome?.storage?.local?.set?.({
+                  provider_lock_settings: {
+                    singularity_locked: true,
+                    singularity_provider: pid
+                  }
+                });
+              } catch (e) {
+                console.error("Failed to save singularity selection:", e);
+              }
+            }}
+          />
+        </div>
+      )}
 
       <div className="flex gap-2 items-center relative w-full max-w-[min(900px,calc(100%-24px))] p-2.5 bg-surface border border-border-subtle/60 rounded-t-2xl rounded-b-2xl flex-wrap z-[100] shadow-elevated">
 

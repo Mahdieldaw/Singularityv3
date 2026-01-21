@@ -98,8 +98,8 @@ function projectShadowParagraphs(shadowStatements: ShadowStatement[]): ShadowPar
   const groups = new Map<string, Array<{ stmt: ShadowStatement; sentenceIndex: number; encounter: number }>>();
   for (let encounter = 0; encounter < shadowStatements.length; encounter++) {
     const stmt = shadowStatements[encounter];
-    const paragraphIndex = (stmt as any)?.location?.paragraphIndex ?? 0;
-    const sentenceIndex = (stmt as any)?.location?.sentenceIndex ?? encounter;
+    const paragraphIndex = stmt.location?.paragraphIndex ?? 0;
+    const sentenceIndex = stmt.location?.sentenceIndex ?? encounter;
     const key = `${stmt.modelIndex}:${paragraphIndex}`;
     const arr = groups.get(key) || [];
     arr.push({ stmt, sentenceIndex, encounter });
@@ -133,7 +133,7 @@ function projectShadowParagraphs(shadowStatements: ShadowStatement[]): ShadowPar
       return {
         id: g.stmt.id,
         text: clipped.text,
-        stance: String((g.stmt as any).stance || ''),
+        stance: String(g.stmt.stance || ''),
         signals
       };
     });
@@ -153,8 +153,8 @@ function projectShadowParagraphs(shadowStatements: ShadowStatement[]): ShadowPar
     const stanceScores = new Map<string, number>();
     let maxConfidence = 0;
     for (const g of group) {
-      const stance = String((g.stmt as any).stance || '');
-      const conf = typeof (g.stmt as any).confidence === 'number' ? (g.stmt as any).confidence : 0;
+      const stance = String(g.stmt.stance || '');
+      const conf = typeof g.stmt.confidence === 'number' ? g.stmt.confidence : 0;
       maxConfidence = Math.max(maxConfidence, conf);
       const w = conf * (stancePriority[stance] ?? 1);
       stanceScores.set(stance, (stanceScores.get(stance) || 0) + w);
@@ -186,14 +186,16 @@ function projectShadowParagraphs(shadowStatements: ShadowStatement[]): ShadowPar
   return paragraphs;
 }
 
-function clusterParagraphs(paragraphs: ShadowParagraph[]): ParagraphCluster[] {
-  const MERGE_THRESHOLD = 0.45;
-  const LOW_COHESION_THRESHOLD = 0.35;
-  const MAX_CLUSTER_SIZE = 8;
-  const MAX_EXPANSION_MEMBERS = 6;
-  const MAX_EXPANSION_CHARS = 1800;
-  const MAX_MEMBER_TEXT_CHARS = 420;
+export const CLUSTER_CONFIG = {
+  MERGE_THRESHOLD: 0.45,
+  LOW_COHESION_THRESHOLD: 0.35,
+  MAX_CLUSTER_SIZE: 8,
+  MAX_EXPANSION_MEMBERS: 6,
+  MAX_EXPANSION_CHARS: 1800,
+  MAX_MEMBER_TEXT_CHARS: 420,
+} as const;
 
+function clusterParagraphs(paragraphs: ShadowParagraph[]): ParagraphCluster[] {
   const paragraphById = new Map(paragraphs.map(p => [p.id, p]));
   const tokensById = new Map(paragraphs.map(p => [p.id, extractSignificantWords(p.text)]));
 
@@ -212,7 +214,7 @@ function clusterParagraphs(paragraphs: ShadowParagraph[]): ParagraphCluster[] {
       }
     }
 
-    if (bestIdx >= 0 && bestSim >= MERGE_THRESHOLD) {
+    if (bestIdx >= 0 && bestSim >= CLUSTER_CONFIG.MERGE_THRESHOLD) {
       clusters[bestIdx].paragraphIds.push(p.id);
     } else {
       clusters.push({ paragraphIds: [p.id], repId: p.id });
@@ -252,9 +254,9 @@ function clusterParagraphs(paragraphs: ShadowParagraph[]): ParagraphCluster[] {
     );
 
     const uncertaintyReasons: string[] = [];
-    if (cohesion < LOW_COHESION_THRESHOLD) uncertaintyReasons.push('low_cohesion');
+    if (cohesion < CLUSTER_CONFIG.LOW_COHESION_THRESHOLD) uncertaintyReasons.push('low_cohesion');
     if (stanceSet.size > 2 || (hasPrescriptive && hasCautionary) || (hasPrerequisite && hasDependent)) uncertaintyReasons.push('stance_diversity');
-    if (paragraphIds.length > MAX_CLUSTER_SIZE) uncertaintyReasons.push('oversized');
+    if (paragraphIds.length > CLUSTER_CONFIG.MAX_CLUSTER_SIZE) uncertaintyReasons.push('oversized');
     if (paragraphIds.length > 1 && aggSignals.tension && aggSignals.conditional) uncertaintyReasons.push('conflicting_signals');
 
     const statementIds: string[] = [];
@@ -288,18 +290,18 @@ function clusterParagraphs(paragraphs: ShadowParagraph[]): ParagraphCluster[] {
       const chosen = new Set<string>([repId]);
       if (byDistance.length > 0) chosen.add(byDistance[0].pid);
       for (const d of byDistance) {
-        if (chosen.size >= MAX_EXPANSION_MEMBERS) break;
+        if (chosen.size >= CLUSTER_CONFIG.MAX_EXPANSION_MEMBERS) break;
         chosen.add(d.pid);
       }
 
-      let charBudget = MAX_EXPANSION_CHARS;
+      let charBudget = CLUSTER_CONFIG.MAX_EXPANSION_CHARS;
       const memberParagraphs: NonNullable<ParagraphCluster['expansion']>['memberParagraphs'] = [];
 
       const chosenList = Array.from(chosen).sort((a, b) => (a === repId ? -1 : 0) || (a < b ? -1 : 1));
       for (const pid of chosenList) {
         const p = paragraphById.get(pid);
         if (!p) continue;
-        const clipped = clipText(p.text, MAX_MEMBER_TEXT_CHARS);
+        const clipped = clipText(p.text, CLUSTER_CONFIG.MAX_MEMBER_TEXT_CHARS);
         if (charBudget - clipped.text.length < 0) break;
         charBudget -= clipped.text.length;
         memberParagraphs.push({
@@ -345,7 +347,6 @@ export function buildSemanticMapperPrompt(
 You find yourself standing in a landscape made entirely of positions.
 Each position is an island — an idea that could stand on its own, be rejected, or be held only if certain things are true.
 At first, these islands look scattered.
-But as you look closer, you notice thin threads between them.
 But as you look closer, you notice thin threads between them.
 Some threads show order — one island can only be reached after another is settled.
 Some show dependence — an island exists only if another one already holds.
