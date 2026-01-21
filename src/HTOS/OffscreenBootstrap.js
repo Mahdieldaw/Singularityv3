@@ -19,7 +19,7 @@ const logOffscreenError = (message, error) => {
     const candidate =
       globalThis.processLogger ||
       globalThis.logger ||
-      (globalThis.window ? globalThis.window.processLogger || globalThis.window.logger : null);
+      (globalThis.window ? globalThis.window['processLogger'] || globalThis.window['logger'] : null);
     if (candidate && typeof candidate.error === "function") {
       candidate.error(message, error);
       return;
@@ -245,10 +245,13 @@ const OffscreenBootstrap = {
     this._heartbeatLastError = null;
     this._swHeartbeatTimer = setInterval(async () => {
       try {
-        await chrome.runtime.sendMessage({
+        const response = await chrome.runtime.sendMessage({
           type: "offscreen.heartbeat",
           timestamp: Date.now(),
         });
+        if (!response?.alive) {
+          throw new Error("Heartbeat not acknowledged");
+        }
         this._heartbeatTotalSuccesses += 1;
         this._heartbeatConsecutiveFailures = 0;
         this._heartbeatLastSuccessAt = Date.now();

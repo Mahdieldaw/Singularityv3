@@ -87,8 +87,9 @@ export class WorkflowEngine {
 
       try {
         await this._persistCheckpoint(request, context, resolvedContext);
-      } catch (_) { }
-
+      } catch (e) {
+        console.warn("[WorkflowEngine] Checkpoint persistence failed (non-blocking):", e);
+      }
       // VALIDATION: Ensure only foundation/singularity steps are present in the main loop
       const invalidSteps = steps.filter(s => !['prompt', 'mapping', 'singularity'].includes(s.type));
       if (invalidSteps.length > 0) {

@@ -162,7 +162,7 @@ function projectShadowParagraphs(shadowStatements: ShadowStatement[]): ShadowPar
 
     let dominantStance = 'assertive';
     let bestScore = -Infinity;
-    for (const [stance, score] of stanceScores.entries()) {
+    for (const [stance, score] of Array.from(stanceScores.entries())) {
       if (score > bestScore || (score === bestScore && stance < dominantStance)) {
         dominantStance = stance;
         bestScore = score;

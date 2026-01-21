@@ -305,7 +305,14 @@ export function formatAuditSummary(delta: ShadowDeltaResult): string {
 // ═══════════════════════════════════════════════════════════════════════════
 // EXPORT HELPERS FOR PIPELINE INTEGRATION
 // ═══════════════════════════════════════════════════════════════════════════
-
+type ClaimLike = {
+    sourceStatementIds?: string[];
+    gates?: {
+        conditionals?: Array<{ sourceStatementIds?: string[] }>;
+        prerequisites?: Array<{ sourceStatementIds?: string[] }>;
+    };
+    conflicts?: Array<{ sourceStatementIds?: string[] }>;
+};
 /**
  * Extract referenced statement IDs from semantic mapper output
  * Use this after semantic mapper runs to build the set for computeShadowDelta
@@ -333,11 +340,4 @@ export function extractReferencedIds(
     return ids;
 }
 
-type ClaimLike = {
-    sourceStatementIds?: string[];
-    gates?: {
-        conditionals?: Array<{ sourceStatementIds?: string[] }>;
-        prerequisites?: Array<{ sourceStatementIds?: string[] }>;
-    };
-    conflicts?: Array<{ sourceStatementIds?: string[] }>;
-};
+

@@ -197,6 +197,7 @@ export class GeminiSessionApi {
       }
     }
 
+    /** @type {{type: string, details: any} | null} */
     let abortHint = null;
     const abortWith = (type, details) => {
       if (!abortHint) abortHint = { type, details };
@@ -431,7 +432,7 @@ export class GeminiSessionApi {
       }
     } catch (e) {
       if (this.isOwnError(e)) throw e;
-      if (abortHint?.type) this._throw(abortHint.type, abortHint.details);
+      if (abortHint && abortHint.type) this._throw(abortHint.type, abortHint.details);
       this._throw("failedToReadResponse", { step: "data", error: e });
     }
 
