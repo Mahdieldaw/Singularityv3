@@ -388,10 +388,48 @@ export class StepExecutor {
     const shadowResult = extractShadowStatements(shadowInput);
     console.log(`[StepExecutor] Extracted ${shadowResult.statements.length} shadow statements.`);
 
-    // 3. Build Prompt (LLM)
+    // ════════════════════════════════════════════════════════════════════════
+    // 2.5 PARAGRAPH PROJECTION (sync, fast)
+    // ════════════════════════════════════════════════════════════════════════
+    const { projectParagraphs } = shadowModule;
+    const paragraphResult = projectParagraphs(shadowResult.statements);
+    console.log(`[StepExecutor] Projected ${paragraphResult.paragraphs.length} paragraphs ` +
+      `(${paragraphResult.meta.contestedCount} contested, ` +
+      `${paragraphResult.meta.processingTimeMs.toFixed(1)}ms)`);
+
+    // ════════════════════════════════════════════════════════════════════════
+    // 2.6 CLUSTERING (async, may fail gracefully)
+    // ════════════════════════════════════════════════════════════════════════
+    let clusteringResult = null;
+    if (paragraphResult.paragraphs.length >= 3) {
+      try {
+        const { clusterParagraphs } = await import('../../clustering');
+        clusteringResult = await clusterParagraphs(
+          paragraphResult.paragraphs,
+          shadowResult.statements  // Pass original statements for embedding text
+        );
+
+        console.log(`[StepExecutor] Clustered into ${clusteringResult.clusters.length} clusters ` +
+          `(${clusteringResult.meta.singletonCount} singletons, ` +
+          `${clusteringResult.meta.uncertainCount} uncertain, ` +
+          `compression ${(clusteringResult.meta.compressionRatio * 100).toFixed(0)}%, ` +
+          `embedding ${clusteringResult.meta.embeddingTimeMs.toFixed(0)}ms, ` +
+          `clustering ${clusteringResult.meta.clusteringTimeMs.toFixed(0)}ms)`);
+      } catch (clusteringError) {
+        // Per design: skip clustering entirely on failure, continue without
+        console.warn('[StepExecutor] Clustering failed, continuing without clusters:', clusteringError.message);
+        clusteringResult = null;
+      }
+    } else {
+      console.log('[StepExecutor] Skipping clustering (< 3 paragraphs)');
+    }
+
+    // 3. Build Prompt (LLM) - pass pre-computed paragraph projection and clustering
     const mappingPrompt = buildSemanticMapperPrompt(
       payload.originalPrompt,
-      shadowResult.statements
+      shadowResult.statements,
+      paragraphResult,
+      clusteringResult
     );
 
     const promptLength = mappingPrompt.length;

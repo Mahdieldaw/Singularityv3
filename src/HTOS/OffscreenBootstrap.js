@@ -13,6 +13,7 @@
 // =============================================================================
 
 import { BusController } from "./BusController.js";
+import { EmbeddingController } from "../offscreen/EmbeddingController.js";
 
 const logOffscreenError = (message, error) => {
   try {
@@ -330,7 +331,11 @@ const OffscreenBootstrap = {
       console.log(
         "[OffscreenBootstrap] Initializing specialized controllers...",
       );
-      await Promise.all([IframeController.init(), UtilsController.init()]);
+      await Promise.all([
+        IframeController.init(),
+        UtilsController.init(),
+        EmbeddingController.init(),
+      ]);
       console.log(
         "[OffscreenBootstrap] All specialized controllers initialized successfully",
       );

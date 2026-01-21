@@ -192,9 +192,6 @@ export const TraversalGraphView: React.FC<TraversalGraphViewProps> = ({
         await new Promise((r) => setTimeout(r, Math.pow(2, attempt) * 1000));
       }
     }
-
-    setIsSubmitting(false);
-    setSubmissionError('Submission failed. Please try again.');
   };
 
   if (!Array.isArray(traversalGraph?.tiers)) {

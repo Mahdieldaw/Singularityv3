@@ -1,6 +1,20 @@
 const fs = require("fs");
 const p = require("path");
 
+// ════════════════════════════════════════════════════════════════════════
+// Recursive copy function (used for fonts and models)
+// ════════════════════════════════════════════════════════════════════════
+function copyRecursive(src, dest) {
+  if (fs.statSync(src).isDirectory()) {
+    fs.mkdirSync(dest, { recursive: true });
+    fs.readdirSync(src).forEach(child => {
+      copyRecursive(p.join(src, child), p.join(dest, child));
+    });
+  } else {
+    fs.copyFileSync(src, dest);
+  }
+}
+
 // ensure dirs
 fs.mkdirSync("dist/ui", { recursive: true });
 fs.mkdirSync("dist/icons", { recursive: true });
@@ -31,21 +45,24 @@ if (fs.existsSync("src/offscreen.css"))
 if (fs.existsSync("src/oi.html"))
   fs.copyFileSync("src/oi.html", "dist/oi.html");
 
+// ════════════════════════════════════════════════════════════════════════
+// Copy embedding model artifacts
+// ════════════════════════════════════════════════════════════════════════
+const modelsSource = p.join(__dirname, "../models");
+const modelsDest = p.join(__dirname, "../dist/models");
+
+if (fs.existsSync(modelsSource)) {
+  fs.mkdirSync(modelsDest, { recursive: true });
+  copyRecursive(modelsSource, modelsDest);
+  console.log("[postbuild] Copied models/ to dist/models/");
+} else {
+  console.warn("[postbuild] Warning: models/ directory not found - embeddings will not work");
+}
+
 // copy fonts
 if (fs.existsSync("ui/fonts")) {
   fs.mkdirSync("dist/ui/fonts", { recursive: true });
-  // Recursive copy function
-  function copyRecursive(src, dest) {
-    if (fs.statSync(src).isDirectory()) {
-      fs.mkdirSync(dest, { recursive: true });
-      fs.readdirSync(src).forEach(child => {
-        copyRecursive(p.join(src, child), p.join(dest, child));
-      });
-    } else {
-      fs.copyFileSync(src, dest);
-    }
-  }
-  
+
   const fonts = fs.readdirSync("ui/fonts");
   for (const font of fonts) {
     copyRecursive(p.join("ui/fonts", font), p.join("dist/ui/fonts", font));

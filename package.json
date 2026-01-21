@@ -24,6 +24,7 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
+    "@huggingface/transformers": "^3.5.1",
     "@tanstack/react-virtual": "^3.13.12",
     "d3-force": "^3.0.0",
     "framer-motion": "^12.23.25",
