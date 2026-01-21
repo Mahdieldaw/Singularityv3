@@ -178,6 +178,7 @@ export class TurnEmitter {
         sessionId: context.sessionId,
         threadId: DEFAULT_THREAD,
         createdAt: timestamp,
+        pipelineStatus: context?.pipelineStatus || "complete",
         batchResponses,
         mappingResponses,
         singularityResponses,

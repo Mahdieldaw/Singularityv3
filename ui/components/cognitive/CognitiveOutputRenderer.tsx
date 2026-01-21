@@ -48,6 +48,7 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
     const streamingState = useAtomValue(turnStreamingStateFamily(aiTurn.id));
     const setActiveSplitPanel = useSetAtom(activeSplitPanelAtom);
     const currentSessionId = useAtomValue(currentSessionIdAtom);
+    const effectiveSessionId = currentSessionId || aiTurn.sessionId;
 
     const hasSingularityText = useMemo(() => {
         return String(singularityState.output?.text || "").trim().length > 0;
@@ -113,7 +114,7 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
     }, [aiTurn.mapperArtifact]);
 
     const isAwaitingTraversal = aiTurn.pipelineStatus === 'awaiting_traversal';
-    const hasTraversalGraph = !!aiTurn.mapperArtifact?.traversalGraph && !!currentSessionId;
+    const hasTraversalGraph = !!aiTurn.mapperArtifact?.traversalGraph && !!effectiveSessionId;
     const isPipelineComplete = !aiTurn.pipelineStatus || aiTurn.pipelineStatus === 'complete';
     const isRoundActive = streamingState.isLoading || isAwaitingTraversal;
 
@@ -219,7 +220,7 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
                         forcingPoints={aiTurn.mapperArtifact!.forcingPoints || []}
                         claims={aiTurn.mapperArtifact!.claims || []}
                         originalQuery={aiTurn.mapperArtifact!.query || ''}
-                        sessionId={currentSessionId!}
+                        sessionId={effectiveSessionId!}
                         aiTurnId={aiTurn.id}
                         onComplete={() => setViewOverride('response')}
                     />

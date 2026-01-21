@@ -173,11 +173,7 @@ export function usePortMessageHandler(enabled: boolean = true) {
           } = message;
 
           // Always adopt the backend sessionId for TURN_CREATED
-          if (msgSessionId) {
-            if (!currentSessionId || currentSessionId === msgSessionId) {
-              setCurrentSessionId(msgSessionId);
-            }
-          }
+          if (msgSessionId) setCurrentSessionId(msgSessionId);
 
           // ✅ CRITICAL FIX: Use providers from message (authoritative backend data)
           // instead of reading from atoms which may be stale
@@ -260,7 +256,11 @@ export function usePortMessageHandler(enabled: boolean = true) {
 
           // Adopt sessionId on finalization to ensure coherence
           if (msgSessionId) {
-            if (!currentSessionId || currentSessionId === msgSessionId) {
+            if (
+              !currentSessionId ||
+              currentSessionId === msgSessionId ||
+              activeAiTurnIdRef.current === aiTurnId
+            ) {
               setCurrentSessionId(msgSessionId);
             }
           }
@@ -881,7 +881,11 @@ export function usePortMessageHandler(enabled: boolean = true) {
           if (!aiTurnId) return;
 
           if (msgSessionId) {
-            if (!currentSessionId || currentSessionId === msgSessionId) {
+            if (
+              !currentSessionId ||
+              currentSessionId === msgSessionId ||
+              activeAiTurnIdRef.current === aiTurnId
+            ) {
               setCurrentSessionId(msgSessionId);
             }
           }

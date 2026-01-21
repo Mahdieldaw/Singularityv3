@@ -48,10 +48,14 @@ export class CognitivePipelineHandler {
         // 1. Update Turn Status
         const aiTurnId = context.canonicalAiTurnId;
         try {
+          const safeMapperArtifact =
+            this.sessionManager && typeof this.sessionManager._safeArtifact === "function"
+              ? this.sessionManager._safeArtifact(mapperArtifact)
+              : mapperArtifact;
           const currentAiTurn = await this.sessionManager.adapter.get("turns", aiTurnId);
           if (currentAiTurn) {
             currentAiTurn.pipelineStatus = 'awaiting_traversal';
-            currentAiTurn.mapperArtifact = mapperArtifact; // Ensure artifact is saved
+            currentAiTurn.mapperArtifact = safeMapperArtifact;
             await this.sessionManager.adapter.put("turns", currentAiTurn);
           }
 
@@ -65,7 +69,7 @@ export class CognitivePipelineHandler {
             type: "MAPPER_ARTIFACT_READY",
             sessionId: context.sessionId,
             aiTurnId: context.canonicalAiTurnId,
-            artifact: mapperArtifact,
+            artifact: safeMapperArtifact,
             singularityOutput: null,
             singularityProvider: null,
             pipelineStatus: 'awaiting_traversal'
@@ -577,6 +581,38 @@ export class CognitivePipelineHandler {
       if (!aiTurn) throw new Error(`AI turn ${aiTurnId} not found.`);
 
       const effectiveSessionId = sessionId || aiTurn.sessionId;
+      if (sessionId && aiTurn.sessionId && sessionId !== aiTurn.sessionId) {
+        try {
+          this.port.postMessage({
+            type: "CONTINUATION_ERROR",
+            sessionId,
+            aiTurnId,
+            error: "Session mismatch for continuation request",
+          });
+        } catch (_) { }
+        return;
+      }
+
+      if (payload?.isTraversalContinuation) {
+        if (aiTurn.pipelineStatus !== 'awaiting_traversal') {
+          try {
+            this.port.postMessage({
+              type: "CONTINUATION_ERROR",
+              sessionId: effectiveSessionId,
+              aiTurnId,
+              error: `Invalid turn state: ${aiTurn.pipelineStatus || 'unknown'}`,
+            });
+          } catch (_) { }
+          return;
+        }
+        try {
+          this.port.postMessage({
+            type: "CONTINUATION_ACK",
+            sessionId: effectiveSessionId,
+            aiTurnId,
+          });
+        } catch (_) { }
+      }
       const userTurnId = aiTurn.userTurnId;
       const userTurn = userTurnId ? await adapter.get("turns", userTurnId) : null;
 

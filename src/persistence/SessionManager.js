@@ -4,6 +4,19 @@
 import { SimpleIndexedDBAdapter } from "./SimpleIndexedDBAdapter.js";
 import { DEFAULT_THREAD } from "../../shared/messaging.js";
 
+const getSessionLogger = () => {
+  try {
+    const candidate =
+      globalThis.processLogger ||
+      globalThis.logger ||
+      (globalThis.window
+        ? globalThis.window["processLogger"] || globalThis.window["logger"]
+        : null);
+    if (candidate && typeof candidate.error === "function") return candidate;
+  } catch (_) { }
+  return console;
+};
+
 
 
 
@@ -14,6 +27,10 @@ export class SessionManager {
     // Persistence layer components will be injected
     this.adapter = null;
     this.isInitialized = false;
+  }
+
+  _safeArtifact(artifact) {
+    return this._toJsonSafe(artifact, { maxDepth: 20, maxStringLength: 250000 });
   }
 
   _toJsonSafe(value, opts = {}, _seen = new WeakSet(), _depth = 0) {
@@ -175,11 +192,12 @@ export class SessionManager {
       ? request?.pipelineStatus
       : (request?.pipelineStatus || "complete");
     const runId = request?.runId;
+    let existingUserTurnId = null;
 
     try {
       const existingAi = await this.adapter.get("turns", aiTurnId);
       if (existingAi && (existingAi.type === "ai" || existingAi.role === "assistant")) {
-        const existingUserTurnId = existingAi.userTurnId || userTurnId;
+        existingUserTurnId = existingAi.userTurnId || userTurnId;
         try {
           const existingUser = await this.adapter.get("turns", existingUserTurnId);
           if (!existingUser) {
@@ -197,11 +215,17 @@ export class SessionManager {
               sequence: Math.max((existingAi.sequence || 1) - 1, 0),
             });
           }
-        } catch (_) { }
+        } catch (err) {
+          const logger = getSessionLogger();
+          logger.error(
+            `[SessionManager] adapter.get("turns", existingUserTurnId) failed (aiTurnId=${aiTurnId}, existingUserTurnId=${existingUserTurnId}, sessionId=${sessionId})`,
+            err,
+          );
+        }
 
         const providerContexts = this._extractContextsFromResult(result);
         const mapperArtifact = request?.mapperArtifact
-          ? this._toJsonSafe(request.mapperArtifact)
+          ? this._safeArtifact(request.mapperArtifact)
           : undefined;
         const storedAnalysis = request?.storedAnalysis
           ? this._toJsonSafe(request.storedAnalysis)
@@ -240,11 +264,30 @@ export class SessionManager {
             session.updatedAt = now;
             await this.adapter.put("sessions", session);
           }
-        } catch (_) { }
+        } catch (err) {
+          const logger = getSessionLogger();
+          logger.error(
+            `[SessionManager] adapter.get("sessions", sessionId) failed (aiTurnId=${aiTurnId}, existingUserTurnId=${existingUserTurnId}, sessionId=${sessionId})`,
+            err,
+          );
+        }
 
         return { sessionId, userTurnId: existingUserTurnId, aiTurnId };
       }
-    } catch (_) { }
+    } catch (err) {
+      const logger = getSessionLogger();
+      logger.error(
+        `[SessionManager] Existing AI-turn handling failed (adapterOp=initialize existing-ai path, aiTurnId=${aiTurnId}, existingUserTurnId=${existingUserTurnId}, sessionId=${sessionId})`,
+        err,
+      );
+
+      const base = err instanceof Error ? err : new Error(String(err));
+      const wrapped = new Error(
+        `[SessionManager] Persistence adapter failure during initialize (aiTurnId=${aiTurnId}, existingUserTurnId=${existingUserTurnId}, sessionId=${sessionId})`,
+      );
+      wrapped.cause = base;
+      throw wrapped;
+    }
 
     // 1) Create session
     const sessionRecord = {
@@ -299,7 +342,7 @@ export class SessionManager {
     // 4) AI turn with contexts
     const providerContexts = this._extractContextsFromResult(result);
     const mapperArtifact = request?.mapperArtifact
-      ? this._toJsonSafe(request.mapperArtifact)
+      ? this._safeArtifact(request.mapperArtifact)
       : undefined;
     const storedAnalysis = request?.storedAnalysis
       ? this._toJsonSafe(request.storedAnalysis)
@@ -405,7 +448,7 @@ export class SessionManager {
 
         const newContexts = this._extractContextsFromResult(result);
         const mapperArtifact = request?.mapperArtifact
-          ? this._toJsonSafe(request.mapperArtifact)
+          ? this._safeArtifact(request.mapperArtifact)
           : undefined;
         const storedAnalysis = request?.storedAnalysis
           ? this._toJsonSafe(request.storedAnalysis)
@@ -506,7 +549,7 @@ export class SessionManager {
 
     // 3) AI turn
     const mapperArtifact = request?.mapperArtifact
-      ? this._toJsonSafe(request.mapperArtifact)
+      ? this._safeArtifact(request.mapperArtifact)
       : undefined;
     const storedAnalysis = request?.storedAnalysis
       ? this._toJsonSafe(request.storedAnalysis)

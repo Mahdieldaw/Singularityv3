@@ -194,7 +194,7 @@ describe('ConciergeService', () => {
         expect(result.output?.claims?.[0]?.conflicts?.[0]?.question).toBe('Which matters more: speed or flexibility?');
     });
 
-    it('should serialize shadow statements using model-keyed contract', () => {
+    it('should serialize shadow paragraphs without duplicating statement text', () => {
         const shadowStatements: any[] = [
             { id: 's_0', modelIndex: 1, text: 'A', stance: 'assertive', signals: { sequence: false, tension: true, conditional: false } },
             { id: 's_1', modelIndex: 2, text: 'B', stance: 'cautionary', signals: { sequence: true, tension: false, conditional: true } },
@@ -203,8 +203,17 @@ describe('ConciergeService', () => {
         const prompt = buildSemanticMapperPrompt('Q', shadowStatements as any);
         const match = prompt.match(/<shadow_paragraphs>\s*([\s\S]*?)\s*<\/shadow_paragraphs>/);
         expect(match).not.toBeNull();
-        const obj = JSON.parse(String(match?.[1] || '{}'));
-        expect(obj.model_1?.[0]?.statements?.[0]).toEqual({ id: 's_0', text: 'A', stance: 'assertive', signals: ['TENS'] });
-        expect(obj.model_2?.[0]?.statements?.[0]).toEqual({ id: 's_1', text: 'B', stance: 'cautionary', signals: ['SEQ', 'COND'] });
+        const block = String(match?.[1] || '');
+
+        expect(block).toContain('model_1:');
+        expect(block).toContain('- A (s_0)');
+        expect(block).toContain('s_0:{stance=assertive,signals=TENS}');
+
+        expect(block).toContain('model_2:');
+        expect(block).toContain('- B (s_1)');
+        expect(block).toContain('s_1:{stance=cautionary,signals=SEQ,COND}');
+
+        expect(block.match(/\bA\b/g)?.length).toBe(1);
+        expect(block.match(/\bB\b/g)?.length).toBe(1);
     });
 });

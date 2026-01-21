@@ -5,6 +5,7 @@ import { TraversalForcingPointCard } from './TraversalForcingPointCard';
 import { buildTraversalContinuationPrompt } from '../../utils/traversal-prompt-builder';
 import type { Claim, ForcingPoint, SerializedTraversalGraph, TraversalGate } from '../../../shared/contract';
 import { CONTINUE_COGNITIVE_WORKFLOW, WORKFLOW_STEP_UPDATE } from '../../../shared/messaging';
+import api from '../../services/extension-api';
 
 interface TraversalGraphViewProps {
   traversalGraph: SerializedTraversalGraph;
@@ -57,18 +58,25 @@ export const TraversalGraphView: React.FC<TraversalGraphViewProps> = ({
       gatesMap
     );
 
-    let port: chrome.runtime.Port | null = null;
-    let messageListener: ((msg: any) => void) | null = null;
-    let timeoutId: any = null;
+    const maxRetries = 3;
 
-    try {
-      port = chrome.runtime.connect({ name: 'htos-popup' });
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      let port: chrome.runtime.Port | null = null;
+      let messageListener: ((msg: any) => void) | null = null;
+      let disconnectListener: (() => void) | null = null;
+      let ackTimeoutId: any = null;
+      let completionTimeoutId: any = null;
 
       const cleanup = () => {
         try {
-          if (timeoutId) clearTimeout(timeoutId);
+          if (ackTimeoutId) clearTimeout(ackTimeoutId);
         } catch (e) {
-          console.debug('[TraversalGraphView] Error clearing timeout:', e);
+          console.debug('[TraversalGraphView] Error clearing ack timeout:', e);
+        }
+        try {
+          if (completionTimeoutId) clearTimeout(completionTimeoutId);
+        } catch (e) {
+          console.debug('[TraversalGraphView] Error clearing completion timeout:', e);
         }
         try {
           if (port && messageListener) {
@@ -78,62 +86,115 @@ export const TraversalGraphView: React.FC<TraversalGraphViewProps> = ({
           console.debug('[TraversalGraphView] Error removing message listener:', e);
         }
         try {
-          port?.disconnect();
+          if (port && disconnectListener) {
+            port.onDisconnect.removeListener(disconnectListener);
+          }
         } catch (e) {
-          console.debug('[TraversalGraphView] Error disconnecting port:', e);
+          console.debug('[TraversalGraphView] Error removing disconnect listener:', e);
         }
       };
 
-      messageListener = (msg: any) => {
-        if (msg.type !== WORKFLOW_STEP_UPDATE) return;
-        if (msg.status === 'completed') {
-          cleanup();
+      try {
+        port = await api.ensurePort({ sessionId, force: attempt > 0 });
+
+        await new Promise<void>((resolve, reject) => {
+          let acked = false;
+          let isDone = false;
+
+          const finish = (fn: () => void) => {
+            if (isDone) return;
+            isDone = true;
+            cleanup();
+            fn();
+          };
+
+          messageListener = (msg: any) => {
+            if (!msg || typeof msg !== 'object') return;
+
+            if (msg.type === 'CONTINUATION_ACK' && msg.aiTurnId === aiTurnId) {
+              acked = true;
+              try {
+                if (ackTimeoutId) clearTimeout(ackTimeoutId);
+              } catch (_) { }
+              return;
+            }
+
+            if (msg.type === 'CONTINUATION_ERROR' && msg.aiTurnId === aiTurnId) {
+              finish(() => reject(new Error(msg.error || 'Continuation failed')));
+              return;
+            }
+
+            if (msg.type !== WORKFLOW_STEP_UPDATE) return;
+            if (msg.sessionId && msg.sessionId !== sessionId) return;
+
+            const stepId = String(msg.stepId || '');
+            const isRelevantStep =
+              stepId.startsWith('singularity-') || stepId === 'continue-singularity-error';
+            if (!isRelevantStep) return;
+
+            if (msg.status === 'completed') {
+              finish(() => resolve());
+              return;
+            }
+
+            if (msg.status === 'failed') {
+              finish(() =>
+                reject(new Error(msg.error || 'Submission failed. Please try again.')),
+              );
+              return;
+            }
+          };
+
+          disconnectListener = () => {
+            finish(() => reject(new Error('Port disconnected')));
+          };
+
+          port!.onMessage.addListener(messageListener);
+          port!.onDisconnect.addListener(disconnectListener);
+
+          ackTimeoutId = setTimeout(() => {
+            if (isDone) return;
+            if (acked) return;
+            finish(() => reject(new Error('No ACK received. Please try again.')));
+          }, 10000);
+
+          completionTimeoutId = setTimeout(() => {
+            finish(() => reject(new Error('Submission timed out. Please try again.')));
+          }, 30000);
+
+          try {
+            port!.postMessage({
+              type: CONTINUE_COGNITIVE_WORKFLOW,
+              payload: {
+                sessionId,
+                aiTurnId,
+                userMessage: continuationPrompt,
+                providerId: 'gemini',
+                isTraversalContinuation: true
+              }
+            });
+          } catch (e) {
+            finish(() => reject(e instanceof Error ? e : new Error(String(e))));
+          }
+        });
+
+        setIsSubmitting(false);
+        onComplete?.();
+        return;
+      } catch (error) {
+        cleanup();
+        const isLast = attempt === maxRetries - 1;
+        if (isLast) {
           setIsSubmitting(false);
-          onComplete?.();
+          setSubmissionError(error instanceof Error ? error.message : String(error));
           return;
         }
-        if (msg.status === 'failed') {
-          cleanup();
-          setIsSubmitting(false);
-          setSubmissionError(msg.error || 'Submission failed. Please try again.');
-        }
-      };
-
-      port.onMessage.addListener(messageListener);
-
-      port.onDisconnect.addListener(() => {
-        const err = chrome.runtime.lastError;
-        console.warn('Port disconnected:', err);
-      });
-
-      port.postMessage({
-        type: CONTINUE_COGNITIVE_WORKFLOW,
-        payload: {
-          sessionId,
-          aiTurnId,
-          userMessage: continuationPrompt,
-          providerId: 'gemini',
-          isTraversalContinuation: true
-        }
-      });
-
-      timeoutId = setTimeout(() => {
-        cleanup();
-        setIsSubmitting(false);
-        setSubmissionError('Submission timed out. Please try again.');
-      }, 30000);
-
-    } catch (error) {
-      console.error('Failed to submit traversal to Concierge:', error);
-      setIsSubmitting(false);
-      setSubmissionError('Failed to submit: ' + String(error));
-      try {
-        if (port && messageListener) {
-          port.onMessage.removeListener(messageListener);
-        }
-      } catch (_) { }
-      try { port?.disconnect(); } catch (_) { }
+        await new Promise((r) => setTimeout(r, Math.pow(2, attempt) * 1000));
+      }
     }
+
+    setIsSubmitting(false);
+    setSubmissionError('Submission failed. Please try again.');
   };
 
   if (!Array.isArray(traversalGraph?.tiers)) {
@@ -274,8 +335,17 @@ export const TraversalGraphView: React.FC<TraversalGraphViewProps> = ({
               {isSubmitting ? 'Generating...' : 'Generate Personalized Guidance'}
             </button>
             {submissionError && (
-              <div className="mt-2 text-xs text-red-500 font-bold">
-                {submissionError}
+              <div className="mt-2">
+                <div className="text-xs text-red-500 font-bold">
+                  {submissionError}
+                </div>
+                <button
+                  onClick={handleSubmitToConcierge}
+                  disabled={isSubmitting}
+                  className="mt-2 px-3 py-1.5 rounded-lg bg-surface-highlight hover:bg-surface-raised border border-border-subtle text-xs font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Retry
+                </button>
               </div>
             )}
           </div>

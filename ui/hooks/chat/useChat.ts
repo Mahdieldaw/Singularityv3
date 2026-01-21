@@ -349,6 +349,7 @@ export function useChat() {
               // Cognitive pipeline structured outputs
               mapperArtifact: round.mapperArtifact || undefined,
               singularityOutput: round.singularityOutput || undefined,
+              pipelineStatus: round.pipelineStatus || undefined,
             };
             newIds.push(aiTurn.id);
             newMap.set(aiTurn.id, aiTurn);

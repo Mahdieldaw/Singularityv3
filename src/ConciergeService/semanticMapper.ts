@@ -2,31 +2,18 @@
 // SEMANTIC MAPPER - PROMPT BUILDER
 // ═══════════════════════════════════════════════════════════════════════════
 
-import { ShadowStatement } from '../shadow';
+import { projectParagraphs } from '../shadow';
+import type { ShadowParagraph, ShadowStatement } from '../shadow';
 import { SemanticMapperOutput } from './contract';
 import {
   parseSemanticMapperOutput as baseParseOutput
 } from '../../shared/parsing-utils';
-
-interface ShadowParagraph {
-  id: string;
-  modelIndex: number;
-  paragraphIndex: number;
-  text: string;
-  statementIds: string[];
-  dominantStance: string;
-  confidence: number;
-  signals: { sequence: boolean; tension: boolean; conditional: boolean };
-  truncated?: boolean;
-  statements: Array<{ id: string; text: string; stance: string; signals: string[] }>;
-}
 
 interface ParagraphCluster {
   id: string;
   paragraphIds: string[];
   statementIds: string[];
   representativeParagraphId: string;
-  representativeText: string;
   cohesion: number;
   uncertain: boolean;
   uncertaintyReasons: string[];
@@ -34,9 +21,8 @@ interface ParagraphCluster {
     memberParagraphs: Array<{
       paragraphId: string;
       modelIndex: number;
-      text: string;
       statementIds: string[];
-      dominantStance: string;
+      dominantStance: ShadowParagraph['dominantStance'];
       signals: { sequence: boolean; tension: boolean; conditional: boolean };
     }>;
   };
@@ -77,115 +63,6 @@ function jaccardSimilarity(a: Set<string>, b: Set<string>): number {
   return union.size > 0 ? intersection / union.size : 0;
 }
 
-function clipText(text: string, maxChars: number): { text: string; clipped: boolean } {
-  if (text.length <= maxChars) return { text, clipped: false };
-  return { text: text.slice(0, Math.max(0, maxChars)).trim(), clipped: true };
-}
-
-function projectShadowParagraphs(shadowStatements: ShadowStatement[]): ShadowParagraph[] {
-  const MAX_STATEMENT_CHARS = 320;
-  const MAX_PARAGRAPH_CHARS = 900;
-
-  const stancePriority: Record<string, number> = {
-    prerequisite: 6,
-    dependent: 5,
-    cautionary: 4,
-    prescriptive: 3,
-    uncertain: 2,
-    assertive: 1,
-  };
-
-  const groups = new Map<string, Array<{ stmt: ShadowStatement; sentenceIndex: number; encounter: number }>>();
-  for (let encounter = 0; encounter < shadowStatements.length; encounter++) {
-    const stmt = shadowStatements[encounter];
-    const paragraphIndex = stmt.location?.paragraphIndex ?? 0;
-    const sentenceIndex = stmt.location?.sentenceIndex ?? encounter;
-    const key = `${stmt.modelIndex}:${paragraphIndex}`;
-    const arr = groups.get(key) || [];
-    arr.push({ stmt, sentenceIndex, encounter });
-    groups.set(key, arr);
-  }
-
-  const paragraphKeys = Array.from(groups.keys())
-    .map(k => {
-      const [modelIndexStr, paragraphIndexStr] = k.split(':');
-      return {
-        key: k,
-        modelIndex: Number(modelIndexStr),
-        paragraphIndex: Number(paragraphIndexStr),
-      };
-    })
-    .sort((a, b) => (a.modelIndex - b.modelIndex) || (a.paragraphIndex - b.paragraphIndex) || (a.key < b.key ? -1 : 1));
-
-  const paragraphs: ShadowParagraph[] = [];
-  for (let i = 0; i < paragraphKeys.length; i++) {
-    const { key, modelIndex, paragraphIndex } = paragraphKeys[i];
-    const group = (groups.get(key) || []).slice().sort((a, b) => (a.sentenceIndex - b.sentenceIndex) || (a.encounter - b.encounter) || (a.stmt.id < b.stmt.id ? -1 : 1));
-    const statementIds = group.map(g => g.stmt.id);
-
-    const statements = group.map(g => {
-      const signals: string[] = [];
-      if (g.stmt.signals?.tension) signals.push('TENS');
-      if (g.stmt.signals?.sequence) signals.push('SEQ');
-      if (g.stmt.signals?.conditional) signals.push('COND');
-
-      const clipped = clipText(String(g.stmt.text || ''), MAX_STATEMENT_CHARS);
-      return {
-        id: g.stmt.id,
-        text: clipped.text,
-        stance: String(g.stmt.stance || ''),
-        signals
-      };
-    });
-
-    const joined = group.map(g => String(g.stmt.text || '').trim()).filter(Boolean).join(' ');
-    const clippedParagraph = clipText(joined, MAX_PARAGRAPH_CHARS);
-
-    const signalsAgg = group.reduce(
-      (acc, g) => ({
-        sequence: acc.sequence || !!g.stmt.signals?.sequence,
-        tension: acc.tension || !!g.stmt.signals?.tension,
-        conditional: acc.conditional || !!g.stmt.signals?.conditional,
-      }),
-      { sequence: false, tension: false, conditional: false }
-    );
-
-    const stanceScores = new Map<string, number>();
-    let maxConfidence = 0;
-    for (const g of group) {
-      const stance = String(g.stmt.stance || '');
-      const conf = typeof g.stmt.confidence === 'number' ? g.stmt.confidence : 0;
-      maxConfidence = Math.max(maxConfidence, conf);
-      const w = conf * (stancePriority[stance] ?? 1);
-      stanceScores.set(stance, (stanceScores.get(stance) || 0) + w);
-    }
-
-    let dominantStance = 'assertive';
-    let bestScore = -Infinity;
-    for (const [stance, score] of Array.from(stanceScores.entries())) {
-      if (score > bestScore || (score === bestScore && stance < dominantStance)) {
-        dominantStance = stance;
-        bestScore = score;
-      }
-    }
-
-    paragraphs.push({
-      id: `p_${i}`,
-      modelIndex,
-      paragraphIndex,
-      text: clippedParagraph.text,
-      truncated: clippedParagraph.clipped || undefined,
-      statementIds,
-      dominantStance,
-      confidence: maxConfidence,
-      signals: signalsAgg,
-      statements,
-    });
-  }
-
-  return paragraphs;
-}
-
 export const CLUSTER_CONFIG = {
   MERGE_THRESHOLD: 0.45,
   LOW_COHESION_THRESHOLD: 0.35,
@@ -197,7 +74,7 @@ export const CLUSTER_CONFIG = {
 
 function clusterParagraphs(paragraphs: ShadowParagraph[]): ParagraphCluster[] {
   const paragraphById = new Map(paragraphs.map(p => [p.id, p]));
-  const tokensById = new Map(paragraphs.map(p => [p.id, extractSignificantWords(p.text)]));
+  const tokensById = new Map(paragraphs.map(p => [p.id, extractSignificantWords(p._fullParagraph)]));
 
   const clusters: Array<{ paragraphIds: string[]; repId: string }> = [];
   for (const p of paragraphs) {
@@ -226,7 +103,6 @@ function clusterParagraphs(paragraphs: ShadowParagraph[]): ParagraphCluster[] {
     const clusterId = `pc_${i}`;
     const paragraphIds = clusters[i].paragraphIds.slice();
     const repId = clusters[i].repId;
-    const rep = paragraphById.get(repId);
 
     const repTokens = tokensById.get(repId) || new Set<string>();
     const sims = paragraphIds.map(pid => {
@@ -276,7 +152,6 @@ function clusterParagraphs(paragraphs: ShadowParagraph[]): ParagraphCluster[] {
       paragraphIds,
       statementIds,
       representativeParagraphId: repId,
-      representativeText: rep?.text || '',
       cohesion,
       uncertain: uncertaintyReasons.length > 0,
       uncertaintyReasons,
@@ -294,20 +169,15 @@ function clusterParagraphs(paragraphs: ShadowParagraph[]): ParagraphCluster[] {
         chosen.add(d.pid);
       }
 
-      let charBudget = CLUSTER_CONFIG.MAX_EXPANSION_CHARS;
       const memberParagraphs: NonNullable<ParagraphCluster['expansion']>['memberParagraphs'] = [];
 
       const chosenList = Array.from(chosen).sort((a, b) => (a === repId ? -1 : 0) || (a < b ? -1 : 1));
       for (const pid of chosenList) {
         const p = paragraphById.get(pid);
         if (!p) continue;
-        const clipped = clipText(p.text, CLUSTER_CONFIG.MAX_MEMBER_TEXT_CHARS);
-        if (charBudget - clipped.text.length < 0) break;
-        charBudget -= clipped.text.length;
         memberParagraphs.push({
           paragraphId: p.id,
           modelIndex: p.modelIndex,
-          text: clipped.text,
           statementIds: p.statementIds,
           dominantStance: p.dominantStance,
           signals: p.signals,
@@ -323,6 +193,45 @@ function clusterParagraphs(paragraphs: ShadowParagraph[]): ParagraphCluster[] {
   return out;
 }
 
+function formatSignalsBooleans(signals: { sequence: boolean; tension: boolean; conditional: boolean }): string {
+  const out: string[] = [];
+  if (signals.sequence) out.push('SEQ');
+  if (signals.tension) out.push('TENS');
+  if (signals.conditional) out.push('COND');
+  return out.length > 0 ? out.join(',') : 'none';
+}
+
+function formatShadowParagraphsForPrompt(paragraphs: ShadowParagraph[]): string {
+  const lines: string[] = [];
+  let currentModel: number | null = null;
+
+  for (const p of paragraphs) {
+    if (currentModel !== p.modelIndex) {
+      currentModel = p.modelIndex;
+      if (lines.length > 0) lines.push('');
+      lines.push(`model_${p.modelIndex}:`);
+    }
+
+    lines.push(
+      `[${p.id}] paragraphIndex=${p.paragraphIndex} dominantStance=${p.dominantStance} confidence=${p.confidence.toFixed(2)} contested=${p.contested}`
+    );
+
+    for (const s of p.statements) {
+      lines.push(`- ${s.text} (${s.id})`);
+    }
+
+    const descriptorParts = p.statements.map(s => {
+      const sig = s.signals.length > 0 ? s.signals.join(',') : 'none';
+      return `${s.id}:{stance=${s.stance},signals=${sig}}`;
+    });
+
+    lines.push(`Descriptors: ${descriptorParts.join(' ')}`);
+    lines.push(`ParagraphSignals: ${formatSignalsBooleans(p.signals)}`);
+  }
+
+  return lines.join('\n');
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // PROMPT BUILDER
 // ═══════════════════════════════════════════════════════════════════════════
@@ -331,17 +240,11 @@ export function buildSemanticMapperPrompt(
   userQuery: string,
   shadowStatements: ShadowStatement[]
 ): string {
-  const paragraphs = projectShadowParagraphs(shadowStatements);
+  const projection = projectParagraphs(shadowStatements);
+  const paragraphs = projection.paragraphs;
   const clusters = clusterParagraphs(paragraphs);
 
-  const groupedByModel: Record<string, ShadowParagraph[]> = {};
-  for (const p of paragraphs) {
-    const key = `model_${p.modelIndex}`;
-    if (!groupedByModel[key]) groupedByModel[key] = [];
-    groupedByModel[key].push(p);
-  }
-
-  const paragraphBlock = JSON.stringify(groupedByModel);
+  const paragraphBlock = formatShadowParagraphsForPrompt(paragraphs);
   const clusterBlock = JSON.stringify(clusters.slice(0, 12));
   return `Semantic Cartographer — Descriptive Core Prompt
 You find yourself standing in a landscape made entirely of positions.

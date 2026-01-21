@@ -78,6 +78,11 @@ export type {
     ShadowDeltaResult,
 } from './ShadowDelta';
 
+export type {
+    ShadowParagraph,
+    ParagraphProjectionResult,
+} from './ShadowParagraphProjector';
+
 // Constants
 export {
     STANCE_PRIORITY,
@@ -113,6 +118,10 @@ export {
     filterBySignals,
     filterByConfidence,
 } from './ShadowExtractor';
+
+export {
+    projectParagraphs,
+} from './ShadowParagraphProjector';
 
 export {
     computeShadowDelta,

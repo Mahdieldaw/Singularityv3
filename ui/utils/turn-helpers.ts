@@ -322,6 +322,7 @@ export function normalizeBackendRoundsToTurns(
         batchResponses,
         mappingResponses: normalizeResponseMap(round.mappingResponses),
         singularityResponses: normalizeResponseMap(round.singularityResponses),
+        pipelineStatus: round.pipelineStatus || undefined,
         meta: round.meta || {},
       };
       normalized.push(aiTurn);

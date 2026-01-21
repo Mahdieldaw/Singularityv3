@@ -645,6 +645,9 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
               if (!artifact || typeof artifact !== "object") return false;
               const claims = artifact.claims;
               const edges = artifact.edges;
+              const hasTraversalGraph = !!artifact.traversalGraph;
+              const hasForcingPoints = Array.isArray(artifact.forcingPoints) && artifact.forcingPoints.length > 0;
+              if (hasTraversalGraph || hasForcingPoints) return true;
               if (!Array.isArray(claims) || !Array.isArray(edges)) return false;
               if (claims.length === 0 && edges.length === 0) return false;
               return true;
@@ -696,6 +699,13 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
               }
             }
 
+            const pipelineStatus =
+              typeof primaryAi?.pipelineStatus === "string"
+                ? primaryAi.pipelineStatus
+                : (typeof primaryAi?.meta?.pipelineStatus === "string"
+                  ? primaryAi.meta.pipelineStatus
+                  : undefined);
+
             rounds.push({
               userTurnId: user.id, aiTurnId: primaryAi.id,
               user: { id: user.id, text: user.text || user.content || "", createdAt: user.createdAt || 0 },
@@ -703,6 +713,7 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
               // Include cognitive pipeline data for proper restoration
               mapperArtifact: hydratedMapperArtifact,
               singularityOutput: extractedSingularityOutput,
+              ...(pipelineStatus ? { pipelineStatus } : {}),
               createdAt: user.createdAt || 0, completedAt: primaryAi.updatedAt || 0
             });
           }
