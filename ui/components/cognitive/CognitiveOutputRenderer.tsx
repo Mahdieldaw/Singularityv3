@@ -162,7 +162,7 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
                                     ? (orbVoiceProviderId ? [String(orbVoiceProviderId)] : [])
                                     : orbProviderIds
                             }
-                            variant={isRoundActive ? "active" : "historical"}
+                            variant={isRoundActive ? "tray" : "historical"}
                             workflowProgress={workflowProgress}
                             onOrbClick={(pid) => {
                                 // Orbs strictly control the ModelResponsePanel selection, not the Singularity Main View

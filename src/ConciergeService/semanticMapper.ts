@@ -12,9 +12,8 @@
 // - Expansion uses _fullParagraph only
 // ═══════════════════════════════════════════════════════════════════════════
 
-import { projectParagraphs } from '../shadow';
 import type { ShadowParagraph, ShadowStatement, ParagraphProjectionResult } from '../shadow';
-import type { ParagraphCluster, ClusteringResult } from '../clustering';
+import type { ClusteringResult } from '../clustering';
 import { SemanticMapperOutput } from './contract';
 import {
   parseSemanticMapperOutput as baseParseOutput
@@ -30,78 +29,64 @@ const MAX_CLUSTERS_IN_PROMPT = 15;
 // HELPERS
 // ═══════════════════════════════════════════════════════════════════════════
 
-function formatSignalsBooleans(signals: { sequence: boolean; tension: boolean; conditional: boolean }): string {
-  const out: string[] = [];
-  if (signals.sequence) out.push('SEQ');
-  if (signals.tension) out.push('TENS');
-  if (signals.conditional) out.push('COND');
-  return out.length > 0 ? out.join(',') : 'none';
-}
+const STANCE_CODES: Record<string, string> = {
+  prescriptive: 'P',
+  cautionary: 'C',
+  assertive: 'A',
+  uncertain: 'U',
+  prerequisite: 'R',
+  dependent: 'D',
+};
 
-function formatShadowParagraphsForPrompt(paragraphs: ShadowParagraph[]): string {
-  const groupedByModel: Record<string, ShadowParagraph[]> = {};
+const STANCE_LEGEND = 'P=prescriptive C=cautionary A=assertive U=uncertain R=prerequisite D=dependent';
+
+function buildCompactStatementBlock(paragraphs: ShadowParagraph[]): string {
+  const lines: string[] = [];
+  let currentModel = -1;
 
   for (const p of paragraphs) {
-    const key = `model_${p.modelIndex}`;
-    if (!groupedByModel[key]) groupedByModel[key] = [];
-    groupedByModel[key].push(p);
+    if (p.modelIndex !== currentModel) {
+      currentModel = p.modelIndex;
+      if (lines.length > 0) lines.push('');
+      lines.push(`[M${currentModel}]`);
+    }
+
+    const contestedMarker = p.contested ? '*' : '';
+    lines.push(`${contestedMarker}${p.id}:`);
+
+    for (const s of p.statements) {
+      const stanceCode = STANCE_CODES[s.stance] || 'A';
+      lines.push(`  ${s.id}|${stanceCode}|${s.text}`);
+    }
   }
 
-  return JSON.stringify(
-    Object.fromEntries(
-      Object.entries(groupedByModel).map(([key, paras]) => [
-        key,
-        paras.map(p => ({
-          id: p.id,
-          modelIndex: p.modelIndex,
-          paragraphIndex: p.paragraphIndex,
-          statementIds: p.statementIds,
-          dominantStance: p.dominantStance,
-          stanceHints: p.stanceHints,
-          contested: p.contested,
-          confidence: p.confidence,
-          signals: p.signals,
-          statements: p.statements,  // Contains text (single copy)
-        }))
-      ])
-    )
-  );
+  return lines.join('\n');
 }
 
-function formatClustersForPrompt(
-  clusters: ParagraphCluster[],
-  maxClusters: number = MAX_CLUSTERS_IN_PROMPT
-): string {
-  // Already sorted uncertain-first by engine, but verify and cap
-  const sortedClusters = [...clusters].sort((a, b) => {
+function buildCompactClusterBlock(clusteringResult: ClusteringResult): string | null {
+  const usefulClusters = clusteringResult.clusters.filter(c =>
+    c.paragraphIds.length > 1 || c.uncertain
+  );
+
+  if (usefulClusters.length === 0) return null;
+
+  const sortedClusters = [...usefulClusters].sort((a, b) => {
     if (a.uncertain && !b.uncertain) return -1;
     if (!a.uncertain && b.uncertain) return 1;
     return b.paragraphIds.length - a.paragraphIds.length;
   });
 
-  // Ensure all uncertain clusters are included, then fill to cap
-  const uncertainClusters = sortedClusters.filter(c => c.uncertain);
-  const certainClusters = sortedClusters.filter(c => !c.uncertain);
-  const remainingSlots = Math.max(0, maxClusters - uncertainClusters.length);
-  const cappedClusters = [
-    ...uncertainClusters,
-    ...certainClusters.slice(0, remainingSlots)
-  ];
+  const lines = sortedClusters.slice(0, Math.min(MAX_CLUSTERS_IN_PROMPT, 12)).map(c => {
+    const flags: string[] = [];
+    if (c.uncertain) flags.push('?');
+    if (c.uncertaintyReasons.includes('low_cohesion')) flags.push('L');
+    if (c.uncertaintyReasons.includes('stance_diversity')) flags.push('S');
 
-  // Do NOT include representativeText - only IDs
-  const clusterData = cappedClusters.map(c => ({
-    id: c.id,
-    paragraphIds: c.paragraphIds,
-    statementIds: c.statementIds,
-    representativeParagraphId: c.representativeParagraphId,
-    cohesion: c.cohesion,
-    uncertain: c.uncertain,
-    uncertaintyReasons: c.uncertaintyReasons,
-    // expansion only for uncertain clusters
-    ...(c.expansion ? { expansion: c.expansion } : {}),
-  }));
+    const flagStr = flags.length > 0 ? `[${flags.join('')}]` : '';
+    return `${c.id}:${c.representativeParagraphId}|${c.paragraphIds.join(',')}|${c.cohesion.toFixed(2)}${flagStr}`;
+  });
 
-  return JSON.stringify(clusterData);
+  return lines.join('\n');
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -120,101 +105,46 @@ export function buildSemanticMapperPrompt(
   paragraphResult?: ParagraphProjectionResult,
   clusteringResult?: ClusteringResult | null
 ): string {
-  // Compute paragraphs if not provided
-  const actualParagraphResult = paragraphResult || projectParagraphs(shadowStatements);
-  const paragraphs = actualParagraphResult.paragraphs;
+  const statementsBlock = paragraphResult
+    ? buildCompactStatementBlock(paragraphResult.paragraphs)
+    : shadowStatements.map(s => `${s.id}|${STANCE_CODES[s.stance] || 'A'}|${s.text}`).join('\n');
 
-  // Format paragraphs
-  const paragraphBlock = formatShadowParagraphsForPrompt(paragraphs);
+  const clusterBlock = clusteringResult ? buildCompactClusterBlock(clusteringResult) : null;
+  const clusterSection = clusterBlock
+    ? `\n<clusters>\n${clusterBlock}\n</clusters>`
+    : '';
 
-  // Format clusters (only if provided)
-  let clusterBlock = '';
-  if (clusteringResult && clusteringResult.clusters.length > 0) {
-    clusterBlock = formatClustersForPrompt(clusteringResult.clusters);
+  if (clusterBlock) {
+    console.log(`[SemanticMapper] Including clusters`);
+  } else {
+    console.log(`[SemanticMapper] Skipping cluster block`);
   }
 
-  return `You are a Semantic Cartographer. Your task is to organize extracted statements into claims with structural relationships.
+  return `You are a Semantic Cartographer. Group extracted statements into claims with structural relationships.
 
-<user_query>
-"${userQuery}"
-</user_query>
+<query>${userQuery}</query>
 
-<shadow_paragraphs>
-${paragraphBlock}
-</shadow_paragraphs>
+<statements>
+# Format: id|stance|text  (* before paragraph = contested)
+# Stances: ${STANCE_LEGEND}
+${statementsBlock}
+</statements>${clusterSection}
 
-${clusterBlock ? `<paragraph_clusters>
-${clusterBlock}
-</paragraph_clusters>` : ''}
+# Task
+1. Group statements expressing the same position into claims
+2. Identify gates (conditionals, prerequisites) and conflicts
+3. For each gate/conflict, provide a resolution question
 
-# Your Task
+# Rules
+- Cite only statement IDs (s_*), never p_* or pc_*
+- Contested paragraphs (*) may contain multiple positions
+- Uncertain clusters need review
+- Do not output an "edges" field anywhere
+- The only relationship fields are "enables" and "conflicts"
+- Every claim/gate/conflict needs sourceStatementIds
 
-1. **Discover Claims**: Group statements pointing to the same position into a single claim. Name each claim with a short verb phrase.
-
-2. **Trace Relationships**:
-   - **Conditional gates**: Claims that only apply if some condition is true
-   - **Prerequisite gates**: Claims whose validity depends on another claim
-   - **Conflicts**: Claims that are mutually exclusive
-
-3. For every gate or conflict, provide a **question** that would resolve it in concrete, human terms.
-
-# Using the Input
-
-- **shadow_paragraphs**: Contains statements grouped by model and paragraph. Each statement has an id (s_*), text, stance, and signals.
-- **paragraph_clusters** (if present): Hints about which paragraphs express similar ideas. Use for grouping guidance.
-  - If a cluster has \`uncertain: true\`, examine the \`expansion.members\` texts carefully and consider splitting into multiple claims.
-  - If a paragraph has \`contested: true\`, it may contain multiple distinct positions - do not force into a single claim.
-  - Clusters are HINTS only - you may split or ignore them based on semantic analysis.
-
-# Schema Lock (Strict)
-
-- Respond with a single JSON object only (no markdown, no prose).
-- Do not output an "edges" field anywhere.
-- The only relationship fields are "enables" and "conflicts".
-- Every gate and every conflict must include a non-empty "question".
-- **Never cite paragraph IDs (p_*) or cluster IDs (pc_*), only statement IDs (s_*).**
-
-# Output Format
-
-\`\`\`json
-{
-  "claims": [
-    {
-      "id": "c_0",
-      "label": "make traversal the primary UI surface",
-      "description": "The traversal/validity state should be the main view users interact with",
-      "stance": "prescriptive",
-      "gates": {
-        "conditionals": [
-          {
-            "id": "cg_0",
-            "condition": "semantic mapping produces non-narrative output",
-            "question": "Is the semantic mapper output machine-legible rather than human-readable?",
-            "sourceStatementIds": ["s_1", "s_39"]
-          }
-        ],
-        "prerequisites": []
-      },
-      "enables": ["c_1"],
-      "conflicts": [],
-      "sourceStatementIds": ["s_1", "s_39", "s_40"]
-    }
-  ]
-}
-\`\`\`
-
-# Field Names
-- Claims: id, label, description?, stance, gates, enables, conflicts, sourceStatementIds
-- Conditional gate: id, condition, question, sourceStatementIds
-- Prerequisite gate: id, claimId, condition, question, sourceStatementIds
-- Conflict: claimId, question, sourceStatementIds, nature?
-
-# Provenance Requirements (Non-Negotiable)
-- Every claim must include ≥1 sourceStatementId.
-- Every gate must include ≥1 sourceStatementId.
-- Every conflict must include ≥1 sourceStatementId.
-
-Generate the map now.`;
+# Output (JSON only)
+{"claims":[{"id":"c_0","label":"...","stance":"...","gates":{"conditionals":[],"prerequisites":[]},"enables":[],"conflicts":[],"sourceStatementIds":["s_0"]}]}`;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

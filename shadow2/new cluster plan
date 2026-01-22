@@ -1,0 +1,1806 @@
+# Consolidated Implementation Plan: Embedding-Based Paragraph Clustering
+
+**Version:** 1.0 Final  
+**Status:** Ready for Implementation  
+**Estimated Scope:** 12 new files, 6 modified files, 10+ files to inspect
+
+---
+
+## Executive Summary
+
+### What We're Building
+A semantic clustering layer between Shadow extraction and Semantic Mapping that groups paragraphs by meaning (not vocabulary) using embedding similarity.
+
+### Why
+Current Jaccard-based clustering fails when different LLMs express the same idea with different words. In the UI design query test case, two models described identical 3-zone layouts but Jaccard found zero overlap, producing 100% singletons.
+
+### Key Decisions (Locked)
+| Decision | Value | Rationale |
+|----------|-------|-----------|
+| Clustering method | Embedding cosine similarity | Jaccard fails on paraphrases |
+| Clustering unit | Paragraphs | Sentences too fragmented |
+| Similarity threshold | 0.82 | Moderately conservative |
+| Representative selection | Centroid | Most semantically central |
+| Async boundary | StepExecutor pre-computes | Prompt builder stays sync |
+| Failure behavior | Skip clustering entirely | No Jaccard fallback |
+| Backend priority | WebGPU > WASM | Performance with fallback |
+| Model bundling | At build time | Offline support |
+
+---
+
+## File Manifest
+
+### New Files to Create
+
+| File Path | Purpose |
+|-----------|---------|
+| `src/shadow/ShadowParagraphProjector.ts` | Paragraph projection with contested detection |
+| `src/clustering/types.ts` | Type definitions |
+| `src/clustering/config.ts` | Thresholds and presets |
+| `src/clustering/distance.ts` | Cosine similarity functions |
+| `src/clustering/hac.ts` | Hierarchical clustering algorithm |
+| `src/clustering/engine.ts` | Main orchestration, centroid, uncertainty |
+| `src/clustering/embeddings.ts` | Offscreen communication |
+| `src/clustering/index.ts` | Public exports |
+| `src/offscreen/embedding-worker.ts` | WebGPU/WASM inference |
+| `models/` | ONNX model files directory |
+
+### Files to Modify
+
+| File Path | Changes |
+|-----------|---------|
+| `src/shadow/ShadowExtractor.ts` | Add markdown/table filtering |
+| `src/shadow/index.ts` | Export projector |
+| `src/ConciergeService/semanticMapper.ts` | Accept pre-computed data, remove duplication, fix prompt |
+| `StepExecutor.js` | Add projection + clustering before prompt build |
+| `manifest.json` | Verify offscreen permission |
+| `package.json` | Add @huggingface/transformers |
+
+### Files to Inspect
+
+| File Path | Verify |
+|-----------|--------|
+| `offscreen.html` | Loads embedding worker |
+| `webpack.config.js` or `vite.config.ts` | Bundles ONNX models |
+| `src/ConciergeService/contract.ts` | SemanticMapperOutput interface |
+| `src/ConciergeService/claimAssembly.ts` | Handles new claim structure |
+| `shared/parsing-utils.ts` | Parser compatibility |
+| `shared/messaging.js` | Message type patterns |
+
+---
+
+## Phase 1: Shadow Extractor Fixes
+
+### File: `src/shadow/ShadowExtractor.ts`
+
+**Problem:** Markdown headers and table fragments extracted as statements.
+
+**Modify `isSubstantive()` function:**
+
+```typescript
+function isSubstantive(sentence: string): boolean {
+    const trimmed = sentence.trim();
+    const words = trimmed.split(/\s+/).filter(w => w.length > 0);
+
+    // Length checks
+    if (words.length < 5) return false;
+
+    // NEW: Filter markdown headers (any level)
+    if (/^#{1,6}\s/.test(trimmed)) return false;
+    
+    // NEW: Filter bold-only lines (likely titles)
+    if (/^\*{2}[^*]+\*{2}$/.test(trimmed)) return false;
+    if (/^__[^_]+__$/.test(trimmed)) return false;
+    
+    // NEW: Filter table fragments
+    if (/^\|.*\|$/.test(trimmed) && trimmed.split('|').length > 2) return false;
+    if (/^[\|\s\-:]+$/.test(trimmed)) return false;  // Table separator lines
+    
+    // NEW: Filter list markers alone
+    if (/^[-*+]\s*$/.test(trimmed)) return false;
+    if (/^\d+\.\s*$/.test(trimmed)) return false;
+
+    // Existing meta-commentary filters
+    const metaPatterns = [
+        /^(sure|okay|yes|no|well|so|now)[,.]?\s/i,
+        /^(let me|I'll|I will|I can|I would)\b/i,
+        /^(here's|here is|this is|that's|that is)\s+(a|an|the|my)\s+(summary|overview|breakdown|list)/i,
+        /\b(as I mentioned|as discussed|as noted)\b/i,
+        /^(to summarize|in summary|in conclusion)\b/i,
+    ];
+
+    for (const pattern of metaPatterns) {
+        if (pattern.test(sentence)) return false;
+    }
+
+    return true;
+}
+```
+
+**Modify `splitIntoSentences()` to handle tables:**
+
+```typescript
+function splitIntoSentences(paragraph: string): string[] {
+    // NEW: Detect and skip markdown tables entirely
+    const lines = paragraph.split('\n');
+    const hasTableStructure = lines.some(line => 
+        /^\|.*\|$/.test(line.trim()) && line.includes('|')
+    );
+    const hasTableSeparator = lines.some(line => 
+        /^[\|\s\-:]+$/.test(line.trim())
+    );
+    
+    if (hasTableStructure && hasTableSeparator) {
+        // Skip tables - they fragment poorly
+        return [];
+    }
+
+    // Existing logic continues...
+    const protectedText = paragraph
+        .replace(/\b(Mr|Mrs|Ms|Dr|Prof|Inc|Ltd|vs|etc|e\.g|i\.e)\./gi, '$1|||')
+        .replace(/\b(\d+)\./g, '$1|||');
+
+    const sentences = protectedText
+        .split(/(?<=[.!?])\s+/)
+        .map(s => s.replace(/\|\|\|/g, '.'))
+        .map(s => s.trim())
+        .filter(s => s.length > 0);
+
+    return sentences;
+}
+```
+
+---
+
+## Phase 2: Paragraph Projector
+
+### File: `src/shadow/ShadowParagraphProjector.ts` (NEW)
+
+```typescript
+// ═══════════════════════════════════════════════════════════════════════════
+// SHADOW PARAGRAPH PROJECTOR
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Projects sentence-level Shadow statements onto paragraph-level semantic units.
+// Paragraphs are derived (not authoritative) - statements remain source of truth.
+// ═══════════════════════════════════════════════════════════════════════════
+
+import { ShadowStatement, Stance, STANCE_PRIORITY } from './StatementTypes';
+
+// ═══════════════════════════════════════════════════════════════════════════
+// TYPES
+// ═══════════════════════════════════════════════════════════════════════════
+
+export interface ShadowParagraph {
+    id: string;                      // "p_0", "p_1", ...
+    modelIndex: number;
+    paragraphIndex: number;
+    
+    // Provenance
+    statementIds: string[];          // s_* IDs in original order
+    
+    // Aggregated metadata
+    dominantStance: Stance;
+    stanceHints: Stance[];           // All unique stances present
+    contested: boolean;              // True if contradiction pairs exist
+    confidence: number;              // max(member.confidence)
+    
+    signals: {
+        sequence: boolean;
+        tension: boolean;
+        conditional: boolean;
+    };
+    
+    // Content for prompt (statements only, no duplication)
+    statements: Array<{
+        id: string;
+        text: string;                // Clipped ≤320 chars
+        stance: Stance;
+        signals: string[];           // ["SEQ", "TENS", "COND"]
+    }>;
+    
+    // Internal only - NOT sent to prompt, used for expansion
+    _fullParagraph: string;
+}
+
+export interface ParagraphProjectionResult {
+    paragraphs: ShadowParagraph[];
+    meta: {
+        totalParagraphs: number;
+        byModel: Record<number, number>;
+        contestedCount: number;
+        avgStatementsPerParagraph: number;
+        processingTimeMs: number;
+    };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CONSTANTS
+// ═══════════════════════════════════════════════════════════════════════════
+
+const MAX_STATEMENT_TEXT_CHARS = 320;
+
+// Contradiction pairs that indicate contested paragraph
+const CONTRADICTION_PAIRS: Array<[Stance, Stance]> = [
+    ['prescriptive', 'cautionary'],
+    ['assertive', 'uncertain'],
+];
+
+// ═══════════════════════════════════════════════════════════════════════════
+// HELPERS
+// ═══════════════════════════════════════════════════════════════════════════
+
+function clipText(text: string, maxChars: number): string {
+    if (text.length <= maxChars) return text;
+    return text.slice(0, maxChars).trim();
+}
+
+function isContested(stances: Stance[]): boolean {
+    const stanceSet = new Set(stances);
+    for (const [a, b] of CONTRADICTION_PAIRS) {
+        if (stanceSet.has(a) && stanceSet.has(b)) return true;
+    }
+    return false;
+}
+
+function computeDominantStance(
+    statements: Array<{ stance: Stance; confidence: number }>
+): Stance {
+    if (statements.length === 0) return 'assertive';
+    
+    // If contested, use priority order
+    const stances = statements.map(s => s.stance);
+    if (isContested(stances)) {
+        for (const priorityStance of STANCE_PRIORITY) {
+            if (stances.includes(priorityStance)) {
+                return priorityStance;
+            }
+        }
+    }
+    
+    // Otherwise, use weighted confidence
+    const stanceScores = new Map<Stance, number>();
+    for (const stmt of statements) {
+        const current = stanceScores.get(stmt.stance) || 0;
+        stanceScores.set(stmt.stance, current + stmt.confidence);
+    }
+    
+    let bestStance: Stance = 'assertive';
+    let bestScore = -Infinity;
+    for (const [stance, score] of stanceScores.entries()) {
+        if (score > bestScore) {
+            bestScore = score;
+            bestStance = stance;
+        }
+    }
+    
+    return bestStance;
+}
+
+function formatSignals(signals: { sequence: boolean; tension: boolean; conditional: boolean }): string[] {
+    const result: string[] = [];
+    if (signals.sequence) result.push('SEQ');
+    if (signals.tension) result.push('TENS');
+    if (signals.conditional) result.push('COND');
+    return result;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// MAIN FUNCTION
+// ═══════════════════════════════════════════════════════════════════════════
+
+export function projectParagraphs(
+    shadowStatements: ShadowStatement[]
+): ParagraphProjectionResult {
+    const startTime = performance.now();
+    
+    // Group by (modelIndex, paragraphIndex)
+    const groups = new Map<string, Array<{
+        stmt: ShadowStatement;
+        sentenceIndex: number;
+        encounter: number;
+    }>>();
+    
+    for (let i = 0; i < shadowStatements.length; i++) {
+        const stmt = shadowStatements[i];
+        const paragraphIndex = stmt.location?.paragraphIndex ?? 0;
+        const sentenceIndex = stmt.location?.sentenceIndex ?? i;
+        const key = `${stmt.modelIndex}:${paragraphIndex}`;
+        
+        if (!groups.has(key)) {
+            groups.set(key, []);
+        }
+        groups.get(key)!.push({ stmt, sentenceIndex, encounter: i });
+    }
+    
+    // Sort keys for deterministic ordering
+    const sortedKeys = Array.from(groups.keys()).sort((a, b) => {
+        const [modelA, paraA] = a.split(':').map(Number);
+        const [modelB, paraB] = b.split(':').map(Number);
+        return (modelA - modelB) || (paraA - paraB);
+    });
+    
+    const paragraphs: ShadowParagraph[] = [];
+    const byModel: Record<number, number> = {};
+    let contestedCount = 0;
+    
+    for (let i = 0; i < sortedKeys.length; i++) {
+        const key = sortedKeys[i];
+        const [modelIndexStr, paragraphIndexStr] = key.split(':');
+        const modelIndex = Number(modelIndexStr);
+        const paragraphIndex = Number(paragraphIndexStr);
+        
+        // Sort statements within paragraph by sentence order
+        const group = groups.get(key)!.sort((a, b) => 
+            (a.sentenceIndex - b.sentenceIndex) || (a.encounter - b.encounter)
+        );
+        
+        const statementIds = group.map(g => g.stmt.id);
+        const stances = group.map(g => g.stmt.stance);
+        const stanceHints = [...new Set(stances)] as Stance[];
+        const contested = isContested(stances);
+        
+        if (contested) contestedCount++;
+        
+        // Aggregate signals (OR logic)
+        const signals = {
+            sequence: group.some(g => g.stmt.signals.sequence),
+            tension: group.some(g => g.stmt.signals.tension),
+            conditional: group.some(g => g.stmt.signals.conditional),
+        };
+        
+        // Compute dominant stance
+        const stmtData = group.map(g => ({
+            stance: g.stmt.stance,
+            confidence: g.stmt.confidence,
+        }));
+        const dominantStance = computeDominantStance(stmtData);
+        
+        // Max confidence
+        const confidence = Math.max(...group.map(g => g.stmt.confidence));
+        
+        // Build statement array for prompt
+        const statements = group.map(g => ({
+            id: g.stmt.id,
+            text: clipText(g.stmt.text, MAX_STATEMENT_TEXT_CHARS),
+            stance: g.stmt.stance,
+            signals: formatSignals(g.stmt.signals),
+        }));
+        
+        // Get full paragraph text (from first statement)
+        const _fullParagraph = group[0]?.stmt.fullParagraph || '';
+        
+        paragraphs.push({
+            id: `p_${i}`,
+            modelIndex,
+            paragraphIndex,
+            statementIds,
+            dominantStance,
+            stanceHints,
+            contested,
+            confidence,
+            signals,
+            statements,
+            _fullParagraph,
+        });
+        
+        // Count by model
+        byModel[modelIndex] = (byModel[modelIndex] || 0) + 1;
+    }
+    
+    const totalStatements = shadowStatements.length;
+    const avgStatementsPerParagraph = paragraphs.length > 0 
+        ? totalStatements / paragraphs.length 
+        : 0;
+    
+    return {
+        paragraphs,
+        meta: {
+            totalParagraphs: paragraphs.length,
+            byModel,
+            contestedCount,
+            avgStatementsPerParagraph,
+            processingTimeMs: performance.now() - startTime,
+        },
+    };
+}
+```
+
+### File: `src/shadow/index.ts` (MODIFY)
+
+Add exports:
+
+```typescript
+// Paragraph projection
+export {
+    projectParagraphs,
+} from './ShadowParagraphProjector';
+
+export type {
+    ShadowParagraph,
+    ParagraphProjectionResult,
+} from './ShadowParagraphProjector';
+```
+
+---
+
+## Phase 3: Clustering Module
+
+### File: `src/clustering/types.ts` (NEW)
+
+```typescript
+// ═══════════════════════════════════════════════════════════════════════════
+// CLUSTERING TYPES
+// ═══════════════════════════════════════════════════════════════════════════
+
+import { Stance } from '../shadow';
+
+export interface ClusterableItem {
+    id: string;                      // Paragraph ID (p_*)
+    text: string;                    // Full paragraph text for embedding
+    modelIndex: number;
+    dominantStance: Stance;
+    stanceHints: Stance[];
+    contested: boolean;
+    signals: {
+        sequence: boolean;
+        tension: boolean;
+        conditional: boolean;
+    };
+    statementIds: string[];          // For provenance
+}
+
+export interface ParagraphCluster {
+    id: string;                      // "pc_0", "pc_1", ...
+    paragraphIds: string[];          // Member paragraph IDs in encounter order
+    statementIds: string[];          // Union of all statement IDs, stable order
+    
+    // Representative (centroid)
+    representativeParagraphId: string;
+    representativeText: string;
+    
+    // Quality metrics
+    cohesion: number;                // 0-1, average similarity to centroid
+    
+    // Uncertainty detection
+    uncertain: boolean;
+    uncertaintyReasons: string[];    // ["low_cohesion", "stance_diversity", "oversized", "high_contested_ratio", "conflicting_signals"]
+    
+    // Expansion (only when uncertain=true)
+    expansion?: {
+        members: Array<{
+            paragraphId: string;
+            text: string;            // Raw _fullParagraph, clipped ≤700 chars
+        }>;
+    };
+}
+
+export interface ClusteringResult {
+    clusters: ParagraphCluster[];
+    meta: {
+        totalClusters: number;
+        singletonCount: number;
+        uncertainCount: number;
+        avgClusterSize: number;
+        maxClusterSize: number;
+        compressionRatio: number;    // clusters / paragraphs
+        embeddingTimeMs: number;
+        clusteringTimeMs: number;
+        totalTimeMs: number;
+    };
+}
+
+export interface EmbeddingResult {
+    embeddings: Map<string, Float32Array>;  // paragraphId -> embedding
+    dimensions: number;
+    timeMs: number;
+}
+```
+
+### File: `src/clustering/config.ts` (NEW)
+
+```typescript
+// ═══════════════════════════════════════════════════════════════════════════
+// CLUSTERING CONFIGURATION
+// ═══════════════════════════════════════════════════════════════════════════
+
+export interface ClusteringConfig {
+    // Similarity threshold for merging (cosine similarity)
+    // Higher = more clusters, stricter matching
+    similarityThreshold: number;
+    
+    // Uncertainty detection thresholds
+    lowCohesionThreshold: number;
+    maxClusterSize: number;
+    stanceDiversityThreshold: number;      // Max unique stances before uncertain
+    contestedRatioThreshold: number;       // Max ratio of contested paragraphs
+    
+    // Expansion limits
+    maxExpansionMembers: number;
+    maxExpansionCharsTotal: number;
+    maxMemberTextChars: number;
+    
+    // Embedding configuration
+    embeddingDimensions: number;
+    modelId: string;
+    
+    // Minimum paragraphs to attempt clustering
+    minParagraphsForClustering: number;
+}
+
+export const DEFAULT_CONFIG: ClusteringConfig = {
+    // From traversal decision: 0.82 (moderately conservative)
+    similarityThreshold: 0.82,
+    
+    // Uncertainty thresholds
+    lowCohesionThreshold: 0.70,
+    maxClusterSize: 8,
+    stanceDiversityThreshold: 3,
+    contestedRatioThreshold: 0.30,
+    
+    // Expansion limits
+    maxExpansionMembers: 6,
+    maxExpansionCharsTotal: 2100,
+    maxMemberTextChars: 700,
+    
+    // Embedding
+    embeddingDimensions: 256,
+    modelId: 'all-MiniLM-L6-v2',
+    
+    // Minimum input
+    minParagraphsForClustering: 3,
+};
+
+export const CONFIG_PRESETS = {
+    highPrecision: {
+        ...DEFAULT_CONFIG,
+        similarityThreshold: 0.88,
+        embeddingDimensions: 384,
+    },
+    balanced: DEFAULT_CONFIG,
+    highRecall: {
+        ...DEFAULT_CONFIG,
+        similarityThreshold: 0.78,
+    },
+    fast: {
+        ...DEFAULT_CONFIG,
+        embeddingDimensions: 128,
+    },
+} as const;
+```
+
+### File: `src/clustering/distance.ts` (NEW)
+
+```typescript
+// ═══════════════════════════════════════════════════════════════════════════
+// DISTANCE & SIMILARITY
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Cosine similarity between two normalized vectors.
+ * Assumes vectors are already L2 normalized.
+ */
+export function cosineSimilarity(a: Float32Array, b: Float32Array): number {
+    let dot = 0;
+    const len = Math.min(a.length, b.length);
+    for (let i = 0; i < len; i++) {
+        dot += a[i] * b[i];
+    }
+    return dot;
+}
+
+/**
+ * Build distance matrix from embeddings.
+ * Returns distances (1 - similarity) for HAC algorithm.
+ */
+export function buildDistanceMatrix(
+    ids: string[],
+    embeddings: Map<string, Float32Array>
+): number[][] {
+    const n = ids.length;
+    const distances: number[][] = Array(n).fill(null).map(() => Array(n).fill(0));
+    
+    for (let i = 0; i < n; i++) {
+        const embA = embeddings.get(ids[i])!;
+        for (let j = i + 1; j < n; j++) {
+            const embB = embeddings.get(ids[j])!;
+            const sim = cosineSimilarity(embA, embB);
+            const dist = 1 - sim;
+            distances[i][j] = dist;
+            distances[j][i] = dist;
+        }
+    }
+    
+    return distances;
+}
+
+/**
+ * Compute cluster cohesion (average similarity to centroid).
+ */
+export function computeCohesion(
+    memberIds: string[],
+    centroidId: string,
+    embeddings: Map<string, Float32Array>
+): number {
+    if (memberIds.length <= 1) return 1.0;
+    
+    const centroidEmb = embeddings.get(centroidId)!;
+    let totalSim = 0;
+    
+    for (const id of memberIds) {
+        const emb = embeddings.get(id)!;
+        totalSim += cosineSimilarity(emb, centroidEmb);
+    }
+    
+    return totalSim / memberIds.length;
+}
+```
+
+### File: `src/clustering/hac.ts` (NEW)
+
+```typescript
+// ═══════════════════════════════════════════════════════════════════════════
+// HIERARCHICAL AGGLOMERATIVE CLUSTERING
+// ═══════════════════════════════════════════════════════════════════════════
+
+import { ClusteringConfig } from './config';
+
+/**
+ * Average linkage: mean distance between all pairs across clusters.
+ */
+function averageLinkage(
+    clusterA: Set<number>,
+    clusterB: Set<number>,
+    distances: number[][]
+): number {
+    let sum = 0;
+    let count = 0;
+    
+    for (const i of clusterA) {
+        for (const j of clusterB) {
+            sum += distances[i][j];
+            count++;
+        }
+    }
+    
+    return count > 0 ? sum / count : Infinity;
+}
+
+/**
+ * Hierarchical Agglomerative Clustering with threshold-based stopping.
+ * 
+ * Returns array of clusters, where each cluster is an array of indices.
+ * Cluster count is EMERGENT from data, not forced.
+ */
+export function hierarchicalCluster(
+    distances: number[][],
+    config: ClusteringConfig
+): number[][] {
+    const n = distances.length;
+    
+    // Edge case: too few items
+    if (n < config.minParagraphsForClustering) {
+        return Array.from({ length: n }, (_, i) => [i]);
+    }
+    
+    // Initialize: each item is its own cluster
+    const clusters: Set<number>[] = Array.from({ length: n }, (_, i) => new Set([i]));
+    const active = new Set(Array.from({ length: n }, (_, i) => i));
+    
+    // Convert similarity threshold to distance threshold
+    const distanceThreshold = 1 - config.similarityThreshold;
+    
+    // Merge loop
+    while (active.size > 1) {
+        // Find closest pair
+        let minDist = Infinity;
+        let minI = -1;
+        let minJ = -1;
+        
+        const activeArray = Array.from(active);
+        for (let ai = 0; ai < activeArray.length; ai++) {
+            for (let aj = ai + 1; aj < activeArray.length; aj++) {
+                const i = activeArray[ai];
+                const j = activeArray[aj];
+                const dist = averageLinkage(clusters[i], clusters[j], distances);
+                
+                if (dist < minDist) {
+                    minDist = dist;
+                    minI = i;
+                    minJ = j;
+                }
+            }
+        }
+        
+        // Stop if closest pair exceeds threshold
+        if (minDist > distanceThreshold) {
+            break;
+        }
+        
+        // Merge j into i
+        for (const idx of clusters[minJ]) {
+            clusters[minI].add(idx);
+        }
+        active.delete(minJ);
+    }
+    
+    // Convert to array format
+    return Array.from(active).map(i => Array.from(clusters[i]).sort((a, b) => a - b));
+}
+```
+
+### File: `src/clustering/engine.ts` (NEW)
+
+```typescript
+// ═══════════════════════════════════════════════════════════════════════════
+// CLUSTERING ENGINE
+// ═══════════════════════════════════════════════════════════════════════════
+
+import { ShadowParagraph } from '../shadow';
+import { ClusterableItem, ParagraphCluster, ClusteringResult } from './types';
+import { ClusteringConfig, DEFAULT_CONFIG } from './config';
+import { buildDistanceMatrix, cosineSimilarity, computeCohesion } from './distance';
+import { hierarchicalCluster } from './hac';
+
+// ═══════════════════════════════════════════════════════════════════════════
+// HELPERS
+// ═══════════════════════════════════════════════════════════════════════════
+
+function clipText(text: string, maxChars: number): string {
+    if (text.length <= maxChars) return text;
+    return text.slice(0, maxChars).trim();
+}
+
+/**
+ * Convert ShadowParagraph to ClusterableItem.
+ */
+export function toClusterableItems(paragraphs: ShadowParagraph[]): ClusterableItem[] {
+    return paragraphs.map(p => ({
+        id: p.id,
+        text: p._fullParagraph || p.statements.map(s => s.text).join(' '),
+        modelIndex: p.modelIndex,
+        dominantStance: p.dominantStance,
+        stanceHints: p.stanceHints,
+        contested: p.contested,
+        signals: p.signals,
+        statementIds: p.statementIds,
+    }));
+}
+
+/**
+ * Find centroid: paragraph closest to cluster mean embedding.
+ */
+function findCentroid(
+    memberIds: string[],
+    embeddings: Map<string, Float32Array>
+): { id: string; similarity: number } {
+    if (memberIds.length === 1) {
+        return { id: memberIds[0], similarity: 1.0 };
+    }
+    
+    // Compute mean embedding
+    const dim = embeddings.get(memberIds[0])!.length;
+    const mean = new Float32Array(dim);
+    
+    for (const id of memberIds) {
+        const emb = embeddings.get(id)!;
+        for (let i = 0; i < dim; i++) {
+            mean[i] += emb[i];
+        }
+    }
+    
+    // Normalize mean
+    let norm = 0;
+    for (let i = 0; i < dim; i++) {
+        mean[i] /= memberIds.length;
+        norm += mean[i] * mean[i];
+    }
+    norm = Math.sqrt(norm);
+    if (norm > 0) {
+        for (let i = 0; i < dim; i++) {
+            mean[i] /= norm;
+        }
+    }
+    
+    // Find member closest to mean
+    let bestId = memberIds[0];
+    let bestSim = -Infinity;
+    
+    for (const id of memberIds) {
+        const emb = embeddings.get(id)!;
+        let sim = 0;
+        for (let i = 0; i < dim; i++) {
+            sim += emb[i] * mean[i];
+        }
+        if (sim > bestSim) {
+            bestSim = sim;
+            bestId = id;
+        }
+    }
+    
+    return { id: bestId, similarity: bestSim };
+}
+
+/**
+ * Detect uncertainty reasons for a cluster.
+ */
+function detectUncertainty(
+    paragraphIds: string[],
+    paragraphsById: Map<string, ShadowParagraph>,
+    cohesion: number,
+    config: ClusteringConfig
+): { uncertain: boolean; reasons: string[] } {
+    const reasons: string[] = [];
+    
+    // Low cohesion
+    if (cohesion < config.lowCohesionThreshold) {
+        reasons.push('low_cohesion');
+    }
+    
+    // Oversized
+    if (paragraphIds.length > config.maxClusterSize) {
+        reasons.push('oversized');
+    }
+    
+    // Stance diversity
+    const allStances = new Set<string>();
+    for (const pid of paragraphIds) {
+        const p = paragraphsById.get(pid);
+        if (p) {
+            allStances.add(p.dominantStance);
+        }
+    }
+    if (allStances.size >= config.stanceDiversityThreshold) {
+        reasons.push('stance_diversity');
+    }
+    
+    // Contested ratio
+    let contestedCount = 0;
+    for (const pid of paragraphIds) {
+        const p = paragraphsById.get(pid);
+        if (p?.contested) contestedCount++;
+    }
+    const contestedRatio = paragraphIds.length > 0 ? contestedCount / paragraphIds.length : 0;
+    if (contestedRatio > config.contestedRatioThreshold) {
+        reasons.push('high_contested_ratio');
+    }
+    
+    // Conflicting signals (tension + conditional both present)
+    let hasTension = false;
+    let hasConditional = false;
+    for (const pid of paragraphIds) {
+        const p = paragraphsById.get(pid);
+        if (p?.signals.tension) hasTension = true;
+        if (p?.signals.conditional) hasConditional = true;
+    }
+    if (hasTension && hasConditional && paragraphIds.length > 1) {
+        reasons.push('conflicting_signals');
+    }
+    
+    return {
+        uncertain: reasons.length > 0,
+        reasons,
+    };
+}
+
+/**
+ * Build expansion payload for uncertain clusters.
+ */
+function buildExpansion(
+    paragraphIds: string[],
+    centroidId: string,
+    paragraphsById: Map<string, ShadowParagraph>,
+    embeddings: Map<string, Float32Array>,
+    config: ClusteringConfig
+): ParagraphCluster['expansion'] {
+    // Find most distant member from centroid
+    const centroidEmb = embeddings.get(centroidId)!;
+    let mostDistantId = paragraphIds[0];
+    let mostDistantSim = Infinity;
+    
+    for (const pid of paragraphIds) {
+        if (pid === centroidId) continue;
+        const emb = embeddings.get(pid)!;
+        const sim = cosineSimilarity(emb, centroidEmb);
+        if (sim < mostDistantSim) {
+            mostDistantSim = sim;
+            mostDistantId = pid;
+        }
+    }
+    
+    // Select members: centroid + most distant + fill to limit
+    const selected = new Set<string>([centroidId, mostDistantId]);
+    for (const pid of paragraphIds) {
+        if (selected.size >= config.maxExpansionMembers) break;
+        selected.add(pid);
+    }
+    
+    // Build expansion with char budget
+    const members: Array<{ paragraphId: string; text: string }> = [];
+    let charBudget = config.maxExpansionCharsTotal;
+    
+    // Centroid first
+    for (const pid of [centroidId, mostDistantId, ...paragraphIds]) {
+        if (!selected.has(pid)) continue;
+        selected.delete(pid);  // Don't add twice
+        
+        const p = paragraphsById.get(pid);
+        if (!p) continue;
+        
+        const text = clipText(p._fullParagraph || '', config.maxMemberTextChars);
+        if (charBudget - text.length < 0) break;
+        
+        charBudget -= text.length;
+        members.push({ paragraphId: pid, text });
+    }
+    
+    return { members };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// MAIN FUNCTION
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Build paragraph clusters from paragraphs and embeddings.
+ */
+export function buildClusters(
+    paragraphs: ShadowParagraph[],
+    embeddings: Map<string, Float32Array>,
+    config: ClusteringConfig = DEFAULT_CONFIG
+): ClusteringResult {
+    const startTime = performance.now();
+    
+    // Build lookup maps
+    const paragraphsById = new Map(paragraphs.map(p => [p.id, p]));
+    const paragraphIds = paragraphs.map(p => p.id);
+    
+    // Edge case: too few paragraphs
+    if (paragraphs.length < config.minParagraphsForClustering) {
+        const clusters: ParagraphCluster[] = paragraphs.map((p, idx) => ({
+            id: `pc_${idx}`,
+            paragraphIds: [p.id],
+            statementIds: [...p.statementIds],
+            representativeParagraphId: p.id,
+            representativeText: p.statements.map(s => s.text).join(' '),
+            cohesion: 1.0,
+            uncertain: false,
+            uncertaintyReasons: [],
+        }));
+        
+        return {
+            clusters,
+            meta: {
+                totalClusters: clusters.length,
+                singletonCount: clusters.length,
+                uncertainCount: 0,
+                avgClusterSize: 1,
+                maxClusterSize: 1,
+                compressionRatio: 1,
+                embeddingTimeMs: 0,
+                clusteringTimeMs: performance.now() - startTime,
+                totalTimeMs: performance.now() - startTime,
+            },
+        };
+    }
+    
+    // Build distance matrix
+    const distances = buildDistanceMatrix(paragraphIds, embeddings);
+    
+    // Run HAC
+    const clusterIndices = hierarchicalCluster(distances, config);
+    
+    // Build ParagraphCluster objects
+    const clusters: ParagraphCluster[] = [];
+    let uncertainCount = 0;
+    
+    for (let i = 0; i < clusterIndices.length; i++) {
+        const indices = clusterIndices[i];
+        const memberIds = indices.map(idx => paragraphIds[idx]);
+        
+        // Find centroid
+        const centroid = findCentroid(memberIds, embeddings);
+        const centroidParagraph = paragraphsById.get(centroid.id)!;
+        
+        // Compute cohesion
+        const cohesion = computeCohesion(memberIds, centroid.id, embeddings);
+        
+        // Detect uncertainty
+        const uncertainty = detectUncertainty(memberIds, paragraphsById, cohesion, config);
+        if (uncertainty.uncertain) uncertainCount++;
+        
+        // Collect statement IDs (stable order)
+        const statementIds: string[] = [];
+        const seenStatements = new Set<string>();
+        for (const pid of memberIds) {
+            const p = paragraphsById.get(pid);
+            if (p) {
+                for (const sid of p.statementIds) {
+                    if (!seenStatements.has(sid)) {
+                        seenStatements.add(sid);
+                        statementIds.push(sid);
+                    }
+                }
+            }
+        }
+        
+        const cluster: ParagraphCluster = {
+            id: `pc_${i}`,
+            paragraphIds: memberIds,
+            statementIds,
+            representativeParagraphId: centroid.id,
+            representativeText: centroidParagraph.statements.map(s => s.text).join(' '),
+            cohesion,
+            uncertain: uncertainty.uncertain,
+            uncertaintyReasons: uncertainty.reasons,
+        };
+        
+        // Add expansion if uncertain
+        if (uncertainty.uncertain) {
+            cluster.expansion = buildExpansion(
+                memberIds,
+                centroid.id,
+                paragraphsById,
+                embeddings,
+                config
+            );
+        }
+        
+        clusters.push(cluster);
+    }
+    
+    // Sort: uncertain first, then by size descending
+    clusters.sort((a, b) => {
+        if (a.uncertain && !b.uncertain) return -1;
+        if (!a.uncertain && b.uncertain) return 1;
+        return b.paragraphIds.length - a.paragraphIds.length;
+    });
+    
+    // Renumber IDs after sort
+    clusters.forEach((c, idx) => {
+        c.id = `pc_${idx}`;
+    });
+    
+    // Compute meta
+    const clusteringTimeMs = performance.now() - startTime;
+    const singletonCount = clusters.filter(c => c.paragraphIds.length === 1).length;
+    const sizes = clusters.map(c => c.paragraphIds.length);
+    
+    return {
+        clusters,
+        meta: {
+            totalClusters: clusters.length,
+            singletonCount,
+            uncertainCount,
+            avgClusterSize: sizes.reduce((a, b) => a + b, 0) / sizes.length,
+            maxClusterSize: Math.max(...sizes),
+            compressionRatio: clusters.length / paragraphs.length,
+            embeddingTimeMs: 0,  // Set by caller
+            clusteringTimeMs,
+            totalTimeMs: clusteringTimeMs,
+        },
+    };
+}
+```
+
+### File: `src/clustering/embeddings.ts` (NEW)
+
+```typescript
+// ═══════════════════════════════════════════════════════════════════════════
+// EMBEDDING CLIENT
+// ═══════════════════════════════════════════════════════════════════════════
+
+import { ShadowParagraph } from '../shadow';
+import { EmbeddingResult } from './types';
+import { ClusteringConfig, DEFAULT_CONFIG } from './config';
+
+/**
+ * Ensure offscreen document exists for embedding inference.
+ */
+async function ensureOffscreen(): Promise<void> {
+    const existingContexts = await chrome.runtime.getContexts({
+        contextTypes: ['OFFSCREEN_DOCUMENT' as chrome.runtime.ContextType],
+    });
+    
+    if (existingContexts.length > 0) return;
+    
+    await chrome.offscreen.createDocument({
+        url: 'offscreen.html',
+        reasons: [chrome.offscreen.Reason.WORKERS],
+        justification: 'Embedding model inference for semantic clustering',
+    });
+}
+
+/**
+ * Request embeddings from offscreen worker.
+ */
+export async function generateEmbeddings(
+    paragraphs: ShadowParagraph[],
+    config: ClusteringConfig = DEFAULT_CONFIG
+): Promise<EmbeddingResult> {
+    await ensureOffscreen();
+    
+    // Extract texts for embedding
+    const texts = paragraphs.map(p => 
+        p._fullParagraph || p.statements.map(s => s.text).join(' ')
+    );
+    const ids = paragraphs.map(p => p.id);
+    
+    return new Promise((resolve, reject) => {
+        chrome.runtime.sendMessage(
+            {
+                type: 'GENERATE_EMBEDDINGS',
+                payload: {
+                    texts,
+                    dimensions: config.embeddingDimensions,
+                },
+            },
+            (response) => {
+                if (chrome.runtime.lastError) {
+                    reject(new Error(chrome.runtime.lastError.message));
+                    return;
+                }
+                
+                if (!response?.success) {
+                    reject(new Error(response?.error || 'Embedding generation failed'));
+                    return;
+                }
+                
+                // Convert arrays back to Float32Array and build map
+                const embeddings = new Map<string, Float32Array>();
+                for (let i = 0; i < ids.length; i++) {
+                    const arr = response.result.embeddings[i];
+                    embeddings.set(ids[i], new Float32Array(arr));
+                }
+                
+                resolve({
+                    embeddings,
+                    dimensions: config.embeddingDimensions,
+                    timeMs: response.result.timeMs,
+                });
+            }
+        );
+    });
+}
+
+/**
+ * Preload embedding model (call during idle time).
+ */
+export async function preloadModel(): Promise<void> {
+    await ensureOffscreen();
+    
+    return new Promise((resolve, reject) => {
+        chrome.runtime.sendMessage(
+            { type: 'PRELOAD_MODEL' },
+            (response) => {
+                if (chrome.runtime.lastError) {
+                    reject(new Error(chrome.runtime.lastError.message));
+                } else if (response?.success) {
+                    resolve();
+                } else {
+                    reject(new Error(response?.error || 'Model preload failed'));
+                }
+            }
+        );
+    });
+}
+```
+
+### File: `src/clustering/index.ts` (NEW)
+
+```typescript
+// ═══════════════════════════════════════════════════════════════════════════
+// CLUSTERING MODULE - PUBLIC API
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Types
+export type {
+    ClusterableItem,
+    ParagraphCluster,
+    ClusteringResult,
+    EmbeddingResult,
+} from './types';
+
+// Configuration
+export {
+    type ClusteringConfig,
+    DEFAULT_CONFIG,
+    CONFIG_PRESETS,
+} from './config';
+
+// Main functions
+export { generateEmbeddings, preloadModel } from './embeddings';
+export { buildClusters, toClusterableItems } from './engine';
+
+// Re-export for convenience
+import { ShadowParagraph } from '../shadow';
+import { ClusteringResult } from './types';
+import { ClusteringConfig, DEFAULT_CONFIG } from './config';
+import { generateEmbeddings } from './embeddings';
+import { buildClusters } from './engine';
+
+/**
+ * High-level API: Cluster paragraphs end-to-end.
+ * Handles embedding generation and clustering in one call.
+ */
+export async function clusterParagraphs(
+    paragraphs: ShadowParagraph[],
+    config: Partial<ClusteringConfig> = {}
+): Promise<ClusteringResult> {
+    const mergedConfig: ClusteringConfig = { ...DEFAULT_CONFIG, ...config };
+    
+    // Skip if too few paragraphs
+    if (paragraphs.length < mergedConfig.minParagraphsForClustering) {
+        return buildClusters(paragraphs, new Map(), mergedConfig);
+    }
+    
+    // Generate embeddings
+    const embeddingResult = await generateEmbeddings(paragraphs, mergedConfig);
+    
+    // Build clusters
+    const clusterResult = buildClusters(paragraphs, embeddingResult.embeddings, mergedConfig);
+    
+    // Update timing
+    clusterResult.meta.embeddingTimeMs = embeddingResult.timeMs;
+    clusterResult.meta.totalTimeMs = embeddingResult.timeMs + clusterResult.meta.clusteringTimeMs;
+    
+    return clusterResult;
+}
+```
+
+---
+
+## Phase 4: Offscreen Embedding Worker
+
+### File: `src/offscreen/embedding-worker.ts` (NEW)
+
+```typescript
+// ═══════════════════════════════════════════════════════════════════════════
+// EMBEDDING WORKER - OFFSCREEN DOCUMENT
+// ═══════════════════════════════════════════════════════════════════════════
+
+import { env, pipeline, Pipeline } from '@huggingface/transformers';
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CONFIGURATION
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Use local models (bundled with extension)
+env.allowRemoteModels = false;
+env.localModelPath = chrome.runtime.getURL('models/');
+env.backends.onnx.wasm.numThreads = 4;
+
+let embedder: Pipeline | null = null;
+let initPromise: Promise<void> | null = null;
+
+// ═══════════════════════════════════════════════════════════════════════════
+// INITIALIZATION
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function initializeModel(): Promise<void> {
+    if (embedder) return;
+    if (initPromise) return initPromise;
+    
+    initPromise = (async () => {
+        console.log('[Embedder] Loading model...');
+        const startTime = performance.now();
+        
+        // Try WebGPU first
+        try {
+            embedder = await pipeline(
+                'feature-extraction',
+                'all-MiniLM-L6-v2',
+                {
+                    device: 'webgpu',
+                    dtype: 'q8',
+                }
+            );
+            console.log(`[Embedder] Loaded with WebGPU in ${Math.round(performance.now() - startTime)}ms`);
+            return;
+        } catch (webgpuError) {
+            console.warn('[Embedder] WebGPU unavailable, falling back to WASM:', webgpuError);
+        }
+        
+        // Fallback to WASM
+        embedder = await pipeline(
+            'feature-extraction',
+            'all-MiniLM-L6-v2',
+            {
+                device: 'wasm',
+                dtype: 'q8',
+            }
+        );
+        console.log(`[Embedder] Loaded with WASM in ${Math.round(performance.now() - startTime)}ms`);
+    })();
+    
+    return initPromise;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// EMBEDDING GENERATION
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function generateEmbeddings(
+    texts: string[],
+    targetDimensions: number
+): Promise<{ embeddings: number[][]; timeMs: number }> {
+    await initializeModel();
+    
+    if (!embedder) {
+        throw new Error('Embedder not initialized');
+    }
+    
+    const startTime = performance.now();
+    const batchSize = 32;
+    const allEmbeddings: number[][] = [];
+    
+    for (let i = 0; i < texts.length; i += batchSize) {
+        const batch = texts.slice(i, i + batchSize);
+        
+        const outputs = await embedder(batch, {
+            pooling: 'mean',
+            normalize: true,
+        });
+        
+        for (let j = 0; j < batch.length; j++) {
+            const output = outputs[j];
+            const data = output.data as Float32Array;
+            
+            // Truncate to target dimensions (MRL)
+            const truncated = Array.from(data.slice(0, targetDimensions));
+            
+            // Re-normalize after truncation
+            let norm = 0;
+            for (const v of truncated) norm += v * v;
+            norm = Math.sqrt(norm);
+            if (norm > 0) {
+                for (let k = 0; k < truncated.length; k++) {
+                    truncated[k] /= norm;
+                }
+            }
+            
+            allEmbeddings.push(truncated);
+        }
+    }
+    
+    return {
+        embeddings: allEmbeddings,
+        timeMs: performance.now() - startTime,
+    };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// MESSAGE HANDLER
+// ═══════════════════════════════════════════════════════════════════════════
+
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    if (message.type === 'GENERATE_EMBEDDINGS') {
+        const { texts, dimensions } = message.payload;
+        
+        generateEmbeddings(texts, dimensions)
+            .then(result => sendResponse({ success: true, result }))
+            .catch(error => sendResponse({ success: false, error: error.message }));
+        
+        return true;  // Async response
+    }
+    
+    if (message.type === 'PRELOAD_MODEL') {
+        initializeModel()
+            .then(() => sendResponse({ success: true }))
+            .catch(error => sendResponse({ success: false, error: error.message }));
+        
+        return true;  // Async response
+    }
+    
+    return false;
+});
+
+// Preload on document ready
+initializeModel().catch(err => {
+    console.warn('[Embedder] Background preload failed:', err);
+});
+```
+
+### File: `offscreen.html` (VERIFY/CREATE)
+
+```html
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Offscreen Worker</title>
+</head>
+<body>
+    <script type="module" src="offscreen/embedding-worker.js"></script>
+</body>
+</html>
+```
+
+### File: `manifest.json` (VERIFY)
+
+Ensure these exist:
+
+```json
+{
+    "permissions": [
+        "offscreen"
+    ],
+    "background": {
+        "service_worker": "background.js",
+        "type": "module"
+    }
+}
+```
+
+---
+
+## Phase 5: Semantic Mapper Modifications
+
+### File: `src/ConciergeService/semanticMapper.ts` (MODIFY)
+
+**Changes Required:**
+
+1. Remove inline `projectShadowParagraphs()` and `clusterParagraphs()` functions
+2. Accept pre-computed projection and clustering as parameters
+3. Remove text duplication (don't include `paragraph.text`)
+4. Fix prompt: remove metaphor, use domain-appropriate example
+5. Implement uncertain-first cluster ordering
+
+**New Signature:**
+
+```typescript
+import { ShadowStatement } from '../shadow';
+import { ParagraphProjectionResult } from '../shadow/ShadowParagraphProjector';
+import { ClusteringResult } from '../clustering';
+
+export function buildSemanticMapperPrompt(
+    userQuery: string,
+    shadowStatements: ShadowStatement[],
+    paragraphResult?: ParagraphProjectionResult,
+    clusteringResult?: ClusteringResult | null
+): string;
+```
+
+**Key Implementation Changes:**
+
+```typescript
+export function buildSemanticMapperPrompt(
+    userQuery: string,
+    shadowStatements: ShadowStatement[],
+    paragraphResult?: ParagraphProjectionResult,
+    clusteringResult?: ClusteringResult | null
+): string {
+    // Group paragraphs by model for prompt
+    const groupedByModel: Record<string, any[]> = {};
+    
+    if (paragraphResult) {
+        for (const p of paragraphResult.paragraphs) {
+            const key = `model_${p.modelIndex}`;
+            if (!groupedByModel[key]) groupedByModel[key] = [];
+            
+            // DO NOT include paragraph.text - only statements
+            groupedByModel[key].push({
+                id: p.id,
+                modelIndex: p.modelIndex,
+                paragraphIndex: p.paragraphIndex,
+                statementIds: p.statementIds,
+                dominantStance: p.dominantStance,
+                contested: p.contested,
+                signals: p.signals,
+                statements: p.statements,  // Contains text
+                // NO text field here - prevents duplication
+            });
+        }
+    }
+    
+    // Cluster ordering: uncertain first, then by size
+    let clusterBlock = '';
+    if (clusteringResult && clusteringResult.clusters.length > 0) {
+        // Already sorted uncertain-first by engine, but verify
+        const sortedClusters = [...clusteringResult.clusters].sort((a, b) => {
+            if (a.uncertain && !b.uncertain) return -1;
+            if (!a.uncertain && b.uncertain) return 1;
+            return b.paragraphIds.length - a.paragraphIds.length;
+        });
+        
+        // Optional cap (all uncertain always included)
+        const MAX_CLUSTERS = 15;
+        const uncertainClusters = sortedClusters.filter(c => c.uncertain);
+        const certainClusters = sortedClusters.filter(c => !c.uncertain);
+        const cappedClusters = [
+            ...uncertainClusters,
+            ...certainClusters.slice(0, MAX_CLUSTERS - uncertainClusters.length)
+        ];
+        
+        clusterBlock = JSON.stringify(cappedClusters);
+    }
+    
+    const paragraphBlock = JSON.stringify(groupedByModel);
+    
+    return `You are a Semantic Cartographer. Your task is to organize extracted statements into claims with structural relationships.
+
+<user_query>
+"${userQuery}"
+</user_query>
+
+<shadow_paragraphs>
+${paragraphBlock}
+</shadow_paragraphs>
+
+${clusterBlock ? `<paragraph_clusters>
+${clusterBlock}
+</paragraph_clusters>` : ''}
+
+# Your Task
+
+1. **Discover Claims**: Group statements pointing to the same position into a single claim. Name each claim with a short verb phrase.
+
+2. **Trace Relationships**:
+   - **Conditional gates**: Claims that only apply if some condition is true
+   - **Prerequisite gates**: Claims whose validity depends on another claim
+   - **Conflicts**: Claims that are mutually exclusive
+
+3. For every gate or conflict, provide a **question** that would resolve it in concrete, human terms.
+
+# Using the Input
+
+- **shadow_paragraphs**: Contains statements grouped by model and paragraph. Each statement has an id (s_*), text, stance, and signals.
+- **paragraph_clusters** (if present): Hints about which paragraphs express similar ideas. Use for grouping guidance.
+  - If a cluster has \`uncertain: true\`, examine the \`expansion.members\` texts carefully and consider splitting into multiple claims.
+  - Clusters are HINTS only - you may split or ignore them based on semantic analysis.
+
+# Schema Lock (Strict)
+
+- Respond with a single JSON object only (no markdown, no prose).
+- Do not output an "edges" field anywhere.
+- The only relationship fields are "enables" and "conflicts".
+- Every gate and every conflict must include a non-empty "question".
+- **Never cite paragraph IDs (p_*) or cluster IDs (pc_*), only statement IDs (s_*).**
+
+# Output Format
+
+\`\`\`json
+{
+  "claims": [
+    {
+      "id": "c_0",
+      "label": "make traversal the primary UI surface",
+      "description": "The traversal/validity state should be the main view users interact with",
+      "stance": "prescriptive",
+      "gates": {
+        "conditionals": [
+          {
+            "id": "cg_0",
+            "condition": "semantic mapping produces non-narrative output",
+            "question": "Is the semantic mapper output machine-legible rather than human-readable?",
+            "sourceStatementIds": ["s_1", "s_39"]
+          }
+        ],
+        "prerequisites": []
+      },
+      "enables": ["c_1"],
+      "conflicts": [],
+      "sourceStatementIds": ["s_1", "s_39", "s_40"]
+    }
+  ]
+}
+\`\`\`
+
+# Field Names
+- Claims: id, label, description?, stance, gates, enables, conflicts, sourceStatementIds
+- Conditional gate: id, condition, question, sourceStatementIds
+- Prerequisite gate: id, claimId, condition, question, sourceStatementIds
+- Conflict: claimId, question, sourceStatementIds, nature?
+
+# Provenance Requirements (Non-Negotiable)
+- Every claim must include ≥1 sourceStatementId.
+- Every gate must include ≥1 sourceStatementId.
+- Every conflict must include ≥1 sourceStatementId.
+
+Generate the map now.`;
+}
+```
+
+---
+
+## Phase 6: StepExecutor Integration
+
+### File: `StepExecutor.js` (MODIFY)
+
+**Location:** Inside `executeMappingStep()`, after shadow extraction, before prompt building.
+
+**Replace this:**
+
+```javascript
+const shadowResult = extractShadowStatements(shadowInput);
+const mappingPrompt = buildSemanticMapperPrompt(
+    payload.originalPrompt,
+    shadowResult.statements
+);
+```
+
+**With this:**
+
+```javascript
+const shadowResult = extractShadowStatements(shadowInput);
+console.log(`[StepExecutor] Extracted ${shadowResult.statements.length} shadow statements.`);
+
+// ════════════════════════════════════════════════════════════════════════
+// NEW: Paragraph Projection + Clustering
+// ════════════════════════════════════════════════════════════════════════
+
+// 1. Project paragraphs (sync, fast)
+const { projectParagraphs } = await import('../../shadow/ShadowParagraphProjector');
+const paragraphResult = projectParagraphs(shadowResult.statements);
+console.log(`[StepExecutor] Projected ${paragraphResult.paragraphs.length} paragraphs (${paragraphResult.meta.contestedCount} contested).`);
+
+// 2. Cluster paragraphs (async, may fail)
+let clusteringResult = null;
+if (paragraphResult.paragraphs.length >= 3) {
+    try {
+        const { clusterParagraphs } = await import('../../clustering');
+        clusteringResult = await clusterParagraphs(paragraphResult.paragraphs);
+        
+        console.log(`[StepExecutor] Clustered into ${clusteringResult.clusters.length} clusters ` +
+            `(${clusteringResult.meta.singletonCount} singletons, ` +
+            `${clusteringResult.meta.uncertainCount} uncertain, ` +
+            `compression ${(clusteringResult.meta.compressionRatio * 100).toFixed(0)}%, ` +
+            `${clusteringResult.meta.totalTimeMs.toFixed(0)}ms)`);
+    } catch (clusteringError) {
+        // Per design: skip clustering entirely on failure, continue without
+        console.warn('[StepExecutor] Clustering failed, continuing without clusters:', clusteringError.message);
+        clusteringResult = null;
+    }
+} else {
+    console.log('[StepExecutor] Skipping clustering (< 3 paragraphs)');
+}
+
+// 3. Build prompt with pre-computed data
+const mappingPrompt = buildSemanticMapperPrompt(
+    payload.originalPrompt,
+    shadowResult.statements,
+    paragraphResult,
+    clusteringResult
+);
+
+// ════════════════════════════════════════════════════════════════════════
+// Continue with existing prompt length check and LLM call...
+// ════════════════════════════════════════════════════════════════════════
+```
+
+**Also update the import at the top of the file:**
+
+```javascript
+const { buildSemanticMapperPrompt, parseSemanticMapperOutput } = await import('../../ConciergeService/semanticMapper');
+```
+
+---
+
+## Phase 7: Build Configuration
+
+### File: `package.json` (MODIFY)
+
+Add dependency:
+
+```json
+{
+    "dependencies": {
+        "@huggingface/transformers": "^3.0.0"
+    }
+}
+```
+
+### Model Files
+
+Create `models/` directory and add ONNX files for `all-MiniLM-L6-v2`:
+
+```
+models/
+├── all-MiniLM-L6-v2/
+│   ├── config.json
+│   ├── tokenizer.json
+│   ├── tokenizer_config.json
+│   └── model_quantized.onnx
+```
+
+Download from: https://huggingface.co/Xenova/all-MiniLM-L6-v2/tree/main/onnx
+
+### Webpack/Vite Config (VERIFY)
+
+Ensure model files are copied to build output:
+
+```javascript
+// Example for webpack
+{
+    plugins: [
+        new CopyPlugin({
+            patterns: [
+                { from: 'models', to: 'models' }
+            ]
+        })
+    ]
+}
+```
+
+---
+
+## Phase 8: Verification Checklist
+
+### Unit Tests to Create
+
+| Test File | What to Test |
+|-----------|--------------|
+| `tests/shadow/ShadowExtractor.test.ts` | Markdown header filtering, table skipping |
+| `tests/shadow/ShadowParagraphProjector.test.ts` | Projection correctness, contested detection, stance aggregation |
+| `tests/clustering/hac.test.ts` | Determinism, threshold behavior, emergent cluster count |
+| `tests/clustering/engine.test.ts` | Centroid selection, uncertainty detection, expansion building |
+
+### Integration Tests
+
+| Test | Validation |
+|------|------------|
+| End-to-end clustering | Paragraphs → embeddings → clusters with expected compression |
+| UI design query regression | Use the failing prompt, verify cross-model clusters form |
+| Embedding failure graceful | Mock failure, verify mapping continues without clusters |
+
+### Acceptance Criteria
+
+| # | Criterion | How to Verify |
+|---|-----------|---------------|
+| 1 | No text duplication in prompt | Grep prompt output for repeated statement text |
+| 2 | Provenance preserved | All claims cite only s_* IDs, never p_* or pc_* |
+| 3 | Determinism | Same input → same paragraph/cluster IDs (run 3x, compare) |
+| 4 | Contested surfaced | Paragraphs with contradiction pairs have `contested: true` |
+| 5 | Centroid as representative | Representative is not always first paragraph in cluster |
+| 6 | Uncertain-first ordering | Clusters with uncertainty appear first in prompt |
+| 7 | Embedding failure graceful | If embeddings fail, prompt still builds and LLM called |
+| 8 | Cross-model clustering | UI design query produces clusters spanning model_1 + model_2 |
+| 9 | Markdown filtered | No `##` headers in statement output |
+| 10 | Tables skipped | No `|` fragments in statement output |
+
+---
+
+## Implementation Order
+
+```
+Week 1: Shadow Fixes + Paragraph Projector
+├── Day 1-2: Modify ShadowExtractor (markdown, tables)
+├── Day 3-4: Create ShadowParagraphProjector
+├── Day 5: Unit tests for both
+
+Week 2: Clustering Module
+├── Day 1: types.ts, config.ts, distance.ts
+├── Day 2: hac.ts
+├── Day 3: engine.ts
+├── Day 4: embeddings.ts, index.ts
+├── Day 5: Unit tests
+
+Week 3: Offscreen + Integration
+├── Day 1: embedding-worker.ts
+├── Day 2: offscreen.html, manifest.json
+├── Day 3: Model bundling (ONNX files)
+├── Day 4: StepExecutor integration
+├── Day 5: semanticMapper modifications
+
+Week 4: Testing + Polish
+├── Day 1-2: Integration tests
+├── Day 3: UI design query regression test
+├── Day 4: Edge case handling
+├── Day 5: Documentation, ship
+```
+
+---
+
+## Summary
+
+This plan transforms the clustering layer from vocabulary-based (Jaccard) to meaning-based (embeddings). The key changes:
+
+1. **Shadow fixes**: Filter markdown headers and tables that pollute extraction
+2. **Paragraph projection**: Extract as separate module with contested detection
+3. **Embedding clustering**: HAC on cosine similarity with 0.82 threshold
+4. **Centroid selection**: Most semantically central paragraph, not first
+5. **Uncertainty handling**: Explicit reasons + expansion for review
+6. **Async boundary**: StepExecutor pre-computes, prompt builder stays sync
+7. **Failure graceful**: Skip clustering if embeddings fail, continue mapping
+8. **No duplication**: Statement text appears once in prompt
+
+The result: Cross-model semantic clustering that groups "Logic Foundry" with "Traversal Dashboard" because they mean the same thing, not because they share vocabulary.

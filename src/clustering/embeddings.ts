@@ -104,19 +104,25 @@ export async function generateEmbeddings(
                 // Rehydrate Float32Array and renormalize
                 const embeddings = new Map<string, Float32Array>();
                 for (let i = 0; i < ids.length; i++) {
-                    const rawData = response.result.embeddings[i] as number[];
+                    // Defensive check: ensure embedding entry exists and is valid array
+                    const rawEntry = response.result.embeddings?.[i];
+                    if (!rawEntry || !Array.isArray(rawEntry) || rawEntry.length === 0) {
+                        console.warn(`[embeddings] Missing or malformed embedding for id: ${ids[i]}`);
+                        continue;
+                    }
+
+                    const rawData = rawEntry as number[];
 
                     // Truncate if needed (MRL - Matryoshka Representation Learning)
                     const truncatedData = rawData.length > config.embeddingDimensions
                         ? rawData.slice(0, config.embeddingDimensions)
                         : rawData;
 
-                    let emb = new Float32Array(truncatedData);
+                    const emb = new Float32Array(truncatedData);
 
                     // Renormalize after truncation (critical for determinism)
-                    emb = normalizeEmbedding(emb);
-
-                    embeddings.set(ids[i], emb);
+                    // Type assertion needed for TS 5.x Float32Array<ArrayBuffer> compatibility
+                    embeddings.set(ids[i], normalizeEmbedding(emb) as Float32Array<ArrayBuffer>);
                 }
 
                 resolve({

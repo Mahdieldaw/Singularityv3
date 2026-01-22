@@ -292,6 +292,44 @@ export function buildClusters(
     // Build distance matrix
     const distances = buildDistanceMatrix(paragraphIds, embeddings);
 
+    let maxSim = -Infinity;
+    let validPairCount = 0;
+    let pairsAboveThreshold = 0;
+    const topPairs: Array<{ i: string; j: string; sim: number }> = [];
+
+    for (let i = 0; i < paragraphIds.length; i++) {
+        for (let j = i + 1; j < paragraphIds.length; j++) {
+            const dist = distances[i][j];
+            if (!Number.isFinite(dist)) continue;
+
+            const sim = 1 - dist;
+            validPairCount++;
+
+            if (sim > maxSim) maxSim = sim;
+            if (sim >= config.similarityThreshold) pairsAboveThreshold++;
+
+            if (topPairs.length < 5) {
+                topPairs.push({ i: paragraphIds[i], j: paragraphIds[j], sim });
+                topPairs.sort((a, b) => b.sim - a.sim);
+            } else if (sim > topPairs[topPairs.length - 1].sim) {
+                topPairs[topPairs.length - 1] = { i: paragraphIds[i], j: paragraphIds[j], sim };
+                topPairs.sort((a, b) => b.sim - a.sim);
+            }
+        }
+    }
+
+    const maxSimSafe = Number.isFinite(maxSim) ? maxSim : 0;
+    console.log(`[Clustering] Similarity distribution:`);
+    console.log(`  - Max: ${maxSimSafe.toFixed(3)}`);
+    console.log(`  - Threshold: ${config.similarityThreshold}`);
+    console.log(`  - Pairs above threshold: ${pairsAboveThreshold}/${validPairCount}`);
+    console.log(`  - Top pairs:`, topPairs.map(s => `${s.i}-${s.j}: ${s.sim.toFixed(3)}`));
+    if (validPairCount > 0 && maxSimSafe < config.similarityThreshold) {
+        console.warn(
+            `[Clustering] WARNING: Max similarity ${maxSimSafe.toFixed(3)} is below threshold ${config.similarityThreshold} - all singletons expected`
+        );
+    }
+
     // Run HAC
     const clusterIndices = hierarchicalCluster(paragraphIds, distances, config);
 

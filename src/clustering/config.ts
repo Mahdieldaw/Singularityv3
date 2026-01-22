@@ -30,8 +30,8 @@ export interface ClusteringConfig {
 }
 
 export const DEFAULT_CONFIG: ClusteringConfig = {
-    // 0.82 = moderately conservative threshold
-    similarityThreshold: 0.82,
+    // 0.72 = moderately conservative threshold
+    similarityThreshold: 0.72,
 
     // Safety limit to prevent pathological explosion
     maxClusters: 40,

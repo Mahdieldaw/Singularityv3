@@ -409,12 +409,27 @@ export class StepExecutor {
           shadowResult.statements  // Pass original statements for embedding text
         );
 
-        console.log(`[StepExecutor] Clustered into ${clusteringResult.clusters.length} clusters ` +
-          `(${clusteringResult.meta.singletonCount} singletons, ` +
-          `${clusteringResult.meta.uncertainCount} uncertain, ` +
-          `compression ${(clusteringResult.meta.compressionRatio * 100).toFixed(0)}%, ` +
-          `embedding ${clusteringResult.meta.embeddingTimeMs.toFixed(0)}ms, ` +
-          `clustering ${clusteringResult.meta.clusteringTimeMs.toFixed(0)}ms)`);
+        const nonSingletons = clusteringResult.clusters.filter(c => c.paragraphIds.length > 1);
+        console.log(`[StepExecutor] Clustering results:`);
+        console.log(`  - Total clusters: ${clusteringResult.meta.totalClusters}`);
+        console.log(`  - Singletons: ${clusteringResult.meta.singletonCount}`);
+        console.log(`  - Multi-member: ${nonSingletons.length}`);
+        console.log(`  - Uncertain: ${clusteringResult.meta.uncertainCount}`);
+        console.log(`  - Compression: ${(clusteringResult.meta.compressionRatio * 100).toFixed(0)}%`);
+        console.log(
+          `  - Timing: embed ${clusteringResult.meta.embeddingTimeMs.toFixed(0)}ms, ` +
+          `cluster ${clusteringResult.meta.clusteringTimeMs.toFixed(0)}ms`
+        );
+
+        if (nonSingletons.length > 0) {
+          const largest = [...nonSingletons]
+            .sort((a, b) => b.paragraphIds.length - a.paragraphIds.length)
+            .slice(0, 3);
+          console.log(
+            `  - Largest clusters:`,
+            largest.map(c => `${c.id}: ${c.paragraphIds.length} paragraphs`)
+          );
+        }
       } catch (clusteringError) {
         // Per design: skip clustering entirely on failure, continue without
         console.warn('[StepExecutor] Clustering failed, continuing without clusters:', clusteringError.message);

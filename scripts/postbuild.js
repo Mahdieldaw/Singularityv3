@@ -52,11 +52,28 @@ const modelsSource = p.join(__dirname, "../models");
 const modelsDest = p.join(__dirname, "../dist/models");
 
 if (fs.existsSync(modelsSource)) {
+  if (fs.existsSync(modelsDest)) {
+    fs.rmSync(modelsDest, { recursive: true, force: true });
+  }
   fs.mkdirSync(modelsDest, { recursive: true });
   copyRecursive(modelsSource, modelsDest);
   console.log("[postbuild] Copied models/ to dist/models/");
 } else {
   console.warn("[postbuild] Warning: models/ directory not found - embeddings will not work");
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// Copy ONNX Runtime WASM files (for MV3 local loading)
+// ════════════════════════════════════════════════════════════════════════
+const onnxSource = p.join(__dirname, "../onnx");
+const onnxDest = p.join(__dirname, "../dist/onnx");
+
+if (fs.existsSync(onnxSource)) {
+  fs.mkdirSync(onnxDest, { recursive: true });
+  copyRecursive(onnxSource, onnxDest);
+  console.log("[postbuild] Copied onnx/ to dist/onnx/");
+} else {
+  console.warn("[postbuild] Warning: onnx/ directory not found - WASM loading may fail");
 }
 
 // copy fonts

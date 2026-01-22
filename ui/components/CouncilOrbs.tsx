@@ -50,6 +50,7 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
     collapsed = false, // Default to expanded
     forceGating = false,
 }) => {
+    const isTurnContext = !!turnId;
     const [hoveredOrb, setHoveredOrb] = useState<string | null>(null);
     const [isCrownMode, setIsCrownMode] = useState(false);
     const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -82,6 +83,10 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
 
     // Auto-open menu when isEditMode becomes true
     React.useEffect(() => {
+        if (isTurnContext) {
+            setIsMenuOpen(false);
+            return;
+        }
         if (variant === 'active') return;
 
         if (isEditMode) {
@@ -91,7 +96,7 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
             setIsMenuOpen(false);
 
         }
-    }, [isEditMode, voiceProviderId, variant]);
+    }, [isEditMode, voiceProviderId, variant, isTurnContext]);
 
     // Filter out system provider if present
     const allProviders = useMemo(() => {
@@ -153,7 +158,7 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
 
     const handleCrownClick = (e: React.MouseEvent) => {
         e.stopPropagation();
-        if (variant === "historical") return; // No crown interaction for historical
+        if (variant === "historical" || isTurnContext) return;
         setIsCrownMode(!isCrownMode);
     };
 
@@ -195,7 +200,7 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
     const shouldDimInSplitMode = isSplitOpen && variant === "tray";
 
     const handleLongPressStart = (_pid: string | null) => {
-        if (variant === "historical") return; // Disable menu for historical
+        if (variant === "historical" || isTurnContext) return;
 
         if (longPressRef.current) clearTimeout(longPressRef.current);
         longPressRef.current = setTimeout(() => {
@@ -368,7 +373,7 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
                 </div>
 
                 {/* Settings Button for Active Mode - positioned at far right edge */}
-                {variant === "active" && (
+                {variant === "active" && !isTurnContext && (
                     <div className="absolute right-[-140px] top-1/2 -translate-y-1/2">
                         <button
                             onClick={(e) => {
@@ -392,7 +397,7 @@ export const CouncilOrbs: React.FC<CouncilOrbsProps> = React.memo(({
                 <div className="council-crown-indicator">Select new voice</div>
             )}
 
-            {isMenuOpen && (
+            {isMenuOpen && !isTurnContext && (
                 <div className="absolute left-1/2 -translate-x-1/2 bottom-[110%] bg-surface-raised border border-border-subtle rounded-xl shadow-elevated p-3 z-[100] min-w-[500px] w-max max-w-[90vw]">
                     <div className="text-xs text-text-muted mb-2">Council Menu</div>
                     <div className="grid grid-cols-2 gap-4">
@@ -537,6 +542,7 @@ const Orb: React.FC<OrbProps> = ({
     forceHide = false,
 }) => {
     const pid = String(provider.id);
+    const isTurnContext = !!turnId;
     const state = useAtomValue(providerEffectiveStateFamily({ turnId, providerId: pid }));
 
     // For active variant, we don't use turn state status, we use selection state
@@ -611,8 +617,8 @@ const Orb: React.FC<OrbProps> = ({
                         variant === "historical" && "council-crown--historical",
                         isCrownMode && "council-crown--selecting"
                     )}
-                    onClick={(e) => { if (variant !== "historical") onCrownClick(e); }}
-                    title={variant === "historical" ? "Synthesizer for this turn" : "Click to change voice"}
+                    onClick={(e) => { if (variant !== "historical" && !isTurnContext) onCrownClick(e); }}
+                    title={variant === "historical" || isTurnContext ? "Synthesizer for this turn" : "Click to change voice"}
                 >
                     👑
                 </button>

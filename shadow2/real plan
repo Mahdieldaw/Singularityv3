@@ -1,0 +1,427 @@
+# Locked, Airtight Implementation Spec + Roadmap (for your agent)
+
+This is the unified, final spec incorporating **all your clarifications**:
+
+- **Single prompt surface**: paragraph objects containing statement objects (no duplicated text).
+- **Paragraph projection**: derived from `ShadowStatement[]`, adds `contested` + `stanceHints` + `_fullParagraph` (internal only).
+- **Clustering**: **embeddings-only**, threshold **0.82**, centroid representative, deterministic, async in `StepExecutor`.
+- **Uncertainty expansion**: **text only**, uses raw `_fullParagraph`, only for `uncertain=true`.
+- **Prompt builder stays sync**: it receives precomputed paragraph + cluster results.
+- **Provider too long**: keep existing length checks; if too long halt and let UI pick another mapping provider.
+
+I’m also surfacing any remaining holes/ambiguities and resolving them below so the agent doesn’t guess.
+
+---
+
+## 0) Hard Invariants (Non-negotiable)
+
+1) **Provenance invariant**
+- Semantic output must cite **only** `s_*` IDs in all `sourceStatementIds`.
+- **Never** cite `p_*` or `pc_*`.
+
+2) **No duplication invariant**
+- Each statement’s text appears **once** in the semantic mapper prompt.
+- Paragraph text is not repeated as a second copy of statement text.
+
+3) **No synthesis invariant (centroid meaning)**
+- Cluster “representativeText” must be **verbatim** from an existing paragraph (centroid paragraph).  
+- No LLM, no rewriting, no fused summaries.
+
+4) **Orthogonality**
+- `contested` (paragraph-level internal stance tension) is not equivalent to cluster `uncertain` (cluster-level cohesion/merge risk).
+
+5) **Async boundary**
+- Prompt builders are pure and synchronous.
+- Embedding + clustering happens in StepExecutor (or in a service called by StepExecutor), not inside `buildSemanticMapperPrompt`.
+
+6) **Failure mode**
+- If embeddings or clustering fails: **skip clustering entirely** (clusters = null/empty). Do not fall back to Jaccard.
+
+7) **Traversal isolation**
+- Traversal/forcing points operate on claims and statement-linked provenance; clusters/paragraphs must not become traversal nodes.
+
+---
+
+## 1) Final Prompt Structure (Single Surface)
+
+### 1.1 What semantic mapper receives
+- `<shadow_paragraphs>` (grouped by model)
+  - Each paragraph contains `statements[]` with `{id,text,stance,signals}`.
+  - Paragraph metadata included: `dominantStance`, `stanceHints`, `contested`, `signals`, `confidence`, `statementIds`.
+  - **Do not include `paragraph.text`** if it duplicates `statements[].text`.
+
+- `<paragraph_clusters>` (optional; omit if clustering unavailable)
+  - Each cluster lists `paragraphIds`, `statementIds`, centroid paragraph reference, cohesion, uncertainty reasons.
+  - `expansion` only when `uncertain=true`, text-only, using raw `_fullParagraph`.
+
+**Result:** semantic sees coherent paragraph groupings without doubling.
+
+---
+
+## 2) Phase 0 (Immediate): Enforce provenance correctness in parser
+
+### 2.1 What’s currently a hole
+Your shared parser (`shared/parsing-utils.ts`) only *warns* on unknown statement IDs. That allows hallucinated citations to slip through as “success”.
+
+### 2.2 Requirement
+Treat paragraph/cluster IDs as **hard errors**, and (recommended) treat any unknown `sourceStatementIds` as errors for semantic mapping.
+
+**Minimum enforcement** (must implement):
+- If any `sourceStatementIds` value starts with `p_` or `pc_` → parsing error.
+
+**Recommended enforcement** (stronger and aligns with your invariant):
+- If `validStatementIds` set is provided and an id is not in it → error (not warning).
+
+Implementation options:
+- Option A: modify `parseSemanticMapperOutput` in `shared/parsing-utils.ts` to error instead of warn for unknown IDs when `validStatementIds` is passed.
+- Option B: keep parser warnings but in `src/ConciergeService/semanticMapper.ts` wrapper, convert these warnings into errors when they match “unknown statement”.
+
+Lock this in so you never silently accept broken provenance.
+
+---
+
+## 3) Phase 1: Extract Paragraph Projector (authoritative spec)
+
+### 3.1 New file
+`src/shadow/ShadowParagraphProjector.ts`
+
+### 3.2 Exports
+```ts
+export interface ShadowParagraph { ... }            // below
+export interface ParagraphProjectionResult { ... }
+export function projectParagraphs(statements: ShadowStatement[]): ParagraphProjectionResult;
+```
+
+### 3.3 Interface (locked)
+```ts
+import type { ShadowStatement } from './ShadowExtractor';
+import type { Stance } from './StatementTypes';
+import { STANCE_PRIORITY } from './StatementTypes';
+
+export interface ShadowParagraph {
+  id: string;                 // "p_0"
+  modelIndex: number;
+  paragraphIndex: number;
+
+  statementIds: string[];     // s_* in original sentence order
+
+  dominantStance: Stance;
+  stanceHints: Stance[];      // unique stances present, deterministic order
+  contested: boolean;         // contradiction pairs present
+  confidence: number;         // max member confidence
+
+  signals: { sequence: boolean; tension: boolean; conditional: boolean };
+
+  // prompt surface (single copy of statement text)
+  statements: Array<{
+    id: string;
+    text: string;             // clipped <= 320 chars (prompt only)
+    stance: Stance;
+    signals: string[];        // ["SEQ","TENS","COND"]
+  }>;
+
+  // internal-only for uncertainty expansion
+  _fullParagraph: string;     // raw paragraph text (from ShadowStatement.fullParagraph)
+}
+
+export interface ParagraphProjectionResult {
+  paragraphs: ShadowParagraph[];
+  meta: {
+    totalParagraphs: number;
+    byModel: Record<number, number>;
+    contestedCount: number;
+    processingTimeMs: number;
+  };
+}
+```
+
+### 3.4 Deterministic paragraph ID assignment
+- Group by `(modelIndex, paragraphIndex)` using statement `location.paragraphIndex`.
+- Sort groups by `modelIndex asc`, then `paragraphIndex asc`.
+- Assign ids sequentially: `p_0, p_1, ...` in that sorted order.
+
+### 3.5 Statement ordering inside a paragraph
+- Sort by `location.sentenceIndex asc` (tie-break by encounter order / id).
+- Preserve that order for `statementIds` and `statements[]`.
+
+### 3.6 Dominant stance + contested rules (locked)
+Compute:
+- `stanceHints = unique stances present`
+- `contested = (prescriptive & cautionary) OR (assertive & uncertain)`
+
+If contested:
+- dominant stance = the stance with higher precedence by `STANCE_PRIORITY` (using priority order you already have; do not redefine).
+
+If not contested:
+- choose dominant stance by weighted confidence:
+  - weight(stance) = sum(confidence for statements with that stance)
+  - tie-breaker: precedence by `STANCE_PRIORITY`, then lexicographic.
+
+Also:
+- paragraph `confidence = max(statement.confidence)`
+
+### 3.7 No duplication rule in projector
+The paragraph object should **not** compute or include a field that is `join(statements.text)` for prompt payload. You can compute joined text internally for embeddings if needed, but do not send it as a second textual copy.
+
+---
+
+## 4) Phase 2: Embedding Infrastructure (Offscreen, WebGPU/WASM)
+
+### 4.1 High-level requirement
+A service callable from the service worker that can return embeddings for a list of texts:
+
+```ts
+embedTexts(texts: string[], opts: { dims: number; modelId: string }): Promise<Float32Array[]>
+```
+
+### 4.2 Placement
+- Offscreen document already exists → host embedding runtime there.
+- Service worker sends messages to offscreen and awaits response.
+- WebGPU primary if available; WASM fallback otherwise.
+
+### 4.3 Model bundling requirement
+- Model artifacts bundled at build time.
+- Ensure model files are accessible inside extension:
+  - either bundled into JS (not ideal),
+  - or served as static assets and added to `web_accessible_resources` if fetched by URL.
+
+### 4.4 Determinism requirement (important)
+Embeddings from GPU can vary slightly. To keep clustering deterministic:
+
+- L2 normalize embeddings.
+- Truncate to 256 dims (per config).
+- **Renormalize** after truncation.
+- For comparisons / threshold decisions, quantize similarity to a fixed epsilon:
+  - e.g. `simQ = Math.round(sim * 1e6) / 1e6`
+- When tie-breaking merges, always use stable id-based tie-breakers.
+
+If WebGPU remains too unstable, force WASM for clustering mode (agent can decide after testing), but spec requires at least quantization + stable tie-breakers.
+
+---
+
+## 5) Phase 3: Clustering Module (Embeddings-only, centroid representative)
+
+### 5.1 New directory
+`src/clustering/`
+
+Recommended files (your proposed structure is good):
+- `types.ts`
+- `config.ts`
+- `engine.ts` (public entry)
+- `hac.ts` (implementation)
+- `embeddings.ts` (bridge to offscreen)
+- `index.ts`
+
+### 5.2 Config (locked)
+```ts
+export const CLUSTERING_CONFIG = {
+  SIMILARITY_THRESHOLD: 0.82,
+
+  LOW_COHESION_THRESHOLD: 0.70,
+  MAX_CLUSTER_SIZE: 8,
+  STANCE_DIVERSITY_THRESHOLD: 3,
+  CONTESTED_RATIO_THRESHOLD: 0.30,
+
+  MAX_EXPANSION_MEMBERS: 6,
+  MAX_EXPANSION_CHARS_TOTAL: 2100,
+  MAX_MEMBER_TEXT_CHARS: 700,
+
+  EMBEDDING_DIMENSIONS: 256,
+  MODEL_ID: 'all-MiniLM-L6-v2',
+} as const;
+```
+
+### 5.3 Embedding input text (resolve a subtle ambiguity)
+**Do not use clipped statement text** (prompt clipping). For embeddings, use a clean, consistent representation:
+
+- embeddingText(paragraph) = `paragraph.statementIds in order → join(original ShadowStatement.text with " ")`
+- optional: cap at something high like 2–4k chars for performance, but this is internal-only.
+
+Rationale:
+- keeps embedding based on the same “extracted evidence” surface, not raw paragraphs that may contain excluded meta text.
+- raw `_fullParagraph` is reserved for uncertainty expansion text.
+
+### 5.4 Clustering algorithm (deterministic)
+You can implement HAC or greedy merge; the spec requires:
+
+- deterministic results
+- threshold cut at 0.82
+- no fallback to Jaccard
+
+If HAC:
+- linkage: **average**
+- tie-breakers:
+  - when multiple merges have equal similarity (after quantization), merge the pair whose (clusterIdA, clusterIdB) is lexicographically smallest.
+
+### 5.5 Centroid paragraph selection (locked)
+Representative paragraph is the paragraph whose embedding is closest to the cluster mean embedding (your centroid routine is correct).
+
+RepresentativeText should be:
+- the **joined extracted statement texts** for that centroid paragraph (not raw fullParagraph)
+
+### 5.6 Cohesion (locked)
+`cohesion = avg(sim(centroid, member))` over members.
+
+### 5.7 Uncertainty rules (locked)
+Set `uncertain=true` if any apply:
+- cohesion < 0.70 → `low_cohesion`
+- size > 8 → `oversized`
+- unique paragraph dominant stances >= 3 → `stance_diversity`
+- contested ratio > 0.30 → `high_internal_contest`
+- if cluster has both conditional and tension signals aggregated → `conflicting_signals` (optional but included in your plan)
+
+### 5.8 Expansion payload (text-only, locked)
+Only when uncertain:
+- `expansion.members[]` contains `{paragraphId, text}` only.
+- `text` is clipped raw `_fullParagraph` (<=700 chars each), total char budget <=2100.
+
+Selection policy (deterministic):
+- always include centroid paragraph
+- include lowest-similarity member
+- include additional lowest-sim members until limits
+
+---
+
+## 6) Phase 4: StepExecutor Integration (async clustering, sync prompt builder)
+
+### 6.1 Modify `executeMappingStep()` flow (locked)
+After shadow extraction:
+
+1) project paragraphs (sync)
+2) cluster paragraphs (async, embeddings)
+3) build prompt (sync, receives computed results)
+
+Pseudo-flow:
+
+```js
+const shadowResult = extractShadowStatements(shadowInput);
+
+const { projectParagraphs } = await import('../../shadow/ShadowParagraphProjector');
+const paragraphResult = projectParagraphs(shadowResult.statements);
+
+let clusteringResult = null;
+if (paragraphResult.paragraphs.length >= 3) {
+  try {
+    const { clusterParagraphs } = await import('../../clustering');
+    clusteringResult = await clusterParagraphs(paragraphResult.paragraphs, shadowResult.statements);
+  } catch (e) {
+    console.warn('[StepExecutor] clustering failed, skipping clusters:', e);
+    clusteringResult = null;
+  }
+}
+
+const mappingPrompt = buildSemanticMapperPrompt(
+  payload.originalPrompt,
+  shadowResult.statements,
+  paragraphResult,
+  clusteringResult
+);
+```
+
+**Note:** clusterParagraphs likely needs access to original statements (to build embeddingText); pass `shadowResult.statements` or provide a lookup map.
+
+### 6.2 Provider too long behavior (locked)
+Keep your current `PROVIDER_LIMITS` check. If too long:
+- throw `INPUT_TOO_LONG`
+- include meta so UI can show provider choices
+
+---
+
+## 7) Phase 5: semanticMapper prompt builder changes (remove duplication + uncertain-first)
+
+### 7.1 Signature (locked)
+```ts
+export function buildSemanticMapperPrompt(
+  userQuery: string,
+  shadowStatements: ShadowStatement[],
+  paragraphResult?: ParagraphProjectionResult,
+  clusteringResult?: ClusteringResult | null
+): string
+```
+
+### 7.2 Must-do edits
+1) Remove inline projector + Jaccard clustering from semanticMapper.ts (they move to new modules).
+2) Emit paragraphBlock grouped by model.
+3) **Ensure paragraph objects do not include `text` if statements already include text**.
+4) `<paragraph_clusters>`:
+   - if clusteringResult is null → omit block entirely (save tokens)
+   - else order clusters uncertain-first, then others
+   - cap to 15 only if needed (your plan says 15; keep), but ensure all uncertain are included before truncation:
+     - if uncertain clusters alone exceed 15, include first 15 uncertain in deterministic order and add `meta.truncated=true` (optional)
+
+### 7.3 Prompt instructions (locked)
+Add (or keep) these rules:
+
+- Paragraphs/clusters are hints only.
+- Never cite p_* or pc_*; cite only s_*.
+- If a cluster is uncertain=true, split rather than merge.
+
+Also add:
+- If paragraph `contested=true`, treat it as potentially multi-claim (don’t force one claim).
+
+---
+
+## 8) Remaining holes to close (so the agent doesn’t drift)
+
+### Hole A — You currently clip statement text to 320 chars
+That’s fine, but the agent must ensure:
+- clipping is **prompt-only**
+- internal statement text remains full for embeddings and auditing
+
+### Hole B — Cluster cap could accidentally hide uncertain clusters
+Resolved by uncertain-first ordering + include all uncertain before truncating.
+
+### Hole C — Unknown statement IDs must not be allowed
+Resolved by parser enforcement changes in Phase 0.
+
+### Hole D — Offscreen model assets must be accessible
+Agent must ensure:
+- model files are packaged and accessible to offscreen script
+- CSP allows whatever runtime is used (`wasm-unsafe-eval` is already present)
+
+---
+
+## 9) Implementation Order (Roadmap)
+
+### Week 1 (mechanical correctness)
+- [ ] Phase 0 parser enforcement (block p_ / pc_ in `sourceStatementIds`, ideally error on any unknown s_*).
+- [ ] Implement `ShadowParagraphProjector.ts` + export from `src/shadow/index.ts`.
+- [ ] Refactor semanticMapper.ts to use projector output, remove duplication (remove `paragraph.text` from prompt payload).
+
+### Week 2 (clustering core without embeddings wired yet)
+- [ ] Create `src/clustering` scaffolding with types/config.
+- [ ] Implement clustering engine with a mock embedder (deterministic fake embeddings) + unit tests:
+  - centroid selection
+  - uncertainty reasons
+  - expansion selection and budgets
+  - determinism on tie breaks
+
+### Week 3 (embeddings)
+- [ ] Implement offscreen embedding worker + SW bridge (`embeddings.ts`).
+- [ ] Add WebGPU/WASM selection and smoke tests.
+- [ ] Integrate real embedder into clustering engine.
+
+### Week 4 (pipeline + E2E)
+- [ ] StepExecutor integration (async clustering).
+- [ ] Prompt builder updates (paragraphResult + clusteringResult parameters).
+- [ ] E2E: run mapping step, parse output, delta audit.
+
+---
+
+## 10) Acceptance Criteria (Final)
+
+1) Prompt contains statement text exactly once per statement.
+2) Semantic output cannot succeed if it cites `p_*` / `pc_*` or unknown statement IDs.
+3) Same input produces same paragraph IDs and cluster IDs/membership (within quantized similarity rules).
+4) contested paragraphs correctly flagged with your contradiction pairs.
+5) uncertain clusters include expansion members with raw `_fullParagraph` text only.
+6) If clustering fails → mapping still runs (clusters omitted).
+7) Similarity threshold used is 0.82; representative paragraph is centroid.
+
+---
+
+If you want one more “safety rail”: I recommend adding a debug-only artifact field in mapping results:
+
+- `meta.shadowParagraphs` count, `meta.clusters` count, `meta.uncertainClusters` count, and `meta.embeddingBackend` (webgpu/wasm/disabled)
+
+That makes it obvious in logs/UI when clustering silently disabled and avoids “mystery regressions.”

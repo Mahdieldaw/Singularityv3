@@ -96,10 +96,21 @@ function splitIntoSentences(paragraph: string): string[] {
  * Check if sentence is substantive enough to extract
  */
 function isSubstantive(sentence: string): boolean {
-    const words = sentence.split(/\s+/).filter(w => w.length > 0);
+    const trimmed = sentence.trim();
+    const words = trimmed.split(/\s+/).filter(w => w.length > 0);
 
     // Length checks
     if (words.length < 5) return false;
+
+    if (/^#{1,6}\s/.test(trimmed)) return false;
+    if (/^\*{2}[^*]+\*{2}$/.test(trimmed)) return false;
+    if (/^__[^_]+__$/.test(trimmed)) return false;
+
+    if (/^\|.*\|$/.test(trimmed) && trimmed.split('|').length > 2) return false;
+    if (/^[\|\s\-:]+$/.test(trimmed)) return false;
+
+    if (/^[-*+]\s*$/.test(trimmed)) return false;
+    if (/^\d+\.\s*$/.test(trimmed)) return false;
 
     // Filter meta-commentary
     const metaPatterns = [
@@ -111,7 +122,7 @@ function isSubstantive(sentence: string): boolean {
     ];
 
     for (const pattern of metaPatterns) {
-        if (pattern.test(sentence)) return false;
+        if (pattern.test(trimmed)) return false;
     }
 
     return true;

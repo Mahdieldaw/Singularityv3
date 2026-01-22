@@ -1,0 +1,424 @@
+# IDE Implementation Prompt: Clustering & Prompt Optimization Fixes
+
+## Overview
+
+Implement the following fixes to resolve:
+1. **All singletons from clustering** - threshold too high (0.82 → 0.72)
+2. **Verbose prompt output** - redundant fields in paragraph/cluster blocks
+3. **Markdown headers in statements** - missing filter in ShadowExtractor
+4. **Useless cluster block** - sending singletons adds no value
+
+---
+
+## File 1: `src/clustering/config.ts`
+
+### Change: Lower similarity threshold from 0.82 to 0.72
+
+```typescript
+export const DEFAULT_CONFIG: ClusteringConfig = {
+    // CHANGED: Lower threshold to allow more merging
+    // MiniLM embeddings for paraphrased content typically score 0.70-0.82
+    // 0.82 was too strict, causing all singletons
+    similarityThreshold: 0.72,
+    
+    // ... rest unchanged
+    maxClusters: 40,
+    lowCohesionThreshold: 0.70,
+    maxClusterSize: 8,
+    stanceDiversityThreshold: 3,
+    contestedRatioThreshold: 0.30,
+    maxExpansionMembers: 6,
+    maxExpansionCharsTotal: 2100,
+    maxMemberTextChars: 700,
+    embeddingDimensions: 256,
+    modelId: 'all-MiniLM-L6-v2',
+    minParagraphsForClustering: 3,
+};
+```
+
+---
+
+## File 2: `src/clustering/engine.ts`
+
+### Change: Add diagnostic logging before HAC to see similarity distribution
+
+Find the `buildClusters()` function and add logging after building the distance matrix:
+
+```typescript
+export function buildClusters(
+    paragraphs: ShadowParagraph[],
+    shadowStatements: ShadowStatement[],
+    embeddings: Map<string, Float32Array>,
+    config: ClusteringConfig = DEFAULT_CONFIG
+): ClusteringResult {
+    const startTime = performance.now();
+    
+    const paragraphsById = new Map(paragraphs.map(p => [p.id, p]));
+    const paragraphIds = paragraphs.map(p => p.id);
+    
+    // Edge case: too few paragraphs
+    if (paragraphs.length < config.minParagraphsForClustering) {
+        // ... existing edge case handling
+    }
+    
+    // Build distance matrix
+    const distances = buildDistanceMatrix(paragraphIds, embeddings);
+    
+    // ════════════════════════════════════════════════════════════════════
+    // NEW: Diagnostic logging - see actual similarity distribution
+    // ════════════════════════════════════════════════════════════════════
+    const allSimilarities: Array<{ i: string; j: string; sim: number }> = [];
+    for (let i = 0; i < paragraphIds.length; i++) {
+        for (let j = i + 1; j < paragraphIds.length; j++) {
+            const sim = 1 - distances[i][j];
+            allSimilarities.push({ 
+                i: paragraphIds[i], 
+                j: paragraphIds[j], 
+                sim 
+            });
+        }
+    }
+    allSimilarities.sort((a, b) => b.sim - a.sim);
+    
+    const maxSim = allSimilarities[0]?.sim ?? 0;
+    const pairsAboveThreshold = allSimilarities.filter(s => s.sim >= config.similarityThreshold).length;
+    
+    console.log(`[Clustering] Similarity distribution:`);
+    console.log(`  - Max: ${maxSim.toFixed(3)}`);
+    console.log(`  - Threshold: ${config.similarityThreshold}`);
+    console.log(`  - Pairs above threshold: ${pairsAboveThreshold}/${allSimilarities.length}`);
+    console.log(`  - Top 5 pairs:`, allSimilarities.slice(0, 5).map(s => 
+        `${s.i}-${s.j}: ${s.sim.toFixed(3)}`
+    ));
+    
+    if (maxSim < config.similarityThreshold) {
+        console.warn(`[Clustering] WARNING: Max similarity ${maxSim.toFixed(3)} is below threshold ${config.similarityThreshold} - all singletons expected`);
+    }
+    // ════════════════════════════════════════════════════════════════════
+    
+    // Run HAC
+    const clusterIndices = hierarchicalCluster(paragraphIds, distances, config);
+    
+    // ... rest of existing function unchanged
+}
+```
+
+---
+
+## File 3: `src/shadow/ShadowExtractor.ts`
+
+### Change: Add markdown header and table filtering to `isSubstantive()`
+
+Find the `isSubstantive()` function and add the new filters:
+
+```typescript
+function isSubstantive(sentence: string): boolean {
+    const trimmed = sentence.trim();
+    const words = trimmed.split(/\s+/).filter(w => w.length > 0);
+
+    // Length checks
+    if (words.length < 5) return false;
+
+    // ════════════════════════════════════════════════════════════════════
+    // NEW: Filter markdown headers (any level)
+    // ════════════════════════════════════════════════════════════════════
+    if (/^#{1,6}\s/.test(trimmed)) return false;
+    
+    // NEW: Filter bold-only lines (likely titles)
+    if (/^\*{2}[^*]+\*{2}$/.test(trimmed)) return false;
+    if (/^__[^_]+__$/.test(trimmed)) return false;
+    
+    // NEW: Filter table fragments
+    if (/^\|.*\|$/.test(trimmed) && trimmed.split('|').length > 2) return false;
+    if (/^[\|\s\-:]+$/.test(trimmed)) return false;
+    
+    // NEW: Filter standalone list markers
+    if (/^[-*+]\s*$/.test(trimmed)) return false;
+    if (/^\d+\.\s*$/.test(trimmed)) return false;
+    // ════════════════════════════════════════════════════════════════════
+
+    // Existing meta-commentary filters (keep these)
+    const metaPatterns = [
+        /^(sure|okay|yes|no|well|so|now)[,.]?\s/i,
+        /^(let me|I'll|I will|I can|I would)\b/i,
+        /^(here's|here is|this is|that's|that is)\s+(a|an|the|my)\s+(summary|overview|breakdown|list)/i,
+        /\b(as I mentioned|as discussed|as noted)\b/i,
+        /^(to summarize|in summary|in conclusion)\b/i,
+    ];
+
+    for (const pattern of metaPatterns) {
+        if (pattern.test(sentence)) return false;
+    }
+
+    return true;
+}
+```
+
+---
+
+## File 4: `src/ConciergeService/semanticMapper.ts`
+
+### Change: Minimize paragraph format and skip useless cluster block
+
+Find the `buildSemanticMapperPrompt()` function and make these changes:
+
+```typescript
+export function buildSemanticMapperPrompt(
+    userQuery: string,
+    shadowStatements: ShadowStatement[],
+    paragraphResult?: ParagraphProjectionResult,
+    clusteringResult?: ClusteringResult | null
+): string {
+    // ════════════════════════════════════════════════════════════════════
+    // Build MINIMAL paragraph block (remove redundant fields)
+    // ════════════════════════════════════════════════════════════════════
+    let paragraphBlock = '{}';
+    
+    if (paragraphResult && paragraphResult.paragraphs.length > 0) {
+        const groupedByModel: Record<string, any[]> = {};
+        
+        for (const p of paragraphResult.paragraphs) {
+            const key = `model_${p.modelIndex}`;
+            if (!groupedByModel[key]) groupedByModel[key] = [];
+            
+            // MINIMAL FORMAT: Only include what the LLM actually needs
+            groupedByModel[key].push({
+                id: p.id,
+                contested: p.contested,
+                statements: p.statements.map(s => ({
+                    id: s.id,
+                    text: s.text,
+                    stance: s.stance,
+                    // REMOVED: signals (not needed for claim grouping)
+                })),
+                // REMOVED: modelIndex (already in grouping key "model_1")
+                // REMOVED: paragraphIndex (implicit in array order)
+                // REMOVED: statementIds (same as statements[].id)
+                // REMOVED: stanceHints (derivable from statements)
+                // REMOVED: confidence (not decision-relevant)
+                // REMOVED: dominantStance (derivable)
+                // REMOVED: signals at paragraph level (not needed)
+            });
+        }
+        
+        paragraphBlock = JSON.stringify(groupedByModel);
+    }
+    
+    // ════════════════════════════════════════════════════════════════════
+    // Build cluster block ONLY if actual clustering occurred
+    // Skip if all singletons (adds no value)
+    // ════════════════════════════════════════════════════════════════════
+    let clusterBlock = '';
+    
+    const hasUsefulClusters = clusteringResult && 
+        clusteringResult.meta.singletonCount < clusteringResult.meta.totalClusters * 0.9;
+    
+    if (hasUsefulClusters) {
+        // Sort uncertain first, then by size
+        const sortedClusters = [...clusteringResult.clusters].sort((a, b) => {
+            if (a.uncertain && !b.uncertain) return -1;
+            if (!a.uncertain && b.uncertain) return 1;
+            return b.paragraphIds.length - a.paragraphIds.length;
+        });
+        
+        // Cap at 15, but ensure all uncertain included
+        const MAX_CLUSTERS = 15;
+        const uncertainClusters = sortedClusters.filter(c => c.uncertain);
+        const certainClusters = sortedClusters.filter(c => !c.uncertain);
+        const remainingSlots = Math.max(0, MAX_CLUSTERS - uncertainClusters.length);
+        const cappedClusters = [
+            ...uncertainClusters,
+            ...certainClusters.slice(0, remainingSlots)
+        ];
+        
+        // MINIMAL cluster format
+        const clusterData = cappedClusters.map(c => ({
+            id: c.id,
+            paragraphIds: c.paragraphIds,
+            statementIds: c.statementIds,
+            representativeParagraphId: c.representativeParagraphId,
+            cohesion: c.cohesion,
+            uncertain: c.uncertain,
+            uncertaintyReasons: c.uncertaintyReasons,
+            // Only include expansion for uncertain clusters
+            ...(c.expansion ? { expansion: c.expansion } : {}),
+            // REMOVED: representativeText (LLM can look up paragraph)
+        }));
+        
+        clusterBlock = JSON.stringify(clusterData);
+        console.log(`[SemanticMapper] Including ${clusterData.length} useful clusters`);
+    } else {
+        console.log(`[SemanticMapper] Skipping cluster block (no useful clusters or all singletons)`);
+    }
+    
+    // ════════════════════════════════════════════════════════════════════
+    // Build prompt (cleaner instructions, no metaphor)
+    // ════════════════════════════════════════════════════════════════════
+    return `You are a Semantic Cartographer. Organize extracted statements into claims with structural relationships.
+
+<user_query>
+"${userQuery}"
+</user_query>
+
+<shadow_paragraphs>
+${paragraphBlock}
+</shadow_paragraphs>
+
+${clusterBlock ? `<paragraph_clusters>
+${clusterBlock}
+</paragraph_clusters>` : ''}
+
+# Your Task
+
+1. **Discover Claims**: Group statements pointing to the same position into a single claim. Name each with a short verb phrase.
+
+2. **Trace Relationships**:
+   - **Conditional gates**: Claims that only apply if some condition is true
+   - **Prerequisite gates**: Claims whose validity depends on another claim
+   - **Conflicts**: Claims that are mutually exclusive
+
+3. For every gate or conflict, provide a **question** that would resolve it.
+
+# Using the Input
+
+- **shadow_paragraphs**: Statements grouped by model/paragraph. Each has id (s_*), text, stance.
+- **paragraph_clusters** (if present): Hints about similar paragraphs.
+  - If \`uncertain: true\`, examine expansion texts and consider splitting.
+  - If \`contested: true\`, paragraph may contain multiple positions.
+  - Clusters are HINTS only—you may split or ignore them.
+
+# Schema Lock (Strict)
+
+- Respond with JSON only (no markdown, no prose).
+- Only cite statement IDs (s_*). Never cite p_* or pc_*.
+- Every gate and conflict must include a "question".
+
+# Output Format
+
+\`\`\`json
+{
+  "claims": [
+    {
+      "id": "c_0",
+      "label": "make traversal the primary surface",
+      "description": "The traversal state should be the main user view",
+      "stance": "prescriptive",
+      "gates": {
+        "conditionals": [{"id": "cg_0", "condition": "...", "question": "...", "sourceStatementIds": ["s_1"]}],
+        "prerequisites": []
+      },
+      "enables": [],
+      "conflicts": [],
+      "sourceStatementIds": ["s_1", "s_39"]
+    }
+  ]
+}
+\`\`\`
+
+# Provenance (Non-Negotiable)
+- Every claim: ≥1 sourceStatementId
+- Every gate: ≥1 sourceStatementId  
+- Every conflict: ≥1 sourceStatementId
+
+Generate the map now.`;
+}
+```
+
+---
+
+## File 5: `StepExecutor.js`
+
+### Change: Add logging for clustering results
+
+Find the clustering section in `executeMappingStep()` and enhance logging:
+
+```javascript
+// Cluster paragraphs (async, may fail gracefully)
+let clusteringResult = null;
+if (paragraphResult.paragraphs.length >= 3) {
+    try {
+        const { clusterParagraphs } = await import('../../clustering');
+        clusteringResult = await clusterParagraphs(
+            paragraphResult.paragraphs,
+            shadowResult.statements
+        );
+        
+        // Enhanced logging
+        const nonSingletons = clusteringResult.clusters.filter(c => c.paragraphIds.length > 1);
+        console.log(`[StepExecutor] Clustering results:`);
+        console.log(`  - Total clusters: ${clusteringResult.meta.totalClusters}`);
+        console.log(`  - Singletons: ${clusteringResult.meta.singletonCount}`);
+        console.log(`  - Multi-member: ${nonSingletons.length}`);
+        console.log(`  - Compression: ${(clusteringResult.meta.compressionRatio * 100).toFixed(0)}%`);
+        console.log(`  - Timing: embed ${clusteringResult.meta.embeddingTimeMs.toFixed(0)}ms, cluster ${clusteringResult.meta.clusteringTimeMs.toFixed(0)}ms`);
+        
+        if (nonSingletons.length > 0) {
+            console.log(`  - Largest clusters:`, nonSingletons.slice(0, 3).map(c => 
+                `${c.id}: ${c.paragraphIds.length} paragraphs`
+            ));
+        }
+    } catch (clusteringError) {
+        console.warn('[StepExecutor] Clustering failed, continuing without:', clusteringError.message);
+        clusteringResult = null;
+    }
+} else {
+    console.log('[StepExecutor] Skipping clustering (< 3 paragraphs)');
+}
+```
+
+---
+
+## Summary of Changes
+
+| File | Change | Impact |
+|------|--------|--------|
+| `config.ts` | Threshold 0.82 → 0.72 | Enables merging |
+| `engine.ts` | Add similarity logging | Debug visibility |
+| `ShadowExtractor.ts` | Markdown header filter | Cleaner statements |
+| `semanticMapper.ts` | Minimal paragraph format | ~40% smaller prompt |
+| `semanticMapper.ts` | Skip singleton clusters | Remove useless data |
+| `semanticMapper.ts` | Cleaner prompt text | Better LLM guidance |
+| `StepExecutor.js` | Enhanced clustering logs | Better debugging |
+
+---
+
+## Expected Results After All Fixes
+
+**Before:**
+```
+26 clusters (26 singletons, 100% compression)
+Prompt: 25110 chars
+Markdown headers in statements: ✓ (bad)
+```
+
+**After:**
+```
+18-22 clusters (~14 singletons, 70-85% compression)  
+Prompt: ~15000 chars (40% reduction)
+Markdown headers: filtered out
+Cluster block: only if useful
+```
+
+---
+
+## Verification Steps
+
+After implementing, run a test query and check console for:
+
+1. **Similarity distribution:**
+   ```
+   [Clustering] Top 5 pairs: p_5-p_16: 0.78, p_7-p_18: 0.75, ...
+   [Clustering] Pairs above threshold: 12/325
+   ```
+
+2. **Clustering results:**
+   ```
+   [StepExecutor] Multi-member: 6-10
+   [StepExecutor] Compression: 70-85%
+   ```
+
+3. **Prompt efficiency:**
+   ```
+   [StepExecutor] Semantic Mapper prompt length: ~15000 chars
+   [SemanticMapper] Including 8 useful clusters (or "Skipping cluster block")
+   ```

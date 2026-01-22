@@ -660,7 +660,8 @@ export function buildProtoClaims(
     });
     
     // Sort by size (largest first) for consistent ordering
-    protoClaims.sort((a, b) => b.memberCount - a.memberCount);
+    protoClaims.sort((a, b) => b.paragraphIds.length - a.paragraphIds.length);
+
     
     // Renumber IDs after sorting
     protoClaims.forEach((pc, idx) => {

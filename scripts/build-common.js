@@ -54,8 +54,7 @@ async function buildAll(isProduction = false, generateMeta = false) {
         entryPoints: ["src/offscreen-entry.js"],
         format: "esm",
         outfile: "dist/offscreen.js",
-        // Mark @huggingface/transformers as external - it's loaded dynamically at runtime
-        external: ["@huggingface/transformers"],
+        // Note: @huggingface/transformers is bundled (not external) for Chrome extension compatibility
     });
     results.push({ name: "offscreen", result: offscreenResult });
 

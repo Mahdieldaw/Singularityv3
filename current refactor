@@ -1,458 +1,182 @@
-Part 1: Architecture Overview (Final State)
-text
+# Analysis: Agent's Investigation Findings
 
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                         HTOS KEEP-ALIVE ARCHITECTURE                         │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                              │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │  OFFSCREEN DOCUMENT (offscreen.html)                                 │    │
-│  │  ════════════════════════════════════                               │    │
-│  │                                                                      │    │
-│  │  ┌─────────────────┐    ┌─────────────────┐                         │    │
-│  │  │ OffscreenBootstrap│   │ Hidden Iframe   │                         │    │
-│  │  │                  │───▶│ (oi.html)       │                         │    │
-│  │  │ • SW Heartbeat   │    │ • Arkose solver │                         │    │
-│  │  │   every 25s      │    │ • Bus responder │                         │    │
-│  │  │ • Iframe watchdog│    │                 │                         │    │
-│  │  │   every 5min     │    └─────────────────┘                         │    │
-│  │  └────────┬─────────┘                                                │    │
-│  │           │                                                          │    │
-│  └───────────┼──────────────────────────────────────────────────────────┘    │
-│              │ chrome.runtime.sendMessage({ type: 'offscreen.heartbeat' })   │
-│              ▼                                                               │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │  SERVICE WORKER (sw-entry.js)                                        │    │
-│  │  ═══════════════════════════════                                    │    │
-│  │                                                                      │    │
-│  │  • Responds to offscreen heartbeat (passive)                        │    │
-│  │  • LifecycleManager tracks activity (no self-ping)                  │    │
-│  │  • ConnectionHandler manages UI ports                               │    │
-│  │  • BusController routes messages to offscreen                       │    │
-│  │                                                                      │    │
-│  └────────┬─────────────────────────────────────────────────────────────┘    │
-│           │ chrome.runtime.Port                                              │
-│           ▼                                                                  │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │  UI (popup/tab)                                                      │    │
-│  │  ══════════════                                                     │    │
-│  │                                                                      │    │
-│  │  • PortHealthManager: KEEPALIVE_PING/PONG (transport only)          │    │
-│  │  • Does NOT send htos.activity                                      │    │
-│  │  • Real activity = workflow execution, messages                     │    │
-│  │                                                                      │    │
-│  └─────────────────────────────────────────────────────────────────────┘    │
-│                                                                              │
-└─────────────────────────────────────────────────────────────────────────────┘
+## What the Agent Found
 
-MESSAGE FLOW:
-═════════════
-1. Offscreen heartbeat (25s) ──► SW responds { alive: true }
-2. Iframe watchdog (5min) ─────► bus.poll('startup.oiReady')
-3. UI port ping (15s) ─────────► KEEPALIVE_PONG (no activity record)
-4. Real user action ───────────► lifecycleManager.recordActivity()
+### The Root Cause
+```typescript
+// CognitiveOutputRenderer.tsx - THREE conditions must ALL be true
+const isAwaitingTraversal = aiTurn.pipelineStatus === 'awaiting_traversal';
+const hasTraversalGraph = !!aiTurn.mapperArtifact?.traversalGraph && !!currentSessionId;
+                                                                     ^^^^^^^^^^^^^^
+                                                                     THIS WAS NULL!
 
+if (isAwaitingTraversal && hasTraversalGraph) {
+  return <TraversalGraphView ... />;
+}
+```
 
-BusController Usage: 60% Is Dead Code
-Feature	Status	Action
-Core events (on, off, send, poll)	✅ Used by ChatGPT, Offscreen	KEEP
-_setupBg	✅ Used by SW	KEEP
-_setupOs + _setupOi	✅ Used by Arkose solver	KEEP
-_setupCs (content script)	❌ Never called	REMOVE
-_setupNj (injected script)	❌ Never called	REMOVE
-_setupPp (popup)	❌ Never called	REMOVE
-Blob marshalling	❌ Never called	REMOVE
-Claude/Gemini bus events	❌ Adapters call directly	REMOVE
-Legacy globals	❌ Unused	REMOVE
-Part 3: Implementation Steps
-Step 1: Add Offscreen Heartbeat (PRIMARY KEEP-ALIVE)
-File: src/offscreen/OffscreenBootstrap.js
+**The Bug:** `currentSessionId` was null because `MAPPER_ARTIFACT_READY` handler wasn't setting it. The SW correctly paused the pipeline, but the UI gate failed silently.
 
-Add to the OffscreenBootstrap object:
+### What Was Fixed
 
-JavaScript
+| File | Change |
+|------|--------|
+| `usePortMessageHandler.ts` | Added sessionId adoption from `MAPPER_ARTIFACT_READY` |
+| `connection-handler.js` | Added `pipelineStatus` to reconnection TURN_FINALIZED emission |
 
-const OffscreenBootstrap = {
-  // ... existing code ...
+---
 
-  async init() {
-    console.log("[OffscreenBootstrap] Starting initialization...");
+## Abnormalities/Code Smells Found (Not Fixed)
 
-    try {
-      // 1. Initialize Bus Controller
-      const busController = this._discoverBus();
-      await busController.init();
-      window["bus"] = busController;
+### 1. Fragile Turn State Merging
 
-      // 2. Initialize controllers
-      await Promise.all([
-        IframeController.init(),
-        UtilsController.init()
-      ]);
+The agent noted multiple handlers updating the same turn with different merge strategies:
 
-      // 3. NEW: Start SW heartbeat (primary keep-alive)
-      this._startSwHeartbeat();
+```typescript
+// TURN_CREATED - creates optimistic turn
+const newAiTurn = { id: aiTurnId, type: 'ai', ... };
 
-      console.log("[OffscreenBootstrap] Initialization completed.");
-    } catch (error) {
-      console.error("[OffscreenBootstrap] Initialization failed:", error);
-      throw error;
-    }
-  },
+// TURN_FINALIZED - merges into existing
+const mergedAiTurn = { ...existingAi, ...turn.ai, pipelineStatus: turn.ai.pipelineStatus };
 
-  // NEW: Add this method
-  _swHeartbeatInterval: null,
-  _swHeartbeatCount: 0,
+// MAPPER_ARTIFACT_READY - patches specific field
+prev.set(existingId, { ...existing, mapperArtifact: msg.artifact });
+```
 
-  _startSwHeartbeat() {
-    if (this._swHeartbeatInterval) return;
+**Risk:** If any handler runs out of order or misses, state becomes inconsistent.
 
-    const HEARTBEAT_INTERVAL = 25000; // 25s, under Chrome's 30s threshold
+---
 
-    // Immediate first heartbeat
-    this._sendSwHeartbeat();
+### 2. History Load Missing pipelineStatus
 
-    this._swHeartbeatInterval = setInterval(() => {
-      this._sendSwHeartbeat();
-    }, HEARTBEAT_INTERVAL);
+The agent noted:
+> "if they refresh, they might lose functionality in the traversal UI"
 
-    console.log("[OffscreenBootstrap] SW heartbeat started (25s interval)");
-  },
+When loading history from persistence, `pipelineStatus` may not be preserved:
 
-  async _sendSwHeartbeat() {
-    try {
-      this._swHeartbeatCount++;
-      const response = await chrome.runtime.sendMessage({
-        type: "offscreen.heartbeat",
-        timestamp: Date.now(),
-        count: this._swHeartbeatCount
-      });
-
-      if (response?.alive) {
-        console.log(`[OffscreenBootstrap] SW heartbeat #${this._swHeartbeatCount} ACK`);
-      } else {
-        console.warn("[OffscreenBootstrap] SW heartbeat not acknowledged");
-      }
-    } catch (err) {
-      // SW might be restarting - this message will wake it
-      console.log("[OffscreenBootstrap] Heartbeat may have woken SW:", err.message);
-    }
-  },
-
-  // ... rest of existing code ...
-};
-Step 2: Handle Offscreen Heartbeat in SW
-File: src/sw-entry.js
-
-Find the chrome.runtime.onMessage.addListener block and update:
-
-JavaScript
-
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  // Bus messages handled separately
-  if (request?.$bus) return false;
-
-  // PRIMARY KEEP-ALIVE: Offscreen heartbeat
-  if (request?.type === "offscreen.heartbeat") {
-    // Minimal work - just ACK
-    sendResponse({ 
-      alive: true, 
-      timestamp: Date.now(),
-      receivedCount: request.count 
-    });
-    return true;
-  }
-
-  // DEPRECATED: Keep for backward compatibility but don't rely on
-  if (request?.type === "htos.keepalive") {
-    sendResponse({ success: true });
-    return true;
-  }
-
-  // DEPRECATED: Remove activity recording from this path
-  if (request?.type === "htos.activity") {
-    // No longer needed - offscreen heartbeat handles keep-alive
-    sendResponse({ success: true });
-    return true;
-  }
-
-  // ... rest of handler ...
+```typescript
+// GET_HISTORY_SESSION response doesn't include pipelineStatus
+rounds.push({
+  userTurnId, aiTurnId, user, providers, mappingResponses,
+  mapperArtifact: hydratedMapperArtifact,
+  // pipelineStatus: ???  ← Not included
 });
-Step 3: Simplify LifecycleManager (Remove Self-Ping)
-File: src/core/lifecycle-manager.js
+```
 
-Replace the entire file:
+**Impact:** After page refresh, an `awaiting_traversal` turn would appear as complete.
 
-JavaScript
+---
 
-/**
- * HTOS Lifecycle Manager - Simplified
- * 
- * Strategy: Track activity for business logic only.
- * Keep-alive is handled by offscreen document heartbeat.
- */
+### 3. Session ID Race Condition
 
-export class LifecycleManager {
-  constructor() {
-    this.lastActivity = Date.now();
-    this.INACTIVITY_THRESHOLD = 20 * 60 * 1000; // 20 minutes
-  }
+Original code had problematic check:
 
-  /**
-   * Called when real user activity happens (workflow, message, etc.)
-   * Used for business logic, NOT keep-alive.
-   */
-  recordActivity() {
-    this.lastActivity = Date.now();
-  }
-
-  /**
-   * Check if system has been idle (for business logic decisions)
-   */
-  isIdle() {
-    return Date.now() - this.lastActivity > this.INACTIVITY_THRESHOLD;
-  }
-
-  /**
-   * Get time since last activity (for debugging/metrics)
-   */
-  getIdleTime() {
-    return Date.now() - this.lastActivity;
-  }
-
-  // Legacy API compatibility
-  activateWorkflowMode() {
-    this.recordActivity();
-  }
-
-  deactivateWorkflowMode() {
-    // No-op - let inactivity threshold handle it
-  }
-
-  keepalive(enable) {
-    if (enable) {
-      this.recordActivity();
-    }
-    // No longer starts/stops heartbeat - offscreen handles that
-  }
+```typescript
+// Could prevent valid updates
+if (!currentSessionId || currentSessionId === msgSessionId) {
+  setCurrentSessionId(msgSessionId);
 }
-Step 4: Update ConnectionHandler (Port Pings ≠ Activity)
-File: src/core/connection-handler.js
+```
 
-Find the message handling section and update:
+**Issue:** If `currentSessionId` was set to a different value before the artifact arrived, it wouldn't update.
 
-JavaScript
+---
 
-handleUnifiedMessage(msg) {
-  // Port keepalive pings = transport health ONLY
-  // Do NOT record activity - these happen even when user is idle
-  if (msg.type === 'KEEPALIVE_PING') {
-    this.port.postMessage({
-      type: 'KEEPALIVE_PONG',
-      timestamp: msg.timestamp
-    });
-    return; // Early return, no further processing
-  }
+### 4. Large Artifact Cloning Risk
 
-  // Real messages DO record activity
-  if (this.lifecycleManager && typeof this.lifecycleManager.recordActivity === 'function') {
-    this.lifecycleManager.recordActivity();
-  }
+The agent suspected:
+> "The artifact might be too large, leading to structured cloning failures"
 
-  // ... rest of message handling ...
+```typescript
+// postMessage uses structured clone, which can fail on:
+// - Functions
+// - Circular references
+// - Very large objects (memory limits)
+port.postMessage({ mapperArtifact: hugeObject });
+```
+
+**Risk:** Silent failure if artifact contains non-cloneable data.
+
+---
+
+### 5. Dual Artifact Construction
+
+There are two paths creating artifacts:
+
+```javascript
+// Path 1: Parse from raw text
+parseMapperArtifact(rawMappingText)
+
+// Path 2: Build traversal graph
+buildTraversalGraph(assemblyResult)
+```
+
+**Unclear:** How these are merged, whether all fields from both sources end up in the final artifact.
+
+---
+
+### 6. Complex Memoization in CognitiveOutputRenderer
+
+```typescript
+// Multiple useMemo with similar dependencies
+const visibleProviderIds = useMemo(() => { ... }, [aiTurn, selectedModels]);
+const orbProviderIds = useMemo(() => { ... }, [mapperProviderId, visibleProviderIds]);
+const orbVoiceProviderId = useMemo(() => { ... }, [mapperProviderId, aiTurn.mappingResponses, orbProviderIds]);
+const isWorkflowSettled = useMemo(() => { ... }, [workflowProgress]);
+const structuralAnalysis = useMemo(() => { ... }, [aiTurn.mapperArtifact]);
+const problemStructure = useMemo(() => { ... }, [aiTurn.mapperArtifact]);
+```
+
+**Risk:** Cascade of recomputes, potential stale closures, hard to debug.
+
+---
+
+### 7. Inconsistent Pipeline Status Values
+
+The agent searched for all `pipelineStatus` usages but didn't find a central enum:
+
+```typescript
+// Various places use string literals
+'awaiting_traversal'
+'complete'
+'streaming'
+undefined  // treated as complete
+```
+
+**Risk:** Typo in any location silently breaks gating.
+
+---
+
+### 8. Missing Error Boundaries in Traversal Flow
+
+The agent noted the port communication has try/catch but errors may be swallowed:
+
+```typescript
+// TraversalGraphView.tsx
+try {
+  port.postMessage({ type: CONTINUE_COGNITIVE_WORKFLOW, ... });
+} catch (error) {
+  setSubmissionError('Failed to submit: ' + String(error));
 }
-Step 5: Remove htos.activity from PortHealthManager
-File: src/ui/PortHealthManager.js (or wherever this lives)
+```
 
-Find and remove the activity message sending:
+**Issue:** If port is disconnected before catch, user sees generic error.
 
-JavaScript
+---
 
-// REMOVE THIS BLOCK:
-// if (Date.now() - this.lastActivitySent > 5000) {
-//   chrome.runtime.sendMessage({ type: 'htos.activity' });
-//   this.lastActivitySent = Date.now();
-// }
+## Recommended Follow-Up Tasks
 
-// KEEP ONLY port-based ping:
-_sendPing() {
-  if (!this.port) return;
-  
-  this.port.postMessage({
-    type: 'KEEPALIVE_PING',
-    timestamp: Date.now()
-  });
-}
-Step 6: Trim BusController (Remove Dead Code)
-File: src/HTOS/BusController.js
+| Priority | Issue | Action |
+|----------|-------|--------|
+| **High** | History load missing pipelineStatus | Add to persistence and GET_HISTORY_SESSION |
+| **High** | No pipelineStatus enum | Create shared enum, use everywhere |
+| **Medium** | Fragile turn merging | Consolidate into single update handler |
+| **Medium** | Large artifact cloning | Add serialization/size guards |
+| **Low** | Complex memoization | Consider zustand or simpler state |
+| **Low** | Missing error boundaries | Add React error boundary around TraversalGraphView |
 
-Apply these changes:
+---
 
-JavaScript
+## Summary
 
-const BusController = {
-  async init() {
-    // Bind public API methods
-    this.on = this.on.bind(this);
-    this.off = this.off.bind(this);
-    this.once = this.once.bind(this);
-    this.send = this._wrapThrowIfError(this.send);
-    this.call = this._wrapThrowIfError(this.call);
-    this.poll = this.poll.bind(this);
-
-    this._locus = env.getLocus();
-    this._handlers = {};
-
-    // SIMPLIFIED: Only 3 contexts matter
-    if (this._is("bg")) {
-      this._setupBg();
-    } else if (this._is("os")) {
-      this._iframe = null;
-      this._setupOs();
-    } else if (this._is("oi")) {
-      this._setupOi();
-    }
-    // REMOVED: pp, cs, nj, fg contexts
-  },
-
-  // ... KEEP: on, off, once, send, call, poll ...
-  // ... KEEP: _setupBg, _setupOs, _setupOi ...
-  // ... KEEP: _sendToExt, _sendToIframe, _sendToParent ...
-  // ... KEEP: _callHandlers, _createBusMsg, _generateId, etc ...
-
-  // REMOVE THESE METHODS ENTIRELY:
-  // _setupPp() { ... }
-  // _setupCs() { ... }
-  // _setupNj() { ... }
-  // _sendToCs() { ... }
-  // _sendToPage() { ... }
-  // _blobIdToObjectUrl() { ... }
-  // _blobToObjectUrl() { ... }
-
-  // SIMPLIFY _serialize (remove blob handling):
-  _serialize(e) {
-    if (utils.is.nil(e)) return null;
-    return JSON.stringify(e, (_key, t) => {
-      // REMOVED: Blob handling
-      return utils.is.error(t) ? `bus.error.${t.message}` : t;
-    });
-  },
-
-  // SIMPLIFY _deserialize (remove blob handling):
-  async _deserialize(e) {
-    if (!utils.is.string(e)) return null;
-    return JSON.parse(e, (_key, n) => {
-      // REMOVED: Blob URL fetching
-      return utils.is.string(n) && n.startsWith("bus.error.")
-        ? new Error(n.slice("bus.error.".length))
-        : n;
-    });
-  },
-};
-
-// SIMPLIFIED env.getLocus()
-const env = {
-  getLocus: () => {
-    const { protocol, pathname, href } = location;
-    const _href = String(href || "").toLowerCase();
-    const _path = String(pathname || "").toLowerCase();
-
-    // oi (offscreen iframe)
-    if (
-      _href === "https://htos.io/oi" ||
-      _href === "http://localhost:3000/oi" ||
-      /(^|\/)oi(\/|$)/.test(_path) ||
-      _path.endsWith("/oi.html")
-    ) {
-      return "oi";
-    }
-
-    // os (offscreen document)
-    if (pathname === "/offscreen.html") {
-      return "os";
-    }
-
-    // bg (everything else = service worker)
-    return "bg";
-  }
-};
-
-// REMOVE legacy globals at bottom:
-// if (typeof window !== "undefined") {
-//   window["HTOSBusController"] = BusController;
-//   window["HTOSBusUtils"] = utils;
-//   window["HTOSEnv"] = env;
-// }
-
-export { BusController, utils, env };
-Step 7: Remove Unused Provider Bus Events
-File: src/providers/claude.js
-
-Remove from init():
-
-JavaScript
-
-async init() {
-  if (this.initialized) return;
-  
-  // REMOVE THIS ENTIRE BLOCK:
-  // if (typeof BusController !== "undefined" && BusController.on) {
-  //   BusController.on("claude.ask", this._handleAskRequest.bind(this));
-  //   BusController.on("claude.setChatTitle", ...);
-  //   BusController.on("claude.deleteChat", ...);
-  //   BusController.on("claude.fetchOrgId", ...);
-  //   BusController.on("claude.updateModels", ...);
-  // }
-
-  // KEEP ONLY:
-  this.api.updateModels();
-  this.initialized = true;
-}
-
-// REMOVE these handler methods entirely:
-// _handleAskRequest() { ... }
-// _handleSetTitleRequest() { ... }
-// _handleDeleteChatRequest() { ... }
-// _handleFetchOrgIdRequest() { ... }
-// _handleUpdateModelsRequest() { ... }
-File: src/providers/gemini.js
-
-Same pattern - remove bus event registration and handlers.
-
-
-
-Part 5: Final Message Taxonomy
-Messages to KEEP
-Type	Direction	Purpose
-offscreen.heartbeat	Offscreen → SW	Primary keep-alive
-KEEPALIVE_PING	UI Port → SW	Transport health
-KEEPALIVE_PONG	SW → UI Port	Transport health
-startup.oiReady	Bus poll	Iframe ready check
-ai.generateProofToken	Bus send	Arkose solver
-ai.retrieveArkoseToken	Bus send	Arkose solver
-utils.ls.*	Bus	LocalStorage proxy
-Messages to DEPRECATE (Keep handlers but don't send)
-Type	Reason
-htos.keepalive	Replaced by offscreen heartbeat
-htos.activity	Redundant, real actions tracked directly
-Messages to REMOVE (After verifying no usage)
-Type	Was Used By
-claude.ask	Nothing (adapter calls directly)
-gemini-provider.ask	Nothing (adapter calls directly)
-bus.sendToCs	Content scripts (don't exist)
-Part 6: Size Impact Summary
-Before	After	Reduction
-BusController: ~1150 lines	~690 lines	40% smaller
-LifecycleManager: ~120 lines	~45 lines	63% smaller
-3 keep-alive mechanisms	1 primary + 1 transport	Clearer ownership
-Quick Reference: File Changes
-File	Change Type
-OffscreenBootstrap.js	ADD heartbeat
-sw-entry.js	ADD handler, DEPRECATE old handlers
-lifecycle-manager.js	REPLACE (simplified)
-connection-handler.js	MODIFY (no activity on ping)
-PortHealthManager.js	REMOVE htos.activity
-BusController.js	REMOVE dead code
-claude.js	REMOVE bus events
-gemini.js	REMOVE bus events
-This is your complete implementation plan. Execute in order, test after each step.
+The agent correctly identified that `currentSessionId` not being set was the immediate cause. The fix is surgical and correct. However, the investigation revealed deeper architectural fragility in how turn state is managed across multiple asynchronous message handlers. The history persistence gap is the most likely source of future bugs.

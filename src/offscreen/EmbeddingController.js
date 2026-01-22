@@ -24,66 +24,112 @@ let currentModelId = null;
 // ═══════════════════════════════════════════════════════════════════════════
 
 async function ensureModel(modelId = 'all-MiniLM-L6-v2') {
-    // Check cache first
     if (modelCache.has(modelId)) {
         return modelCache.get(modelId);
     }
 
-    // Single-flight pattern: wait for any in-progress load
     if (inFlightLoad) {
-        await inFlightLoad;
+        try {
+            await inFlightLoad;
+        } catch {
+        }
         if (modelCache.has(modelId)) {
             return modelCache.get(modelId);
         }
     }
 
-    // Load model dynamically
     console.log(`[EmbeddingController] Loading model ${modelId}...`);
     const startTime = performance.now();
 
+    const modelPath = `models/${modelId}`;
+
     inFlightLoad = (async () => {
-        // Dynamic import of transformers library
-        const { pipeline, env } = await import('@huggingface/transformers');
+        try {
+            const { pipeline, env } = await import('@huggingface/transformers');
 
-        // Configure for local models only
-        env.allowRemoteModels = false;
-        env.allowLocalModels = true;
-        env.localModelPath = chrome.runtime.getURL('/models/');
+            // === CRITICAL: Configure for local-only MV3 Chrome extension ===
 
-        let model;
-        const hasWebGPU = typeof navigator !== 'undefined' && !!navigator.gpu;
+            // 1. Force local files only
+            env.allowRemoteModels = false;
+            env.allowLocalModels = true;
 
-        if (hasWebGPU) {
+            // 2. Disable browser cache (unsupported for chrome-extension://)
+            env.useBrowserCache = false;
+            env.cacheDir = null;
+
+            // 3. Point to extension root for models
+            env.localModelPath = chrome.runtime.getURL('/');
+
+            // 4. CRITICAL: Set WASM paths BEFORE any pipeline call
+            // Initialize backends if not present
+            if (!env.backends) env.backends = {};
+            if (!env.backends.onnx) env.backends.onnx = {};
+            if (!env.backends.onnx.wasm) env.backends.onnx.wasm = {};
+            env.backends.onnx.wasm.wasmPaths = chrome.runtime.getURL('/onnx/');
+            env.backends.onnx.wasm.numThreads = 1;
+            env.backends.onnx.wasm.proxy = false;
+
+            console.log('[EmbeddingController] Config:', {
+                localModelPath: env.localModelPath,
+                wasmPaths: env.backends.onnx.wasm.wasmPaths,
+                allowRemoteModels: env.allowRemoteModels,
+                crossOriginIsolated: typeof crossOriginIsolated !== 'undefined' ? crossOriginIsolated : null,
+                hasSharedArrayBuffer: typeof SharedArrayBuffer !== 'undefined',
+                wasmNumThreads: env.backends.onnx.wasm.numThreads,
+                wasmProxy: env.backends.onnx.wasm.proxy,
+            });
+
+            let model;
+            const hasWebGPU = typeof navigator !== 'undefined' && !!navigator.gpu;
+
+            const pipelineOptions = {
+                dtype: 'q4f16',
+            };
+
+            let webgpuSupported = false;
             try {
-                model = await pipeline('feature-extraction', modelId, {
-                    device: 'webgpu',
-                });
-                currentBackend = 'webgpu';
-                console.log(`[EmbeddingController] Loaded with WebGPU in ${Math.round(performance.now() - startTime)}ms`);
-            } catch (webgpuError) {
-                console.warn('[EmbeddingController] WebGPU failed, falling back to WASM:', webgpuError);
-                model = await pipeline('feature-extraction', modelId, {
+                webgpuSupported = !!(await env.backends?.onnx?.webgpu?.isSupported?.());
+            } catch (_) {
+                webgpuSupported = false;
+            }
+
+            const shouldTryWebGPUFirst = webgpuSupported && hasWebGPU && pipelineOptions.dtype !== 'q4f16';
+
+            if (shouldTryWebGPUFirst) {
+                try {
+                    model = await pipeline('feature-extraction', modelPath, {
+                        ...pipelineOptions,
+                        device: 'webgpu',
+                    });
+                    currentBackend = 'webgpu';
+                    console.log(`[EmbeddingController] Loaded with WebGPU in ${Math.round(performance.now() - startTime)}ms`);
+                } catch (webgpuError) {
+                    console.warn('[EmbeddingController] WebGPU failed, falling back to WASM:', webgpuError);
+                    model = await pipeline('feature-extraction', modelPath, {
+                        ...pipelineOptions,
+                        device: 'wasm',
+                    });
+                    currentBackend = 'wasm';
+                    console.log(`[EmbeddingController] Loaded with WASM fallback in ${Math.round(performance.now() - startTime)}ms`);
+                }
+            } else {
+                model = await pipeline('feature-extraction', modelPath, {
+                    ...pipelineOptions,
                     device: 'wasm',
                 });
                 currentBackend = 'wasm';
-                console.log(`[EmbeddingController] Loaded with WASM fallback in ${Math.round(performance.now() - startTime)}ms`);
+                console.log(`[EmbeddingController] Loaded with WASM in ${Math.round(performance.now() - startTime)}ms`);
             }
-        } else {
-            model = await pipeline('feature-extraction', modelId, {
-                device: 'wasm',
-            });
-            currentBackend = 'wasm';
-            console.log(`[EmbeddingController] Loaded with WASM in ${Math.round(performance.now() - startTime)}ms`);
-        }
 
-        currentModelId = modelId;
-        modelCache.set(modelId, model);
-        return model;
+            currentModelId = modelId;
+            modelCache.set(modelId, model);
+            return model;
+        } finally {
+            inFlightLoad = null;
+        }
     })();
 
-    const result = await inFlightLoad;
-    inFlightLoad = null;
-    return result;
+    return await inFlightLoad;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

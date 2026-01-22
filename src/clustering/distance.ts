@@ -35,14 +35,30 @@ export function buildDistanceMatrix(
 ): number[][] {
     const n = ids.length;
     const distances: number[][] = Array(n).fill(null).map(() => Array(n).fill(0));
+    const warnedIds = new Set<string>();
 
     for (let i = 0; i < n; i++) {
         const embA = embeddings.get(ids[i]);
-        if (!embA) continue;
 
         for (let j = i + 1; j < n; j++) {
             const embB = embeddings.get(ids[j]);
-            if (!embB) continue;
+
+            // Handle missing embeddings with Infinity sentinel
+            if (!embA || !embB) {
+                distances[i][j] = Infinity;
+                distances[j][i] = Infinity;
+
+                // Warn once per missing id
+                if (!embA && !warnedIds.has(ids[i])) {
+                    warnedIds.add(ids[i]);
+                    console.warn(`[distance] Missing embedding for id: ${ids[i]}`);
+                }
+                if (!embB && !warnedIds.has(ids[j])) {
+                    warnedIds.add(ids[j]);
+                    console.warn(`[distance] Missing embedding for id: ${ids[j]}`);
+                }
+                continue;
+            }
 
             const sim = cosineSimilarity(embA, embB);
             const simQ = quantizeSimilarity(sim);
@@ -74,6 +90,9 @@ export function computeCohesion(
     let count = 0;
 
     for (const id of memberIds) {
+        // Skip centroid to avoid biasing average with 1.0
+        if (id === centroidId) continue;
+
         const emb = embeddings.get(id);
         if (!emb) continue;
 

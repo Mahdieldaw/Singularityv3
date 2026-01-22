@@ -535,7 +535,11 @@ const OffscreenController = {
         if (!(await chrome.offscreen.hasDocument())) {
           await chrome.offscreen.createDocument({
             url: "offscreen.html",
-            reasons: [chrome.offscreen.Reason.BLOBS, chrome.offscreen.Reason.DOM_PARSER],
+            reasons: [
+              chrome.offscreen.Reason.BLOBS,
+              chrome.offscreen.Reason.DOM_PARSER,
+              chrome.offscreen.Reason.WORKERS,
+            ],
             justification: "HTOS needs persistent offscreen DOM.",
           });
         }

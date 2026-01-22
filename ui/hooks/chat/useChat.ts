@@ -268,9 +268,18 @@ export function useChat() {
 
           // 2. Extract AiTurn
           const providers = round.providers || {};
-          const hasProviderData = Object.keys(providers).length > 0;
+          const mappingRaw = round.mappingResponses || {};
+          const singularityRaw = round.singularityResponses || {};
+          const hasAnyResponseData =
+            Object.keys(providers).length > 0 ||
+            Object.keys(mappingRaw).length > 0 ||
+            Object.keys(singularityRaw).length > 0;
+          const hasAnyCognitiveData =
+            !!round.mapperArtifact ||
+            !!round.singularityOutput ||
+            typeof round.pipelineStatus === "string";
 
-          if (hasProviderData) {
+          if (hasAnyResponseData || hasAnyCognitiveData) {
             // Transform providers object to batchResponses (arrays per provider)
             const batchResponses: Record<string, ProviderResponse[]> = {};
             Object.entries(providers).forEach(
@@ -344,8 +353,8 @@ export function useChat() {
               createdAt: round.completedAt || round.createdAt || Date.now(),
               batchResponses,
 
-              mappingResponses: normalizeResponseMap(round.mappingResponses),
-              singularityResponses: normalizeResponseMap(round.singularityResponses),
+              mappingResponses: normalizeResponseMap(mappingRaw),
+              singularityResponses: normalizeResponseMap(singularityRaw),
               // Cognitive pipeline structured outputs
               mapperArtifact: round.mapperArtifact || undefined,
               singularityOutput: round.singularityOutput || undefined,
