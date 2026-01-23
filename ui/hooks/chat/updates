@@ -1,0 +1,940 @@
+# Clarification: Same Paradigm, Refined Structure
+
+The GIL plan is **not a different paradigm**—it's a **refinement** of the unified plan that solves two gaps:
+
+| Gap in Earlier Plan | GIL Solution |
+|---------------------|--------------|
+| Assumed regions = components only | **Region abstraction** (cluster \| component \| patch) |
+| No adaptive thresholds | **AdaptiveLens** for phase-adapted HAC |
+| Hardcoded similarity windows `[0.75, 0.92]` | **Top-N pairs** approach |
+| Mixed physics + interpretation | **Separate directories** |
+
+---
+
+## Synthesized Authoritative Plan
+
+### Directory Structure
+
+```
+src/geometry/
+├── types.ts              # Substrate types (DONE)
+├── knn.ts                # Two-graph builder (DONE)
+├── threshold.ts          # Soft threshold (DONE)
+├── topology.ts           # Components on strong graph (DONE)
+├── nodes.ts              # Per-node stats (DONE)
+├── substrate.ts          # Orchestrator (DONE)
+├── index.ts              # Public API (DONE)
+│
+└── interpretation/       # NEW LAYER (next sprint)
+    ├── types.ts          # Region, Profile, Lens, Guidance types
+    ├── lens.ts           # Adaptive epistemic lens
+    ├── regions.ts        # Regionization (cluster | component | patch)
+    ├── profiles.ts       # Peak/Hill/Floor + purity + geometry
+    ├── opposition.ts     # Semantic opposition detection
+    ├── guidance.ts       # Mapper hints payload
+    ├── validation.ts     # Post-semantic audit (moved from unified.ts)
+    └── index.ts          # Public API
+```
+
+**The substrate layer is physics. The interpretation layer is meaning.**
+
+---
+
+## What Stays From `unified.ts`
+
+| Component | Status | New Location |
+|-----------|--------|--------------|
+| `RegionProfile` interface | **Refined** | `interpretation/types.ts` |
+| `ShapePrediction` interface | **Kept** | `interpretation/types.ts` |
+| `MapperGuidance` interface | **Renamed** → `MapperGeometricHints` | `interpretation/types.ts` |
+| `StructuralValidation` interface | **Kept** | `interpretation/types.ts` |
+| `buildRegionProfiles()` | **Refactored** to use Region abstraction | `interpretation/profiles.ts` |
+| `predictShape()` | **Simplified** → use `substrate.shape.prior` | `interpretation/guidance.ts` |
+| `generateMapperGuidance()` | **Kept** | `interpretation/guidance.ts` |
+| `validateStructuralMapping()` | **Kept** | `interpretation/validation.ts` |
+| Tier assignment logic | **Kept** (ratio-based) | `interpretation/profiles.ts` |
+| Opposition detection | **Refactored** → top-N pairs | `interpretation/opposition.ts` |
+
+---
+
+## What's New (GIL Additions)
+
+### 1. AdaptiveLens (`interpretation/lens.ts`)
+
+```typescript
+// ═══════════════════════════════════════════════════════════════════════════
+// ADAPTIVE EPISTEMIC LENS
+// ═══════════════════════════════════════════════════════════════════════════
+
+import type { GeometricSubstrate } from '../types';
+
+export interface AdaptiveLens {
+  // Regime classification (from substrate shape prior)
+  regime: 'fragmented' | 'parallel_components' | 'bimodal_fork' | 'convergent_core';
+  
+  // HAC control
+  shouldRunClustering: boolean;
+  hardMergeThreshold: number;      // For HAC "planet detection"
+  
+  // Already computed in substrate, but recorded here for traceability
+  softThreshold: number;
+  k: number;
+  
+  // Confidence
+  confidence: number;
+  evidence: string[];
+}
+
+const REGIME_MAP: Record<string, AdaptiveLens['regime']> = {
+  'fragmented': 'fragmented',
+  'convergent_core': 'convergent_core',
+  'bimodal_fork': 'bimodal_fork',
+  'parallel_components': 'parallel_components',
+};
+
+export function deriveLens(substrate: GeometricSubstrate): AdaptiveLens {
+  const { topology, graphs, meta } = substrate;
+  const stats = meta.similarityStats;
+  
+  // Map substrate shape to regime
+  // substrate.shape doesn't exist yet in current types - we derive from topology
+  const regime = classifyRegime(topology, stats);
+  
+  // Derive hard merge threshold from similarity distribution
+  // Conservative: use p95 minus small margin, clamped to safe range
+  const hardMergeThreshold = clamp(stats.p95 - 0.03, 0.65, 0.85);
+  
+  // Should we run clustering?
+  // Yes if: sufficient density AND not maximally fragmented
+  const shouldRunClustering = 
+    topology.globalStrongDensity >= 0.10 &&
+    topology.isolationRatio < 0.7 &&
+    meta.nodeCount >= 3;
+  
+  const evidence: string[] = [];
+  evidence.push(`Global density: ${topology.globalStrongDensity.toFixed(3)}`);
+  evidence.push(`Isolation ratio: ${topology.isolationRatio.toFixed(3)}`);
+  evidence.push(`Similarity p95: ${stats.p95.toFixed(3)}`);
+  if (!shouldRunClustering) {
+    evidence.push(`Clustering skipped: ${
+      topology.globalStrongDensity < 0.10 ? 'low density' :
+      topology.isolationRatio >= 0.7 ? 'high isolation' : 'insufficient nodes'
+    }`);
+  }
+  
+  return {
+    regime,
+    shouldRunClustering,
+    hardMergeThreshold,
+    softThreshold: graphs.strong.softThreshold,
+    k: graphs.knn.k,
+    confidence: computeRegimeConfidence(topology, stats),
+    evidence,
+  };
+}
+
+function classifyRegime(
+  topology: GeometricSubstrate['topology'],
+  stats: GeometricSubstrate['meta']['similarityStats']
+): AdaptiveLens['regime'] {
+  const { components, largestComponentRatio, isolationRatio, globalStrongDensity } = topology;
+  
+  // Fragmented: high isolation, low density
+  if (isolationRatio > 0.5 || globalStrongDensity < 0.05) {
+    return 'fragmented';
+  }
+  
+  // Convergent core: one dominant component
+  if (largestComponentRatio > 0.7 && components.length <= 3) {
+    return 'convergent_core';
+  }
+  
+  // Bimodal fork: two major components of similar size
+  if (components.length >= 2) {
+    const [first, second] = components;
+    if (second && second.size / first.size > 0.5) {
+      return 'bimodal_fork';
+    }
+  }
+  
+  // Parallel: multiple independent components
+  if (components.length >= 3) {
+    return 'parallel_components';
+  }
+  
+  // Default
+  return globalStrongDensity > 0.15 ? 'convergent_core' : 'fragmented';
+}
+
+function computeRegimeConfidence(
+  topology: GeometricSubstrate['topology'],
+  stats: GeometricSubstrate['meta']['similarityStats']
+): number {
+  // Higher confidence when signals are clear
+  const densityClarity = Math.abs(topology.globalStrongDensity - 0.15) / 0.15;
+  const isolationClarity = Math.abs(topology.isolationRatio - 0.5) / 0.5;
+  const componentClarity = topology.components.length <= 2 ? 0.8 : 0.5;
+  
+  return clamp((densityClarity + isolationClarity + componentClarity) / 3, 0.3, 0.95);
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+```
+
+---
+
+### 2. Region Abstraction (`interpretation/regions.ts`)
+
+```typescript
+// ═══════════════════════════════════════════════════════════════════════════
+// REGIONIZATION
+// ═══════════════════════════════════════════════════════════════════════════
+// 
+// Creates Region objects from substrate using fallback hierarchy:
+// 1. Clusters (if available and meaningful)
+// 2. Strong components (if clusters unavailable)
+// 3. Neighborhood patches (fallback for isolated nodes)
+// ═══════════════════════════════════════════════════════════════════════════
+
+import type { GeometricSubstrate, NodeLocalStats } from '../types';
+import type { ParagraphCluster } from '../../clustering/types';
+import type { ShadowParagraph } from '../../shadow/ShadowParagraphProjector';
+import type { AdaptiveLens } from './lens';
+
+export interface Region {
+  id: string;                      // "r_0", "r_1", ...
+  kind: 'cluster' | 'component' | 'patch';
+  
+  // Membership
+  nodeIds: string[];               // Paragraph IDs (p_*)
+  statementIds: string[];          // Union of all statement IDs
+  
+  // Source tracking
+  sourceId: string;                // Original cluster/component/patch ID
+  
+  // Model coverage
+  modelIndices: number[];          // Unique, sorted
+}
+
+export interface RegionizationResult {
+  regions: Region[];
+  
+  meta: {
+    regionCount: number;
+    kindCounts: Record<Region['kind'], number>;
+    fallbackUsed: boolean;
+    fallbackReason?: string;
+    coveredNodes: number;
+    totalNodes: number;
+  };
+}
+
+export function buildRegions(
+  substrate: GeometricSubstrate,
+  paragraphs: ShadowParagraph[],
+  lens: AdaptiveLens,
+  clusters?: ParagraphCluster[]
+): RegionizationResult {
+  const paragraphsById = new Map(paragraphs.map(p => [p.id, p]));
+  const nodesById = new Map(substrate.nodes.map(n => [n.paragraphId, n]));
+  const totalNodes = substrate.nodes.length;
+  
+  const regions: Region[] = [];
+  const coveredNodeIds = new Set<string>();
+  let regionIndex = 0;
+  
+  // ─────────────────────────────────────────────────────────────────────────
+  // STRATEGY 1: Use clusters if available and meaningful
+  // ─────────────────────────────────────────────────────────────────────────
+  const useableClusters = clusters?.filter(c => c.paragraphIds.length >= 2) ?? [];
+  
+  if (lens.shouldRunClustering && useableClusters.length > 0) {
+    for (const cluster of useableClusters) {
+      const region = clusterToRegion(
+        cluster,
+        `r_${regionIndex++}`,
+        paragraphsById,
+        nodesById
+      );
+      regions.push(region);
+      cluster.paragraphIds.forEach(id => coveredNodeIds.add(id));
+    }
+  }
+  
+  // ─────────────────────────────────────────────────────────────────────────
+  // STRATEGY 2: Use strong components for uncovered nodes
+  // ─────────────────────────────────────────────────────────────────────────
+  const uncoveredByCluster = substrate.nodes.filter(n => !coveredNodeIds.has(n.paragraphId));
+  
+  if (uncoveredByCluster.length > 0) {
+    for (const component of substrate.topology.components) {
+      // Only use components with uncovered nodes and size >= 2
+      const uncoveredInComponent = component.nodeIds.filter(id => !coveredNodeIds.has(id));
+      
+      if (uncoveredInComponent.length >= 2) {
+        const region = componentToRegion(
+          component,
+          uncoveredInComponent,
+          `r_${regionIndex++}`,
+          paragraphsById,
+          nodesById
+        );
+        regions.push(region);
+        uncoveredInComponent.forEach(id => coveredNodeIds.add(id));
+      }
+    }
+  }
+  
+  // ─────────────────────────────────────────────────────────────────────────
+  // STRATEGY 3: Create patches for remaining isolated nodes
+  // ─────────────────────────────────────────────────────────────────────────
+  const stillUncovered = substrate.nodes.filter(n => !coveredNodeIds.has(n.paragraphId));
+  
+  if (stillUncovered.length > 0) {
+    // Group by mutual neighborhood patch to avoid duplicates
+    const patchMap = new Map<string, NodeLocalStats[]>();
+    
+    for (const node of stillUncovered) {
+      // Canonical patch key (sorted node IDs)
+      const patchKey = [...node.mutualNeighborhoodPatch].sort().join('|');
+      
+      if (!patchMap.has(patchKey)) {
+        patchMap.set(patchKey, []);
+      }
+      patchMap.get(patchKey)!.push(node);
+    }
+    
+    for (const [patchKey, nodes] of patchMap) {
+      const patchNodeIds = patchKey.split('|');
+      const region = patchToRegion(
+        patchNodeIds,
+        `r_${regionIndex++}`,
+        paragraphsById,
+        nodesById
+      );
+      regions.push(region);
+      patchNodeIds.forEach(id => coveredNodeIds.add(id));
+    }
+  }
+  
+  // ─────────────────────────────────────────────────────────────────────────
+  // Sort regions deterministically
+  // ─────────────────────────────────────────────────────────────────────────
+  regions.sort((a, b) => {
+    // By kind priority: cluster > component > patch
+    const kindOrder = { cluster: 0, component: 1, patch: 2 };
+    if (kindOrder[a.kind] !== kindOrder[b.kind]) {
+      return kindOrder[a.kind] - kindOrder[b.kind];
+    }
+    // Then by size descending
+    if (b.nodeIds.length !== a.nodeIds.length) {
+      return b.nodeIds.length - a.nodeIds.length;
+    }
+    // Then by ID
+    return a.id.localeCompare(b.id);
+  });
+  
+  // Reassign IDs after sort
+  regions.forEach((r, idx) => {
+    r.id = `r_${idx}`;
+  });
+  
+  // Compute meta
+  const kindCounts: Record<Region['kind'], number> = { cluster: 0, component: 0, patch: 0 };
+  for (const r of regions) {
+    kindCounts[r.kind]++;
+  }
+  
+  const fallbackUsed = kindCounts.cluster === 0;
+  const fallbackReason = fallbackUsed
+    ? (lens.shouldRunClustering ? 'no_multi_member_clusters' : 'clustering_skipped_by_lens')
+    : undefined;
+  
+  return {
+    regions,
+    meta: {
+      regionCount: regions.length,
+      kindCounts,
+      fallbackUsed,
+      fallbackReason,
+      coveredNodes: coveredNodeIds.size,
+      totalNodes,
+    },
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CONVERTERS
+// ═══════════════════════════════════════════════════════════════════════════
+
+function clusterToRegion(
+  cluster: ParagraphCluster,
+  regionId: string,
+  paragraphsById: Map<string, ShadowParagraph>,
+  nodesById: Map<string, NodeLocalStats>
+): Region {
+  const modelIndices = new Set<number>();
+  
+  for (const nodeId of cluster.paragraphIds) {
+    const node = nodesById.get(nodeId);
+    if (node) modelIndices.add(node.modelIndex);
+  }
+  
+  return {
+    id: regionId,
+    kind: 'cluster',
+    nodeIds: [...cluster.paragraphIds],
+    statementIds: [...cluster.statementIds],
+    sourceId: cluster.id,
+    modelIndices: Array.from(modelIndices).sort((a, b) => a - b),
+  };
+}
+
+function componentToRegion(
+  component: GeometricSubstrate['topology']['components'][0],
+  nodeIds: string[],
+  regionId: string,
+  paragraphsById: Map<string, ShadowParagraph>,
+  nodesById: Map<string, NodeLocalStats>
+): Region {
+  const modelIndices = new Set<number>();
+  const statementIds: string[] = [];
+  const seenStatements = new Set<string>();
+  
+  for (const nodeId of nodeIds) {
+    const node = nodesById.get(nodeId);
+    if (node) {
+      modelIndices.add(node.modelIndex);
+      for (const sid of node.statementIds) {
+        if (!seenStatements.has(sid)) {
+          seenStatements.add(sid);
+          statementIds.push(sid);
+        }
+      }
+    }
+  }
+  
+  return {
+    id: regionId,
+    kind: 'component',
+    nodeIds: [...nodeIds],
+    statementIds,
+    sourceId: component.id,
+    modelIndices: Array.from(modelIndices).sort((a, b) => a - b),
+  };
+}
+
+function patchToRegion(
+  nodeIds: string[],
+  regionId: string,
+  paragraphsById: Map<string, ShadowParagraph>,
+  nodesById: Map<string, NodeLocalStats>
+): Region {
+  const modelIndices = new Set<number>();
+  const statementIds: string[] = [];
+  const seenStatements = new Set<string>();
+  
+  for (const nodeId of nodeIds) {
+    const node = nodesById.get(nodeId);
+    if (node) {
+      modelIndices.add(node.modelIndex);
+      for (const sid of node.statementIds) {
+        if (!seenStatements.has(sid)) {
+          seenStatements.add(sid);
+          statementIds.push(sid);
+        }
+      }
+    }
+  }
+  
+  return {
+    id: regionId,
+    kind: 'patch',
+    nodeIds: [...nodeIds],
+    statementIds,
+    sourceId: `patch_${nodeIds.sort().join('_')}`,
+    modelIndices: Array.from(modelIndices).sort((a, b) => a - b),
+  };
+}
+```
+
+---
+
+### 3. Opposition Detection (`interpretation/opposition.ts`)
+
+```typescript
+// ═══════════════════════════════════════════════════════════════════════════
+// SEMANTIC OPPOSITION DETECTION
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Uses top-N pairs approach instead of hardcoded similarity windows.
+// This avoids the "vocab gap" failure mode.
+// ═══════════════════════════════════════════════════════════════════════════
+
+import type { GeometricSubstrate } from '../types';
+import type { Region } from './regions';
+import type { RegionProfile } from './profiles';
+import type { Stance } from '../../shadow/StatementTypes';
+
+export interface OppositionPair {
+  regionA: string;
+  regionB: string;
+  similarity: number;
+  stanceConflict: boolean;
+  reason: string;
+}
+
+const OPPOSITE_STANCES: Array<[Stance, Stance]> = [
+  ['prescriptive', 'cautionary'],
+  ['assertive', 'uncertain'],
+];
+
+const TOP_N_PAIRS = 10;
+
+/**
+ * Detect semantic oppositions using top-N approach.
+ * 
+ * Instead of hardcoded similarity windows, we:
+ * 1. Find top-N most similar region pairs
+ * 2. Flag as opposition when stances conflict OR high contested ratio
+ */
+export function detectOppositions(
+  regions: Region[],
+  profiles: RegionProfile[],
+  substrate: GeometricSubstrate
+): OppositionPair[] {
+  if (regions.length < 2) return [];
+  
+  const profileById = new Map(profiles.map(p => [p.regionId, p]));
+  
+  // Compute all pairwise similarities using strong graph edges
+  const pairSimilarities: Array<{
+    regionA: string;
+    regionB: string;
+    similarity: number;
+  }> = [];
+  
+  for (let i = 0; i < regions.length; i++) {
+    for (let j = i + 1; j < regions.length; j++) {
+      const regionA = regions[i];
+      const regionB = regions[j];
+      
+      // Max cross-edge similarity between regions
+      const sim = computeInterRegionSimilarity(regionA, regionB, substrate);
+      
+      if (sim > 0) {
+        pairSimilarities.push({
+          regionA: regionA.id,
+          regionB: regionB.id,
+          similarity: sim,
+        });
+      }
+    }
+  }
+  
+  // Sort by similarity descending, take top N
+  pairSimilarities.sort((a, b) => b.similarity - a.similarity);
+  const topPairs = pairSimilarities.slice(0, TOP_N_PAIRS);
+  
+  // Flag oppositions
+  const oppositions: OppositionPair[] = [];
+  
+  for (const pair of topPairs) {
+    const profileA = profileById.get(pair.regionA);
+    const profileB = profileById.get(pair.regionB);
+    
+    if (!profileA || !profileB) continue;
+    
+    const stanceConflict = isOppositeStance(
+      profileA.purity.dominantStance as Stance,
+      profileB.purity.dominantStance as Stance
+    );
+    
+    const highContested = 
+      profileA.purity.contestedRatio > 0.3 || 
+      profileB.purity.contestedRatio > 0.3;
+    
+    const stanceVariety = 
+      profileA.purity.stanceVariety >= 3 || 
+      profileB.purity.stanceVariety >= 3;
+    
+    if (stanceConflict || highContested || stanceVariety) {
+      const reasons: string[] = [];
+      if (stanceConflict) reasons.push('opposite_stances');
+      if (highContested) reasons.push('high_contested');
+      if (stanceVariety) reasons.push('stance_variety');
+      
+      oppositions.push({
+        regionA: pair.regionA,
+        regionB: pair.regionB,
+        similarity: pair.similarity,
+        stanceConflict,
+        reason: reasons.join('+'),
+      });
+    }
+  }
+  
+  return oppositions;
+}
+
+function isOppositeStance(a: Stance, b: Stance): boolean {
+  return OPPOSITE_STANCES.some(([x, y]) =>
+    (a === x && b === y) || (a === y && b === x)
+  );
+}
+
+/**
+ * Compute max cross-edge similarity between two regions.
+ * Uses existing strong graph edges (cheap and deterministic).
+ */
+function computeInterRegionSimilarity(
+  regionA: Region,
+  regionB: Region,
+  substrate: GeometricSubstrate
+): number {
+  const nodeSetA = new Set(regionA.nodeIds);
+  const nodeSetB = new Set(regionB.nodeIds);
+  
+  let maxSim = 0;
+  
+  // Check strong edges that cross between regions
+  for (const edge of substrate.graphs.strong.edges) {
+    const aInA = nodeSetA.has(edge.source);
+    const aInB = nodeSetB.has(edge.source);
+    const bInA = nodeSetA.has(edge.target);
+    const bInB = nodeSetB.has(edge.target);
+    
+    // Edge crosses regions
+    if ((aInA && bInB) || (aInB && bInA)) {
+      if (edge.similarity > maxSim) {
+        maxSim = edge.similarity;
+      }
+    }
+  }
+  
+  // Also check mutual graph if strong didn't find anything
+  if (maxSim === 0) {
+    for (const edge of substrate.graphs.mutual.edges) {
+      const aInA = nodeSetA.has(edge.source);
+      const aInB = nodeSetB.has(edge.source);
+      const bInA = nodeSetA.has(edge.target);
+      const bInB = nodeSetB.has(edge.target);
+      
+      if ((aInA && bInB) || (aInB && bInA)) {
+        if (edge.similarity > maxSim) {
+          maxSim = edge.similarity;
+        }
+      }
+    }
+  }
+  
+  return maxSim;
+}
+```
+
+---
+
+### 4. Updated Profiles (`interpretation/profiles.ts`)
+
+```typescript
+// ═══════════════════════════════════════════════════════════════════════════
+// REGION PROFILING
+// ═══════════════════════════════════════════════════════════════════════════
+
+import type { GeometricSubstrate, NodeLocalStats } from '../types';
+import type { ShadowParagraph } from '../../shadow/ShadowParagraphProjector';
+import type { Stance } from '../../shadow/StatementTypes';
+import type { Region } from './regions';
+
+export interface RegionProfile {
+  regionId: string;
+  tier: 'peak' | 'hill' | 'floor';
+  tierConfidence: number;
+  
+  mass: {
+    nodeCount: number;
+    modelDiversity: number;
+    modelDiversityRatio: number;  // Always ratio, never absolute
+  };
+  
+  purity: {
+    dominantStance: Stance;
+    stanceUnanimity: number;       // 0-1
+    contestedRatio: number;        // 0-1
+    stanceVariety: number;         // Count of unique stances
+  };
+  
+  geometry: {
+    internalDensity: number;       // Strong edges within region
+    isolation: number;             // Avg node isolation score
+    avgInternalSimilarity: number; // From node stats
+  };
+  
+  predicted: {
+    likelyClaims: number;          // 1 if high purity, 2+ if contested/varied
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// TIER THRESHOLDS (RATIO-ONLY)
+// ═══════════════════════════════════════════════════════════════════════════
+
+const TIER_THRESHOLDS = {
+  peak: {
+    minModelDiversityRatio: 0.5,
+    minInternalDensity: 0.25,
+  },
+  hill: {
+    minModelDiversityRatio: 0.25,
+    minInternalDensity: 0.10,
+  },
+};
+
+export function profileRegions(
+  regions: Region[],
+  substrate: GeometricSubstrate,
+  paragraphs: ShadowParagraph[]
+): RegionProfile[] {
+  const nodesById = new Map(substrate.nodes.map(n => [n.paragraphId, n]));
+  const paragraphsById = new Map(paragraphs.map(p => [p.id, p]));
+  
+  // Derive observed model count from data
+  const observedModelCount = deriveModelCount(substrate);
+  
+  return regions.map(region => 
+    profileRegion(region, substrate, nodesById, paragraphsById, observedModelCount)
+  );
+}
+
+function profileRegion(
+  region: Region,
+  substrate: GeometricSubstrate,
+  nodesById: Map<string, NodeLocalStats>,
+  paragraphsById: Map<string, ShadowParagraph>,
+  observedModelCount: number
+): RegionProfile {
+  const { nodeIds, modelIndices } = region;
+  
+  // ─────────────────────────────────────────────────────────────────────────
+  // MASS
+  // ─────────────────────────────────────────────────────────────────────────
+  const modelDiversity = modelIndices.length;
+  const modelDiversityRatio = observedModelCount > 0 
+    ? modelDiversity / observedModelCount 
+    : 0;
+  
+  // ─────────────────────────────────────────────────────────────────────────
+  // PURITY
+  // ─────────────────────────────────────────────────────────────────────────
+  const stanceCounts: Record<Stance, number> = {
+    prerequisite: 0, dependent: 0, cautionary: 0,
+    prescriptive: 0, uncertain: 0, assertive: 0,
+  };
+  let contestedCount = 0;
+  
+  for (const nodeId of nodeIds) {
+    const node = nodesById.get(nodeId);
+    if (node) {
+      stanceCounts[node.dominantStance]++;
+      if (node.contested) contestedCount++;
+    }
+  }
+  
+  const stanceEntries = Object.entries(stanceCounts) as [Stance, number][];
+  const dominantStance = stanceEntries.sort((a, b) => b[1] - a[1])[0][0];
+  const totalStances = stanceEntries.reduce((sum, [, count]) => sum + count, 0);
+  const stanceUnanimity = totalStances > 0 
+    ? stanceCounts[dominantStance] / totalStances 
+    : 0;
+  const contestedRatio = nodeIds.length > 0 
+    ? contestedCount / nodeIds.length 
+    : 0;
+  const stanceVariety = stanceEntries.filter(([, count]) => count > 0).length;
+  
+  // ─────────────────────────────────────────────────────────────────────────
+  // GEOMETRY
+  // ─────────────────────────────────────────────────────────────────────────
+  const internalDensity = computeInternalDensity(nodeIds, substrate);
+  
+  let totalIsolation = 0;
+  let totalSim = 0;
+  let simCount = 0;
+  
+  for (const nodeId of nodeIds) {
+    const node = nodesById.get(nodeId);
+    if (node) {
+      totalIsolation += node.isolationScore;
+      if (node.avgTopKSim > 0) {
+        totalSim += node.avgTopKSim;
+        simCount++;
+      }
+    }
+  }
+  
+  const isolation = nodeIds.length > 0 ? totalIsolation / nodeIds.length : 1;
+  const avgInternalSimilarity = simCount > 0 ? totalSim / simCount : 0;
+  
+  // ─────────────────────────────────────────────────────────────────────────
+  // TIER
+  // ─────────────────────────────────────────────────────────────────────────
+  const tier = assignTier(modelDiversityRatio, internalDensity);
+  const tierConfidence = computeTierConfidence(tier, modelDiversityRatio, internalDensity);
+  
+  // ─────────────────────────────────────────────────────────────────────────
+  // PREDICTED CLAIMS
+  // ─────────────────────────────────────────────────────────────────────────
+  const likelyClaims = 
+    contestedRatio > 0.3 ? 2 :
+    stanceVariety >= 3 ? 2 :
+    stanceUnanimity < 0.6 ? 2 :
+    1;
+  
+  return {
+    regionId: region.id,
+    tier,
+    tierConfidence,
+    
+    mass: {
+      nodeCount: nodeIds.length,
+      modelDiversity,
+      modelDiversityRatio,
+    },
+    
+    purity: {
+      dominantStance,
+      stanceUnanimity,
+      contestedRatio,
+      stanceVariety,
+    },
+    
+    geometry: {
+      internalDensity,
+      isolation,
+      avgInternalSimilarity,
+    },
+    
+    predicted: {
+      likelyClaims,
+    },
+  };
+}
+
+function assignTier(
+  modelDiversityRatio: number,
+  internalDensity: number
+): 'peak' | 'hill' | 'floor' {
+  const { peak, hill } = TIER_THRESHOLDS;
+  
+  if (
+    modelDiversityRatio >= peak.minModelDiversityRatio &&
+    internalDensity >= peak.minInternalDensity
+  ) {
+    return 'peak';
+  }
+  
+  if (
+    modelDiversityRatio >= hill.minModelDiversityRatio ||
+    internalDensity >= hill.minInternalDensity
+  ) {
+    return 'hill';
+  }
+  
+  return 'floor';
+}
+
+function computeTierConfidence(
+  tier: 'peak' | 'hill' | 'floor',
+  modelDiversityRatio: number,
+  internalDensity: number
+): number {
+  const { peak, hill } = TIER_THRESHOLDS;
+  
+  if (tier === 'peak') {
+    const diversityMargin = (modelDiversityRatio - peak.minModelDiversityRatio) / 
+                            (1 - peak.minModelDiversityRatio);
+    const densityMargin = (internalDensity - peak.minInternalDensity) / 
+                          (1 - peak.minInternalDensity);
+    return Math.min(1, 0.7 + 0.3 * Math.min(diversityMargin, densityMargin));
+  }
+  
+  if (tier === 'hill') {
+    const diversityProgress = modelDiversityRatio / peak.minModelDiversityRatio;
+    const densityProgress = internalDensity / peak.minInternalDensity;
+    return 0.5 + 0.3 * Math.max(diversityProgress, densityProgress);
+  }
+  
+  return 0.3 + 0.2 * Math.max(modelDiversityRatio, internalDensity);
+}
+
+function computeInternalDensity(
+  nodeIds: string[],
+  substrate: GeometricSubstrate
+): number {
+  if (nodeIds.length < 2) return 0;
+  
+  const nodeSet = new Set(nodeIds);
+  let internalEdges = 0;
+  
+  for (const edge of substrate.graphs.strong.edges) {
+    if (nodeSet.has(edge.source) && nodeSet.has(edge.target)) {
+      internalEdges++;
+    }
+  }
+  
+  const maxPossible = (nodeIds.length * (nodeIds.length - 1)) / 2;
+  return maxPossible > 0 ? internalEdges / maxPossible : 0;
+}
+
+function deriveModelCount(substrate: GeometricSubstrate): number {
+  const modelIndices = new Set<number>();
+  for (const node of substrate.nodes) {
+    modelIndices.add(node.modelIndex);
+  }
+  return Math.max(1, modelIndices.size);
+}
+```
+
+---
+
+## Summary: What You Now Have
+
+| Layer | Files | Status |
+|-------|-------|--------|
+| **Substrate (Physics)** | `geometry/*.ts` | ✅ Done |
+| **Interpretation** | `geometry/interpretation/*.ts` | 📋 Spec Complete |
+
+### Interpretation Layer Files
+
+| File | Purpose | Key Export |
+|------|---------|------------|
+| `types.ts` | All interpretation types | Interfaces |
+| `lens.ts` | Adaptive epistemic lens | `deriveLens()` |
+| `regions.ts` | Cluster → Component → Patch fallback | `buildRegions()` |
+| `profiles.ts` | Peak/Hill/Floor (ratio-based) | `profileRegions()` |
+| `opposition.ts` | Top-N pairs, no hardcoded windows | `detectOppositions()` |
+| `guidance.ts` | Mapper hints payload | `buildMapperGuidance()` |
+| `validation.ts` | Post-semantic audit | `validateStructuralMapping()` |
+
+### The Pipeline
+
+```
+Substrate (always exists)
+        ↓
+    deriveLens()
+        ↓
+    buildRegions()     ← Uses lens to decide cluster vs component vs patch
+        ↓
+    profileRegions()   ← Peak/Hill/Floor using ratios
+        ↓
+    detectOppositions() ← Top-N pairs
+        ↓
+    buildMapperGuidance()
+        ↓
+    [SEMANTIC MAPPER]
+        ↓
+    validateStructuralMapping()
+```
+
+This is the **authoritative unified plan**. The earlier `unified.ts` was a draft; this is the refined, model-count-agnostic, fallback-aware implementation.

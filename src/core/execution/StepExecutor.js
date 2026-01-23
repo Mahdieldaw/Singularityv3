@@ -401,13 +401,139 @@ export class StepExecutor {
     // 2.6 CLUSTERING (async, may fail gracefully)
     // ════════════════════════════════════════════════════════════════════════
     let clusteringResult = null;
+    let paragraphClusteringSummary = null;
+    let substrateSummary = null;
+    let substrateDegenerate = null;
+    let substrateDegenerateReason = null;
+    let preSemanticInterpretation = null;
     if (paragraphResult.paragraphs.length >= 3) {
       try {
-        const { clusterParagraphs } = await import('../../clustering');
-        clusteringResult = await clusterParagraphs(
+        const clusteringModule = await import('../../clustering');
+        const { generateEmbeddings, getEmbeddingStatus, buildClusters, DEFAULT_CONFIG } = clusteringModule;
+        const { buildGeometricSubstrate, isDegenerate } = await import('../../geometry');
+        const { buildPreSemanticInterpretation } = await import('../../geometry/interpretation');
+
+        const embeddingResult = await generateEmbeddings(
           paragraphResult.paragraphs,
-          shadowResult.statements  // Pass original statements for embedding text
+          shadowResult.statements,
+          DEFAULT_CONFIG
         );
+
+        let embeddingBackend = 'none';
+        try {
+          const status = await getEmbeddingStatus();
+          if (status?.backend === 'webgpu' || status?.backend === 'wasm') {
+            embeddingBackend = status.backend;
+          }
+        } catch (_) { }
+
+        const substrate = buildGeometricSubstrate(
+          paragraphResult.paragraphs,
+          embeddingResult.embeddings,
+          embeddingBackend
+        );
+
+        try {
+          substrateDegenerate = isDegenerate(substrate);
+          substrateDegenerateReason = substrateDegenerate
+            ? String(substrate?.degenerateReason || 'unknown')
+            : null;
+        } catch (_) {
+          substrateDegenerate = null;
+          substrateDegenerateReason = null;
+        }
+
+        try {
+          const nodeCount = Array.isArray(substrate.nodes) ? substrate.nodes.length : 0;
+          const contestedCount = Array.isArray(substrate.nodes)
+            ? substrate.nodes.reduce((acc, n) => acc + (n?.contested ? 1 : 0), 0)
+            : 0;
+          const avgTop1Sim = Array.isArray(substrate.nodes) && nodeCount > 0
+            ? substrate.nodes.reduce((acc, n) => acc + (typeof n?.top1Sim === 'number' ? n.top1Sim : 0), 0) / nodeCount
+            : 0;
+          const avgIsolationScore = Array.isArray(substrate.nodes) && nodeCount > 0
+            ? substrate.nodes.reduce((acc, n) => acc + (typeof n?.isolationScore === 'number' ? n.isolationScore : 0), 0) / nodeCount
+            : 0;
+
+          substrateSummary = {
+            shape: {
+              prior: String(substrate?.shape?.prior || 'unknown'),
+              confidence: typeof substrate?.shape?.confidence === 'number' ? substrate.shape.confidence : 0,
+            },
+            topology: {
+              componentCount: typeof substrate?.topology?.componentCount === 'number' ? substrate.topology.componentCount : 0,
+              largestComponentRatio: typeof substrate?.topology?.largestComponentRatio === 'number' ? substrate.topology.largestComponentRatio : 0,
+              isolationRatio: typeof substrate?.topology?.isolationRatio === 'number' ? substrate.topology.isolationRatio : 0,
+              globalStrongDensity: typeof substrate?.topology?.globalStrongDensity === 'number' ? substrate.topology.globalStrongDensity : 0,
+            },
+            meta: {
+              embeddingSuccess: !!substrate?.meta?.embeddingSuccess,
+              embeddingBackend: substrate?.meta?.embeddingBackend || 'none',
+              nodeCount: typeof substrate?.meta?.nodeCount === 'number' ? substrate.meta.nodeCount : nodeCount,
+              knnEdgeCount: typeof substrate?.meta?.knnEdgeCount === 'number' ? substrate.meta.knnEdgeCount : 0,
+              mutualEdgeCount: typeof substrate?.meta?.mutualEdgeCount === 'number' ? substrate.meta.mutualEdgeCount : 0,
+              strongEdgeCount: typeof substrate?.meta?.strongEdgeCount === 'number' ? substrate.meta.strongEdgeCount : 0,
+              softThreshold: typeof substrate?.graphs?.strong?.softThreshold === 'number' ? substrate.graphs.strong.softThreshold : 0,
+              buildTimeMs: typeof substrate?.meta?.buildTimeMs === 'number' ? substrate.meta.buildTimeMs : 0,
+            },
+            nodes: {
+              contestedCount,
+              avgTop1Sim,
+              avgIsolationScore,
+            },
+          };
+        } catch (_) {
+          substrateSummary = null;
+        }
+
+        if (isDegenerate(substrate)) {
+          console.warn(`[StepExecutor] Degenerate substrate: ${substrate.degenerateReason}`);
+        } else {
+          console.log(
+            `[StepExecutor] Substrate shape: ${substrate.shape.prior} ` +
+            `(${substrate.shape.confidence.toFixed(2)})`
+          );
+        }
+
+        clusteringResult = buildClusters(
+          paragraphResult.paragraphs,
+          shadowResult.statements,
+          embeddingResult.embeddings,
+          DEFAULT_CONFIG,
+          substrate.graphs.mutual
+        );
+
+        clusteringResult.meta.embeddingTimeMs = embeddingResult.timeMs;
+        clusteringResult.meta.totalTimeMs = embeddingResult.timeMs + clusteringResult.meta.clusteringTimeMs;
+
+        try {
+          paragraphClusteringSummary = {
+            meta: { ...(clusteringResult.meta || {}) },
+            clusters: (clusteringResult.clusters || []).map((c) => ({
+              id: c.id,
+              size: Array.isArray(c.paragraphIds) ? c.paragraphIds.length : 0,
+              cohesion: typeof c.cohesion === 'number' ? c.cohesion : 0,
+              uncertain: !!c.uncertain,
+              ...(Array.isArray(c.uncertaintyReasons) ? { uncertaintyReasons: c.uncertaintyReasons } : {}),
+            })),
+          };
+        } catch (_) {
+          paragraphClusteringSummary = null;
+        }
+
+        try {
+          if (!substrateDegenerate && typeof buildPreSemanticInterpretation === 'function') {
+            preSemanticInterpretation = buildPreSemanticInterpretation(
+              substrate,
+              paragraphResult.paragraphs,
+              Array.isArray(clusteringResult?.clusters) ? clusteringResult.clusters : undefined
+            );
+          } else {
+            preSemanticInterpretation = null;
+          }
+        } catch (_) {
+          preSemanticInterpretation = null;
+        }
 
         const nonSingletons = clusteringResult.clusters.filter(c => c.paragraphIds.length > 1);
         console.log(`[StepExecutor] Clustering results:`);
@@ -492,7 +618,12 @@ export class StepExecutor {
             }
 
             let mapperArtifact = null;
+            let pipelineArtifacts = null;
             const rawText = finalResult?.text || "";
+            let shadowDelta = null;
+            let topUnindexed = null;
+            let referencedIds = null;
+            let structuralValidation = null;
 
             if (finalResult?.text) {
               // 4. Parse (New Parser)
@@ -554,9 +685,9 @@ export class StepExecutor {
 
                 try {
                   // Shadow Delta
-                  const referencedIds = extractReferencedIds(assemblyResult.claims);
-                  const shadowDelta = computeShadowDelta(shadowResult, referencedIds, payload.originalPrompt);
-                  const topUnindexed = getTopUnreferenced(shadowDelta, 10);
+                  referencedIds = extractReferencedIds(assemblyResult.claims);
+                  shadowDelta = computeShadowDelta(shadowResult, referencedIds, payload.originalPrompt);
+                  topUnindexed = getTopUnreferenced(shadowDelta, 10);
 
                   // ═══════════════════════════════════════════════════════════════════════
                   // V2-TO-V1 CONVERSION (Backward Compatibility)
@@ -587,8 +718,22 @@ export class StepExecutor {
                       audit: shadowDelta.audit,
                       topUnindexed: topUnindexed,
                       processingTime: (shadowDelta.processingTimeMs || 0) + (shadowResult.meta?.processingTimeMs || 0)
-                    }
+                    },
+                    ...(paragraphResult?.meta ? { paragraphProjection: paragraphResult.meta } : {}),
+                    ...(paragraphClusteringSummary ? { paragraphClustering: paragraphClusteringSummary } : {}),
+                    ...(substrateSummary ? { substrate: substrateSummary } : {}),
                   };
+
+                  try {
+                    if (preSemanticInterpretation && mapperArtifact) {
+                      const { computeStructuralAnalysis } = await import('../PromptMethods');
+                      const { validateStructuralMapping } = await import('../../geometry/interpretation');
+                      const postSemantic = computeStructuralAnalysis(mapperArtifact);
+                      structuralValidation = validateStructuralMapping(preSemanticInterpretation, postSemantic);
+                    }
+                  } catch (_) {
+                    structuralValidation = null;
+                  }
 
                   console.log(`[StepExecutor] Generated V1-compatible artifact with ${v1Artifact.claims.length} claims, ${v1Artifact.edges.length} edges`);
                 } catch (err) {
@@ -612,6 +757,46 @@ export class StepExecutor {
                 console.warn("[StepExecutor] Semantic Mapper parsing failed:", parseResult.errors);
                 // Fallback? Or just fail? For now, we proceed with raw text but no artifact.
               }
+
+              try {
+                pipelineArtifacts = {
+                  shadow: {
+                    extraction: shadowResult || null,
+                    delta: shadowDelta || null,
+                    topUnreferenced: topUnindexed || null,
+                    referencedIds: referencedIds ? Array.from(referencedIds || []) : null,
+                  },
+                  paragraphProjection: paragraphResult || null,
+                  clustering: {
+                    result: clusteringResult
+                      ? {
+                        clusters: Array.isArray(clusteringResult.clusters) ? clusteringResult.clusters : [],
+                        meta: clusteringResult.meta || null,
+                      }
+                      : null,
+                    summary: paragraphClusteringSummary || null,
+                  },
+                  substrate: {
+                    summary: substrateSummary || null,
+                    degenerate: typeof substrateDegenerate === 'boolean' ? substrateDegenerate : undefined,
+                    degenerateReason: substrateDegenerateReason || null,
+                  },
+                  preSemantic: preSemanticInterpretation || null,
+                  validation: structuralValidation || null,
+                  prompts: {
+                    semanticMapperPrompt: mappingPrompt || "",
+                    rawMappingText: rawText || "",
+                  },
+                };
+              } catch (_) {
+                pipelineArtifacts = null;
+              }
+
+              try {
+                if (pipelineArtifacts) {
+                  context.pipelineArtifacts = pipelineArtifacts;
+                }
+              } catch (_) { }
 
               // Process raw text for clean display
               const processed = artifactProcessor.process(finalResult.text);
@@ -658,6 +843,9 @@ export class StepExecutor {
             if (mapperArtifact) {
               finalResultWithMeta.meta.mapperArtifact = mapperArtifact;
             }
+            if (pipelineArtifacts) {
+              finalResultWithMeta.meta.pipelineArtifacts = pipelineArtifacts;
+            }
 
             try {
               if (finalResultWithMeta?.meta) {
@@ -673,6 +861,7 @@ export class StepExecutor {
               meta: finalResultWithMeta.meta || {},
               artifacts: finalResult.artifacts || [],
               mapperArtifact: mapperArtifact,
+              pipelineArtifacts: pipelineArtifacts,
               ...(finalResult.softError ? { softError: finalResult.softError } : {}),
             });
           },

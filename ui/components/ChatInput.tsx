@@ -14,7 +14,6 @@ import {
   activeRecomputeStateAtom,
   workflowProgressAtom,
   isRoundActiveAtom,
-  selectedModeAtom,
   singularityProviderAtom,
   batchAutoRunEnabledAtom,
   turnIdsAtom,
@@ -48,7 +47,6 @@ const ChatInput = ({
 
   const [isReducedMotion] = useAtom(isReducedMotionAtom as any) as [boolean, any];
   const [, setChatInputHeight] = useAtom(chatInputHeightAtom);
-  const [selectedMode] = useAtom(selectedModeAtom as any) as [string, any];
 
   // Streaming UX: hide config orbs during active round
   const isRoundActive = useAtomValue(isRoundActiveAtom);
@@ -95,7 +93,6 @@ const ChatInput = ({
           targetProvider: activeTarget.providerId,
           userMessage: prompt,
           useThinking: false,
-          mode: selectedMode as any,
         };
         await api.executeWorkflow(primitive);
         setActiveTarget(null);
@@ -107,7 +104,7 @@ const ChatInput = ({
       return;
     }
     sendMessage(prompt, "continuation");
-  }, [sendMessage, activeTarget, currentSessionId, setActiveTarget, setActiveRecomputeState, setToast, selectedMode]);
+  }, [sendMessage, activeTarget, currentSessionId, setActiveTarget, setActiveRecomputeState, setToast]);
 
   const onAbort = useCallback(() => { void abort(); }, [abort]);
 

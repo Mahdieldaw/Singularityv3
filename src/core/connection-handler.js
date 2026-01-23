@@ -191,6 +191,7 @@ export class ConnectionHandler {
             singularityResponses: buckets.singularityResponses,
             meta: aiTurn.meta || {},
             mapperArtifact: aiTurn.mapperArtifact,
+            pipelineArtifacts: aiTurn.pipelineArtifacts,
             singularityOutput: inferredSingularityOutput,
             pipelineStatus: aiTurn.pipelineStatus,
           },

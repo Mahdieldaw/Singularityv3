@@ -49,7 +49,6 @@ export function adaptGraphTopology(topology: GraphTopology | null): {
         type: isClaimType((node as any)?.theme) ? (node as any).theme : "factual",
         role: "anchor",
         challenges: null,
-        originalId: String(node.id),
         quote: (node as any)?.quote
     }));
 

@@ -322,6 +322,9 @@ export function normalizeBackendRoundsToTurns(
         batchResponses,
         mappingResponses: normalizeResponseMap(round.mappingResponses),
         singularityResponses: normalizeResponseMap(round.singularityResponses),
+        mapperArtifact: round.mapperArtifact || undefined,
+        pipelineArtifacts: round.pipelineArtifacts || undefined,
+        singularityOutput: round.singularityOutput || undefined,
         pipelineStatus: round.pipelineStatus || undefined,
         meta: round.meta || {},
       };

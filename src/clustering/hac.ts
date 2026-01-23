@@ -4,6 +4,7 @@
 
 import { ClusteringConfig } from './config';
 import { quantizeSimilarity } from './distance';
+import type { MutualKnnGraph } from '../geometry/types';
 
 /**
  * Average linkage: mean distance between all pairs across clusters.
@@ -35,7 +36,7 @@ function averageLinkage(
  * Key behavior:
  * - Cluster count is EMERGENT from data, not forced
  * - Algorithm stops when nothing is similar enough to merge
- * - If cluster count exceeds maxClusters, forces merges to stay under limit
+ * - If cluster count exceeds maxClusters, warns but respects threshold (no forced merges)
  * 
  * @param paragraphIds - Array of paragraph IDs in stable order
  * @param distances - Distance matrix (pre-computed, quantized)
@@ -45,13 +46,24 @@ function averageLinkage(
 export function hierarchicalCluster(
     paragraphIds: string[],
     distances: number[][],
-    config: ClusteringConfig
+    config: ClusteringConfig,
+    mutualGraph?: MutualKnnGraph
 ): number[][] {
     const n = paragraphIds.length;
 
     // Edge case: too few items
     if (n < config.minParagraphsForClustering) {
         return Array.from({ length: n }, (_, i) => [i]);
+    }
+
+    const mutualEdges = new Set<string>();
+    if (mutualGraph) {
+        for (const edge of mutualGraph.edges) {
+            const key = edge.source < edge.target
+                ? `${edge.source}|${edge.target}`
+                : `${edge.target}|${edge.source}`;
+            mutualEdges.add(key);
+        }
     }
 
     // Initialize: each item is its own cluster with stable IDs
@@ -75,7 +87,27 @@ export function hierarchicalCluster(
             for (let aj = ai + 1; aj < activeArray.length; aj++) {
                 const i = activeArray[ai];
                 const j = activeArray[aj];
-                const dist = quantizeSimilarity(averageLinkage(clusters[i], clusters[j], distances));
+                let dist = quantizeSimilarity(averageLinkage(clusters[i], clusters[j], distances));
+
+                if (mutualGraph) {
+                    let hasMutual = false;
+                    for (const idxI of clusters[i]) {
+                        for (const idxJ of clusters[j]) {
+                            const nodeI = paragraphIds[idxI];
+                            const nodeJ = paragraphIds[idxJ];
+                            const key = nodeI < nodeJ ? `${nodeI}|${nodeJ}` : `${nodeJ}|${nodeI}`;
+                            if (mutualEdges.has(key)) {
+                                hasMutual = true;
+                                break;
+                            }
+                        }
+                        if (hasMutual) break;
+                    }
+
+                    if (hasMutual) {
+                        dist = quantizeSimilarity(dist * 0.9);
+                    }
+                }
 
                 // Stable tie-breaker - prefer lower index pairs
                 if (dist < minDist || (dist === minDist && (i < minI || (i === minI && j < minJ)))) {
@@ -88,19 +120,31 @@ export function hierarchicalCluster(
 
         // Stop conditions with max clusters safety
 
-        // Under limit: stop if threshold exceeded
-        if (active.size <= config.maxClusters && minDist > distanceThreshold) {
-            break;
+        // HARD STOP: Never merge beyond threshold
+        if (minDist > distanceThreshold) {
+            // Safety cap: warn if approaching limit, but don't force bad merges
+            if (active.size <= config.maxClusters) {
+                console.warn(
+                    `[HAC] Stopping at ${active.size} clusters (threshold exceeded). ` +
+                    `Consider lowering similarityThreshold if more clusters needed.`
+                );
+            }
+            break; // No more valid merges exist
         }
-
-        // Over limit: force merge even if over threshold (safety mechanism)
-        // (Will continue loop until we're under limit or at 1 cluster)
 
         // Merge j into i
         for (const idx of clusters[minJ]) {
             clusters[minI].add(idx);
         }
         active.delete(minJ);
+    }
+
+    // If we exceed maxClusters due to threshold, log it but don't lie
+    if (active.size > config.maxClusters) {
+        console.warn(
+            `[HAC] Produced ${active.size} clusters (exceeds max ${config.maxClusters}). ` +
+            `Data is genuinely fragmented at threshold ${config.similarityThreshold}.`
+        );
     }
 
     // Convert to stable array format

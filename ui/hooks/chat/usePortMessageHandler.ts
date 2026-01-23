@@ -584,6 +584,14 @@ export function usePortMessageHandler(enabled: boolean = true) {
                       ),
                     };
                     aiTurn.mappingVersion = (aiTurn.mappingVersion ?? 0) + 1;
+                    const artifact = data?.mapperArtifact || data?.meta?.mapperArtifact;
+                    if (artifact) {
+                      aiTurn.mapperArtifact = artifact;
+                    }
+                    const pipelineArtifacts = data?.pipelineArtifacts || data?.meta?.pipelineArtifacts;
+                    if (pipelineArtifacts) {
+                      (aiTurn as any).pipelineArtifacts = pipelineArtifacts;
+                    }
                   } else if (stepType === "batch") {
                     aiTurn.batchResponses = {
                       ...(aiTurn.batchResponses || {}),
@@ -921,6 +929,7 @@ export function usePortMessageHandler(enabled: boolean = true) {
             draft.set(aiTurnId, {
               ...aiTurn,
               mapperArtifact: artifact,
+              ...(message as any)?.pipelineArtifacts ? { pipelineArtifacts: (message as any).pipelineArtifacts } : {},
               ...(singularityOutput ? { singularityOutput } : {}),
               ...(pipelineStatus ? { pipelineStatus } : {}),
             });

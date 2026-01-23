@@ -549,7 +549,6 @@ export function parseUnifiedMapperOutput(text: string): ParsedMapperOutput {
                     challenges: role === "challenger" && typeof c.challenges === "string" ? c.challenges : null,
                     ...(typeof c.quote === "string" ? { quote: c.quote } : {}),
                     ...(typeof c.support_count === "number" ? { support_count: c.support_count } : {}),
-                    ...(typeof c.originalId === "string" ? { originalId: c.originalId } : {}),
                 };
             })
             .filter((c: any) => c.id && c.label)

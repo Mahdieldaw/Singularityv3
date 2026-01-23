@@ -83,6 +83,7 @@ export interface AiTurnRecord extends BaseTurnRecord {
   mappingResponseCount: number;
   providerContexts?: Record<string, any>;
   mapperArtifact?: any;
+  pipelineArtifacts?: any;
   singularityOutput?: any;
 }
 

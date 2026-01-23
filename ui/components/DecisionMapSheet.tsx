@@ -821,7 +821,7 @@ export const DecisionMapSheet = React.memo(() => {
   const setSingularityProvider = useSetAtom(singularityProviderAtom);
   const setActiveSplitPanel = useSetAtom(activeSplitPanelAtom);
 
-  const [activeTab, setActiveTab] = useState<'graph' | 'narrative' | 'options' | 'debug' | 'concierge'>('graph');
+  const [activeTab, setActiveTab] = useState<'graph' | 'narrative' | 'options' | 'pipeline' | 'debug' | 'concierge'>('graph');
   const [selectedNode, setSelectedNode] = useState<{ id: string; label: string; supporters: (string | number)[]; theme?: string } | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [dims, setDims] = useState<{ w: number; h: number }>({ w: window.innerWidth, h: 400 });
@@ -830,6 +830,7 @@ export const DecisionMapSheet = React.memo(() => {
   const [structuralAnalysis, setStructuralAnalysis] = useState<StructuralAnalysis | null>(null);
   const [structuralTurnId, setStructuralTurnId] = useState<string | null>(null);
   const [structuralLoading, setStructuralLoading] = useState(false);
+  const [pipelineStage, setPipelineStage] = useState<string>('pipeline_shadow_extraction');
   const resizeRef = useRef<{ active: boolean; startY: number; startRatio: number; moved: boolean }>({
     active: false,
     startY: 0,
@@ -839,11 +840,12 @@ export const DecisionMapSheet = React.memo(() => {
 
   useEffect(() => {
     if (openState) {
-      setActiveTab('graph');
+      setActiveTab(openState.tab || 'graph');
       setSelectedNode(null);
       setSheetHeightRatio(0.5);
+      setPipelineStage('pipeline_shadow_extraction');
     }
-  }, [openState?.turnId]);
+  }, [openState?.turnId, openState?.tab]);
 
   useEffect(() => {
     if (!openState?.turnId) {
@@ -1210,10 +1212,95 @@ export const DecisionMapSheet = React.memo(() => {
     return t;
   }, []);
 
+  const resolvedPipelineArtifacts = useMemo(() => {
+    const fromTurn = (aiTurn as any)?.pipelineArtifacts || null;
+    const fromMeta = (latestMapping?.meta as any)?.pipelineArtifacts || null;
+    return fromTurn || fromMeta || null;
+  }, [aiTurn, latestMapping?.meta]);
+
+  const pipelineStages = useMemo(() => {
+    const mapperArtifact =
+      (aiTurn as any)?.mapperArtifact ||
+      (parsedMapping as any)?.artifact ||
+      (graphData.claims.length > 0 || graphData.edges.length > 0
+        ? {
+          claims: graphData.claims,
+          edges: graphData.edges,
+          ghosts: Array.isArray((parsedMapping as any)?.ghosts) ? (parsedMapping as any).ghosts : null,
+          query: (latestMapping as any)?.meta?.query || null,
+        }
+        : null);
+
+    const singularityOutput = (aiTurn as any)?.singularityOutput || singularityState.output || null;
+
+    const hasValue = (value: any, kind: 'json' | 'text') => {
+      if (value == null) return false;
+      if (kind === 'text') return String(value).trim().length > 0;
+      return true;
+    };
+
+    const p = resolvedPipelineArtifacts as any;
+
+    return [
+      { key: 'pipeline_shadow_extraction', label: 'Shadow Extraction', kind: 'json' as const, value: p?.shadow?.extraction ?? null, group: 'Shadow', disabled: !hasValue(p?.shadow?.extraction, 'json') },
+      { key: 'pipeline_shadow_delta', label: 'Shadow Delta', kind: 'json' as const, value: p?.shadow?.delta ?? null, group: 'Shadow', disabled: !hasValue(p?.shadow?.delta, 'json') },
+      { key: 'pipeline_shadow_top_unreferenced', label: 'Top Unreferenced', kind: 'json' as const, value: p?.shadow?.topUnreferenced ?? null, group: 'Shadow', disabled: !hasValue(p?.shadow?.topUnreferenced, 'json') },
+      { key: 'pipeline_shadow_referenced_ids', label: 'Referenced IDs', kind: 'json' as const, value: p?.shadow?.referencedIds ?? null, group: 'Shadow', disabled: !hasValue(p?.shadow?.referencedIds, 'json') },
+
+      { key: 'pipeline_paragraph_projection', label: 'Paragraph Projection', kind: 'json' as const, value: p?.paragraphProjection ?? null, group: 'Projection', disabled: !hasValue(p?.paragraphProjection, 'json') },
+
+      { key: 'pipeline_clustering_result', label: 'Clustering Result', kind: 'json' as const, value: p?.clustering?.result ?? null, group: 'Clustering', disabled: !hasValue(p?.clustering?.result, 'json') },
+      { key: 'pipeline_clustering_summary', label: 'Clustering Summary', kind: 'json' as const, value: p?.clustering?.summary ?? null, group: 'Clustering', disabled: !hasValue(p?.clustering?.summary, 'json') },
+
+      { key: 'pipeline_substrate_summary', label: 'Substrate Summary', kind: 'json' as const, value: p?.substrate?.summary ?? null, group: 'Substrate', disabled: !hasValue(p?.substrate?.summary, 'json') },
+      { key: 'pipeline_substrate_degeneracy', label: 'Substrate Degeneracy', kind: 'json' as const, value: p?.substrate ?? null, group: 'Substrate', disabled: !hasValue(p?.substrate, 'json') },
+
+      { key: 'pipeline_presemantic', label: 'Pre-Semantic Interpretation', kind: 'json' as const, value: p?.preSemantic ?? null, group: 'Interpretation', disabled: !hasValue(p?.preSemantic, 'json') },
+      { key: 'pipeline_validation', label: 'Structural Validation', kind: 'json' as const, value: p?.validation ?? null, group: 'Validation', disabled: !hasValue(p?.validation, 'json') },
+
+      { key: 'pipeline_semantic_mapper_prompt', label: 'Semantic Mapper Prompt', kind: 'text' as const, value: p?.prompts?.semanticMapperPrompt || semanticMapperPrompt || '', group: 'Prompts', disabled: !hasValue(p?.prompts?.semanticMapperPrompt || semanticMapperPrompt || '', 'text') },
+      { key: 'pipeline_raw_mapping_text', label: 'Raw Mapping Text', kind: 'text' as const, value: p?.prompts?.rawMappingText || rawMappingText || '', group: 'Prompts', disabled: !hasValue(p?.prompts?.rawMappingText || rawMappingText || '', 'text') },
+
+      { key: 'mapper_artifact', label: 'Mapper Artifact', kind: 'json' as const, value: mapperArtifact, group: 'Mapper', disabled: !hasValue(mapperArtifact, 'json') },
+      { key: 'traversal_graph', label: 'Traversal Graph', kind: 'json' as const, value: (mapperArtifact as any)?.traversalGraph || null, group: 'Mapper', disabled: !hasValue((mapperArtifact as any)?.traversalGraph || null, 'json') },
+      { key: 'forcing_points', label: 'Forcing Points', kind: 'json' as const, value: (mapperArtifact as any)?.forcingPoints || null, group: 'Mapper', disabled: !hasValue((mapperArtifact as any)?.forcingPoints || null, 'json') },
+
+      { key: 'singularity_output', label: 'Singularity Output', kind: 'json' as const, value: singularityOutput, group: 'Singularity', disabled: !hasValue(singularityOutput, 'json') },
+      { key: 'singularity_pipeline', label: 'Singularity Pipeline', kind: 'json' as const, value: (singularityOutput as any)?.pipeline || null, group: 'Singularity', disabled: !hasValue((singularityOutput as any)?.pipeline || null, 'json') },
+    ];
+  }, [aiTurn, parsedMapping, graphData, latestMapping, singularityState.output, semanticMapperPrompt, rawMappingText, resolvedPipelineArtifacts]);
+
+  const pipelineStageGroups = useMemo(() => {
+    const groups: Array<{ label: string; stages: typeof pipelineStages }> = [];
+    const order = ['Shadow', 'Projection', 'Clustering', 'Substrate', 'Interpretation', 'Validation', 'Prompts', 'Mapper', 'Singularity'];
+    order.forEach((label) => {
+      const stages = pipelineStages.filter((s: any) => s.group === label);
+      if (stages.length > 0) groups.push({ label, stages } as any);
+    });
+    return groups;
+  }, [pipelineStages]);
+
+  const activePipelineStage = useMemo(() => {
+    return pipelineStages.find((s) => s.key === pipelineStage) || pipelineStages[0];
+  }, [pipelineStages, pipelineStage]);
+
+  const pipelineStageText = useMemo(() => {
+    const stage = activePipelineStage;
+    if (!stage) return '';
+    if (stage.kind === 'text') return String(stage.value || '');
+    try {
+      if (stage.value == null) return '';
+      return JSON.stringify(stage.value, null, 2);
+    } catch {
+      return String(stage.value || '');
+    }
+  }, [activePipelineStage]);
+
   const tabConfig = [
     { key: 'graph' as const, label: 'Graph', activeClass: 'decision-tab-active-graph' },
     { key: 'narrative' as const, label: 'Narrative', activeClass: 'decision-tab-active-narrative' },
     { key: 'options' as const, label: 'Options', activeClass: 'decision-tab-active-options' },
+    { key: 'pipeline' as const, label: 'Pipeline Artifacts', activeClass: 'decision-tab-active-options' },
     { key: 'debug' as const, label: '🔬 Structural Analysis Debug', activeClass: 'decision-tab-active-options' },
     { key: 'concierge' as const, label: 'Concierge Pipeline', activeClass: 'decision-tab-active-singularity' }
   ];
@@ -1429,6 +1516,80 @@ export const DecisionMapSheet = React.memo(() => {
                         </div>
                       ) : (
                         <div className="text-text-muted text-sm">No graph topology available.</div>
+                      )}
+                    </div>
+                  </m.div>
+                )}
+
+                {activeTab === 'pipeline' && (
+                  <m.div
+                    key="pipeline"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    className="h-full overflow-y-auto relative custom-scrollbar p-6"
+                  >
+                    <div className="flex items-center justify-between mb-4">
+                      <div className="flex items-center gap-3">
+                        <span className="text-2xl">🧪</span>
+                        <div>
+                          <div className="text-sm font-semibold">Pipeline Artifacts</div>
+                          <div className="text-xs text-text-muted">Raw JSON/text captured for this turn</div>
+                        </div>
+                      </div>
+                      <CopyButton
+                        text={pipelineStageText}
+                        label="Copy artifact"
+                        buttonText="Copy"
+                        className="mr-1"
+                      />
+                    </div>
+
+                    <div className="space-y-4 mb-4">
+                      {pipelineStageGroups.map((group) => (
+                        <div key={group.label}>
+                          <div className="text-[11px] font-semibold uppercase tracking-wider text-text-muted mb-2">
+                            {group.label}
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            {group.stages.map((s: any) => (
+                              <button
+                                key={s.key}
+                                type="button"
+                                disabled={!!s.disabled}
+                                onClick={() => setPipelineStage(s.key)}
+                                className={clsx(
+                                  "px-3 py-1.5 rounded-full border text-xs transition-colors",
+                                  s.disabled
+                                    ? "opacity-40 cursor-not-allowed bg-transparent border-white/10 text-text-muted"
+                                    : pipelineStage === s.key
+                                      ? "bg-white/10 border-white/20 text-text-primary"
+                                      : "bg-transparent border-white/10 text-text-muted hover:bg-white/5 hover:text-text-primary"
+                                )}
+                              >
+                                {s.label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="bg-surface border border-border-subtle rounded-xl p-4">
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="text-xs font-semibold uppercase tracking-wider text-text-muted">
+                          {activePipelineStage?.label || 'Artifact'}
+                        </div>
+                        <div className="text-[11px] text-text-muted font-mono">
+                          {pipelineStageText ? `${pipelineStageText.length.toLocaleString()} chars` : '—'}
+                        </div>
+                      </div>
+                      {pipelineStageText ? (
+                        <pre className="text-[11px] leading-snug overflow-x-auto whitespace-pre-wrap">
+                          {pipelineStageText}
+                        </pre>
+                      ) : (
+                        <div className="text-text-muted text-sm">No artifact captured for this stage.</div>
                       )}
                     </div>
                   </m.div>

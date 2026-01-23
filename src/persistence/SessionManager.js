@@ -227,6 +227,9 @@ export class SessionManager {
         const mapperArtifact = request?.mapperArtifact
           ? this._safeArtifact(request.mapperArtifact)
           : undefined;
+        const pipelineArtifacts = request?.pipelineArtifacts
+          ? this._toJsonSafe(request.pipelineArtifacts)
+          : undefined;
         const storedAnalysis = request?.storedAnalysis
           ? this._toJsonSafe(request.storedAnalysis)
           : undefined;
@@ -246,6 +249,7 @@ export class SessionManager {
           mappingResponseCount: this.countResponses(result.mappingOutputs),
           singularityResponseCount: this.countResponses(result.singularityOutputs),
           ...(mapperArtifact ? { mapperArtifact } : {}),
+          ...(pipelineArtifacts ? { pipelineArtifacts } : {}),
           ...(storedAnalysis ? { storedAnalysis } : {}),
           ...(singularityOutput ? { singularityOutput } : {}),
           lastContextSummary: contextSummary,
@@ -344,6 +348,9 @@ export class SessionManager {
     const mapperArtifact = request?.mapperArtifact
       ? this._safeArtifact(request.mapperArtifact)
       : undefined;
+    const pipelineArtifacts = request?.pipelineArtifacts
+      ? this._toJsonSafe(request.pipelineArtifacts)
+      : undefined;
     const storedAnalysis = request?.storedAnalysis
       ? this._toJsonSafe(request.storedAnalysis)
       : undefined;
@@ -366,6 +373,7 @@ export class SessionManager {
       mappingResponseCount: this.countResponses(result.mappingOutputs),
       singularityResponseCount: this.countResponses(result.singularityOutputs),
       ...(mapperArtifact ? { mapperArtifact } : {}),
+      ...(pipelineArtifacts ? { pipelineArtifacts } : {}),
       ...(storedAnalysis ? { storedAnalysis } : {}),
       ...(singularityOutput ? { singularityOutput } : {}),
       lastContextSummary: contextSummary,
@@ -373,27 +381,6 @@ export class SessionManager {
       ...(pipelineStatus ? { pipelineStatus } : {}),
     };
     await this.adapter.put("turns", aiTurnRecord);
-
-    if (request?.artifactCuration?.edits) {
-      const edits = request.artifactCuration.edits || {};
-      try {
-        const totalClaims = (request?.mapperArtifact?.consensus?.claims?.length || 0) + (request?.mapperArtifact?.outliers?.length || 0);
-        const changeCount = (edits.added?.length || 0) + (edits.removed?.length || 0) + ((edits.modified?.length || 0) * 2);
-        const ratio = changeCount / Math.max(totalClaims, 1);
-        const intensity = ratio < 0.15 ? "light" : (ratio < 0.4 ? "moderate" : "heavy");
-        const enrichedEdit = {
-          sessionId,
-          turnId: aiTurnId,
-          editedAt: Date.now(),
-          userNotes: request?.artifactCuration?.userNotes || null,
-          edits,
-          tickedIds: request?.artifactCuration?.selectedArtifactIds || [],
-          ghostOverride: request?.artifactCuration?.ghostOverride || null,
-          editIntensity: intensity,
-        };
-        await this.persistArtifactEdit(sessionId, aiTurnId, enrichedEdit);
-      } catch (_) { }
-    }
 
     // 5) Provider responses
     await this._persistProviderResponses(sessionId, aiTurnId, result, now, runId);
@@ -450,6 +437,9 @@ export class SessionManager {
         const mapperArtifact = request?.mapperArtifact
           ? this._safeArtifact(request.mapperArtifact)
           : undefined;
+        const pipelineArtifacts = request?.pipelineArtifacts
+          ? this._toJsonSafe(request.pipelineArtifacts)
+          : undefined;
         const storedAnalysis = request?.storedAnalysis
           ? this._toJsonSafe(request.storedAnalysis)
           : undefined;
@@ -469,6 +459,7 @@ export class SessionManager {
           mappingResponseCount: this.countResponses(result.mappingOutputs),
           singularityResponseCount: this.countResponses(result.singularityOutputs),
           ...(mapperArtifact ? { mapperArtifact } : {}),
+          ...(pipelineArtifacts ? { pipelineArtifacts } : {}),
           ...(storedAnalysis ? { storedAnalysis } : {}),
           ...(singularityOutput ? { singularityOutput } : {}),
           lastContextSummary: contextSummary,
@@ -551,6 +542,9 @@ export class SessionManager {
     const mapperArtifact = request?.mapperArtifact
       ? this._safeArtifact(request.mapperArtifact)
       : undefined;
+    const pipelineArtifacts = request?.pipelineArtifacts
+      ? this._toJsonSafe(request.pipelineArtifacts)
+      : undefined;
     const storedAnalysis = request?.storedAnalysis
       ? this._toJsonSafe(request.storedAnalysis)
       : undefined;
@@ -573,6 +567,7 @@ export class SessionManager {
       mappingResponseCount: this.countResponses(result.mappingOutputs),
       singularityResponseCount: this.countResponses(result.singularityOutputs),
       ...(mapperArtifact ? { mapperArtifact } : {}),
+      ...(pipelineArtifacts ? { pipelineArtifacts } : {}),
       ...(storedAnalysis ? { storedAnalysis } : {}),
       ...(singularityOutput ? { singularityOutput } : {}),
       lastContextSummary: contextSummary,
@@ -580,27 +575,6 @@ export class SessionManager {
       ...(pipelineStatus ? { pipelineStatus } : {}),
     };
     await this.adapter.put("turns", aiTurnRecord);
-
-    if (request?.artifactCuration?.edits) {
-      const edits = request.artifactCuration.edits || {};
-      try {
-        const totalClaims = (request?.mapperArtifact?.consensus?.claims?.length || 0) + (request?.mapperArtifact?.outliers?.length || 0);
-        const changeCount = (edits.added?.length || 0) + (edits.removed?.length || 0) + ((edits.modified?.length || 0) * 2);
-        const ratio = changeCount / Math.max(totalClaims, 1);
-        const intensity = ratio < 0.15 ? "light" : (ratio < 0.4 ? "moderate" : "heavy");
-        const enrichedEdit = {
-          sessionId,
-          turnId: aiTurnId,
-          editedAt: Date.now(),
-          userNotes: request?.artifactCuration?.userNotes || null,
-          edits,
-          tickedIds: request?.artifactCuration?.selectedArtifactIds || [],
-          ghostOverride: request?.artifactCuration?.ghostOverride || null,
-          editIntensity: intensity,
-        };
-        await this.persistArtifactEdit(sessionId, aiTurnId, enrichedEdit);
-      } catch (_) { }
-    }
 
     // 4) Provider responses
     await this._persistProviderResponses(sessionId, aiTurnId, result, now, runId);
@@ -1392,17 +1366,6 @@ export class SessionManager {
       if (!this.adapter) return;
       const record = { ...bridge, sessionId, createdAt: Date.now() };
       await this.adapter.put("context_bridges", record, turnId);
-    } catch (_) { }
-  }
-
-  async persistArtifactEdit(sessionId, turnId, edit) {
-    void sessionId;
-    try {
-      if (!this.adapter) return;
-      const turn = await this.adapter.get("turns", turnId);
-      if (!turn) return;
-      const updated = { ...turn, artifactEdit: edit, updatedAt: Date.now() };
-      await this.adapter.put("turns", updated, turnId);
     } catch (_) { }
   }
 

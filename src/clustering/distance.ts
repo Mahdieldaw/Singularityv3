@@ -2,6 +2,9 @@
 // DISTANCE & SIMILARITY CALCULATIONS
 // ═══════════════════════════════════════════════════════════════════════════
 
+import type { ShadowParagraph } from '../shadow/ShadowParagraphProjector';
+import type { Stance } from '../shadow/StatementTypes';
+
 /**
  * Quantize similarity for deterministic comparisons.
  * Prevents floating-point drift across runs (GPU may vary slightly).
@@ -23,6 +26,35 @@ export function cosineSimilarity(a: Float32Array, b: Float32Array): number {
     return dot;
 }
 
+function stanceAdjustedSimilarity(
+    baseSim: number,
+    stanceA: Stance,
+    stanceB: Stance
+): number {
+    const opposing: Record<Stance, Stance> = {
+        prescriptive: 'cautionary',
+        cautionary: 'prescriptive',
+        assertive: 'uncertain',
+        uncertain: 'assertive',
+        prerequisite: 'dependent',
+        dependent: 'prerequisite',
+    };
+
+    if (opposing[stanceA] === stanceB) {
+        return baseSim * 0.6;
+    }
+
+    if (stanceA === stanceB) {
+        return baseSim * 1.1;
+    }
+
+    return baseSim;
+}
+
+function modelDiversityWeight(modelA: number, modelB: number): number {
+    return modelA !== modelB ? 1.15 : 1.0;
+}
+
 /**
  * Build distance matrix from embeddings.
  * Returns distances (1 - similarity) for HAC algorithm.
@@ -31,11 +63,19 @@ export function cosineSimilarity(a: Float32Array, b: Float32Array): number {
  */
 export function buildDistanceMatrix(
     ids: string[],
-    embeddings: Map<string, Float32Array>
+    embeddings: Map<string, Float32Array>,
+    paragraphs?: ShadowParagraph[]
 ): number[][] {
     const n = ids.length;
     const distances: number[][] = Array(n).fill(null).map(() => Array(n).fill(0));
     const warnedIds = new Set<string>();
+
+    const paragraphMetaById = new Map<string, ShadowParagraph>();
+    if (paragraphs) {
+        for (const p of paragraphs) {
+            paragraphMetaById.set(p.id, p);
+        }
+    }
 
     for (let i = 0; i < n; i++) {
         const embA = embeddings.get(ids[i]);
@@ -60,7 +100,16 @@ export function buildDistanceMatrix(
                 continue;
             }
 
-            const sim = cosineSimilarity(embA, embB);
+            let sim = cosineSimilarity(embA, embB);
+
+            const metaA = paragraphMetaById.get(ids[i]);
+            const metaB = paragraphMetaById.get(ids[j]);
+            if (metaA && metaB) {
+                sim = stanceAdjustedSimilarity(sim, metaA.dominantStance, metaB.dominantStance);
+                sim *= modelDiversityWeight(metaA.modelIndex, metaB.modelIndex);
+                sim = Math.max(-1, Math.min(1, sim));
+            }
+
             const simQ = quantizeSimilarity(sim);
             const dist = 1 - simQ;
             distances[i][j] = dist;

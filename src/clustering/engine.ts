@@ -8,6 +8,7 @@ import type { ParagraphCluster, ClusteringResult } from './types';
 import { ClusteringConfig, DEFAULT_CONFIG } from './config';
 import { buildDistanceMatrix, cosineSimilarity, computeCohesion, quantizeSimilarity } from './distance';
 import { hierarchicalCluster } from './hac';
+import type { MutualKnnGraph } from '../geometry/types';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // HELPERS
@@ -225,7 +226,8 @@ export function buildClusters(
     paragraphs: ShadowParagraph[],
     _shadowStatements: ShadowStatement[],
     embeddings: Map<string, Float32Array>,
-    config: ClusteringConfig = DEFAULT_CONFIG
+    config: ClusteringConfig = DEFAULT_CONFIG,
+    mutualGraph?: MutualKnnGraph
 ): ClusteringResult {
     const startTime = performance.now();
 
@@ -290,7 +292,7 @@ export function buildClusters(
     }
 
     // Build distance matrix
-    const distances = buildDistanceMatrix(paragraphIds, embeddings);
+    const distances = buildDistanceMatrix(paragraphIds, embeddings, paragraphs);
 
     let maxSim = -Infinity;
     let validPairCount = 0;
@@ -331,7 +333,7 @@ export function buildClusters(
     }
 
     // Run HAC
-    const clusterIndices = hierarchicalCluster(paragraphIds, distances, config);
+    const clusterIndices = hierarchicalCluster(paragraphIds, distances, config, mutualGraph);
 
     // Build ParagraphCluster objects
     const clusters: ParagraphCluster[] = [];

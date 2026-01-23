@@ -82,9 +82,6 @@ export class WorkflowEngine {
     }
 
     try {
-      const mode = request.mode || "auto";
-      context.mode = mode;
-
       try {
         await this._persistCheckpoint(request, context, resolvedContext);
       } catch (e) {
@@ -168,6 +165,13 @@ export class WorkflowEngine {
             workflowContexts[pid] = data.meta;
           }
         });
+      }
+
+      if (step.type === 'mapping' && result?.mapperArtifact) {
+        context.mapperArtifact = result.mapperArtifact;
+      }
+      if (step.type === 'mapping' && result?.pipelineArtifacts) {
+        context.pipelineArtifacts = result.pipelineArtifacts;
       }
 
       await this._persistStepResponse(step, context, result, resolvedContext);
@@ -378,6 +382,7 @@ export class WorkflowEngine {
       userMessage: this.currentUserMessage,
       // ✅ CRITICAL: Ensure cognitive artifacts are persisted
       mapperArtifact: context?.mapperArtifact,
+      pipelineArtifacts: context?.pipelineArtifacts,
       singularityOutput: context?.singularityOutput,
       storedAnalysis: context?.storedAnalysis,
       runId: context?.runId || request?.context?.runId,

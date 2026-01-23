@@ -22,10 +22,6 @@ export const TraversalGateCard: React.FC<TraversalGateCardProps> = ({
   }, [resolution?.userInput]);
 
   const handleResolve = (satisfied: boolean) => {
-    if (gate.type === 'conditional' && satisfied && !userInput.trim()) {
-      setExpanded(true);
-      return;
-    }
     onResolve(gate.id, satisfied, userInput.trim() || undefined);
     setExpanded(false);
   };

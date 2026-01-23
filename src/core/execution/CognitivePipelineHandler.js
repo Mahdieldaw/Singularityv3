@@ -571,7 +571,7 @@ export class CognitivePipelineHandler {
 
 
   async handleContinueRequest(payload, stepExecutor, streamingManager, contextManager) {
-    const { sessionId, aiTurnId, providerId, selectedArtifacts, isRecompute, sourceTurnId } = payload || {};
+    const { sessionId, aiTurnId, providerId, isRecompute, sourceTurnId } = payload || {};
 
     try {
       const adapter = this.sessionManager?.adapter;
@@ -681,7 +681,6 @@ export class CognitivePipelineHandler {
           originalPrompt,
           mappingText: latestMappingText,
           mappingMeta: latestMappingMeta,
-          selectedArtifacts: Array.isArray(selectedArtifacts) ? selectedArtifacts : [],
           useThinking: payload.useThinking || false,
           isTraversalContinuation: payload.isTraversalContinuation
         },
@@ -766,6 +765,12 @@ export class CognitivePipelineHandler {
         }
       }
 
+      let finalAiTurn = aiTurn;
+      try {
+        const t = await adapter.get("turns", aiTurnId);
+        if (t) finalAiTurn = t;
+      } catch (_) { }
+
       this.port?.postMessage({
         type: "TURN_FINALIZED",
         sessionId: effectiveSessionId,
@@ -798,7 +803,10 @@ export class CognitivePipelineHandler {
             mappingResponses: buckets.mappingResponses,
             singularityResponses: buckets.singularityResponses,
             meta: aiTurn.meta || {},
-            pipelineStatus: aiTurn.pipelineStatus
+            mapperArtifact: finalAiTurn?.mapperArtifact,
+            pipelineArtifacts: finalAiTurn?.pipelineArtifacts,
+            singularityOutput: finalAiTurn?.singularityOutput,
+            pipelineStatus: finalAiTurn?.pipelineStatus || aiTurn.pipelineStatus
           },
         },
       });

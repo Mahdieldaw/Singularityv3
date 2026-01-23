@@ -130,7 +130,6 @@ export class WorkflowCompiler {
       workflowId,
       context: workflowContext,
       steps,
-      mode: request.mode,
       singularity: request.singularity,
     };
   }

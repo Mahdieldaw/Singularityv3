@@ -296,7 +296,6 @@ export const includePromptInCopyAtom = atomWithStorage<boolean>(
 
 /**
  * Feature flag for the new Cognitive Pipeline (v2)
- * REMOVED: Now controlled by selectedModeAtom ("standard" vs "auto")
  */
 
 // Provider Contexts
@@ -399,7 +398,7 @@ export const activeSplitPanelAtom = atom<{ turnId: string; providerId: string } 
 export const isSplitOpenAtom = atom((get) => get(activeSplitPanelAtom) !== null);
 
 
-export const isDecisionMapOpenAtom = atom<{ turnId: string } | null>(null);
+export const isDecisionMapOpenAtom = atom<{ turnId: string; tab?: 'graph' | 'narrative' | 'options' | 'pipeline' | 'debug' | 'concierge' } | null>(null);
 export const isDecisionMapVisibleAtom = atom((get) => get(isDecisionMapOpenAtom) !== null);
 
 
@@ -518,13 +517,4 @@ export const hasAutoOpenedPaneAtom = atom<string | null>(null);
 
 
 
-/**
- * Selected Cognitive Mode (e.g. "auto", "understand", "decide")
- * Persisted in local storage.
- */
-import { CognitiveMode } from "@shared/contract";
-
-export const selectedModeAtom = atomWithStorage<CognitiveMode>(
-  "htos_selected_mode",
-  "auto"
-);
+ 

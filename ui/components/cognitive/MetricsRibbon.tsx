@@ -30,6 +30,9 @@ export const MetricsRibbon: React.FC<MetricsRibbonProps> = ({
 
     const modelCount = landscape?.modelCount || 0;
     const ghosts = artifact?.ghosts || [];
+    const substrate = artifact?.substrate;
+    const paragraphProjection = artifact?.paragraphProjection;
+    const paragraphClustering = artifact?.paragraphClustering;
 
     // Confidence badge
     const confidence = problemStructure?.confidence;
@@ -100,6 +103,21 @@ export const MetricsRibbon: React.FC<MetricsRibbonProps> = ({
                                     <li key={`${e}-${idx}`}>• {e}</li>
                                 ))}
                             </ul>
+                        </div>
+                    )}
+                    {paragraphProjection && (
+                        <div>
+                            <span className="text-text-secondary">Paragraphs:</span> {paragraphProjection.totalParagraphs} ({paragraphProjection.contestedCount} contested)
+                        </div>
+                    )}
+                    {substrate && (
+                        <div>
+                            <span className="text-text-secondary">Substrate:</span> {substrate.shape.prior} ({Math.round(substrate.shape.confidence * 100)}%) · {substrate.topology.componentCount} components · {Math.round(substrate.topology.isolationRatio * 100)}% isolated · {substrate.meta.embeddingBackend}
+                        </div>
+                    )}
+                    {paragraphClustering && (
+                        <div>
+                            <span className="text-text-secondary">Clustering:</span> {paragraphClustering.meta.totalClusters} clusters · {paragraphClustering.meta.singletonCount} singletons · {paragraphClustering.meta.uncertainCount} uncertain
                         </div>
                     )}
                 </div>

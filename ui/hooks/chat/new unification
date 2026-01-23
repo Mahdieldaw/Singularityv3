@@ -1,0 +1,337 @@
+# Structural Analysis: Old vs New Delta + Unified Synthesis
+
+## The Core Insight
+
+You have **two complementary analysis systems** operating at different semantic levels:
+
+| Layer | Input | Output | When It Runs |
+|-------|-------|--------|--------------|
+| **Old Structural Analysis** | Claims + Edges (post-mapper) | Peaks, Patterns, Shape | After semantic mapping |
+| **New Geometric Substrate** | Paragraphs + Embeddings (pre-mapper) | kNN, Topology, Components | Before semantic mapping |
+
+**Neither replaces the other.** They form a validation loop:
+
+```
+Geometry PREDICTS → Mapper INTERPRETS → Analysis VALIDATES
+     ↑                                         ↓
+     └─────────── Feedback Loop ───────────────┘
+```
+
+---
+
+## Clarification: Same Paradigm, Refined Structure
+
+The refined plan is **not a different paradigm**—it closes concrete gaps in the first unified draft:
+
+| Gap in Earlier Draft | Refinement |
+|----------------------|------------|
+| Assumed regions = components only | **Region abstraction** (cluster \| component \| patch) |
+| No regime-adaptive controls | **AdaptiveLens** derived from substrate shape/topology |
+| Hardcoded similarity windows | **Top-N region pairs** for opposition detection |
+| Mixed physics + interpretation | **Separate directories**: `geometry/` vs `geometry/interpretation/` |
+
+---
+
+## What Stays, What Changes, What's New
+
+### Preserved From Old Layer (Still Valid)
+
+| Component | Why It Stays |
+|-----------|--------------|
+| **Peak Detection (>50% support)** | Operates on claim-level support ratios, not geometry |
+| **Pattern Detection (dissent, keystone, chain, etc.)** | Requires claim-edge topology, not just embedding proximity |
+| **CompositeShape structure** | Good schema, now gains pre-validation |
+| **Support ratio calculations** | Model-count based, claim-specific |
+| **Claim enrichment (leverage, percentile flags)** | Still needed for concierge |
+| **Transfer question generation** | Shape-dependent, runs post-analysis |
+
+### Replaced/Obsoleted
+
+| Component | Why It's Replaced | Replacement |
+|-----------|-------------------|-------------|
+| **Shape detection from claims only** | Now has geometric prior | Shape PREDICTION + VALIDATION |
+| **Cluster-is-claim assumption** | Clusters are hints, not 1:1 | Region profiles inform mapper |
+| **"No structure" as valid output** | Geometry always has structure | Substrate guarantees shape |
+| **HAC as sole grouping mechanism** | Binary success/fail | kNN + mutual + strong graphs |
+
+### New Additions
+
+| Component | Purpose |
+|-----------|---------|
+| **GeometricSubstrate** | Always-present connectivity field |
+| **Interpretation Layer** | Meaningful signals derived from substrate (pre-semantic) |
+| **AdaptiveLens** | Regime-aware controls for regionization and clustering use |
+| **Regionization (Region abstraction)** | Cluster \| component \| patch fallback for coverage |
+| **Region Profiles** | Peak/hill/floor + purity + geometry (ratio-based) |
+| **Semantic Oppositions** | Top-N region-pair detection without fixed windows |
+| **Mapper Geometric Hints** | Structural hints payload for the semantic mapper |
+| **Post-Semantic Validation** | Audit predicted vs actual structure; score fidelity |
+| **Shape Persistence** | Multi-threshold stability |
+
+---
+
+## The Unified Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ LAYER 0: GEOMETRIC SUBSTRATE (Always Present)                               │
+│                                                                             │
+│   GeometricSubstrate {                                                      │
+│     nodes: NodeLocalStats[]       // Per-paragraph metrics                  │
+│     graphs: { knn, mutual, strong }                                         │
+│     topology: { components, isolationRatio, density }                       │
+│     meta: { embeddingSuccess, quantization, timing }                        │
+│     shape: { prior, confidence, evidence }                                  │
+│   }                                                                         │
+│                                                                             │
+│   Guarantee: NEVER null. Even if embeddings fail → degenerate substrate.   │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    ↓
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ LAYER 1: INTERPRETATION (Pre-Semantic)                                      │
+│                                                                             │
+│   deriveLens() → buildRegions() → profileRegions() → detectOppositions()    │
+│                     → buildMapperGeometricHints()                           │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    ↓
+                          [SEMANTIC MAPPER]
+                                    ↓
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ LAYER 2: CLAIM ANALYSIS (Post-Semantic - YOUR EXISTING LAYER)               │
+│                                                                             │
+│   EnrichedClaim {                                                           │
+│     id, label, text, type, role                                             │
+│     supportRatio: number          // From model count                       │
+│     leverage: number              // Structural importance                  │
+│     isHighSupport, isLeverageInversion, isKeystone                         │
+│   }                                                                         │
+│                                                                             │
+│   CompositeShape {                                                          │
+│     primary: PrimaryShape                                                   │
+│     confidence: number                                                      │
+│     peaks: ClaimReference[]                                                 │
+│     patterns: SecondaryPattern[]  // dissent, keystone, chain, etc.        │
+│     transferQuestion: string                                                │
+│   }                                                                         │
+│                                                                             │
+│   StructuralAnalysis {                                                      │
+│     landscape: { claimCount, modelCount, dominantType, convergenceRatio }  │
+│     shape: CompositeShape                                                   │
+│     ratios: { concentration, tension, fragmentation, depth }               │
+│     claimsWithLeverage: EnrichedClaim[]                                    │
+│   }                                                                         │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    ↓
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ LAYER 3: VALIDATION (Pre vs Post Reconciliation)                            │
+│                                                                             │
+│   StructuralValidation {                                                    │
+│     shapeMatch: boolean           // predicted == actual?                   │
+│     tierAlignment: number         // region peaks → claim peaks?            │
+│     missedConflicts: Violation[]  // geometry saw fork, no conflict edge   │
+│     falseConflicts: Violation[]   // conflict edge, no geometric evidence  │
+│     dissentAlignment: number      // predicted dissent → actual pattern?   │
+│     overallFidelity: number       // 0-1 score                             │
+│     confidence: 'high' | 'medium' | 'low'                                  │
+│   }                                                                         │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Synthesized Authoritative Unified Plan
+
+### Directory Structure (Physics vs Interpretation)
+
+```
+src/geometry/
+├── types.ts
+├── knn.ts
+├── threshold.ts
+├── topology.ts
+├── nodes.ts
+├── shape.ts
+├── substrate.ts
+├── index.ts
+│
+└── interpretation/
+    ├── types.ts
+    ├── lens.ts
+    ├── regions.ts
+    ├── profiles.ts
+    ├── opposition.ts
+    ├── guidance.ts
+    ├── validation.ts
+    └── index.ts
+```
+
+The geometry module remains pure measurement. The interpretation layer is the only place that turns geometry into mapper-facing meaning.
+
+---
+
+### What Gets Moved Out Of The Draft `unified.ts`
+
+| Draft Concept | Status | New Location |
+|--------------|--------|--------------|
+| `RegionProfile` | Refined (region-based, ratio-only) | `geometry/interpretation/types.ts` |
+| `ShapePrediction` | Kept (but uses substrate prior) | `geometry/interpretation/types.ts` |
+| `MapperGuidance` | Renamed to `MapperGeometricHints` | `geometry/interpretation/types.ts` |
+| `StructuralValidation` | Kept | `geometry/interpretation/types.ts` |
+| `buildRegionProfiles()` | Replaced by `profileRegions()` | `geometry/interpretation/profiles.ts` |
+| `predictShape()` | Simplified to substrate-shape prior | `geometry/interpretation/guidance.ts` |
+| Opposition detection | Refactored to top-N pairs | `geometry/interpretation/opposition.ts` |
+| `validateStructuralMapping()` | Kept (now region-aware) | `geometry/interpretation/validation.ts` |
+
+---
+
+### Interpretation Layer Pipeline (Authoritative)
+
+```
+Substrate (always exists)
+        ↓
+    deriveLens()
+        ↓
+    buildRegions()          (cluster → component → patch fallback)
+        ↓
+    profileRegions()        (peak/hill/floor + purity + geometry; ratio-only)
+        ↓
+    detectOppositions()     (top-N region pairs; no fixed similarity windows)
+        ↓
+    buildMapperGeometricHints()
+        ↓
+    [SEMANTIC MAPPER]
+        ↓
+    computeStructuralAnalysis() / computeFullAnalysis()
+        ↓
+    validateStructuralMapping()
+```
+
+---
+
+### Core Types (Interpretation Layer)
+
+The single rule: model-count signals are expressed as ratios, never as absolute numbers.
+
+```typescript
+import type { Stance } from '../../shadow/StatementTypes';
+import type { PrimaryShape, StructuralAnalysis } from '../../../shared/contract';
+import type { GeometricSubstrate } from '../types';
+
+export interface AdaptiveLens {
+  regime: 'fragmented' | 'parallel_components' | 'bimodal_fork' | 'convergent_core';
+  shouldRunClustering: boolean;
+  hardMergeThreshold: number;
+  softThreshold: number;
+  k: number;
+  confidence: number;
+  evidence: string[];
+}
+
+export interface Region {
+  id: string;
+  kind: 'cluster' | 'component' | 'patch';
+  nodeIds: string[];
+  statementIds: string[];
+  sourceId: string;
+  modelIndices: number[];
+}
+
+export interface RegionProfile {
+  regionId: string;
+  tier: 'peak' | 'hill' | 'floor';
+  tierConfidence: number;
+  mass: { nodeCount: number; modelDiversity: number; modelDiversityRatio: number };
+  purity: {
+    dominantStance: Stance;
+    stanceUnanimity: number;
+    contestedRatio: number;
+    stanceVariety: number;
+  };
+  geometry: { internalDensity: number; isolation: number; avgInternalSimilarity: number };
+  predicted: { likelyClaims: number };
+}
+
+export interface ShapePrediction {
+  predicted: PrimaryShape;
+  confidence: number;
+  evidence: string[];
+}
+
+export interface MapperGeometricHints {
+  predictedShape: ShapePrediction;
+  expectedClaimCount: [number, number];
+  expectedConflicts: number;
+  expectedDissent: boolean;
+  attentionRegions: Array<{
+    regionId: string;
+    priority: 'high' | 'medium' | 'low';
+    reason:
+      | 'semantic_opposition'
+      | 'high_isolation'
+      | 'stance_inversion'
+      | 'uncertain'
+      | 'bridge'
+      | 'low_cohesion';
+    guidance: string;
+  }>;
+}
+
+export interface PreSemanticInterpretation {
+  lens: AdaptiveLens;
+  regions: Region[];
+  regionProfiles: RegionProfile[];
+  oppositions: Array<{ regionA: string; regionB: string; similarity: number; reason: string }>;
+  hints: MapperGeometricHints;
+}
+```
+
+---
+
+### Integration: Unified Runtime Payload
+
+The authoritative unified payload is not “one file”; it is one composed output that ties physics + interpretation + post-semantic truth + validation.
+
+```typescript
+import type { StructuralValidation } from '../geometry/interpretation/types';
+
+export interface UnifiedStructuralAnalysis {
+  substrate: GeometricSubstrate;
+  preSemantic: PreSemanticInterpretation;
+  postSemantic: StructuralAnalysis;
+  validation: StructuralValidation;
+}
+```
+
+---
+
+### What Your Old Layer Still Does (Preserved Truth)
+
+| Existing Component | Status | Role |
+|-------------------|--------|------|
+| `computeStructuralAnalysis()` | Preserved | Post-semantic ground truth from mapper artifact |
+| `computeFullAnalysis()` | Preserved | Post-semantic analysis + shadow extraction/delta |
+| Shape + pattern detection | Preserved | Runs on claims/edges where it belongs |
+| Claim enrichment | Preserved | Support ratios, leverage, percentiles for UX |
+
+---
+
+### Key Differences: Region Tier vs Claim Peak
+
+| Aspect | Region Tier (Pre-Semantic) | Claim Peak (Post-Semantic) |
+|--------|----------------------------|----------------------------|
+| Input | Density + diversity ratios + stance purity | Support ratios from model count |
+| Unit | Regions (cluster/component/patch) | Claims |
+| Purpose | Predict structure and guide mapper | Confirm structure and explain it |
+| Can disagree? | Yes (that is what validation measures) | N/A |
+
+---
+
+### Summary: One Closed Loop
+
+```
+Geometry (substrate) measures → Interpretation predicts → Mapper writes claims
+                          ↓                          ↑
+                  Validation audits ← Post-semantic analysis confirms
+```
+
+This file is the authoritative plan: the earlier single-file `unified.ts` draft is superseded by the split physics/interpretation architecture and the region/lens/top-N refinements.

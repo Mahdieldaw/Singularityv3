@@ -17,7 +17,6 @@ import {
   currentAppStepAtom,
   uiPhaseAtom,
   isHistoryPanelOpenAtom,
-  selectedModeAtom,
   activeProviderTargetAtom,
   batchAutoRunEnabledAtom,
 } from "../../state/atoms";
@@ -49,7 +48,6 @@ export function useChat() {
   const currentSessionId = useAtomValue(currentSessionIdAtom);
   const turnIds = useAtomValue(turnIdsAtom);
   const singularityProvider = useAtomValue(singularityProviderAtom);
-  const selectedMode = useAtomValue(selectedModeAtom);
   const batchAutoRunEnabled = useAtomValue(batchAutoRunEnabledAtom);
 
 
@@ -149,7 +147,6 @@ export function useChat() {
             }),
             providerMeta: {},
             clientUserTurnId: userTurnId,
-            mode: selectedMode as any,
           }
           : {
             type: "extend",
@@ -172,7 +169,6 @@ export function useChat() {
             }),
             providerMeta: {},
             clientUserTurnId: userTurnId,
-            mode: selectedMode as any,
             batchAutoRunEnabled, // FEATURE 1: Gate batch after turn 1
           };
 
@@ -200,7 +196,6 @@ export function useChat() {
       singularityProvider,
       thinkOnChatGPT,
       turnIds,
-      selectedMode,
       batchAutoRunEnabled,
     ],
   );
@@ -357,6 +352,7 @@ export function useChat() {
               singularityResponses: normalizeResponseMap(singularityRaw),
               // Cognitive pipeline structured outputs
               mapperArtifact: round.mapperArtifact || undefined,
+              pipelineArtifacts: round.pipelineArtifacts || undefined,
               singularityOutput: round.singularityOutput || undefined,
               pipelineStatus: round.pipelineStatus || undefined,
             };

@@ -120,31 +120,84 @@ export function buildSemanticMapperPrompt(
     console.log(`[SemanticMapper] Skipping cluster block`);
   }
 
-  return `You are a Semantic Cartographer. Group extracted statements into claims with structural relationships.
+  const shapeSignal = `Stance codes: ${STANCE_LEGEND}`;
 
-<query>${userQuery}</query>
+  return `You are the Epistemic Cartographer. Your mandate is the Incorruptible Distillation of Signal—preserving every incommensurable insight while discarding only connective tissue that adds nothing to the answer.
+
+${shapeSignal}
+
+<user_query>
+${userQuery}
+</user_query>
 
 <statements>
-# Format: id|stance|text  (* before paragraph = contested)
-# Stances: ${STANCE_LEGEND}
 ${statementsBlock}
 </statements>${clusterSection}
 
 # Task
-1. Group statements expressing the same position into claims
-2. Identify gates (conditionals, prerequisites) and conflicts
-3. For each gate/conflict, provide a resolution question
 
-# Rules
-- Cite only statement IDs (s_*), never p_* or pc_*
-- Contested paragraphs (*) may contain multiple positions
-- Uncertain clusters need review
-- Do not output an "edges" field anywhere
-- The only relationship fields are "enables" and "conflicts"
-- Every claim/gate/conflict needs sourceStatementIds
+You are not a synthesizer. Your job: Index positions, not topics.
 
-# Output (JSON only)
-{"claims":[{"id":"c_0","label":"...","stance":"...","gates":{"conditionals":[],"prerequisites":[]},"enables":[],"conflicts":[],"sourceStatementIds":["s_0"]}]}`;
+A position is a stance—something that can be supported, opposed, or traded against another.
+
+- Where multiple sources reach the same position → note convergence
+- Where only one source sees something → preserve as singularity  
+- Where sources oppose each other → map the conflict
+- Where they optimize for different ends → map the tradeoff
+- Where one position depends on another → map the prerequisite
+- What no source addressed but matters → these are the ghosts
+
+Every distinct position receives a canonical label and sequential ID. That exact pairing—**[Label|claim_N]**—binds your map to your narrative.
+
+# Output
+
+Produce two outputs: <map> and <narrative>
+
+<map>
+A JSON object with three arrays:
+
+**claims**: each has:
+- id: sequential ("claim_1", "claim_2", ...)
+- label: verb-phrase expressing a position (stance that can be agreed with, opposed, traded off)
+- text: the mechanism, evidence, or reasoning (one sentence)
+- supporters: array of model indices that expressed this
+- type: epistemic nature
+  - factual: verifiable truth
+  - prescriptive: recommendation or ought-statement
+  - conditional: truth depends on unstated context
+  - contested: models actively disagree
+  - speculative: prediction or uncertain projection
+- role: "challenger" if this questions a premise or reframes; null otherwise
+- challenges: if challenger, the claim_id being challenged; null otherwise
+
+**edges**: each has:
+- from: source claim_id
+- to: target claim_id  
+- type:
+  - supports: from reinforces to
+  - conflicts: from and to cannot both be true
+  - tradeoff: from and to optimize for different ends
+  - prerequisite: to depends on from being true
+
+**ghosts**: what no source addressed that would matter. Null if none.
+</map>
+
+<narrative>
+Not a summary. A landscape the reader walks through. Use **[Label|claim_id]** anchors.
+
+Begin with the governing variable—if tradeoff or conflict edges exist, name the dimension along which the answer pivots.
+
+Signal the shape: converging? splitting into camps? sequential chain?
+
+Establish the ground: claims with broad support are the floor.
+
+Move to the tension: claims with conflict or tradeoff edges. Present opposing positions—the axis should be visible in the verb-phrases. Do not resolve; reveal what choosing requires.
+
+Surface the edges: claims with few supporters but high connectivity, or challenger role. Place adjacent to what they challenge.
+
+Close with what remains uncharted. Ghosts are the boundary.
+
+Do not synthesize a verdict. The landscape is the product.`;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

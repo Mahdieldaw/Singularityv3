@@ -192,6 +192,7 @@ export class TurnEmitter {
         },
         // Cognitive artifacts
         mapperArtifact: context?.mapperArtifact || undefined,
+        pipelineArtifacts: context?.pipelineArtifacts || undefined,
         singularityOutput: context?.singularityOutput || undefined,
       };
 

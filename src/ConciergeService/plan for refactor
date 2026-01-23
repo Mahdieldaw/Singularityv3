@@ -1,0 +1,349 @@
+Phase 2: Semantic Mapper
+File: semanticMapper.ts
+Remove these helper functions:
+
+buildCompactStatementBlock — no longer sending IDs to mapper
+buildCompactClusterBlock — no longer sending cluster metadata to mapper
+Add new helper function buildCleanModelOutputs:
+
+Takes paragraphs grouped by model and produces clean text. For each model index, collect all statement texts from that model's paragraphs and join them. Separate models with a header like [Model 0] and use --- between different models. No IDs, no stance codes, no metadata. Just the actual text content.
+
+Add new helper function buildShapeSignal:
+
+Takes the geometric substrate and returns a one-sentence signal. Map the shape prior to guidance:
+
+"fragmented" → "Responses are scattered with weak clustering. Preserve distinct positions as separate claims."
+"convergent_core" → "Strong agreement exists with peripheral variations. Most positions will have multiple supporters."
+"bimodal_fork" → "Clear split into opposing camps. Expect conflict edges between the two sides."
+"parallel_components" → "Multiple distinct threads running in parallel. Look for prerequisite chains rather than conflicts."
+If substrate is degenerate or unavailable, return a neutral signal indicating geometric analysis was unavailable.
+
+Update buildSemanticMapperPrompt:
+
+Change the function signature to accept: userQuery, paragraphs (ShadowParagraph array), and substrate (GeometricSubstrate).
+
+Replace the prompt content entirely. The new prompt should contain:
+
+Opening identity statement establishing the Epistemic Cartographer role with mandate to distill signal while preserving incommensurable insights.
+
+Shape signal section using the helper above.
+
+User query section with the original query.
+
+Model outputs section with the clean text from buildCleanModelOutputs.
+
+Task description explaining:
+
+Index positions not topics
+A position is a stance that can be supported, opposed, or traded against
+Where multiple sources reach the same position, note convergence in supporters array
+Where sources oppose each other, create conflict edges
+Where one position depends on another, create prerequisite edges
+Identify conditionals that test unchangeable facts about user situation
+Instructions for conditionals:
+
+Generate binary yes/no questions about unchangeable facts
+Questions should be answerable without technical knowledge
+If answered NO, the affected claims become inapplicable
+Example: "Are you deploying to a browser environment?" — if NO, browser-specific claims are pruned
+Instructions for conflict edges:
+
+For each conflict, identify the underlying tradeoff dimension
+Generate a question about user values, not technical choices
+User should be able to answer based on their situation
+Bad example: "Do you want Jaccard or Embeddings?"
+Good example: "Do you need to detect when different phrasings express the same idea, or is matching exact words sufficient?"
+Output format specification requesting:
+
+<map> tag containing JSON with claims, edges, conditionals arrays
+<narrative> tag containing the walkable landscape prose
+The claims format should specify: id (sequential), label (verb-phrase), text (one sentence), supporters (model indices array), role (challenger or anchor), challenges (claim id or null).
+
+The edges format should specify: from, to, type (prerequisite or conflict), question (required for conflict).
+
+The conditionals format should specify: id, question, affectedClaims array.
+
+Update parseSemanticMapperOutput:
+
+Change the function to parse the new schema. Extract content from <map> and <narrative> tags. Parse the JSON from the map section.
+
+Validation should check:
+
+Every conflict edge has a question field
+Every conditional has a non-empty affectedClaims array
+Role defaults to "anchor" if not specified
+Challenges defaults to null if not specified
+Remove all validation related to sourceStatementIds, gates, or the old schema.
+
+Return a ParseResult containing the MapperOutput or errors.
+
+
+
+Phase 3: Provenance Reconstruction
+File: claimAssembly.ts
+Add new function reconstructProvenance:
+
+This function takes:
+
+claims: MapperClaim array from mapper output
+statements: ShadowStatement array from shadow extraction
+paragraphs: ShadowParagraph array
+paragraphEmbeddings: Map from paragraph ID to Float32Array
+The function should:
+
+First, build an array of claim texts by concatenating each claim's label and text with a period between them.
+
+Call the embedding infrastructure to embed all claim texts in a single batch. This uses the same embedding function already used for paragraphs.
+
+For each claim:
+
+Get that claim's embedding from the batch result
+Filter paragraphs to only those where modelIndex is in the claim's supporters array
+For each candidate paragraph, compute cosine similarity between claim embedding and paragraph embedding
+Keep paragraphs with similarity above 0.5
+Sort by similarity descending and take top 5
+Collect all statement IDs from the matched paragraphs (via paragraph.statementIds)
+Look up the actual ShadowStatement objects for those IDs
+Compute supportRatio as supporters.length divided by total model count
+Compute signal flags by checking if any source statement has that signal
+Return an array of EnrichedClaim objects with all the reconstructed fields attached.
+
+Update assembleClaims:
+
+Change the function signature. It should now receive the MapperOutput and call reconstructProvenance internally, or receive already-enriched claims.
+
+The function should:
+
+Call reconstructProvenance to get EnrichedClaim array
+Build any inverse relationships needed (though with only prerequisite and conflict edges, this may not be necessary)
+Return the enriched claims
+Remove any code that assumes sourceStatementIds came from the mapper output.
+
+Remove the old gate-based processing.
+
+Remove or simplify the provenance validation functions that checked mapper-provided statement IDs. The validation now happens during reconstruction (if a claim can't be matched to any statements, that's a warning).
+
+Phase 4: Traversal
+File: traversal.ts
+Remove the existing tier computation logic that was based on gates and prerequisites as blockers.
+
+Add new function buildTraversalGraph:
+
+Takes:
+
+claims: EnrichedClaim array
+edges: MapperEdge array
+conditionals: ConditionalPruner array
+Returns a structure containing the claims and information needed for forcing point extraction.
+
+Add new function initializeTraversalState:
+
+Takes claims array.
+
+Returns a TraversalState with:
+
+claimStatuses: Map with every claim ID set to "active"
+unavailableReasons: empty Map
+conditionalAnswers: empty Map
+prerequisiteStatuses: empty Map
+conflictResolutions: empty Map
+Add new function applyConditionalAnswer:
+
+Takes:
+
+state: TraversalState
+conditionalId: string
+answer: "yes" | "no" | "unsure"
+conditional: ConditionalPruner
+edges: MapperEdge array
+If answer is "unsure", just record the answer and return the state unchanged otherwise.
+
+If answer is "yes" or "no":
+
+Record the answer
+If answer is "no", mark all affectedClaims as "pruned"
+Run cascade: for each newly pruned claim, find prerequisite edges where that claim is the "from" side. Mark the "to" claims as "unavailable" and record the reason as "Missing: [pruned claim label]". Recurse for newly unavailable claims.
+Return the updated state.
+
+Add new function applyPrerequisiteAnswer:
+
+Takes:
+
+state: TraversalState
+claimId: string
+answer: "has" | "lacks" | "unknown"
+Simply record the answer in prerequisiteStatuses. No pruning, no cascading. Return the updated state.
+
+Add new function applyConflictResolution:
+
+Takes:
+
+state: TraversalState
+forcingPointId: string
+chosenClaimId: string
+rejectedClaimId: string
+edges: MapperEdge array
+Mark the rejected claim as "pruned". Run cascade for the rejected claim (same logic as conditional cascade). Record the resolution. Return the updated state.
+
+Add new function checkAutoResolutions:
+
+Takes:
+
+forcingPoints: ConflictForcingPoint array
+state: TraversalState
+For each conflict forcing point that is still "pending":
+
+Check if optionA's claim is active and optionB's claim is not active (pruned or unavailable)
+If so, mark the forcing point as "auto_resolved" with autoResolvedTo set to optionA
+Check the reverse (optionB active, optionA not active)
+If both are not active, the conflict is moot (both eliminated)
+If both are active, it remains pending
+Return the updated forcing points array.
+
+Remove the old computeTiers, getCascade, updateTensionLiveness functions. The new model doesn't use the gate-based tier system or the tension liveness concept.
+
+Phase 5: Forcing Points
+File: forcingPoints.ts
+Replace extractForcingPoints function:
+
+Takes:
+
+claims: EnrichedClaim array
+edges: MapperEdge array
+conditionals: ConditionalPruner array
+Build three lists:
+
+Tier 0 - Conditionals:
+For each conditional, create a ConditionalForcingPoint with:
+
+id: generated like "fp_cond_0"
+tier: 0
+type: "conditional"
+question: from the conditional
+affectedClaims: from the conditional
+Tier 1 - Prerequisites:
+Find all unique claim IDs that appear as the "from" side of prerequisite edges. For each:
+
+Find the claim by ID to get its label
+Find all claims that require this one (where this claim is "from" in a prerequisite edge, collect the "to" claims)
+Create a PrerequisiteForcingPoint with:
+id: generated like "fp_prereq_0"
+tier: 1
+type: "prerequisite"
+claimId: the prerequisite claim's ID
+claimLabel: the prerequisite claim's label
+question: "Do you have " + claimLabel + "?"
+requiredBy: array of claim IDs that need this
+Tier 2 - Conflicts:
+For each edge where type is "conflict":
+
+Find both claims by ID
+Create a ConflictForcingPoint with:
+id: generated like "fp_conflict_0"
+tier: 2
+type: "conflict"
+question: from the edge
+optionA: { claimId: from claim ID, label: from claim label }
+optionB: { claimId: to claim ID, label: to claim label }
+status: "pending"
+Return all forcing points sorted by tier.
+
+Update getLiveForcingPoints:
+
+Takes:
+
+forcingPoints: ForcingPoint array
+state: TraversalState
+Return forcing points that are:
+
+Not yet answered (conditionals: not in conditionalAnswers, prerequisites: not in prerequisiteStatuses, conflicts: status is "pending")
+For conflicts: both claims must be "active" in claimStatuses (if either is pruned/unavailable, it was auto-resolved)
+Update getNextForcingPoint:
+
+Returns the first live forcing point, or null if none remain. Process in tier order: all tier 0 first, then tier 1, then tier 2.
+
+Remove the old gate-based extraction logic, gateToFp mapping, and tension-based conflict extraction.
+
+Phase 6: Shadow Delta
+File: ShadowDelta.ts
+Update extractReferencedIds:
+
+The current function walks through claims extracting sourceStatementIds from various nested locations (claims, gates, conflicts).
+
+Change it to simply accept an array of EnrichedClaim and extract sourceStatementIds from each claim directly. The enriched claims have a flat sourceStatementIds array after reconstruction.
+
+Alternatively, change the signature to accept referencedIds: string[] directly, passed in from claimAssembly after reconstruction.
+
+Update computeShadowDelta:
+
+Change the referencedStatementIds parameter to accept a Set or array directly, rather than extracting from mapper output.
+
+The rest of the delta computation (ranking unreferenced by relevance and signals) remains the same.
+
+Phase 7: Step Executor Integration
+File: StepExecutor.js
+In executeMappingStep:
+
+Find the section after paragraph projection and clustering where geometry/embeddings are computed.
+
+Retain embeddings: After embeddingResult is obtained, store it in a variable that persists through the rest of the function. Currently it may be scoped inside a try block. Move the reference so it's available for provenance reconstruction later.
+
+Update mapper prompt building: Change the call to buildSemanticMapperPrompt to pass:
+
+payload.originalPrompt (the user query)
+paragraphResult.paragraphs
+substrate (the geometric substrate)
+Remove any parameters related to clusters or statement arrays.
+
+After mapper execution and parsing: Where the parseResult is checked for success:
+
+Import and call reconstructProvenance from claimAssembly. Pass:
+
+parseResult.output.claims
+shadowResult.statements
+paragraphResult.paragraphs
+embeddingResult.embeddings (the retained embeddings Map)
+This returns an array of EnrichedClaim.
+
+Build forcing points: Import and call extractForcingPoints from forcingPoints. Pass the enriched claims, edges, and conditionals from the mapper output.
+
+Update shadow delta: Call computeShadowDelta with the statement IDs extracted from the enriched claims (flatMap the sourceStatementIds arrays).
+
+Build the final artifact: Construct a MapperArtifact containing:
+
+claims: the enriched claims
+edges: from mapper output
+conditionals: from mapper output
+narrative: from mapper output
+forcingPoints: from extraction
+shadow: containing statements, audit, and topUnreferenced
+substrate: the summary (already being built)
+query, turn, modelCount: from payload and context
+Remove v2-to-v1 adapter call: Delete the import and all calls to convertV2toV1. The mapper now outputs the format downstream expects.
+
+Remove legacy fallbacks: Delete any code paths that check for old gate structures or fall back to different formats.
+
+Phase 8: Cleanup
+File: ConciergeService/contract.ts
+Delete this file entirely. All types are now in shared/contract.ts.
+
+Update any imports that referenced this file to import from shared instead.
+
+File: ConciergeService/v2-to-v1-adapter.ts
+Delete this file entirely.
+
+Remove all imports of this adapter from StepExecutor and anywhere else.
+
+File: shared/parsing-utils.ts
+Update the parsing utilities to work with the new schema.
+
+If there are separate parsing paths for V1 vs V2, consolidate to a single path that handles the new MapperOutput format.
+
+The parser should:
+
+Extract <map> content and parse as JSON
+Extract <narrative> content as string
+Validate the JSON structure matches MapperOutput
+Return the parsed output or errors
+Remove any validation logic specific to the old gate-based schema (checking for sourceStatementIds, ConditionalGate arrays, etc.).
+

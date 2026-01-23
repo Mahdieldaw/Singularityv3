@@ -47,8 +47,6 @@
         "oi.js",
         "src/oi.js",
         "models/*",
-        "models/all-MiniLM-L6-v2/*",
-        "models/all-MiniLM-L6-v2/onnx/*",
         "onnx/*"
       ],
       "matches": [

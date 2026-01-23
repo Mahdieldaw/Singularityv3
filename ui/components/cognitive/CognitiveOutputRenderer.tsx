@@ -6,7 +6,7 @@ import { SingularityOutputState } from '../../hooks/useSingularityOutput';
 import { CouncilOrbs } from '../CouncilOrbs';
 import { LLM_PROVIDERS_CONFIG } from '../../constants';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { selectedModelsAtom, workflowProgressForTurnFamily, activeSplitPanelAtom, currentSessionIdAtom, turnStreamingStateFamily } from '../../state/atoms';
+import { selectedModelsAtom, workflowProgressForTurnFamily, activeSplitPanelAtom, currentSessionIdAtom, turnStreamingStateFamily, isDecisionMapOpenAtom } from '../../state/atoms';
 import { MetricsRibbon } from './MetricsRibbon';
 import StructureGlyph from '../StructureGlyph';
 import { computeProblemStructureFromArtifact, computeStructuralAnalysis } from '../../../src/core/PromptMethods';
@@ -40,13 +40,14 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
         if (options.providerId) {
             singularityState.setPinnedProvider(options.providerId);
         }
-        await runSingularity(aiTurn.id, options);
+        await runSingularity(aiTurn.id, { ...options, isRecompute: true, sourceTurnId: aiTurn.id });
     };
 
     const selectedModels = useAtomValue(selectedModelsAtom);
     const workflowProgress = useAtomValue(workflowProgressForTurnFamily(aiTurn.id));
     const streamingState = useAtomValue(turnStreamingStateFamily(aiTurn.id));
     const setActiveSplitPanel = useSetAtom(activeSplitPanelAtom);
+    const setDecisionMapOpen = useSetAtom(isDecisionMapOpenAtom);
     const currentSessionId = useAtomValue(currentSessionIdAtom);
     const effectiveSessionId = currentSessionId || aiTurn.sessionId;
 
@@ -134,6 +135,17 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
         <div className="w-full max-w-3xl mx-auto animate-in fade-in duration-500">
             {/* === UNIFIED HEADER (Toggle + Orbs + Metrics) === */}
             <div className="flex flex-col gap-6 mb-8">
+                <div className="flex justify-center">
+                    <button
+                        type="button"
+                        onClick={() => setDecisionMapOpen({ turnId: aiTurn.id, tab: 'pipeline' })}
+                        className="px-3 py-2 bg-surface-highlight border border-border-strong rounded-lg text-text-secondary cursor-pointer transition-all duration-200 hover:bg-surface-raised flex items-center gap-2"
+                        aria-label="Open debug pipeline artifacts for this turn"
+                    >
+                        <span>Debug</span>
+                    </button>
+                </div>
+
                 {canShowTraversal && canShowResponse && (
                     <div className="flex justify-center">
                         <button

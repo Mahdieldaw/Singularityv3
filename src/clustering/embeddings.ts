@@ -107,8 +107,7 @@ export async function generateEmbeddings(
                     // Defensive check: ensure embedding entry exists and is valid array
                     const rawEntry = response.result.embeddings?.[i];
                     if (!rawEntry || !Array.isArray(rawEntry) || rawEntry.length === 0) {
-                        console.warn(`[embeddings] Missing or malformed embedding for id: ${ids[i]}`);
-                        continue;
+                        throw new Error(`Missing or malformed embedding for paragraph ${ids[i]}`);
                     }
 
                     const rawData = rawEntry as number[];
