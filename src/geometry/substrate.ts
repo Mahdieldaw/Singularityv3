@@ -59,6 +59,7 @@ export function buildGeometricSubstrate(
             paragraphs,
             'insufficient_paragraphs',
             embeddingBackend,
+            config,
             performance.now() - startTime
         );
     }
@@ -71,6 +72,7 @@ export function buildGeometricSubstrate(
             paragraphs,
             'embedding_failure',
             embeddingBackend,
+            config,
             performance.now() - startTime
         );
     }
@@ -94,6 +96,7 @@ export function buildGeometricSubstrate(
             paragraphs,
             'all_embeddings_identical',
             embeddingBackend,
+            config,
             performance.now() - startTime
         );
     }
@@ -202,6 +205,7 @@ function buildDegenerateSubstrate(
     paragraphs: ShadowParagraph[],
     reason: DegenerateReason,
     embeddingBackend: 'webgpu' | 'wasm' | 'none',
+    config: SubstrateConfig,
     buildTimeMs: number
 ): DegenerateSubstrate {
     const paragraphIds = paragraphs.map(p => p.id);
@@ -257,11 +261,11 @@ function buildDegenerateSubstrate(
         nodes,
 
         graphs: {
-            knn: { k: 5, edges: [], adjacency: new Map(emptyAdjacency) },
-            mutual: { k: 5, edges: [], adjacency: new Map(emptyAdjacency) },
+            knn: { k: config.k, edges: [], adjacency: new Map(emptyAdjacency) },
+            mutual: { k: config.k, edges: [], adjacency: new Map(emptyAdjacency) },
             strong: {
                 softThreshold: 0,
-                thresholdMethod: 'p80_top1',
+                thresholdMethod: config.threshold.method,
                 edges: [],
                 adjacency: new Map(emptyAdjacency)
             },

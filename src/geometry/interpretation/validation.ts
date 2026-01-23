@@ -63,14 +63,18 @@ export function validateStructuralMapping(
     const actualConflictEdges = postSemantic.edges.filter(e => e.type === 'conflicts').length;
 
     const conflictPrecision =
+        actualConflictEdges > 0
+            ? Math.min(1, expectedConflicts / actualConflictEdges)
+            : expectedConflicts === 0
+                ? 1
+                : 0;
+
+    const conflictRecall =
         expectedConflicts > 0
             ? Math.min(1, actualConflictEdges / expectedConflicts)
             : actualConflictEdges === 0
                 ? 1
                 : 0;
-
-    const conflictRecall =
-        expectedConflicts > 0 ? Math.min(1, actualConflictEdges / expectedConflicts) : 1;
 
     if (expectedConflicts > 0 && actualConflictEdges === 0) {
         violations.push({

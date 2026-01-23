@@ -129,7 +129,11 @@ export function buildRegions(
 
         for (const node of stillUncovered) {
             const patchKey = [...node.mutualNeighborhoodPatch].sort().join('|');
-            if (!patchMap.has(patchKey)) patchMap.set(patchKey, patchKey.split('|'));
+            if (!patchMap.has(patchKey)) {
+                patchMap.set(patchKey, [node.paragraphId]);
+            } else {
+                patchMap.get(patchKey)!.push(node.paragraphId);
+            }
         }
 
         for (const patchNodeIds of patchMap.values()) {

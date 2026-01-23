@@ -4,10 +4,10 @@ import type { LLMProvider } from "../types";
 import { ChatGPTIcon, ClaudeIcon, GeminiIcon, QwenIcon } from "./providerIcons";
 
 // Import SVG Logos
-import ChatGPTLogo from "../assets/chatgpt.svg";
-import ClaudeLogo from "../assets/claude.svg";
-import GeminiLogo from "../assets/gemini.svg";
-import QwenLogo from "../assets/qwen.svg";
+import ChatGPTLogo from "../assets/providers/chatgpt.svg";
+import ClaudeLogo from "../assets/providers/claude.svg";
+import GeminiLogo from "../assets/providers/gemini.svg";
+import QwenLogo from "../assets/providers/qwen.svg";
 
 // Central registry for provider metadata used by the UI (lanes/rail)
 // - Do NOT hard-code hex colors inside Rail; colors live here (or in tokens)

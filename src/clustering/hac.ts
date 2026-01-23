@@ -123,8 +123,8 @@ export function hierarchicalCluster(
         // HARD STOP: Never merge beyond threshold
         if (minDist > distanceThreshold) {
             // Safety cap: warn if approaching limit, but don't force bad merges
-            if (active.size <= config.maxClusters) {
-                console.warn(
+            if (active.size > config.maxClusters * 0.8) {
+                console.debug(
                     `[HAC] Stopping at ${active.size} clusters (threshold exceeded). ` +
                     `Consider lowering similarityThreshold if more clusters needed.`
                 );

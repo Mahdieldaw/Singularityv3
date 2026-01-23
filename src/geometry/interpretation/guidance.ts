@@ -101,16 +101,6 @@ function buildAttentionRegions(
         const regionId = profile.regionId;
         const regionOppositions = oppositions.filter(o => o.regionA === regionId || o.regionB === regionId);
 
-        if (regionOppositions.length > 0 && profile.tier !== 'floor' && !seen.has(regionId)) {
-            seen.add(regionId);
-            attentionRegions.push({
-                regionId,
-                reason: 'semantic_opposition',
-                priority: profile.tier === 'peak' ? 'high' : 'medium',
-                guidance: `Opposes ${regionOppositions.length} region(s). Expect conflict edge.`,
-            });
-        }
-
         if (profile.tier === 'hill') {
             const opposingPeaks = regionOppositions.filter(o => {
                 const otherId = o.regionA === regionId ? o.regionB : o.regionA;
@@ -126,6 +116,16 @@ function buildAttentionRegions(
                     guidance: 'Hill challenging peak consensus. Likely dissent pattern.',
                 });
             }
+        }
+
+        if (regionOppositions.length > 0 && profile.tier !== 'floor' && !seen.has(regionId)) {
+            seen.add(regionId);
+            attentionRegions.push({
+                regionId,
+                reason: 'semantic_opposition',
+                priority: profile.tier === 'peak' ? 'high' : 'medium',
+                guidance: `Opposes ${regionOppositions.length} region(s). Expect conflict edge.`,
+            });
         }
 
         if (profile.geometry.isolation > 0.7 && !seen.has(regionId)) {

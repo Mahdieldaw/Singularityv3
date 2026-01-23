@@ -73,6 +73,10 @@ export function buildStrongGraph(
   // Filter mutual edges by threshold
   for (const edge of mutual.edges) {
     if (edge.similarity >= softThreshold) {
+      if (!strongAdjacency.has(edge.source) || !strongAdjacency.has(edge.target)) {
+        continue;
+      }
+
       strongEdges.push(edge);
       strongAdjacency.get(edge.source)!.push(edge);
       strongAdjacency.get(edge.target)!.push({
