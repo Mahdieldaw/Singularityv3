@@ -371,11 +371,10 @@ export class StepExecutor {
     // 1. Import new modules dynamically
     // Import shadow module once at function scope so callbacks can use its exports without awaiting
     const shadowModule = await import('../../shadow');
-    const { extractShadowStatements, computeShadowDelta, extractReferencedIds, getTopUnreferenced } = shadowModule;
+    const { extractShadowStatements, computeShadowDelta, getTopUnreferenced } = shadowModule;
     const { buildSemanticMapperPrompt, parseSemanticMapperOutput } = await import('../../ConciergeService/semanticMapper');
-    const { assembleClaims } = await import('../../ConciergeService/claimAssembly');
-    const { buildTraversalGraph } = await import('../../ConciergeService/traversal');
-    const { extractForcingPoints } = await import('../../ConciergeService/forcingPoints');
+    const { reconstructProvenance } = await import('../../ConciergeService/claimAssembly');
+    const { extractForcingPoints } = await import('../../utils/cognitive/traversalEngine');
 
     // 2. Shadow Extraction (Mechanical)
     // Map sourceData to expected format (modelIndex, content)
@@ -401,19 +400,20 @@ export class StepExecutor {
     // 2.6 CLUSTERING (async, may fail gracefully)
     // ════════════════════════════════════════════════════════════════════════
     let clusteringResult = null;
+    let embeddingResult = null;
     let paragraphClusteringSummary = null;
     let substrateSummary = null;
     let substrateDegenerate = null;
     let substrateDegenerateReason = null;
     let preSemanticInterpretation = null;
-    if (paragraphResult.paragraphs.length >= 3) {
+    if (paragraphResult.paragraphs.length > 0) {
       try {
         const clusteringModule = await import('../../clustering');
         const { generateEmbeddings, getEmbeddingStatus, buildClusters, DEFAULT_CONFIG } = clusteringModule;
         const { buildGeometricSubstrate, isDegenerate } = await import('../../geometry');
         const { buildPreSemanticInterpretation } = await import('../../geometry/interpretation');
 
-        const embeddingResult = await generateEmbeddings(
+        embeddingResult = await generateEmbeddings(
           paragraphResult.paragraphs,
           shadowResult.statements,
           DEFAULT_CONFIG
@@ -495,29 +495,35 @@ export class StepExecutor {
           );
         }
 
-        clusteringResult = buildClusters(
-          paragraphResult.paragraphs,
-          shadowResult.statements,
-          embeddingResult.embeddings,
-          DEFAULT_CONFIG,
-          substrate.graphs.mutual
-        );
+        if (paragraphResult.paragraphs.length >= 3) {
+          clusteringResult = buildClusters(
+            paragraphResult.paragraphs,
+            shadowResult.statements,
+            embeddingResult.embeddings,
+            DEFAULT_CONFIG,
+            substrate.graphs.mutual
+          );
 
-        clusteringResult.meta.embeddingTimeMs = embeddingResult.timeMs;
-        clusteringResult.meta.totalTimeMs = embeddingResult.timeMs + clusteringResult.meta.clusteringTimeMs;
+          clusteringResult.meta.embeddingTimeMs = embeddingResult.timeMs;
+          clusteringResult.meta.totalTimeMs = embeddingResult.timeMs + clusteringResult.meta.clusteringTimeMs;
 
-        try {
-          paragraphClusteringSummary = {
-            meta: { ...(clusteringResult.meta || {}) },
-            clusters: (clusteringResult.clusters || []).map((c) => ({
-              id: c.id,
-              size: Array.isArray(c.paragraphIds) ? c.paragraphIds.length : 0,
-              cohesion: typeof c.cohesion === 'number' ? c.cohesion : 0,
-              uncertain: !!c.uncertain,
-              ...(Array.isArray(c.uncertaintyReasons) ? { uncertaintyReasons: c.uncertaintyReasons } : {}),
-            })),
-          };
-        } catch (_) {
+          try {
+            paragraphClusteringSummary = {
+              meta: { ...(clusteringResult.meta || {}) },
+              clusters: (clusteringResult.clusters || []).map((c) => ({
+                id: c.id,
+                size: Array.isArray(c.paragraphIds) ? c.paragraphIds.length : 0,
+                cohesion: typeof c.cohesion === 'number' ? c.cohesion : 0,
+                pairwiseCohesion: typeof c.pairwiseCohesion === 'number' ? c.pairwiseCohesion : 0,
+                uncertain: !!c.uncertain,
+                ...(Array.isArray(c.uncertaintyReasons) ? { uncertaintyReasons: c.uncertaintyReasons } : {}),
+              })),
+            };
+          } catch (_) {
+            paragraphClusteringSummary = null;
+          }
+        } else {
+          clusteringResult = null;
           paragraphClusteringSummary = null;
         }
 
@@ -535,26 +541,28 @@ export class StepExecutor {
           preSemanticInterpretation = null;
         }
 
-        const nonSingletons = clusteringResult.clusters.filter(c => c.paragraphIds.length > 1);
-        console.log(`[StepExecutor] Clustering results:`);
-        console.log(`  - Total clusters: ${clusteringResult.meta.totalClusters}`);
-        console.log(`  - Singletons: ${clusteringResult.meta.singletonCount}`);
-        console.log(`  - Multi-member: ${nonSingletons.length}`);
-        console.log(`  - Uncertain: ${clusteringResult.meta.uncertainCount}`);
-        console.log(`  - Compression: ${(clusteringResult.meta.compressionRatio * 100).toFixed(0)}%`);
-        console.log(
-          `  - Timing: embed ${clusteringResult.meta.embeddingTimeMs.toFixed(0)}ms, ` +
-          `cluster ${clusteringResult.meta.clusteringTimeMs.toFixed(0)}ms`
-        );
-
-        if (nonSingletons.length > 0) {
-          const largest = [...nonSingletons]
-            .sort((a, b) => b.paragraphIds.length - a.paragraphIds.length)
-            .slice(0, 3);
+        if (clusteringResult) {
+          const nonSingletons = clusteringResult.clusters.filter(c => c.paragraphIds.length > 1);
+          console.log(`[StepExecutor] Clustering results:`);
+          console.log(`  - Total clusters: ${clusteringResult.meta.totalClusters}`);
+          console.log(`  - Singletons: ${clusteringResult.meta.singletonCount}`);
+          console.log(`  - Multi-member: ${nonSingletons.length}`);
+          console.log(`  - Uncertain: ${clusteringResult.meta.uncertainCount}`);
+          console.log(`  - Compression: ${(clusteringResult.meta.compressionRatio * 100).toFixed(0)}%`);
           console.log(
-            `  - Largest clusters:`,
-            largest.map(c => `${c.id}: ${c.paragraphIds.length} paragraphs`)
+            `  - Timing: embed ${clusteringResult.meta.embeddingTimeMs.toFixed(0)}ms, ` +
+            `cluster ${clusteringResult.meta.clusteringTimeMs.toFixed(0)}ms`
           );
+
+          if (nonSingletons.length > 0) {
+            const largest = [...nonSingletons]
+              .sort((a, b) => b.paragraphIds.length - a.paragraphIds.length)
+              .slice(0, 3);
+            console.log(
+              `  - Largest clusters:`,
+              largest.map(c => `${c.id}: ${c.paragraphIds.length} paragraphs`)
+            );
+          }
         }
       } catch (clusteringError) {
         // Per design: skip clustering entirely on failure, continue without
@@ -562,15 +570,14 @@ export class StepExecutor {
         clusteringResult = null;
       }
     } else {
-      console.log('[StepExecutor] Skipping clustering (< 3 paragraphs)');
+      console.log('[StepExecutor] Skipping embeddings/geometry (no paragraphs)');
     }
 
     // 3. Build Prompt (LLM) - pass pre-computed paragraph projection and clustering
     const mappingPrompt = buildSemanticMapperPrompt(
       payload.originalPrompt,
-      shadowResult.statements,
-      paragraphResult,
-      clusteringResult
+      paragraphResult.paragraphs,
+      preSemanticInterpretation?.hints || null
     );
 
     const promptLength = mappingPrompt.length;
@@ -627,90 +634,233 @@ export class StepExecutor {
 
             if (finalResult?.text) {
               // 4. Parse (New Parser)
-              const parseResult = parseSemanticMapperOutput(rawText, shadowResult.statements);
+              const parseResult = parseSemanticMapperOutput(rawText);
 
               if (parseResult.success && parseResult.output) {
                 // 5. Assembly & Traversal (Mechanical)
-                console.log(`[StepExecutor] Assembling claims from ${parseResult.output.claims.length} mapped items...`);
-                const assemblyResult = assembleClaims(
-                  parseResult.output,
+                const regions = Array.isArray(preSemanticInterpretation?.regionization?.regions)
+                  ? preSemanticInterpretation.regionization.regions
+                  : [];
+                const regionProfiles = Array.isArray(preSemanticInterpretation?.regionProfiles)
+                  ? preSemanticInterpretation.regionProfiles
+                  : [];
+
+                const unifiedEdges = Array.isArray(parseResult.output.edges) ? parseResult.output.edges : [];
+                const unifiedConditionals = Array.isArray(parseResult.output.conditionals) ? parseResult.output.conditionals : [];
+
+                const mapperClaimsForProvenance = (parseResult.output.claims || []).map((c) => ({
+                  id: c.id,
+                  label: c.label,
+                  text: c.text,
+                  supporters: Array.isArray(c.supporters) ? c.supporters : [],
+                }));
+
+                const stanceFromSourceStatements = (sourceStatements) => {
+                  if (!Array.isArray(sourceStatements) || sourceStatements.length === 0) return 'assertive';
+                  const weights = new Map();
+                  for (const s of sourceStatements) {
+                    const stance = String(s?.stance || 'assertive');
+                    const conf = typeof s?.confidence === 'number' ? s.confidence : 0;
+                    weights.set(stance, (weights.get(stance) || 0) + conf);
+                  }
+                  let best = 'assertive';
+                  let bestWeight = -Infinity;
+                  for (const [stance, weight] of weights.entries()) {
+                    if (weight > bestWeight) {
+                      best = stance;
+                      bestWeight = weight;
+                    }
+                  }
+                  return best;
+                };
+
+                const enrichedClaims = await reconstructProvenance(
+                  mapperClaimsForProvenance,
                   shadowResult.statements,
-                  citationOrder.length
+                  paragraphResult.paragraphs,
+                  embeddingResult?.embeddings || new Map(),
+                  regions,
+                  regionProfiles,
+                  citationOrder.length,
+                  unifiedEdges
                 );
 
-                const traversalGraph = buildTraversalGraph(assemblyResult);
-                const forcingPointsResult = extractForcingPoints(traversalGraph);
+                const enrichedById = new Map(enrichedClaims.map((c) => [c.id, c]));
+
+                const claimOrder = new Map();
+                for (let i = 0; i < enrichedClaims.length; i++) {
+                  const id = enrichedClaims[i]?.id;
+                  if (id) claimOrder.set(id, i);
+                }
+
+                const conflictClaimIdSet = new Set();
+                const conflictAdj = new Map();
+                for (const e of unifiedEdges) {
+                  if (!e || e.type !== 'conflict') continue;
+                  const from = String(e.from || '').trim();
+                  const to = String(e.to || '').trim();
+                  if (!from || !to) continue;
+
+                  conflictClaimIdSet.add(from);
+                  conflictClaimIdSet.add(to);
+
+                  if (!conflictAdj.has(from)) conflictAdj.set(from, new Set());
+                  if (!conflictAdj.has(to)) conflictAdj.set(to, new Set());
+                  conflictAdj.get(from).add(to);
+                  conflictAdj.get(to).add(from);
+                }
+
+                const foundationClaimIds = [];
+                for (const c of enrichedClaims) {
+                  if (!conflictClaimIdSet.has(c.id)) foundationClaimIds.push(c.id);
+                }
+
+                const conflictComponents = [];
+                const visited = new Set();
+                for (const id of conflictClaimIdSet) {
+                  if (visited.has(id)) continue;
+                  const stack = [id];
+                  const component = [];
+                  visited.add(id);
+                  while (stack.length > 0) {
+                    const cur = stack.pop();
+                    component.push(cur);
+                    const neighbors = conflictAdj.get(cur);
+                    if (!neighbors) continue;
+                    for (const n of neighbors) {
+                      if (visited.has(n)) continue;
+                      visited.add(n);
+                      stack.push(n);
+                    }
+                  }
+                  component.sort((a, b) => (claimOrder.get(a) ?? 0) - (claimOrder.get(b) ?? 0));
+                  conflictComponents.push(component);
+                }
+
+                conflictComponents.sort((a, b) => {
+                  const amin = a.length > 0 ? (claimOrder.get(a[0]) ?? 0) : 0;
+                  const bmin = b.length > 0 ? (claimOrder.get(b[0]) ?? 0) : 0;
+                  return amin - bmin;
+                });
+
+                const tiers = [
+                  { tierIndex: 0, claimIds: foundationClaimIds, gates: [] },
+                  ...conflictComponents.map((claimIds, i) => ({ tierIndex: i + 1, claimIds, gates: [] })),
+                ];
+
+                const traversalGraph = {
+                  claims: enrichedClaims,
+                  edges: unifiedEdges,
+                  conditionals: unifiedConditionals,
+                  tiers,
+                  maxTier: tiers.length - 1,
+                };
+
+                const forcingPoints = extractForcingPoints(traversalGraph);
+
                 const serializedTraversalGraph = {
-                  claims: (traversalGraph?.claims || []).map((c) => ({
+                  claims: enrichedClaims.map((c) => ({
                     id: c.id,
                     label: c.label,
-                    description: c.description,
-                    stance: c.stance,
-                    gates: {
-                      conditionals: (c?.gates?.conditionals || []).map((g) => ({
-                        id: g.id,
-                        condition: g.condition,
-                        question: g.question,
-                        sourceStatementIds: g.sourceStatementIds,
-                      })),
-                      prerequisites: (c?.gates?.prerequisites || []).map((g) => ({
-                        id: g.id,
-                        claimId: g.claimId,
-                        condition: g.condition,
-                        question: g.question,
-                        sourceStatementIds: g.sourceStatementIds,
-                      })),
-                    },
-                    enables: Array.isArray(c.enables) ? c.enables : [],
-                    conflicts: (c?.conflicts || []).map((edge) => ({
-                      claimId: edge.claimId,
-                      question: edge.question,
-                      sourceStatementIds: edge.sourceStatementIds,
-                      nature: edge.nature,
-                    })),
+                    description: c.text,
+                    stance: stanceFromSourceStatements(c.sourceStatements),
+                    gates: { conditionals: [], prerequisites: [] },
+                    enables: [],
+                    conflicts: [],
                     sourceStatementIds: Array.isArray(c.sourceStatementIds) ? c.sourceStatementIds : [],
-                    supporterModels: Array.isArray(c.supporterModels) ? c.supporterModels : [],
+                    supporterModels: Array.isArray(c.supporters) ? c.supporters : [],
                     supportRatio: typeof c.supportRatio === 'number' ? c.supportRatio : 0,
                     hasConditionalSignal: !!c.hasConditionalSignal,
                     hasSequenceSignal: !!c.hasSequenceSignal,
                     hasTensionSignal: !!c.hasTensionSignal,
-                    tier: typeof c.tier === 'number' ? c.tier : 0,
+                    tier: 0,
                   })),
-                  tensions: traversalGraph?.tensions || [],
-                  tiers: traversalGraph?.tiers || [],
-                  maxTier: typeof traversalGraph?.maxTier === 'number' ? traversalGraph.maxTier : 0,
-                  roots: traversalGraph?.roots || [],
-                  cycles: traversalGraph?.cycles || [],
+                  tensions: [],
+                  tiers,
+                  maxTier: tiers.length - 1,
+                  roots: [],
+                  cycles: [],
                 };
 
                 try {
                   // Shadow Delta
-                  referencedIds = extractReferencedIds(assemblyResult.claims);
+                  referencedIds = new Set(
+                    enrichedClaims
+                      .map((c) => (Array.isArray(c?.sourceStatementIds) ? c.sourceStatementIds : []))
+                      .flat()
+                  );
                   shadowDelta = computeShadowDelta(shadowResult, referencedIds, payload.originalPrompt);
                   topUnindexed = getTopUnreferenced(shadowDelta, 10);
 
-                  // ═══════════════════════════════════════════════════════════════════════
-                  // V2-TO-V1 CONVERSION (Backward Compatibility)
-                  // ═══════════════════════════════════════════════════════════════════════
-                  const { convertV2toV1 } = await import('../../ConciergeService/v2-to-v1-adapter');
-
-                  const v1Artifact = convertV2toV1(
-                    parseResult.output,  // V2 semantic mapper output
-                    shadowResult.statements,
-                    {
-                      query: payload.originalPrompt,
-                      turn: context.turn || 0,
-                      model_count: citationOrder.length
+                  const mappedEdges = unifiedEdges
+                    .filter((e) => e && e.from && e.to && (e.type === 'prerequisite' || e.type === 'conflict'))
+                    .map((e) => {
+                      if (e.type === 'prerequisite') {
+                        return { from: e.from, to: e.to, type: 'prerequisite' };
+                      }
+                      const q = typeof e.question === 'string' ? e.question.trim() : '';
+                      return {
+                        from: e.from,
+                        to: e.to,
+                        type: q ? 'conflicts' : 'tradeoff',
+                      };
+                    });
+                  
+                  const derivedSupportEdges = [];
+                  const supportKey = new Set();
+                  
+                  for (const e of unifiedEdges) {
+                    if (!e || e.type !== 'prerequisite') continue;
+                    const from = String(e.from || '').trim();
+                    const to = String(e.to || '').trim();
+                    if (!from || !to) continue;
+                    const key = `${from}::${to}::supports`;
+                    if (supportKey.has(key)) continue;
+                    supportKey.add(key);
+                    derivedSupportEdges.push({ from, to, type: 'supports' });
+                  }
+                  
+                  for (const cond of unifiedConditionals) {
+                    const affected = Array.isArray(cond?.affectedClaims) ? cond.affectedClaims : [];
+                    for (let i = 0; i < affected.length; i++) {
+                      const a = String(affected[i] || '').trim();
+                      if (!a) continue;
+                      for (let j = i + 1; j < affected.length; j++) {
+                        const b = String(affected[j] || '').trim();
+                        if (!b || a === b) continue;
+                        const k1 = `${a}::${b}::supports`;
+                        if (!supportKey.has(k1)) {
+                          supportKey.add(k1);
+                          derivedSupportEdges.push({ from: a, to: b, type: 'supports' });
+                        }
+                        const k2 = `${b}::${a}::supports`;
+                        if (!supportKey.has(k2)) {
+                          supportKey.add(k2);
+                          derivedSupportEdges.push({ from: b, to: a, type: 'supports' });
+                        }
+                      }
                     }
-                  );
+                  }
 
-                  // Attach V2-specific data that V1 format can't represent
+                  const ghosts = null;
+
                   mapperArtifact = {
-                    ...v1Artifact,
+                    id: `artifact-${Date.now()}`,
+                    query: payload.originalPrompt,
+                    turn: context.turn || 0,
+                    timestamp: new Date().toISOString(),
+                    model_count: citationOrder.length,
+
+                    claims: enrichedClaims,
+                    edges: [...mappedEdges, ...derivedSupportEdges],
+                    ghosts,
+                    narrative: String(parseResult.narrative || '').trim(),
+                    conditionals: unifiedConditionals,
 
                     // NEW DATA (not in V1)
-                    traversalGraph: serializedTraversalGraph,
-                    forcingPoints: forcingPointsResult.forcingPoints,
+                    traversalGraph,
+                    forcingPoints,
+                    preSemantic: preSemanticInterpretation || null,
 
                     // SHADOW DATA
                     shadow: {
@@ -735,10 +885,10 @@ export class StepExecutor {
                     structuralValidation = null;
                   }
 
-                  console.log(`[StepExecutor] Generated V1-compatible artifact with ${v1Artifact.claims.length} claims, ${v1Artifact.edges.length} edges`);
+                  console.log(`[StepExecutor] Generated mapper artifact with ${enrichedClaims.length} claims, ${mappedEdges.length} edges`);
                 } catch (err) {
                   // processLogger.error or console.error with context
-                  console.error('[StepExecutor] Shadow/V2-V1 conversion failed:', err);
+                  console.error('[StepExecutor] Mapper artifact build failed:', err);
                   console.debug('Context:', {
                     originalPrompt: payload.originalPrompt,
                     turn: context.turn,

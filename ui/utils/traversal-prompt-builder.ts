@@ -1,72 +1,64 @@
-export interface GateResolution {
-  satisfied: boolean;
-  userInput?: string;
-  label?: string;
-  question?: string;
-  condition?: string;
-}
-
-export interface ForcingPointResolution {
-  selectedClaimId: string;
-}
-
 export interface Claim {
   id: string;
   label: string;
   text?: string;
 }
 
-export interface Gate {
-  question?: string;
-  condition?: string;
-}
+import type { ForcingPoint, Resolution } from '../../src/utils/cognitive/traversalEngine';
 
 export function buildTraversalContinuationPrompt(
   originalQuery: string,
-  gateResolutions: Map<string, GateResolution>,
-  forcingPointResolutions: Map<string, ForcingPointResolution>,
-  claims: Claim[],
-  gatesMap: Map<string, Gate>
+  forcingPoints: ForcingPoint[],
+  getResolution: (fpId: string) => Resolution | undefined,
+  claims: Claim[]
 ): string {
   const parts: string[] = [];
 
   // User's original question
   parts.push(`Original Question: "${originalQuery}"\n`);
 
-  // Gate context (user-provided situational info)
-  if (gateResolutions.size > 0) {
+  const conditionalResolutions: Array<{ fp: ForcingPoint; resolution: Resolution }> = [];
+  const conflictResolutions: Array<{ fp: ForcingPoint; resolution: Resolution }> = [];
+
+  for (const fp of forcingPoints) {
+    const resolution = getResolution(fp.id);
+    if (!resolution) continue;
+    if (resolution.type === 'conditional') conditionalResolutions.push({ fp, resolution });
+    if (resolution.type === 'conflict') conflictResolutions.push({ fp, resolution });
+  }
+
+  if (conditionalResolutions.length > 0) {
     parts.push("User Context:");
-    gateResolutions.forEach((resolution, gateId) => {
-      if (resolution.satisfied && resolution.userInput) {
+    for (const { fp, resolution } of conditionalResolutions) {
+      const satisfied = resolution.satisfied === true;
+      if (satisfied && resolution.userInput) {
         parts.push(`- ${resolution.userInput}`);
-      } else if (!resolution.satisfied) {
-        // Try to find a human-readable label
-        const gate = gatesMap?.get(gateId);
-        const label =
-          resolution.label ||
-          resolution.question ||
-          resolution.condition ||
-          gate?.question ||
-          gate?.condition ||
-          gateId;
+        continue;
+      }
+      if (!satisfied) {
+        const label = fp.question || fp.condition || fp.id;
         parts.push(`- Does NOT apply: ${label}`);
       }
-    });
+    }
     parts.push("");
   }
 
-  // User's choices at forcing points
-  if (forcingPointResolutions.size > 0) {
+  if (conflictResolutions.length > 0) {
     parts.push("User Decisions:");
-    forcingPointResolutions.forEach((resolution) => {
-      const claim = claims.find(c => c.id === resolution.selectedClaimId);
+    for (const { resolution } of conflictResolutions) {
+      const selectedClaimId = resolution.selectedClaimId;
+      if (!selectedClaimId) continue;
+
+      const claim = claims.find(c => c.id === selectedClaimId);
       if (claim) {
         parts.push(`- Chose: "${claim.label}"`);
         if (claim.text) {
           parts.push(`  Rationale: ${claim.text}`);
         }
+      } else if (resolution.selectedLabel) {
+        parts.push(`- Chose: "${resolution.selectedLabel}"`);
       }
-    });
+    }
     parts.push("");
   }
 

@@ -557,9 +557,9 @@ export const detectEnrichedConflicts = (
             claimA: toConflictClaim(a),
             claimB: toConflictClaim(b),
             axis: {
-                explicit: a.challenges === b.id ? a.text : (b.challenges === a.id ? b.text : null),
+                explicit: a.challenges === b.id ? b.text : (b.challenges === a.id ? a.text : null),
                 inferred: inferredAxis,
-                resolved: a.challenges === b.id ? a.text : inferredAxis
+                resolved: a.challenges === b.id ? b.text : (b.challenges === a.id ? a.text : inferredAxis)
             },
             combinedSupport,
             supportDelta,

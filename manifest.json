@@ -15,8 +15,8 @@
   ],
   "host_permissions": [
     "https://*/*",
-    "http://localhost:3000/*",
-    "https://x.com/*"
+    "https://grok.com/*",
+    "http://localhost:3000/*"
   ],
   "content_scripts": [
     {
@@ -43,7 +43,6 @@
   "web_accessible_resources": [
     {
       "resources": [
-        "main-world-injector.js",
         "oi.html",
         "oi.js",
         "src/oi.js",

@@ -6,7 +6,7 @@ import type { ShadowParagraph } from '../shadow/ShadowParagraphProjector';
 import type { ShadowStatement } from '../shadow/ShadowExtractor';
 import type { ParagraphCluster, ClusteringResult } from './types';
 import { ClusteringConfig, DEFAULT_CONFIG } from './config';
-import { buildDistanceMatrix, cosineSimilarity, computeCohesion, quantizeSimilarity } from './distance';
+import { buildDistanceMatrix, cosineSimilarity, computeCohesion, pairwiseCohesion, quantizeSimilarity } from './distance';
 import { hierarchicalCluster } from './hac';
 import type { MutualKnnGraph } from '../geometry/types';
 
@@ -101,6 +101,7 @@ function detectUncertainty(
     paragraphIds: string[],
     paragraphsById: Map<string, ShadowParagraph>,
     cohesion: number,
+    pairwiseCohesionScore: number,
     config: ClusteringConfig
 ): { uncertain: boolean; reasons: string[] } {
     const reasons: string[] = [];
@@ -110,6 +111,16 @@ function detectUncertainty(
     // 1. Low cohesion
     if (cohesion < config.lowCohesionThreshold) {
         reasons.push('low_cohesion');
+    }
+
+    const dumbbellGap = 0.10;
+    if (
+        paragraphIds.length >= 4 &&
+        cohesion >= config.lowCohesionThreshold &&
+        pairwiseCohesionScore < config.lowCohesionThreshold &&
+        cohesion - pairwiseCohesionScore >= dumbbellGap
+    ) {
+        reasons.push('dumbbell_cluster');
     }
 
     // 2. Oversized
@@ -243,6 +254,7 @@ export function buildClusters(
             statementIds: [...p.statementIds],
             representativeParagraphId: p.id,
             cohesion: 1.0,
+            pairwiseCohesion: 1.0,
             uncertain: false,
             uncertaintyReasons: [],
         }));
@@ -271,6 +283,7 @@ export function buildClusters(
             statementIds: [...p.statementIds],
             representativeParagraphId: p.id,
             cohesion: 1.0,
+            pairwiseCohesion: 1.0,
             uncertain: false,
             uncertaintyReasons: [],
         }));
@@ -348,9 +361,10 @@ export function buildClusters(
 
         // Compute cohesion
         const cohesion = computeCohesion(memberIds, centroid.id, embeddings);
+        const pairwiseCohesionScore = pairwiseCohesion(memberIds, embeddings);
 
         // Detect uncertainty
-        const uncertainty = detectUncertainty(memberIds, paragraphsById, cohesion, config);
+        const uncertainty = detectUncertainty(memberIds, paragraphsById, cohesion, pairwiseCohesionScore, config);
         if (uncertainty.uncertain) uncertainCount++;
 
         // Collect statement IDs (stable order, no duplicates)
@@ -374,6 +388,7 @@ export function buildClusters(
             statementIds,
             representativeParagraphId: centroid.id,
             cohesion,
+            pairwiseCohesion: pairwiseCohesionScore,
             uncertain: uncertainty.uncertain,
             uncertaintyReasons: uncertainty.reasons,
         };

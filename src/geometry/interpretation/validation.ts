@@ -28,6 +28,21 @@ export function validateStructuralMapping(
         });
     }
 
+    if (predictedShape === 'sparse' && actualShape === 'convergent') {
+        violations.push({
+            type: 'embedding_quality_suspect',
+            severity: 'high',
+            predicted: {
+                description: 'Topology sparse but semantics converged. Embeddings may be degraded.',
+                evidence: hints.predictedShape.evidence.join('; '),
+            },
+            actual: {
+                description: `Actual: ${actualShape}`,
+                evidence: postSemantic.shape.evidence.join('; '),
+            },
+        });
+    }
+
     const [minClaims, maxClaims] = hints.expectedClaimCount;
     const claimCount = postSemantic.claimsWithLeverage.length;
 

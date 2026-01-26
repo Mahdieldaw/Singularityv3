@@ -27,9 +27,7 @@ fs.copyFileSync("manifest.json", "dist/manifest.json");
 // copy & tweak UI html
 if (fs.existsSync("ui/index.html")) {
   let html = fs.readFileSync("ui/index.html", "utf8");
-  html = html
-    .replace("index.tsx", "index.js")
-    .replace("/icons/icon-16.png", "/icons/icon16.png");
+  html = html.replace("index.tsx", "index.js");
   fs.writeFileSync("dist/ui/index.html", html);
 }
 
@@ -87,17 +85,18 @@ if (fs.existsSync("ui/fonts")) {
 }
 
 /// icons - copy all PNG icons for the extension  
-const map = [
-  ["icon-16.png", "icon16.png"],
-  ["icon-32.png", "icon32.png"],
-  ["icon-48.png", "icon48.png"],
-  ["Icon-48.png", "icon48.png"],  // fallback for capitalized version
-  ["icon-128.png", "icon128.png"],
-  ["icon-192.png", "icon192.png"],
-];
-for (const [src, dst] of map) {
-  if (fs.existsSync(src)) {
-    fs.copyFileSync(src, p.join("dist/icons", dst));
-    console.log(`[postbuild] Copied ${src} → dist/icons/${dst}`);
-  }
+const iconNames = ["icon-16.png", "icon-32.png", "icon-48.png", "icon-128.png", "icon-192.png"];
+for (const iconName of iconNames) {
+  const candidates = [
+    p.join("icons", iconName),
+    iconName,
+    iconName.replace("icon-", "Icon-"),
+    p.join("icons", iconName.replace("icon-", "Icon-")),
+  ];
+
+  const existing = candidates.find((candidate) => fs.existsSync(candidate));
+  if (!existing) continue;
+
+  fs.copyFileSync(existing, p.join("dist/icons", iconName));
+  console.log(`[postbuild] Copied ${existing} → dist/icons/${iconName}`);
 }

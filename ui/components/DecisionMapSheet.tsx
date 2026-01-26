@@ -1284,17 +1284,37 @@ export const DecisionMapSheet = React.memo(() => {
     return pipelineStages.find((s) => s.key === pipelineStage) || pipelineStages[0];
   }, [pipelineStages, pipelineStage]);
 
+  const stringifyForDebug = useMemo(() => {
+    return (value: any) => {
+      const seen = new WeakSet();
+      return JSON.stringify(
+        value,
+        (_key, v) => {
+          if (v instanceof Map) return Object.fromEntries(v);
+          if (v instanceof Set) return Array.from(v);
+          if (typeof v === 'bigint') return String(v);
+          if (typeof v === 'object' && v !== null) {
+            if (seen.has(v)) return '[Circular]';
+            seen.add(v);
+          }
+          return v;
+        },
+        2
+      );
+    };
+  }, []);
+
   const pipelineStageText = useMemo(() => {
     const stage = activePipelineStage;
     if (!stage) return '';
     if (stage.kind === 'text') return String(stage.value || '');
     try {
       if (stage.value == null) return '';
-      return JSON.stringify(stage.value, null, 2);
+      return stringifyForDebug(stage.value);
     } catch {
       return String(stage.value || '');
     }
-  }, [activePipelineStage]);
+  }, [activePipelineStage, stringifyForDebug]);
 
   const tabConfig = [
     { key: 'graph' as const, label: 'Graph', activeClass: 'decision-tab-active-graph' },
@@ -1469,7 +1489,7 @@ export const DecisionMapSheet = React.memo(() => {
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
                     exit={{ opacity: 0 }}
-                    className="p-6 h-full overflow-y-auto relative"
+                    className="p-6 h-full overflow-y-auto relative custom-scrollbar"
                   >
                     {mappingText && (
                       <div className="absolute top-4 right-4 z-10">
@@ -1496,7 +1516,7 @@ export const DecisionMapSheet = React.memo(() => {
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
                     exit={{ opacity: 0 }}
-                    className="h-full overflow-y-auto relative"
+                    className="h-full overflow-y-auto relative custom-scrollbar"
                   >
                     {optionsText && (
                       <div className="absolute top-4 right-4 z-10">
@@ -1585,9 +1605,11 @@ export const DecisionMapSheet = React.memo(() => {
                         </div>
                       </div>
                       {pipelineStageText ? (
-                        <pre className="text-[11px] leading-snug overflow-x-auto whitespace-pre-wrap">
-                          {pipelineStageText}
-                        </pre>
+                        <div className="max-h-[55vh] overflow-auto custom-scrollbar rounded-lg border border-border-subtle bg-black/20">
+                          <pre className="text-[11px] leading-snug whitespace-pre min-w-max p-3">
+                            {pipelineStageText}
+                          </pre>
+                        </div>
                       ) : (
                         <div className="text-text-muted text-sm">No artifact captured for this stage.</div>
                       )}

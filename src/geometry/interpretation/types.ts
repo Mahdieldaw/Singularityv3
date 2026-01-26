@@ -114,7 +114,8 @@ export interface StructuralViolation {
         | 'claim_count_mismatch'
         | 'tier_mismatch'
         | 'missed_conflict'
-        | 'false_conflict';
+        | 'false_conflict'
+        | 'embedding_quality_suspect';
     severity: 'high' | 'medium' | 'low';
     predicted: { description: string; evidence: string };
     actual: { description: string; evidence: string };

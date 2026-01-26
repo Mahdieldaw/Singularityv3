@@ -704,6 +704,33 @@ export class ProviderDNRGate {
             },
           },
         ];
+      case "grok":
+        return [
+          {
+            priority: 1,
+            action: {
+              type: chrome.declarativeNetRequest.RuleActionType.MODIFY_HEADERS,
+              requestHeaders: [
+                {
+                  header: "origin",
+                  operation: chrome.declarativeNetRequest.HeaderOperation.SET,
+                  value: "https://grok.com",
+                },
+                {
+                  header: "referer",
+                  operation: chrome.declarativeNetRequest.HeaderOperation.SET,
+                  value: "https://grok.com/",
+                },
+              ],
+            },
+            condition: {
+              requestDomains: ["grok.com"],
+              resourceTypes: [
+                chrome.declarativeNetRequest.ResourceType.XMLHTTPREQUEST,
+              ],
+            },
+          },
+        ];
       default:
         return [];
     }

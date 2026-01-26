@@ -21,3 +21,4 @@ export const ChatGPTIcon = baseIcon(tokens.accents.chatgpt);
 export const ClaudeIcon = baseIcon(tokens.accents.claude);
 export const GeminiIcon = baseIcon(tokens.accents.gemini);
 export const QwenIcon = baseIcon(tokens.accents.qwen);
+export const GrokIcon = baseIcon(tokens.accents.grok);

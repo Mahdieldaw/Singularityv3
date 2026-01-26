@@ -139,13 +139,17 @@ export const buildConvergentData = (
         // even if its primary role was different (e.g. a supplementary claim that also challenges).
         c.role === "challenger" || c.isChallenger
     );
-    const challengerInfos: ChallengerInfo[] = challengers.map(c => ({
-        id: c.id,
-        label: c.label,
-        text: c.text,
-        supportCount: c.supporters.length, challenges: c.challenges,
-        targetsClaim: c.challenges
-    }));
+    const challengerInfos: ChallengerInfo[] = challengers.map(c => {
+        const target = c.challenges ? claims.find(t => t.id === c.challenges) : null;
+        return {
+            id: c.id,
+            label: c.label,
+            text: c.text,
+            supportCount: c.supporters.length,
+            challenges: target ? target.text : null,
+            targetsClaim: c.challenges
+        };
+    });
     const outsideClaims = claims.filter(c => !floorIds.has(c.id));
     let strongestOutlier: SettledShapeData["strongestOutlier"] = null;
     if (outsideClaims.length > 0) {

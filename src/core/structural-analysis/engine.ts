@@ -6,6 +6,8 @@ import {
     SettledShapeData,
     ContestedShapeData,
     TradeoffShapeData,
+    Claim,
+    Edge,
 } from "../../../shared/contract";
 import { computeLandscapeMetrics, computeClaimRatios, assignPercentileFlags, computeCoreRatios } from "./metrics";
 import { getTopNCount, computeSignalStrength } from "./utils";
@@ -37,13 +39,132 @@ import {
     UnindexedStatement
 } from "../../shadow";
 
+type ConditionalAffectedClaims = Array<{ affectedClaims: string[] }>;
+
+const applyComputedRoles = (
+    claims: Claim[],
+    edges: Edge[],
+    conditionals: ConditionalAffectedClaims,
+    modelCount: number
+): Claim[] => {
+    const safeModelCount = Math.max(modelCount, 1);
+    const supportRatioById = new Map<string, number>();
+    for (const c of claims) {
+        const supporterCount = Array.isArray(c.supporters) ? c.supporters.length : 0;
+        supportRatioById.set(c.id, supporterCount / safeModelCount);
+    }
+    const consensusIds = new Set<string>();
+    for (const [id, ratio] of supportRatioById.entries()) {
+        if (ratio >= 0.5) consensusIds.add(id);
+    }
+
+    const bestTargetByChallenger = new Map<string, { targetId: string; targetSupportRatio: number }>();
+    for (const e of edges) {
+        if (e.type !== "conflicts") continue;
+        const fromIsConsensus = consensusIds.has(e.from);
+        const toIsConsensus = consensusIds.has(e.to);
+        if (fromIsConsensus === toIsConsensus) continue;
+
+        const challengerId = fromIsConsensus ? e.to : e.from;
+        const targetId = fromIsConsensus ? e.from : e.to;
+        const targetSupportRatio = supportRatioById.get(targetId) ?? 0;
+
+        const prev = bestTargetByChallenger.get(challengerId);
+        if (!prev || targetSupportRatio > prev.targetSupportRatio) {
+            bestTargetByChallenger.set(challengerId, { targetId, targetSupportRatio });
+        }
+    }
+
+    const branchIds = new Set<string>();
+    for (const c of conditionals) {
+        if (!c?.affectedClaims) continue;
+        for (const id of c.affectedClaims) branchIds.add(id);
+    }
+
+    const challengerIds = new Set<string>(bestTargetByChallenger.keys());
+    const prereqOutCounts = new Map<string, number>();
+    const prereqOutHasChildren = new Map<string, boolean>();
+    const supportInCounts = new Map<string, number>();
+    for (const e of edges) {
+        if (e.type === "prerequisite") {
+            prereqOutCounts.set(e.from, (prereqOutCounts.get(e.from) ?? 0) + 1);
+            prereqOutHasChildren.set(e.from, true);
+        } else if (e.type === "supports") {
+            supportInCounts.set(e.to, (supportInCounts.get(e.to) ?? 0) + 1);
+        }
+    }
+
+    const dependentsById = new Map<string, string[]>();
+    for (const e of edges) {
+        if (e.type !== "prerequisite") continue;
+        const list = dependentsById.get(e.from) ?? [];
+        list.push(e.to);
+        dependentsById.set(e.from, list);
+    }
+
+    const conflictChallengerNeighborCounts = new Map<string, number>();
+    const conflictChallengerNeighbors = new Map<string, Set<string>>();
+    for (const e of edges) {
+        if (e.type !== "conflicts") continue;
+        const aIsChallenger = challengerIds.has(e.from);
+        const bIsChallenger = challengerIds.has(e.to);
+        if (aIsChallenger === bIsChallenger) continue;
+        const targetId = aIsChallenger ? e.to : e.from;
+        const challengerId = aIsChallenger ? e.from : e.to;
+        const set = conflictChallengerNeighbors.get(targetId) ?? new Set<string>();
+        set.add(challengerId);
+        conflictChallengerNeighbors.set(targetId, set);
+    }
+    for (const [targetId, set] of conflictChallengerNeighbors.entries()) {
+        conflictChallengerNeighborCounts.set(targetId, set.size);
+    }
+
+    const computeAnchorScore = (claimId: string): number => {
+        let score = 0;
+        const prereqOutDegree = prereqOutCounts.get(claimId) ?? 0;
+        score += prereqOutDegree * 2;
+        const supportInDegree = supportInCounts.get(claimId) ?? 0;
+        score += supportInDegree * 1;
+        const conflictTargetCount = conflictChallengerNeighborCounts.get(claimId) ?? 0;
+        score += conflictTargetCount * 1.5;
+        const dependents = dependentsById.get(claimId) ?? [];
+        let dependentsArePrereqs = 0;
+        for (const depId of dependents) {
+            if (prereqOutHasChildren.has(depId)) dependentsArePrereqs += 1;
+        }
+        score += dependentsArePrereqs * 1.5;
+        return score;
+    };
+
+    return claims.map((c) => {
+        const target = bestTargetByChallenger.get(c.id);
+        if (target) {
+            return {
+                ...c,
+                role: "challenger",
+                challenges: target.targetId,
+            };
+        }
+        if (branchIds.has(c.id)) {
+            return { ...c, role: "branch", challenges: null };
+        }
+        const anchorScore = computeAnchorScore(c.id);
+        if (anchorScore >= 2) {
+            return { ...c, role: "anchor", challenges: null };
+        }
+        return { ...c, role: "supplement", challenges: null };
+    });
+};
+
 export const computeStructuralAnalysis = (artifact: MapperArtifact): StructuralAnalysis => {
     const rawClaims = Array.isArray(artifact?.claims) ? artifact.claims : [];
     const edges = Array.isArray(artifact?.edges) ? artifact.edges : [];
     const ghosts = Array.isArray(artifact?.ghosts) ? artifact.ghosts.filter(Boolean).map(String) : [];
     const landscape = computeLandscapeMetrics(artifact);
-    const claimIds = rawClaims.map(c => c.id);
-    const claimsWithRatios = rawClaims.map((c) =>
+    const conditionals = Array.isArray(artifact?.conditionals) ? artifact.conditionals : [];
+    const claimsWithDerivedRoles = applyComputedRoles(rawClaims, edges, conditionals, landscape.modelCount);
+    const claimIds = claimsWithDerivedRoles.map(c => c.id);
+    const claimsWithRatios = claimsWithDerivedRoles.map((c) =>
         computeClaimRatios(c, edges, landscape.modelCount)
     );
     const simpleClaimMap = new Map(claimsWithRatios.map(c => [c.id, { id: c.id, label: c.label }]));

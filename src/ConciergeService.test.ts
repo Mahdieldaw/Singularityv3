@@ -88,124 +88,102 @@ describe('ConciergeService', () => {
     });
 
     it('should reject legacy semantic mapper edges field', () => {
-        const shadowStatements: any[] = [
-            { id: 's_1', text: 'Statement', stance: 'prescriptive', signals: { sequence: false, tension: false, conditional: false } },
-        ];
-
         const raw = JSON.stringify({
             claims: [
                 {
                     id: 'c_0',
                     label: 'do thing',
-                    stance: 'prescriptive',
-                    gates: {
-                        conditionals: [
-                            {
-                                id: 'cg_0',
-                                condition: 'if X',
-                                question: 'Does X apply?',
-                                sourceStatementIds: ['s_1'],
-                            },
-                        ],
-                        prerequisites: [],
-                    },
-                    edges: { sequence: [], tension: [] },
-                    sourceStatementIds: ['s_1'],
+                    text: 'Do the thing.',
+                    supporters: [1],
+                    role: 'anchor',
+                    challenges: null,
                 },
             ],
+            edges: { sequence: [], tension: [] },
+            conditionals: [],
         });
 
-        const result = parseSemanticMapperOutput(raw, shadowStatements as any);
+        const result = parseSemanticMapperOutput(raw);
         expect(result.success).toBe(false);
-        expect(result.errors?.some(e => e.field === 'claim[0].edges')).toBe(true);
+        expect(result.errors?.some(e => e.field === 'edges')).toBe(true);
     });
 
-    it('should reject semantic mapper gates missing question', () => {
-        const shadowStatements: any[] = [
-            { id: 's_1', text: 'Statement', stance: 'prescriptive', signals: { sequence: false, tension: false, conditional: true } },
-        ];
-
+    it('should accept semantic mapper conflicts without questions', () => {
         const raw = JSON.stringify({
-            claims: [
-                {
-                    id: 'c_0',
-                    label: 'do thing',
-                    stance: 'prescriptive',
-                    gates: {
-                        conditionals: [
-                            {
-                                id: 'cg_0',
-                                condition: 'if X',
-                                sourceStatementIds: ['s_1'],
-                            },
-                        ],
-                        prerequisites: [],
-                    },
-                    enables: [],
-                    conflicts: [],
-                    sourceStatementIds: ['s_1'],
-                },
-            ],
+            claims: [{
+                id: 'c_0',
+                label: 'do thing',
+                text: 'Do the thing.',
+                supporters: [1],
+                role: 'anchor',
+                challenges: null,
+            }],
+            edges: [{
+                from: 'c_0',
+                to: 'c_1',
+                type: 'conflict',
+            }],
+            conditionals: [],
         });
 
-        const result = parseSemanticMapperOutput(raw, shadowStatements as any);
-        expect(result.success).toBe(false);
-        expect(result.errors?.some(e => e.field === 'claim[0].gates.conditionals[0].question')).toBe(true);
+        const result = parseSemanticMapperOutput(raw);
+        expect(result.success).toBe(true);
+        expect(result.output?.edges?.length).toBe(1);
+        const e0 = result.output?.edges?.[0];
+        expect(e0?.type).toBe('conflict');
+        expect(((e0 as any)?.question ?? null)).toBeNull();
     });
 
     it('should accept semantic mapper V2 conflicts with questions', () => {
-        const shadowStatements: any[] = [
-            { id: 's_1', text: 'Statement', stance: 'prescriptive', signals: { sequence: false, tension: true, conditional: false } },
-        ];
-
         const raw = JSON.stringify({
-            claims: [
-                {
-                    id: 'c_0',
-                    label: 'optimize for speed',
-                    stance: 'prescriptive',
-                    gates: { conditionals: [], prerequisites: [] },
-                    enables: [],
-                    conflicts: [
-                        {
-                            claimId: 'c_1',
-                            question: 'Which matters more: speed or flexibility?',
-                            sourceStatementIds: ['s_1'],
-                            nature: 'optimization',
-                        },
-                    ],
-                    sourceStatementIds: ['s_1'],
-                },
-                {
-                    id: 'c_1',
-                    label: 'optimize for flexibility',
-                    stance: 'prescriptive',
-                    gates: { conditionals: [], prerequisites: [] },
-                    enables: [],
-                    conflicts: [],
-                    sourceStatementIds: ['s_1'],
-                },
-            ],
+            claims: [{
+                id: 'c_0',
+                label: 'optimize for speed',
+                text: 'Prioritize execution speed.',
+                supporters: [1],
+                role: 'anchor',
+                challenges: null,
+            }, {
+                id: 'c_1',
+                label: 'optimize for flexibility',
+                text: 'Prioritize flexibility.',
+                supporters: [2],
+                role: 'anchor',
+                challenges: null,
+            }],
+            edges: [{
+                from: 'c_0',
+                to: 'c_1',
+                type: 'conflict',
+                question: 'Which matters more: speed or flexibility?',
+            }],
+            conditionals: [],
         });
 
-        const result = parseSemanticMapperOutput(raw, shadowStatements as any);
+        const result = parseSemanticMapperOutput(raw);
         expect(result.success).toBe(true);
-        expect(result.output?.claims?.[0]?.conflicts?.length).toBe(1);
-        expect(result.output?.claims?.[0]?.conflicts?.[0]?.question).toBe('Which matters more: speed or flexibility?');
+        expect(result.output?.edges?.length).toBe(1);
+        const e0 = result.output?.edges?.[0];
+        expect(e0?.type).toBe('conflict');
+        if (e0 && e0.type === 'conflict') {
+            expect(e0.question).toBe('Which matters more: speed or flexibility?');
+        }
     });
 
     it('should serialize shadow paragraphs without duplicating statement text', () => {
-        const shadowStatements: any[] = [
-            { id: 's_0', modelIndex: 1, text: 'Alpha', stance: 'assertive', signals: { sequence: false, tension: true, conditional: false } },
-            { id: 's_1', modelIndex: 2, text: 'Beta', stance: 'cautionary', signals: { sequence: true, tension: false, conditional: true } },
+        const paragraphs: any[] = [
+            { id: 'p_0', modelIndex: 1, paragraphIndex: 0, _fullParagraph: 'Alpha' },
+            { id: 'p_1', modelIndex: 2, paragraphIndex: 0, _fullParagraph: 'Beta' },
         ];
 
-        const prompt = buildSemanticMapperPrompt('Q', shadowStatements as any);
-        const match = prompt.match(/<statements>\s*([\s\S]*?)\s*<\/statements>/);
+        const prompt = buildSemanticMapperPrompt('Q', paragraphs as any);
+        const match = prompt.match(/<model_outputs>\s*([\s\S]*?)\s*<\/model_outputs>/);
         expect(match).not.toBeNull();
         const block = String(match?.[1] || '');
-        expect(block).toContain('s_0|A|Alpha');
-        expect(block).toContain('s_1|C|Beta');
+        expect(block).toContain('[Model 1]');
+        expect(block).toContain('[Model 2]');
+        expect(block).toContain('Alpha');
+        expect(block).toContain('Beta');
 
         expect(block.match(/\bAlpha\b/g)?.length).toBe(1);
         expect(block.match(/\bBeta\b/g)?.length).toBe(1);

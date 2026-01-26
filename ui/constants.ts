@@ -33,6 +33,7 @@ export const PROVIDER_COLORS: Record<string, string> = {
   'gemini-exp': '#8B5CF6',
   'chatgpt': '#10A37F',
   'qwen': '#F59E0B',
+  'grok': '#293944ff',
   'default': '#64748B'
 };
 
@@ -43,6 +44,7 @@ export const PROVIDER_ACCENT_COLORS: Record<string, string> = {
   'gemini-exp': '#6D28D9',
   'chatgpt': '#047857',
   'qwen': '#D97706',
+  'grok': '#293944ff',
   'default': '#475569'
 };
 

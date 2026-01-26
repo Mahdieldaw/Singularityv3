@@ -1,7 +1,6 @@
 // synthesisPromptV2.ts - v2-style layered  synthesis prompt builder
 
-import { TraversalState, formatPathSummary, getActiveClaims } from './traversalState';
-import { TraversalGraph } from './traversal';
+import { getActiveClaims, getPathSummary, type TraversalGraph, type TraversalState } from '../utils/cognitive/traversalEngine';
 
 import { buildPositionBriefFromClaims, TargetedAnalysis, computeTargetedAnalysis, formatTargetedInsights } from './positionBrief'; // Need this
 
@@ -18,13 +17,13 @@ export function buildSynthesisPrompt(ctx: SynthesisContext): string {
     const { userQuery, traversalState, graph, ghosts, structuralAnalysis } = ctx;
 
     // 1. Get active claims (post-traversal)
-    const activeClaims = getActiveClaims(traversalState, graph);
+    const activeClaims = getActiveClaims(graph.claims, traversalState);
 
     // Compute targeted analysis if not provided
     const targeted = structuralAnalysis ?? computeTargetedAnalysis(activeClaims, traversalState, graph);
 
     // 2. LAYER 1: User Path
-    const userPath = formatPathSummary(traversalState);
+    const userPath = getPathSummary(traversalState);
     const pathSection = userPath
         ? `<USER_PATH>\n${userPath}\n</USER_PATH>\n\n`
         : '';

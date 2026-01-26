@@ -6,6 +6,7 @@ import type { Region, RegionProfile } from './types';
 const TIER_THRESHOLDS = {
     peak: {
         minModelDiversityRatio: 0.5,
+        minModelDiversityAbsolute: 3,
         minInternalDensity: 0.25,
     },
     hill: {
@@ -62,9 +63,28 @@ function computeAvgInternalSimilarity(nodeIds: string[], substrate: GeometricSub
     return 0;
 }
 
-function assignTier(modelDiversityRatio: number, internalDensity: number): RegionProfile['tier'] {
+function computePeakMinDiversityRatio(observedModelCount: number): number {
+    const { peak } = TIER_THRESHOLDS;
+    const safeModelCount = Math.max(1, observedModelCount);
+    const absAsRatio = peak.minModelDiversityAbsolute / safeModelCount;
+    return Math.max(peak.minModelDiversityRatio, absAsRatio);
+}
+
+function assignTier(
+    modelDiversity: number,
+    modelDiversityRatio: number,
+    observedModelCount: number,
+    internalDensity: number
+): RegionProfile['tier'] {
     const { peak, hill } = TIER_THRESHOLDS;
-    if (modelDiversityRatio >= peak.minModelDiversityRatio && internalDensity >= peak.minInternalDensity) return 'peak';
+    const peakMinRatio = computePeakMinDiversityRatio(observedModelCount);
+    if (
+        modelDiversity >= peak.minModelDiversityAbsolute &&
+        modelDiversityRatio >= peakMinRatio &&
+        internalDensity >= peak.minInternalDensity
+    ) {
+        return 'peak';
+    }
     if (modelDiversityRatio >= hill.minModelDiversityRatio || internalDensity >= hill.minInternalDensity) return 'hill';
     return 'floor';
 }
@@ -72,18 +92,20 @@ function assignTier(modelDiversityRatio: number, internalDensity: number): Regio
 function computeTierConfidence(
     tier: RegionProfile['tier'],
     modelDiversityRatio: number,
+    observedModelCount: number,
     internalDensity: number
 ): number {
     const { peak } = TIER_THRESHOLDS;
+    const peakMinRatio = computePeakMinDiversityRatio(observedModelCount);
 
     if (tier === 'peak') {
-        const diversityMargin = (modelDiversityRatio - peak.minModelDiversityRatio) / (1 - peak.minModelDiversityRatio);
+        const diversityMargin = (modelDiversityRatio - peakMinRatio) / (1 - peakMinRatio);
         const densityMargin = (internalDensity - peak.minInternalDensity) / (1 - peak.minInternalDensity);
         return clamp(0.7 + 0.3 * Math.min(diversityMargin, densityMargin), 0, 1);
     }
 
     if (tier === 'hill') {
-        const diversityProgress = modelDiversityRatio / peak.minModelDiversityRatio;
+        const diversityProgress = modelDiversityRatio / peakMinRatio;
         const densityProgress = internalDensity / peak.minInternalDensity;
         return clamp(0.5 + 0.3 * Math.max(diversityProgress, densityProgress), 0, 1);
     }
@@ -149,8 +171,8 @@ function profileRegion(
 
     const isolation = nodeIds.length > 0 ? totalIsolation / nodeIds.length : 1;
 
-    const tier = assignTier(modelDiversityRatio, internalDensity);
-    const tierConfidence = computeTierConfidence(tier, modelDiversityRatio, internalDensity);
+    const tier = assignTier(modelDiversity, modelDiversityRatio, observedModelCount, internalDensity);
+    const tierConfidence = computeTierConfidence(tier, modelDiversityRatio, observedModelCount, internalDensity);
 
     const likelyClaims = contestedRatio > 0.3 || stanceVariety >= 3 || stanceUnanimity < 0.6 ? 2 : 1;
 

@@ -20,10 +20,12 @@ import { ClaudeAdapter } from "./providers/claude-adapter.js";
 import { GeminiAdapter } from "./providers/gemini-adapter.js";
 import { ChatGPTAdapter } from "./providers/chatgpt-adapter.js";
 import { QwenAdapter } from "./providers/qwen-adapter.js";
+import { GrokAdapter } from "./providers/grok-adapter.js";
 import { ClaudeProviderController } from "./providers/claude.js";
 import { GeminiProviderController } from "./providers/gemini.js";
 import { ChatGPTProviderController } from "./providers/chatgpt.js";
 import { QwenProviderController } from "./providers/qwen.js";
+import { GrokProviderController } from "./providers/grok.js";
 import { DNRUtils } from "./core/dnr-utils.js";
 import { ConnectionHandler } from "./core/connection-handler.js";
 import { authManager } from './core/auth-manager.js';
@@ -187,6 +189,7 @@ async function initializeProviders() {
     },
     { name: "chatgpt", Controller: ChatGPTProviderController, Adapter: ChatGPTAdapter },
     { name: "qwen", Controller: QwenProviderController, Adapter: QwenAdapter },
+    { name: "grok", Controller: GrokProviderController, Adapter: GrokAdapter },
   ];
 
   const initialized = [];

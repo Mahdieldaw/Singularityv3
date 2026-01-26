@@ -3,17 +3,17 @@ export const PROVIDER_PRIORITIES = {
      * For mapping: Structured reasoning / decision tree quality
      * Gemini > Qwen > ChatGPT > Gemini Exp > Claude > Gemini Pro
      */
-    mapping: ['gemini', 'qwen', 'chatgpt', 'gemini-exp', 'claude', 'gemini-pro'],
+    mapping: ['gemini', 'qwen', 'grok', 'chatgpt', 'gemini-exp', 'claude', 'gemini-pro'],
 
     /**
      * For singularity: Final synthesis quality
      */
-    singularity: ['gemini', 'qwen', 'chatgpt', 'gemini-exp', 'claude', 'gemini-pro'],
+    singularity: ['gemini', 'qwen', 'grok', 'chatgpt', 'gemini-exp', 'claude', 'gemini-pro'],
 
     /**
      * For batch queries: Balance of speed + quality
      */
-    batch: ['claude', 'gemini-exp', 'qwen', 'gemini-pro', 'chatgpt', 'gemini'],
+    batch: ['claude', 'gemini-exp', 'qwen', 'grok', 'gemini-pro', 'chatgpt', 'gemini'],
 } as const;
 
 export type ProviderRole = keyof typeof PROVIDER_PRIORITIES;

@@ -23,5 +23,6 @@ export const tokens = {
     claude: "#FF7F00",
     gemini: "#4285F4",
     qwen: "#00A9E0", // A distinct teal color for Qwen
+    grok: "#293944ff",
   },
 } as const;

@@ -229,7 +229,6 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
                 <div className="animate-in fade-in duration-500">
                     <TraversalGraphView
                         traversalGraph={aiTurn.mapperArtifact!.traversalGraph!}
-                        forcingPoints={aiTurn.mapperArtifact!.forcingPoints || []}
                         claims={aiTurn.mapperArtifact!.claims || []}
                         originalQuery={aiTurn.mapperArtifact!.query || ''}
                         sessionId={effectiveSessionId!}

@@ -83,9 +83,17 @@ export const computeLandscapeMetrics = (artifact: MapperArtifact): {
     const dominantType = (Object.entries(typeDistribution).sort((a, b) => b[1] - a[1])[0]?.[0] || "prescriptive") as Claim["type"];
     const dominantRole = (Object.entries(roleDistribution).sort((a, b) => b[1] - a[1])[0]?.[0] || "anchor") as Claim["role"];
 
-    const modelCount = typeof artifact?.model_count === "number" && artifact.model_count > 0
-        ? artifact.model_count
-        : supporterSet.size > 0 ? supporterSet.size : 1;
+    const explicitModelCount =
+        typeof artifact?.model_count === "number"
+            ? artifact.model_count
+            : typeof (artifact as any)?.modelCount === "number"
+                ? (artifact as any).modelCount
+                : null;
+
+    const modelCount =
+        typeof explicitModelCount === "number" && explicitModelCount > 0
+            ? explicitModelCount
+            : supporterSet.size > 0 ? supporterSet.size : 1;
 
     const topThreshold = getTopNCount(claims.length, 0.3);
     const sortedBySupport = [...claims].sort((a, b) => (b.supporters?.length || 0) - (a.supporters?.length || 0));
@@ -188,6 +196,7 @@ export const assignPercentileFlags = (
     const allLeverages = claims.map(c => c.leverage);
     const allKeystoneScores = claims.map(c => c.keystoneScore);
     const allSupportSkews = claims.map(c => c.supportSkew);
+    const consensusIds = new Set(claims.filter(c => c.supportRatio >= 0.5).map(c => c.id));
 
     const cascadeBySource = new Map<string, CascadeRisk>();
     cascadeRisks.forEach(risk => cascadeBySource.set(risk.sourceId, risk));
@@ -210,7 +219,7 @@ export const assignPercentileFlags = (
             : 0;
 
 
-        const isHighSupport = isInTopPercentile(claim.supportRatio, allSupportRatios, 0.3);
+        const isHighSupport = consensusIds.has(claim.id);
         const isLowSupport = isInBottomPercentile(claim.supportRatio, allSupportRatios, 0.3);
         const isHighLeverage = isInTopPercentile(claim.leverage, allLeverages, 0.25);
         const isLeverageInversion = isLowSupport && isHighLeverage;
@@ -228,12 +237,10 @@ export const assignPercentileFlags = (
             e.type === "prerequisite" && e.to === claim.id
         );
 
-        const challengesHighSupport = claim.role === "challenger" && edges.some(e =>
-            e.from === claim.id &&
-            topClaimIds.has(e.to) &&
-            (e.type === "conflicts" || e.type === "prerequisite")
+        const isChallenger = !isHighSupport && edges.some(e =>
+            e.type === "conflicts" &&
+            ((e.from === claim.id && consensusIds.has(e.to)) || (e.to === claim.id && consensusIds.has(e.from)))
         );
-        const isChallenger = isLowSupport && challengesHighSupport;
 
         const isIsolated = !connectedIds.has(claim.id);
         const chainDepth = claim.isChainRoot ? 0 : (claim.isChainTerminal ? 1 : 0);

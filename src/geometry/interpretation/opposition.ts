@@ -19,22 +19,12 @@ function computeInterRegionSimilarity(regionA: Region, regionB: Region, substrat
 
     let maxSim = 0;
 
-    for (const edge of substrate.graphs.strong.edges) {
+    for (const edge of substrate.graphs.mutual.edges) {
         const aInA = nodeSetA.has(edge.source);
         const aInB = nodeSetB.has(edge.source);
         const bInA = nodeSetA.has(edge.target);
         const bInB = nodeSetB.has(edge.target);
         if ((aInA && bInB) || (aInB && bInA)) maxSim = Math.max(maxSim, edge.similarity);
-    }
-
-    if (maxSim === 0) {
-        for (const edge of substrate.graphs.mutual.edges) {
-            const aInA = nodeSetA.has(edge.source);
-            const aInB = nodeSetB.has(edge.source);
-            const bInA = nodeSetA.has(edge.target);
-            const bInB = nodeSetB.has(edge.target);
-            if ((aInA && bInB) || (aInB && bInA)) maxSim = Math.max(maxSim, edge.similarity);
-        }
     }
 
     return maxSim;
@@ -86,4 +76,3 @@ export function detectOppositions(regions: Region[], profiles: RegionProfile[], 
 
     return oppositions;
 }
-

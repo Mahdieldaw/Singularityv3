@@ -18,10 +18,7 @@ import type {
     Edge,
 } from '../../shared/contract';
 
-import type { AssembledClaim } from './claimAssembly';
-import type { TraversalState } from './traversalState';
-import type { TraversalGraph } from './traversal';
-import { getCascade } from './traversal';
+import type { TraversalGraph, TraversalState } from '../utils/cognitive/traversalEngine';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // UTILITIES
@@ -102,19 +99,42 @@ function buildTensionPairs(
     return pairs;
 }
 
+function getCascadeFromPrerequisites(
+    claimId: string,
+    graph: TraversalGraph
+): string[] {
+    const visited = new Set<string>();
+    const queue: string[] = [claimId];
+
+    while (queue.length > 0) {
+        const current = queue.shift()!;
+        if (visited.has(current)) continue;
+        visited.add(current);
+
+        for (const e of graph.edges || []) {
+            if (e?.type !== 'prerequisite') continue;
+            if (e.from !== current) continue;
+            if (!visited.has(e.to)) queue.push(e.to);
+        }
+    }
+
+    visited.delete(claimId);
+    return Array.from(visited);
+}
+
 // NEW: Targeted structural analysis for active/path-specific concerns
 export interface TargetedAnalysis {
     keystones: Array<{
-        claim: AssembledClaim;
+        claim: EnrichedClaim;
         dependentCount: number;
         userConfirmed: boolean;  // Did user confirm this?
     }>;
     dissent: Array<{
-        claim: AssembledClaim;
+        claim: EnrichedClaim;
         contrastingWith: string; // User's preference
     }>;
     fragilePaths: Array<{
-        claim: AssembledClaim;
+        claim: EnrichedClaim;
         unblockedGate: string;   // Gate not yet confirmed
     }>;
 }
@@ -127,41 +147,46 @@ export interface TargetedAnalysis {
  * - Marks fragile paths (claims still gated by unresolved gates)
  */
 export function computeTargetedAnalysis(
-    activeClaims: AssembledClaim[],
+    activeClaims: EnrichedClaim[],
     traversalState: TraversalState,
     graph: TraversalGraph
 ): TargetedAnalysis {
     // Work only on currently active claims
     const activeIds = new Set(activeClaims.map(c => c.id));
+    const selectedClaimIds = new Set<string>(
+        Array.from(traversalState.resolutions.values())
+            .filter(r => r.type === 'conflict' && !!r.selectedClaimId)
+            .map(r => String(r.selectedClaimId))
+    );
 
     // 1) Keystones: active claims that many others depend on (cascade size)
     const keystones = activeClaims
         .map(c => ({
             claim: c,
-            dependentCount: getCascade(c.id, graph).length,
-            userConfirmed: traversalState.selected.has(c.id) || traversalState.collectedEvidence.has(c.id),
+            dependentCount: getCascadeFromPrerequisites(c.id, graph).length,
+            userConfirmed: selectedClaimIds.has(c.id),
         }))
         .filter(k => k.dependentCount > 0)
         .sort((a, b) => b.dependentCount - a.dependentCount);
 
     // 2) Dissent: active claims that conflict with something the user has chosen
-    const dissent: Array<{ claim: AssembledClaim; contrastingWith: string }> = [];
-    const selectedIds = Array.from(traversalState.selected);
+    const dissent: Array<{ claim: EnrichedClaim; contrastingWith: string }> = [];
+    const selectedIds = Array.from(selectedClaimIds);
 
     if (selectedIds.length > 0) {
-        // For each tension in the graph, if one side is selected and the other is active,
-        // the active opposite represents a dissenting alternative to the user's path.
-        for (const t of graph.tensions) {
-            const aSelected = selectedIds.includes(t.claimAId);
-            const bSelected = selectedIds.includes(t.claimBId);
+        for (const e of graph.edges || []) {
+            if (e?.type !== 'conflict') continue;
 
-            if (aSelected && activeIds.has(t.claimBId)) {
-                const claim = graph.claims.find(c => c.id === t.claimBId);
-                if (claim) dissent.push({ claim, contrastingWith: t.claimAId });
+            const aSelected = selectedIds.includes(e.from);
+            const bSelected = selectedIds.includes(e.to);
+
+            if (aSelected && activeIds.has(e.to)) {
+                const claim = graph.claims.find(c => c.id === e.to);
+                if (claim) dissent.push({ claim, contrastingWith: e.from });
             }
-            if (bSelected && activeIds.has(t.claimAId)) {
-                const claim = graph.claims.find(c => c.id === t.claimAId);
-                if (claim) dissent.push({ claim, contrastingWith: t.claimBId });
+            if (bSelected && activeIds.has(e.from)) {
+                const claim = graph.claims.find(c => c.id === e.from);
+                if (claim) dissent.push({ claim, contrastingWith: e.to });
             }
         }
     }
@@ -175,20 +200,19 @@ export function computeTargetedAnalysis(
     });
 
     // 3) Fragile paths: active claims that still depend on unresolved gates
-    const fragilePaths: Array<{ claim: AssembledClaim; unblockedGate: string }> = [];
+    const fragilePaths: Array<{ claim: EnrichedClaim; unblockedGate: string }> = [];
 
     for (const c of activeClaims) {
-        // Collect gate ids (conditionals + prerequisites)
-        const gateIds = [
-            ...c.gates.conditionals.map(g => g.id),
-            ...c.gates.prerequisites.map(g => g.id),
-        ];
-
-        // Find first gate that has not been resolved (i.e., not present in resolvedGates)
-        const unresolved = gateIds.find(gid => !traversalState.resolvedGates.has(gid));
-
-        if (unresolved) {
-            fragilePaths.push({ claim: c, unblockedGate: unresolved });
+        for (const cond of graph.conditionals || []) {
+            if (!Array.isArray(cond?.affectedClaims)) continue;
+            if (!cond.affectedClaims.includes(c.id)) continue;
+            const fpId = cond?.id ? `fp_cond_${String(cond.id)}` : '';
+            if (!fpId) continue;
+            const resolution = traversalState.resolutions.get(fpId);
+            if (!resolution) {
+                fragilePaths.push({ claim: c, unblockedGate: String(cond?.question || fpId) });
+                break;
+            }
         }
     }
 
@@ -232,24 +256,12 @@ export function formatTargetedInsights(
 // ═══════════════════════════════════════════════════════════════════════════
 // NEW function needed in positionBrief.ts
 export function buildPositionBriefFromClaims(
-    claims: AssembledClaim[],
+    claims: EnrichedClaim[],
     ghosts: string[] = []
 ): string {
-    // Same bucket algorithm, but:
-    // - Uses AssembledClaim (has sourceStatements attached)
-    // - Formats with evidence from claim.sourceStatements
-    // - No dependency on StructuralAnalysis
-
-    // Simple compatibility implementation: map AssembledClaim -> EnrichedClaim-like object
-    const mapped = claims.map(c => ({
-        id: c.id,
-        text: c.label + (c.description ? ` — ${c.description}` : ''),
-        supportRatio: c.supportRatio,
-    } as EnrichedClaim));
-
     // Build a minimal analysis-like wrapper
     const analysisLike = {
-        claimsWithLeverage: mapped,
+        claimsWithLeverage: claims,
         edges: [] as Edge[],
     } as unknown as StructuralAnalysis;
 

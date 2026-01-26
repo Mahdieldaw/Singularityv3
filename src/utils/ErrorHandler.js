@@ -40,6 +40,11 @@ export const PROVIDER_CONFIG = {
     loginUrl: 'https://qianwen.com',
     maxInputChars: 30000,
   },
+  grok: {
+    displayName: 'Grok',
+    loginUrl: 'http://grok.com',
+    maxInputChars: 120000,
+  },
 };
 
 // ============================================================

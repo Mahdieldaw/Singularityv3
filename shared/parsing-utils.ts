@@ -15,6 +15,59 @@ export function repairJson(text: string): string {
     const input = String(text ?? '');
     if (!input) return '';
 
+    const fixInvalidStringEscapes = (src: string): string => {
+        let out = '';
+        let quote: '"' | "'" | null = null;
+        let esc = false;
+
+        const isAllowedEscape = (c: string) =>
+            c === '"' ||
+            c === '\\' ||
+            c === '/' ||
+            c === 'b' ||
+            c === 'f' ||
+            c === 'n' ||
+            c === 'r' ||
+            c === 't' ||
+            c === 'u';
+
+        for (let i = 0; i < src.length; i++) {
+            const ch = src[i];
+            const next = i + 1 < src.length ? src[i + 1] : '';
+
+            if (quote) {
+                if (esc) {
+                    esc = false;
+                    out += ch;
+                    continue;
+                }
+                if (ch === '\\') {
+                    if (next && !isAllowedEscape(next)) {
+                        out += next;
+                        i++;
+                        continue;
+                    }
+                    esc = true;
+                    out += ch;
+                    continue;
+                }
+                out += ch;
+                if (ch === quote) {
+                    quote = null;
+                }
+                continue;
+            }
+
+            out += ch;
+            if (ch === '"' || ch === "'") {
+                quote = ch as any;
+                esc = false;
+            }
+        }
+
+        return out;
+    };
+
     const stripComments = (src: string): string => {
         let out = '';
         let quote: '"' | "'" | null = null;
@@ -210,7 +263,7 @@ export function repairJson(text: string): string {
     const noComments = stripComments(input);
     const noTrailing = removeTrailingCommas(noComments);
     const quotedKeys = quoteUnquotedKeys(noTrailing);
-    return quotedKeys;
+    return fixInvalidStringEscapes(quotedKeys);
 }
 
 export function extractJsonObject(text: string): { json: any | null; path: string } {
@@ -392,7 +445,9 @@ export function parseUnifiedMapperOutput(text: string): ParsedMapperOutput {
         };
     }
 
-    const normalizedText = text.replace(/\\</g, '<').replace(/\\>/g, '>');
+    const normalizedText = text
+        .replace(/\\+(?=<)/g, '')
+        .replace(/\\+(?=>)/g, '');
 
     type HeadingBlock = {
         kind: 'map' | 'narrative';
@@ -554,16 +609,26 @@ export function parseUnifiedMapperOutput(text: string): ParsedMapperOutput {
             .filter((c: any) => c.id && c.label)
         : [];
 
+    const normalizeEdgeType = (e: any): Edge["type"] => {
+        const t = String(e?.type ?? "").toLowerCase();
+        if (t === "supports" || t === "support") return "supports";
+        if (t === "prerequisite" || t === "requires") return "prerequisite";
+        if (t === "tradeoff") return "tradeoff";
+        if (t === "conflicts") return "conflicts";
+        if (t === "conflict") {
+            const q = typeof e?.question === "string" ? e.question.trim() : "";
+            return q ? "conflicts" : "tradeoff";
+        }
+        return "supports";
+    };
+
     const normalizedEdges: Edge[] = Array.isArray((map as any).edges)
         ? (map as any).edges
             .filter((e: any) => e && (e.from || e.to))
             .map((e: any) => ({
                 from: String(e.from ?? ""),
                 to: String(e.to ?? ""),
-                type:
-                    e.type === "supports" || e.type === "conflicts" || e.type === "tradeoff" || e.type === "prerequisite"
-                        ? e.type
-                        : "supports",
+                type: normalizeEdgeType(e),
             }))
             .filter((e: any) => e.from && e.to)
         : [];
@@ -1035,6 +1100,7 @@ export interface SemanticMapperParseError {
 export interface SemanticMapperParseResult {
     success: boolean;
     output?: any; // Will be typed as SemanticMapperOutput in the caller
+    narrative?: string;
     errors?: SemanticMapperParseError[];
     warnings?: string[];
 }
@@ -1044,236 +1110,143 @@ export interface SemanticMapperParseResult {
  * Extracts JSON from markdown fences or raw text and validates the structure.
  */
 export function parseSemanticMapperOutput(
-    rawResponse: string,
-    validStatementIds?: Set<string>
+    rawResponse: string
 ): SemanticMapperParseResult {
     const errors: SemanticMapperParseError[] = [];
     const warnings: string[] = [];
 
-    // Extract JSON from response
-    const { json: parsed, path: _path } = extractJsonObject(rawResponse);
+    const normalizedText = String(rawResponse || '')
+        .replace(/\\+(?=<)/g, '')
+        .replace(/\\+(?=>)/g, '');
 
-    if (!parsed) {
+    const mapTagPattern = /<map\b[^>]*>([\s\S]*?)<\/map\s*>/gi;
+    const narrativeTagPattern = /<narrative\b[^>]*>([\s\S]*?)<\/narrative\s*>/gi;
+
+    const mapMatches = Array.from(normalizedText.matchAll(mapTagPattern));
+    const narrativeMatches = Array.from(normalizedText.matchAll(narrativeTagPattern));
+
+    let mapContent = mapMatches.length > 0 ? mapMatches[mapMatches.length - 1]?.[1] : null;
+    const narrativeContent = narrativeMatches.length > 0 ? narrativeMatches[narrativeMatches.length - 1]?.[1] : null;
+
+    if (!mapContent) {
+        const openIdx = normalizedText.search(/<map\b[^>]*>/i);
+        if (openIdx !== -1) {
+            const afterOpen = normalizedText.slice(openIdx);
+            const tagEnd = afterOpen.indexOf('>');
+            if (tagEnd !== -1) {
+                mapContent = afterOpen.slice(tagEnd + 1);
+            }
+        }
+    }
+
+    let parsedMap: any | null = null;
+    if (mapContent && mapContent.trim().length > 0) {
+        parsedMap = extractJsonFromContent(mapContent);
+    }
+    if (!parsedMap) {
+        const extracted = extractJsonFromContent(normalizedText);
+        parsedMap = extracted || null;
+    }
+
+    if (!parsedMap || typeof parsedMap !== 'object') {
         return {
             success: false,
-            errors: [{ field: 'response', issue: 'No valid JSON object found in response' }],
+            errors: [{ field: 'response', issue: 'No valid <map> JSON found in response' }],
         };
     }
 
-    // Validate structure
-    if (!parsed.claims || !Array.isArray(parsed.claims)) {
+    const claims = Array.isArray((parsedMap as any).claims) ? (parsedMap as any).claims : null;
+    const edges = Array.isArray((parsedMap as any).edges) ? (parsedMap as any).edges : null;
+    const conditionals = Array.isArray((parsedMap as any).conditionals)
+        ? (parsedMap as any).conditionals
+        : [];
+
+    if (!claims) {
         errors.push({ field: 'claims', issue: 'Missing or invalid claims array' });
         return { success: false, errors };
     }
+    if (!edges) {
+        errors.push({ field: 'edges', issue: 'Missing or invalid edges array' });
+        return { success: false, errors };
+    }
 
-    // Track claim IDs and gate IDs for reference validation
+    const narrativeFromMap = typeof (parsedMap as any).narrative === 'string' ? String((parsedMap as any).narrative) : '';
+    const narrative = String((narrativeContent || narrativeFromMap || '')).trim();
+
     const claimIds = new Set<string>();
-    const gateIds = new Set<string>();
+    for (let i = 0; i < claims.length; i++) {
+        const c = claims[i];
+        const ctx = `claims[${i}]`;
 
-    // Validate each claim
-    for (let i = 0; i < parsed.claims.length; i++) {
-        const claim = parsed.claims[i];
-        const claimContext = `claim[${i}]`;
-
-        // Disallow legacy contract fields
-        if (claim && typeof claim === 'object' && 'edges' in claim) {
-            errors.push({
-                field: `${claimContext}.edges`,
-                issue: 'Legacy field not allowed. Use enables[] and conflicts[] instead of edges.*',
-            });
+        if (!c || typeof c !== 'object') {
+            errors.push({ field: ctx, issue: 'Claim must be an object' });
+            continue;
         }
 
-        // Required fields
-        if (!claim.id) {
-            errors.push({ field: `${claimContext}.id`, issue: 'Missing claim ID' });
-        } else {
-            if (claimIds.has(claim.id)) {
-                errors.push({ field: `${claimContext}.id`, issue: `Duplicate claim ID: ${claim.id}` });
-            }
-            claimIds.add(claim.id);
+        const id = String((c as any).id || '').trim();
+        const label = String((c as any).label || '').trim();
+        const text = String((c as any).text || '').trim();
+
+        if (!id) errors.push({ field: `${ctx}.id`, issue: 'Missing id' });
+        if (!label) errors.push({ field: `${ctx}.label`, issue: 'Missing label' });
+        if (!text) errors.push({ field: `${ctx}.text`, issue: 'Missing text' });
+
+        if (id) {
+            if (claimIds.has(id)) errors.push({ field: `${ctx}.id`, issue: `Duplicate id: ${id}` });
+            claimIds.add(id);
         }
 
-        if (!claim.label) {
-            errors.push({ field: `${claimContext}.label`, issue: 'Missing claim label' });
-        }
-
-        if (!claim.stance) {
-            errors.push({ field: `${claimContext}.stance`, issue: 'Missing stance' });
-        }
-
-        if (!claim.sourceStatementIds || !Array.isArray(claim.sourceStatementIds)) {
-            errors.push({ field: `${claimContext}.sourceStatementIds`, issue: 'Missing or invalid sourceStatementIds' });
-        } else if (claim.sourceStatementIds.length === 0) {
-            errors.push({ field: `${claimContext}.sourceStatementIds`, issue: 'Empty sourceStatementIds array' });
-        } else if (validStatementIds) {
-            // Validate statement IDs exist
-            for (const sid of claim.sourceStatementIds) {
-                if (!validStatementIds.has(sid)) {
-                    warnings.push(`Claim ${claim.id} references unknown statement: ${sid}`);
-                }
-            }
-        }
-
-        // Validate gates
-        if (!claim.gates) {
-            errors.push({ field: `${claimContext}.gates`, issue: 'Missing gates object' });
-        } else {
-            // Conditional gates
-            if (!(claim.gates as any).conditionals) {
-                (claim.gates as any).conditionals = []; // Auto-fix
-            } else if (!Array.isArray((claim.gates as any).conditionals)) {
-                errors.push({ field: `${claimContext}.gates.conditionals`, issue: 'Must be an array' });
-            } else {
-                for (let j = 0; j < (claim.gates as any).conditionals.length; j++) {
-                    const gate = (claim.gates as any).conditionals[j];
-                    const gateContext = `${claimContext}.gates.conditionals[${j}]`;
-
-                    if (!gate.id) {
-                        errors.push({ field: `${gateContext}.id`, issue: 'Missing gate ID' });
-                    } else {
-                        if (gateIds.has(gate.id)) {
-                            errors.push({ field: `${gateContext}.id`, issue: `Duplicate gate ID: ${gate.id}` });
-                        }
-                        gateIds.add(gate.id);
-                    }
-
-                    if (!gate.condition) {
-                        errors.push({ field: `${gateContext}.condition`, issue: 'Missing condition' });
-                    }
-
-                    if (!gate.question) {
-                        errors.push({ field: `${gateContext}.question`, issue: 'Missing question' });
-                    }
-
-                    if (!gate.sourceStatementIds || gate.sourceStatementIds.length === 0) {
-                        errors.push({ field: `${gateContext}.sourceStatementIds`, issue: 'Missing provenance' });
-                    } else if (validStatementIds) {
-                        for (const sid of gate.sourceStatementIds) {
-                            if (!validStatementIds.has(sid)) {
-                            warnings.push(`Gate ${gate.id} references unknown statement: ${sid}`);
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Prerequisite gates
-            if (!claim.gates.prerequisites) {
-                claim.gates.prerequisites = []; // Auto-fix
-            } else if (!Array.isArray(claim.gates.prerequisites)) {
-                errors.push({ field: `${claimContext}.gates.prerequisites`, issue: 'Must be an array' });
-            } else {
-                for (let j = 0; j < claim.gates.prerequisites.length; j++) {
-                    const gate = claim.gates.prerequisites[j];
-                    const gateContext = `${claimContext}.gates.prerequisites[${j}]`;
-
-                    if (!gate.id) {
-                        errors.push({ field: `${gateContext}.id`, issue: 'Missing gate ID' });
-                    } else {
-                        if (gateIds.has(gate.id)) {
-                            errors.push({ field: `${gateContext}.id`, issue: `Duplicate gate ID: ${gate.id}` });
-                        }
-                        gateIds.add(gate.id);
-                    }
-
-                    if (!gate.claimId) {
-                        errors.push({ field: `${gateContext}.claimId`, issue: 'Missing required claim reference' });
-                    }
-
-                    if (!gate.condition) {
-                        errors.push({ field: `${gateContext}.condition`, issue: 'Missing condition' });
-                    }
-
-                    if (!gate.question) {
-                        errors.push({ field: `${gateContext}.question`, issue: 'Missing question' });
-                    }
-
-                    if (!gate.sourceStatementIds || gate.sourceStatementIds.length === 0) {
-                        errors.push({ field: `${gateContext}.sourceStatementIds`, issue: 'Missing provenance' });
-                    } else if (validStatementIds) {
-                        for (const sid of gate.sourceStatementIds) {
-                            if (!validStatementIds.has(sid)) {
-                                warnings.push(`Gate ${gate.id} references unknown statement: ${sid}`);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // Validate relationships
-        if (!('enables' in claim)) {
-            claim.enables = []; // Auto-fix
-        } else if (claim.enables != null && !Array.isArray(claim.enables)) {
-            errors.push({ field: `${claimContext}.enables`, issue: 'Must be an array of claim IDs' });
-        } else if (Array.isArray(claim.enables)) {
-            for (let j = 0; j < claim.enables.length; j++) {
-                const enabledId = claim.enables[j];
-                const enablesContext = `${claimContext}.enables[${j}]`;
-                if (typeof enabledId !== 'string' || enabledId.trim().length === 0) {
-                    errors.push({ field: enablesContext, issue: 'Enabled claim ID must be a non-empty string' });
-                }
-            }
-        }
-
-        if (!('conflicts' in claim)) {
-            claim.conflicts = []; // Auto-fix
-        } else if (claim.conflicts != null && !Array.isArray(claim.conflicts)) {
-            errors.push({ field: `${claimContext}.conflicts`, issue: 'Must be an array' });
-        } else if (Array.isArray(claim.conflicts)) {
-            for (let j = 0; j < claim.conflicts.length; j++) {
-                const conflict = claim.conflicts[j];
-                const conflictContext = `${claimContext}.conflicts[${j}]`;
-
-                if (!conflict || typeof conflict !== 'object') {
-                    errors.push({ field: conflictContext, issue: 'Conflict must be an object' });
-                    continue;
-                }
-
-                if (!conflict.claimId) {
-                    errors.push({ field: `${conflictContext}.claimId`, issue: 'Missing conflicting claim reference' });
-                }
-
-                if (!conflict.question) {
-                    errors.push({ field: `${conflictContext}.question`, issue: 'Missing question' });
-                }
-
-                if (!conflict.sourceStatementIds || !Array.isArray(conflict.sourceStatementIds) || conflict.sourceStatementIds.length === 0) {
-                    errors.push({ field: `${conflictContext}.sourceStatementIds`, issue: 'Missing provenance' });
-                } else if (validStatementIds) {
-                    for (const sid of conflict.sourceStatementIds) {
-                        if (!validStatementIds.has(sid)) {
-                            warnings.push(`Conflict edge references unknown statement: ${sid}`);
-                        }
-                    }
-                }
-            }
+        const supporters = (c as any).supporters;
+        if (!Array.isArray(supporters) || supporters.some((s: any) => typeof s !== 'number')) {
+            errors.push({ field: `${ctx}.supporters`, issue: 'supporters must be number[]' });
         }
     }
 
-    // Second pass: validate claim references
-    for (const claim of parsed.claims) {
-        if (claim.gates && claim.gates.prerequisites) {
-            for (const gate of claim.gates.prerequisites) {
-                if (gate.claimId && !claimIds.has(gate.claimId)) {
-                    warnings.push(`Prerequisite gate ${gate.id} references unknown claim: ${gate.claimId}`);
-                }
-            }
+    for (let i = 0; i < edges.length; i++) {
+        const e = edges[i];
+        const ctx = `edges[${i}]`;
+
+        if (!e || typeof e !== 'object') {
+            errors.push({ field: ctx, issue: 'Edge must be an object' });
+            continue;
         }
 
-        if (Array.isArray(claim.enables)) {
-            for (const enabledId of claim.enables) {
-                if (enabledId && !claimIds.has(enabledId)) {
-                    warnings.push(`Enables relationship from ${claim.id} references unknown claim: ${enabledId}`);
-                }
-            }
+        const from = String((e as any).from || '').trim();
+        const to = String((e as any).to || '').trim();
+        const type = String((e as any).type || '').trim();
+
+        if (!from) errors.push({ field: `${ctx}.from`, issue: 'Missing from' });
+        if (!to) errors.push({ field: `${ctx}.to`, issue: 'Missing to' });
+        if (type !== 'prerequisite' && type !== 'conflict') {
+            errors.push({ field: `${ctx}.type`, issue: 'type must be "prerequisite" or "conflict"' });
+        }
+    }
+
+    for (let i = 0; i < conditionals.length; i++) {
+        const c = conditionals[i];
+        const ctx = `conditionals[${i}]`;
+
+        if (!c || typeof c !== 'object') {
+            errors.push({ field: ctx, issue: 'Conditional must be an object' });
+            continue;
         }
 
-        if (Array.isArray(claim.conflicts)) {
-            for (const conflict of claim.conflicts) {
-                if (conflict?.claimId && !claimIds.has(conflict.claimId)) {
-                    warnings.push(`Conflict edge from ${claim.id} references unknown claim: ${conflict.claimId}`);
-                }
+        const id = String((c as any).id || '').trim();
+        const question = String((c as any).question || '').trim();
+        const affectedClaims = (c as any).affectedClaims;
+
+        if (!id) errors.push({ field: `${ctx}.id`, issue: 'Missing id' });
+        if (!question) errors.push({ field: `${ctx}.question`, issue: 'Missing question' });
+        if (!Array.isArray(affectedClaims) || affectedClaims.some((x: any) => typeof x !== 'string' || x.trim().length === 0)) {
+            errors.push({ field: `${ctx}.affectedClaims`, issue: 'affectedClaims must be string[]' });
+        }
+    }
+
+    if (errors.length === 0) {
+        for (const id of claimIds) {
+            if (!/^c_/i.test(id) && !/^claim_/i.test(id)) {
+                warnings.push(`Non-standard claim id: ${id}`);
+                break;
             }
         }
     }
@@ -1289,8 +1262,11 @@ export function parseSemanticMapperOutput(
     return {
         success: true,
         output: {
-            claims: parsed.claims,
+            claims,
+            edges,
+            conditionals,
         },
+        narrative,
         warnings: warnings.length > 0 ? warnings : undefined,
     };
 }

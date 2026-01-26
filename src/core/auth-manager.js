@@ -113,6 +113,8 @@ class AuthManager {
             }
         }));
 
+        status.grok = await this._verifyGrok();
+
         // Update cache and storage
         this._cookieStatus = status;
         this._cookieStatusTs = Date.now();
@@ -152,6 +154,9 @@ class AuthManager {
                     break;
                 case 'qwen':
                     valid = await this._verifyQwen();
+                    break;
+                case 'grok':
+                    valid = await this._verifyGrok();
                     break;
                 default:
                     // Unknown provider, fall back to cookie check
@@ -194,7 +199,7 @@ class AuthManager {
      */
     async verifyAll() {
         console.log('[AuthManager] Verifying all providers...');
-        const baseProviders = ['claude', 'chatgpt', 'gemini', 'qwen'];
+        const baseProviders = ['claude', 'chatgpt', 'gemini', 'qwen', 'grok'];
         const results = {};
 
         await Promise.all(baseProviders.map(async (pid) => {
@@ -303,6 +308,35 @@ class AuthManager {
         const html = await response.text();
         // Robust presence check for csrfToken in script tags, JSON blobs, or meta elements
         return /csrfToken["']?\s*[:=]\s*["']([^"']+)["']/i.test(html) || html.includes('name="csrf-token"');
+    }
+
+    /**
+     * Grok: GET /c
+     * Success: 200 + HTML contains baggage + sentry-trace meta tags and Next.js chunks
+     * Failure: 403 = blocked, or missing meta tags = site changed/broken
+     */
+    async _verifyGrok() {
+        try {
+            const response = await fetch('https://grok.com/c', {
+                method: 'GET',
+                credentials: 'include',
+                signal: AbortSignal.timeout(5000),
+            });
+
+            if (!response.ok) {
+                return false;
+            }
+
+            const html = await response.text();
+            const hasBaggage = html.includes('<meta name="baggage" content="');
+            const hasSentryTrace = html.includes('<meta name="sentry-trace" content="');
+            const hasScripts = html.includes('/_next/static/chunks/');
+
+            return hasBaggage && hasSentryTrace && hasScripts;
+        } catch (e) {
+            console.warn('[AuthManager] Grok verification failed:', e?.message || String(e));
+            return false;
+        }
     }
 
     /**

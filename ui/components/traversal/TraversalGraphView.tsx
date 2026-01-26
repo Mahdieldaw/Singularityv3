@@ -1,15 +1,17 @@
 import React from 'react';
-import { useTraversalState } from '../../hooks/cognitive/useTraversalState';
+import { useAtomValue } from 'jotai';
+
+import { useTraversal } from '../../hooks/useTraversal';
 import { TraversalGateCard } from './TraversalGateCard';
 import { TraversalForcingPointCard } from './TraversalForcingPointCard';
 import { buildTraversalContinuationPrompt } from '../../utils/traversal-prompt-builder';
-import type { Claim, ForcingPoint, SerializedTraversalGraph, TraversalGate } from '../../../shared/contract';
+import type { Claim, TraversalGate } from '../../../shared/contract';
 import { CONTINUE_COGNITIVE_WORKFLOW, WORKFLOW_STEP_UPDATE } from '../../../shared/messaging';
 import api from '../../services/extension-api';
+import { singularityProviderAtom } from '../../state/atoms';
 
 interface TraversalGraphViewProps {
-  traversalGraph: SerializedTraversalGraph;
-  forcingPoints: ForcingPoint[];
+  traversalGraph: any;
   claims: Claim[];
   originalQuery: string;
   sessionId: string;
@@ -19,27 +21,23 @@ interface TraversalGraphViewProps {
 
 export const TraversalGraphView: React.FC<TraversalGraphViewProps> = ({
   traversalGraph,
-  forcingPoints,
   claims,
   originalQuery,
   sessionId,
   aiTurnId,
   onComplete
 }) => {
-  const tiersArray = Array.isArray(traversalGraph?.tiers) ? traversalGraph.tiers : [];
-  const conflictForcingPoints = Array.isArray(forcingPoints)
-    ? forcingPoints.filter((fp: any) => fp && fp.type === 'conflict')
-    : [];
-
   const {
     state,
     resolveGate,
     resolveForcingPoint,
-    unlockedTiers,
     isComplete,
-    reset
-  } = useTraversalState(traversalGraph, conflictForcingPoints);
-
+    liveForcingPoints,
+    reset,
+    forcingPoints,
+    getResolution,
+  } = useTraversal(traversalGraph, claims as any);
+  const singularityProvider = useAtomValue(singularityProviderAtom);
   const [isSubmitting, setIsSubmitting] = React.useState(false);
   const [submissionError, setSubmissionError] = React.useState<string | null>(null);
 
@@ -47,15 +45,11 @@ export const TraversalGraphView: React.FC<TraversalGraphViewProps> = ({
     setIsSubmitting(true);
     setSubmissionError(null);
 
-    const allGates = tiersArray.flatMap((t) => t.gates || []);
-    const gatesMap = new Map<string, TraversalGate>(allGates.map((g) => [g.id, g]));
-
     const continuationPrompt = buildTraversalContinuationPrompt(
       originalQuery,
-      state.gateResolutions,
-      state.forcingPointResolutions,
-      claims,
-      gatesMap
+      forcingPoints,
+      getResolution,
+      claims
     );
 
     const maxRetries = 3;
@@ -169,7 +163,7 @@ export const TraversalGraphView: React.FC<TraversalGraphViewProps> = ({
                 sessionId,
                 aiTurnId,
                 userMessage: continuationPrompt,
-                providerId: 'gemini',
+                providerId: singularityProvider || undefined,
                 isTraversalContinuation: true
               }
             });
@@ -194,16 +188,23 @@ export const TraversalGraphView: React.FC<TraversalGraphViewProps> = ({
     }
   };
 
-  if (!Array.isArray(traversalGraph?.tiers)) {
-    console.warn('[Traversal] Legacy/malformed traversal graph detected', traversalGraph);
-    return (
-      <div className="mt-8 pt-6 border-t border-border-subtle text-text-muted text-sm">
-        This response used an older traversal format and can’t be displayed.
-      </div>
-    );
-  }
+  const tiersArray = React.useMemo(() => {
+    return Array.isArray(traversalGraph?.tiers) && traversalGraph.tiers.length > 0
+      ? traversalGraph.tiers
+      : [{ tierIndex: 0, claimIds: claims.map(c => c.id), gates: [] }];
+  }, [claims, traversalGraph]);
 
   const sortedTiers = [...tiersArray].sort((a: any, b: any) => a.tierIndex - b.tierIndex);
+  const liveIds = new Set((liveForcingPoints || []).map((fp: any) => fp?.id).filter(Boolean));
+  const displayForcingPoints = (forcingPoints || [])
+    .filter((fp: any) => fp && (liveIds.has(fp.id) || !!getResolution(fp.id)))
+    .sort((a: any, b: any) => {
+      const ta = typeof a?.tier === 'number' ? a.tier : 0;
+      const tb = typeof b?.tier === 'number' ? b.tier : 0;
+      if (ta !== tb) return ta - tb;
+      const typePriority: Record<string, number> = { conditional: 0, conflict: 1 };
+      return (typePriority[String(a?.type)] ?? 99) - (typePriority[String(b?.type)] ?? 99);
+    });
 
   return (
     <div className="mt-8 pt-6 border-t border-border-subtle">
@@ -224,7 +225,14 @@ export const TraversalGraphView: React.FC<TraversalGraphViewProps> = ({
 
       {/* Tiers */}
       {sortedTiers.map((tier: any) => {
-        const isUnlocked = unlockedTiers.has(tier.tierIndex);
+        const blockingGates = Array.isArray(tier.gates) ? tier.gates : [];
+        const isUnlocked =
+          tier.tierIndex === 0 ||
+          blockingGates.length === 0 ||
+          blockingGates.every((gate: any) => {
+            const r = getResolution(String(gate.id));
+            return r?.type === 'conditional' && r.satisfied === true;
+          });
         const tierClaims = Array.isArray(tier.claimIds)
           ? tier.claimIds.map((id: string) => claims.find((c: any) => c.id === id)).filter(Boolean)
           : Array.isArray(tier.claims)
@@ -234,15 +242,36 @@ export const TraversalGraphView: React.FC<TraversalGraphViewProps> = ({
         return (
           <div key={tier.tierIndex} className="mb-6">
             {/* Gates before this tier */}
-            {tier.gates && tier.gates.length > 0 && tier.gates.map((gate: any) => (
-              <TraversalGateCard
-                key={gate.id}
-                gate={gate}
-                isResolved={state.gateResolutions.has(gate.id)}
-                resolution={state.gateResolutions.get(gate.id)}
-                onResolve={resolveGate}
-              />
-            ))}
+            {(tier.tierIndex === 0
+              ? (forcingPoints || []).filter((fp: any) => fp?.type === 'conditional')
+              : blockingGates
+            ).map((gateOrFp: any) => {
+              const isFp = gateOrFp?.type === 'conditional' && gateOrFp?.affectedClaims;
+              const gate: TraversalGate = isFp
+                ? {
+                  id: String(gateOrFp.id),
+                  type: 'conditional',
+                  condition: String(gateOrFp.condition || gateOrFp.question || gateOrFp.id),
+                  question: String(gateOrFp.question || gateOrFp.condition || gateOrFp.id),
+                  blockedClaims: Array.isArray(gateOrFp.affectedClaims) ? gateOrFp.affectedClaims : [],
+                  sourceStatementIds: Array.isArray(gateOrFp.sourceStatementIds) ? gateOrFp.sourceStatementIds : [],
+                }
+                : gateOrFp;
+
+              const resolution = getResolution(String(gate.id));
+
+              return (
+                <TraversalGateCard
+                  key={gate.id}
+                  gate={gate}
+                  isResolved={!!resolution && resolution.type === 'conditional'}
+                  resolution={resolution?.type === 'conditional'
+                    ? { satisfied: resolution.satisfied === true, userInput: resolution.userInput }
+                    : undefined}
+                  onResolve={resolveGate}
+                />
+              );
+            })}
 
             {/* Tier header */}
             <div className={`p-4 rounded-t-xl border-2 border-b-0 ${isUnlocked
@@ -298,18 +327,42 @@ export const TraversalGraphView: React.FC<TraversalGraphViewProps> = ({
       })}
 
       {/* Forcing Points */}
-      {conflictForcingPoints.length > 0 && (
+      {displayForcingPoints.length > 0 && (
         <div className="mt-8">
           <h4 className="text-md font-bold text-text-primary mb-4">Key Decision Points</h4>
-          {conflictForcingPoints.map((fp: any) => (
+          {displayForcingPoints.map((fp: any) => (
+            (() => {
+              const resolution = getResolution(String(fp.id));
+              const isResolved = !!resolution;
+          const conflictResolution =
+            resolution?.type === 'conflict' && !!resolution.selectedClaimId
+              ? {
+                selectedClaimId: resolution.selectedClaimId,
+                selectedLabel:
+                  resolution.selectedLabel ||
+                  String(
+                    fp?.options?.find((o: any) => o?.claimId === resolution.selectedClaimId)?.label || ''
+                  ),
+              }
+              : undefined;
+              const gateResolution =
+                resolution?.type === 'conditional'
+                  ? { satisfied: resolution.satisfied === true, userInput: resolution.userInput }
+                  : undefined;
+
+              return (
             <TraversalForcingPointCard
               key={fp.id}
               forcingPoint={fp}
               claims={claims}
-              isResolved={state.forcingPointResolutions.has(fp.id)}
-              resolution={state.forcingPointResolutions.get(fp.id)}
-              onResolve={resolveForcingPoint}
+              isResolved={isResolved}
+              resolution={conflictResolution}
+              gateResolution={gateResolution}
+              onResolveConflict={resolveForcingPoint}
+              onResolveGate={resolveGate}
             />
+              );
+            })()
           ))}
         </div>
       )}

@@ -1,7 +1,7 @@
 import type { LLMProvider } from "../types";
 
 // Provider icons are light-weight and color-driven via tokens to remain dark-mode safe
-import { ChatGPTIcon, ClaudeIcon, GeminiIcon, QwenIcon } from "./providerIcons";
+import { ChatGPTIcon, ClaudeIcon, GeminiIcon, QwenIcon, GrokIcon } from "./providerIcons";
 
 // Import SVG Logos
 import ChatGPTLogo from "../assets/providers/chatgpt.svg";
@@ -75,6 +75,14 @@ export const INITIAL_PROVIDERS: ProviderConfig[] = [
     icon: QwenIcon,
     emoji: "🤖",
     logoSrc: QwenLogo,
+  },
+  {
+    id: "grok",
+    name: "Grok",
+    color: "#293944ff",
+    logoBgClass: "bg-sky-500",
+    hostnames: ["grok.com"],
+    icon: GrokIcon,
   },
 ];
 

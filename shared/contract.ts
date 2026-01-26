@@ -85,8 +85,6 @@ export interface MapperClaim {
   label: string;
   text: string;
   supporters: number[];
-  role: 'challenger' | 'anchor';
-  challenges: string | null;
 }
 
 export type MapperEdge =
@@ -99,7 +97,7 @@ export type MapperEdge =
     from: string;
     to: string;
     type: 'conflict';
-    question: string;
+    question?: string | null;
   };
 
 export interface ConditionalPruner {
@@ -112,7 +110,6 @@ export interface UnifiedMapperOutput {
   claims: MapperClaim[];
   edges: MapperEdge[];
   conditionals: ConditionalPruner[];
-  narrative: string;
 }
 
 export interface GraphEdge {
@@ -625,6 +622,13 @@ export interface EnrichedClaim extends Claim {
   hasSequenceSignal?: boolean;
   hasTensionSignal?: boolean;
   hasConditionalSignal?: boolean;
+  geometricSignals?: {
+    backedByPeak: boolean;
+    backedByHill: boolean;
+    backedByFloor: boolean;
+    avgGeometricConfidence: number;
+    sourceRegionIds: string[];
+  };
   supportRatio: number;
   leverage: number;
   leverageFactors: {

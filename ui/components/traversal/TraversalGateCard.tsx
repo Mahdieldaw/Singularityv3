@@ -16,6 +16,9 @@ export const TraversalGateCard: React.FC<TraversalGateCardProps> = ({
 }) => {
   const [expanded, setExpanded] = useState(false);
   const [userInput, setUserInput] = useState(resolution?.userInput || '');
+  const normalizedQuestion = String(gate.question || '').trim();
+  const normalizedCondition = String(gate.condition || '').trim();
+  const showCondition = normalizedCondition.length > 0 && normalizedCondition !== normalizedQuestion;
 
   React.useEffect(() => {
     setUserInput(resolution?.userInput || '');
@@ -41,9 +44,11 @@ export const TraversalGateCard: React.FC<TraversalGateCardProps> = ({
               <div className="text-sm font-bold text-text-primary">
                 {gate.type === 'conditional' ? 'Conditional Gate' : 'Prerequisite Gate'}
               </div>
-              <div className="text-xs text-text-muted">
-                Blocks {gate.blockedClaims.length} claim(s) in next tier
-              </div>
+              {gate.blockedClaims.length > 0 && (
+                <div className="text-xs text-text-muted">
+                  Blocks {gate.blockedClaims.length} claim(s) in next tier
+                </div>
+              )}
             </div>
           </div>
 
@@ -67,11 +72,13 @@ export const TraversalGateCard: React.FC<TraversalGateCardProps> = ({
         </div>
 
         <div className="mt-2 text-sm font-bold text-text-primary">
-          {gate.question}
+          {normalizedQuestion}
         </div>
-        <div className="mt-1 text-xs text-text-muted">
-          {gate.condition}
-        </div>
+        {showCondition && (
+          <div className="mt-1 text-xs text-text-muted">
+            {normalizedCondition}
+          </div>
+        )}
 
         {isResolved && resolution?.userInput && (
           <div className="mt-3 p-3 rounded-lg bg-surface-highlight border border-border-subtle">

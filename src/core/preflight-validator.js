@@ -9,7 +9,8 @@ const PROVIDER_URLS = {
     gemini: 'https://gemini.google.com',
     'gemini-pro': 'https://gemini.google.com',
     'gemini-exp': 'https://gemini.google.com',
-    qwen: 'https://qianwen.com'
+    qwen: 'https://qianwen.com',
+    grok: 'https://grok.com'
 };
 
 /**

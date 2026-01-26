@@ -2,89 +2,56 @@
 // SEMANTIC MAPPER - PROMPT BUILDER
 // ═══════════════════════════════════════════════════════════════════════════
 //
-// v1.1: Receives pre-computed paragraph projection and clustering.
-// Prompt builder is SYNC - all async work done in StepExecutor.
-//
-// Critical invariants:
-// - No text duplication (statements appear once)
-// - Clusters contain IDs only (no representativeText)
-// - Uncertain clusters listed first
-// - Expansion uses _fullParagraph only
+// v2: Geometry-guided, ID-free prompt. Output is UnifiedMapperOutput.
 // ═══════════════════════════════════════════════════════════════════════════
 
-import type { ShadowParagraph, ShadowStatement, ParagraphProjectionResult } from '../shadow';
-import type { ClusteringResult } from '../clustering';
-import { SemanticMapperOutput } from './contract';
+import type { ShadowParagraph } from '../shadow';
+import type { UnifiedMapperOutput } from '../../shared/contract';
+import type { MapperGeometricHints } from '../geometry/interpretation/types';
 import {
   parseSemanticMapperOutput as baseParseOutput
 } from '../../shared/parsing-utils';
 
-// ═══════════════════════════════════════════════════════════════════════════
-// CONSTANTS
-// ═══════════════════════════════════════════════════════════════════════════
-
-const MAX_CLUSTERS_IN_PROMPT = 15;
-
-// ═══════════════════════════════════════════════════════════════════════════
-// HELPERS
-// ═══════════════════════════════════════════════════════════════════════════
-
-const STANCE_CODES: Record<string, string> = {
-  prescriptive: 'P',
-  cautionary: 'C',
-  assertive: 'A',
-  uncertain: 'U',
-  prerequisite: 'R',
-  dependent: 'D',
-};
-
-const STANCE_LEGEND = 'P=prescriptive C=cautionary A=assertive U=uncertain R=prerequisite D=dependent';
-
-function buildCompactStatementBlock(paragraphs: ShadowParagraph[]): string {
-  const lines: string[] = [];
-  let currentModel = -1;
-
+function buildCleanModelOutputs(paragraphs: ShadowParagraph[]): string {
+  const byModel = new Map<number, ShadowParagraph[]>();
   for (const p of paragraphs) {
-    if (p.modelIndex !== currentModel) {
-      currentModel = p.modelIndex;
-      if (lines.length > 0) lines.push('');
-      lines.push(`[M${currentModel}]`);
-    }
-
-    const contestedMarker = p.contested ? '*' : '';
-    lines.push(`${contestedMarker}${p.id}:`);
-
-    for (const s of p.statements) {
-      const stanceCode = STANCE_CODES[s.stance] || 'A';
-      lines.push(`  ${s.id}|${stanceCode}|${s.text}`);
-    }
+    const arr = byModel.get(p.modelIndex) || [];
+    arr.push(p);
+    byModel.set(p.modelIndex, arr);
   }
 
-  return lines.join('\n');
+  const modelIndices = Array.from(byModel.keys()).sort((a, b) => a - b);
+  const blocks: string[] = [];
+
+  for (const modelIndex of modelIndices) {
+    const ps = (byModel.get(modelIndex) || []).slice().sort((a, b) => a.paragraphIndex - b.paragraphIndex);
+    const text = ps
+      .map(p => String(p._fullParagraph || '').trim())
+      .filter(t => t.length > 0)
+      .join('\n\n');
+
+    blocks.push(`[Model ${modelIndex}]\n${text}`);
+  }
+
+  return blocks.join('\n\n---\n\n');
 }
 
-function buildCompactClusterBlock(clusteringResult: ClusteringResult): string | null {
-  const usefulClusters = clusteringResult.clusters.filter(c =>
-    c.paragraphIds.length > 1 || c.uncertain
-  );
+function formatGeometricHints(hints?: MapperGeometricHints | null): string {
+  if (!hints) return 'No geometric hints available.';
 
-  if (usefulClusters.length === 0) return null;
+  const lines: string[] = [];
+  lines.push(`Predicted shape: ${hints.predictedShape.predicted} (conf=${hints.predictedShape.confidence.toFixed(2)})`);
+  lines.push(`Expected claim count: ${hints.expectedClaimCount[0]}–${hints.expectedClaimCount[1]}`);
+  lines.push(`Expected conflicts: ${hints.expectedConflicts}`);
+  lines.push(`Expected dissent: ${hints.expectedDissent ? 'yes' : 'no'}`);
 
-  const sortedClusters = [...usefulClusters].sort((a, b) => {
-    if (a.uncertain && !b.uncertain) return -1;
-    if (!a.uncertain && b.uncertain) return 1;
-    return b.paragraphIds.length - a.paragraphIds.length;
-  });
-
-  const lines = sortedClusters.slice(0, Math.min(MAX_CLUSTERS_IN_PROMPT, 12)).map(c => {
-    const flags: string[] = [];
-    if (c.uncertain) flags.push('?');
-    if (c.uncertaintyReasons.includes('low_cohesion')) flags.push('L');
-    if (c.uncertaintyReasons.includes('stance_diversity')) flags.push('S');
-
-    const flagStr = flags.length > 0 ? `[${flags.join('')}]` : '';
-    return `${c.id}:${c.representativeParagraphId}|${c.paragraphIds.join(',')}|${c.cohesion.toFixed(2)}${flagStr}`;
-  });
+  if (Array.isArray(hints.attentionRegions) && hints.attentionRegions.length > 0) {
+    lines.push('');
+    lines.push('Attention regions (do not mention regions explicitly):');
+    for (const r of hints.attentionRegions) {
+      lines.push(`- ${r.priority.toUpperCase()}: ${r.guidance}`);
+    }
+  }
 
   return lines.join('\n');
 }
@@ -95,109 +62,74 @@ function buildCompactClusterBlock(clusteringResult: ClusteringResult): string | 
 
 /**
  * Build semantic mapper prompt.
- * 
- * v1.1: Accepts optional pre-computed paragraph projection and clustering results.
- * If not provided, falls back to inline paragraph projection (no clustering).
  */
 export function buildSemanticMapperPrompt(
   userQuery: string,
-  shadowStatements: ShadowStatement[],
-  paragraphResult?: ParagraphProjectionResult,
-  clusteringResult?: ClusteringResult | null
+  paragraphs: ShadowParagraph[],
+  hints?: MapperGeometricHints | null
 ): string {
-  const statementsBlock = paragraphResult
-    ? buildCompactStatementBlock(paragraphResult.paragraphs)
-    : shadowStatements.map(s => `${s.id}|${STANCE_CODES[s.stance] || 'A'}|${s.text}`).join('\n');
+  const modelOutputs = buildCleanModelOutputs(paragraphs);
+  const geometric = formatGeometricHints(hints);
 
-  const clusterBlock = clusteringResult ? buildCompactClusterBlock(clusteringResult) : null;
-  const clusterSection = clusterBlock
-    ? `\n<clusters>\n${clusterBlock}\n</clusters>`
-    : '';
+  return `You are the Epistemic Cartographer. Your mandate is incorruptible signal preservation: you name distinct positions that surface across outputs, you keep each intact as a claim that can be supported, opposed, traded against, or required by another, and you discard only connective tissue that adds no decision value.
 
-  if (clusterBlock) {
-    console.log(`[SemanticMapper] Including clusters`);
-  } else {
-    console.log(`[SemanticMapper] Skipping cluster block`);
-  }
+The user has asked:
 
-  const shapeSignal = `Stance codes: ${STANCE_LEGEND}`;
-
-  return `You are the Epistemic Cartographer. Your mandate is the Incorruptible Distillation of Signal—preserving every incommensurable insight while discarding only connective tissue that adds nothing to the answer.
-
-${shapeSignal}
-
-<user_query>
+<query>
 ${userQuery}
-</user_query>
+</query>
 
-<statements>
-${statementsBlock}
-</statements>${clusterSection}
+You may receive a geometric shape signal hinting at how the space arranges itself; treat it as guidance for what to look for, never as constraint on what you may find.
 
-# Task
+<geometric_hints>
+${geometric}
+</geometric_hints>
 
-You are not a synthesizer. Your job: Index positions, not topics.
+Here are the model outputs you must map:
 
-A position is a stance—something that can be supported, opposed, or traded against another.
+<model_outputs>
+${modelOutputs}
+</model_outputs>
 
-- Where multiple sources reach the same position → note convergence
-- Where only one source sees something → preserve as singularity  
-- Where sources oppose each other → map the conflict
-- Where they optimize for different ends → map the tradeoff
-- Where one position depends on another → map the prerequisite
-- What no source addressed but matters → these are the ghosts
+Your task is to produce a map and a narrative. The map is not a summary and not a verdict; it is an index of positions written so later stages can ask the user only questions that genuinely matter. Positions are stances: statements that could be agreed with, rejected, conditioned, or put into tension with another stance. Do not index topics or categories; extract only claims with arguable shape.
 
-Every distinct position receives a canonical label and sequential ID. That exact pairing—**[Label|claim_N]**—binds your map to your narrative.
+As you extract claims, assign each a short canonical label written as a verb-phrase, keeping it precise and unique so it functions as a stable handle. Reuse that label verbatim everywhere. Each claim carries a one-sentence text stating the mechanism or basis the outputs gave for that position, plus the list of supporting model indices.
 
-# Output
+Once claims exist, map three structures. Prerequisites are logical dependency: one claim must hold for another to remain available, and these never generate user questions. Conflicts appear in two forms: when two claims cannot both be upheld in the same solution, attach a question that asks about the user's values or intended outcome in a way that reveals the tradeoff deciding between them, phrased as human choice not technical configuration; when both claims can coexist but optimizing one meaningfully weakens the other, omit the question field to signal Pareto tension without forcing immediate choice. Conditionals are binary facts about the user's situation that, if answered no, prune specific claims; they must be unchangeable constraints or reality-checks, never preferences, and each must list exactly which claim ids it affects.
 
-Produce two outputs: <map> and <narrative>
+Write questions so a single answer would actually change the map's availability or priority: avoid questions whose answer merely adds color. Keep them short, concrete, value- or constraint-oriented, in the form "Do you need X, or is Y acceptable?" or "Is Z true of your situation?" without domain-specific jargon.
+
+Return exactly two blocks with nothing outside them. First is valid JSON inside map tags, second is reader-facing landscape inside narrative tags. The JSON follows this shape, using real ids, labels, and indices from the provided outputs:
 
 <map>
-A JSON object with three arrays:
-
-**claims**: each has:
-- id: sequential ("claim_1", "claim_2", ...)
-- label: verb-phrase expressing a position (stance that can be agreed with, opposed, traded off)
-- text: the mechanism, evidence, or reasoning (one sentence)
-- supporters: array of model indices that expressed this
-- type: epistemic nature
-  - factual: verifiable truth
-  - prescriptive: recommendation or ought-statement
-  - conditional: truth depends on unstated context
-  - contested: models actively disagree
-  - speculative: prediction or uncertain projection
-- role: "challenger" if this questions a premise or reframes; null otherwise
-- challenges: if challenger, the claim_id being challenged; null otherwise
-
-**edges**: each has:
-- from: source claim_id
-- to: target claim_id  
-- type:
-  - supports: from reinforces to
-  - conflicts: from and to cannot both be true
-  - tradeoff: from and to optimize for different ends
-  - prerequisite: to depends on from being true
-
-**ghosts**: what no source addressed that would matter. Null if none.
+{
+  "claims": [
+    {
+      "id": "claim_1",
+      "label": "Canonical verb-phrase label",
+      "text": "One sentence mechanism or rationale",
+      "supporters": [1, 3]
+    }
+  ],
+  "edges": [
+    { "from": "claim_1", "to": "claim_2", "type": "prerequisite" },
+    { "from": "claim_3", "to": "claim_4", "type": "conflict", "question": "User-facing values question exposing the tradeoff" },
+    { "from": "claim_5", "to": "claim_6", "type": "conflict" }
+  ],
+  "conditionals": [
+    {
+      "id": "cond_1",
+      "question": "Binary fact question?",
+      "affectedClaims": ["claim_7", "claim_8"]
+    }
+  ]
+}
 </map>
 
+In the narrative, do not summarize and do not resolve. Make the reader feel the structure by walking them through it using **[Label|claim_id]** as touchpoints. Begin by naming the governing variable if conflicts exist, so the reader knows what the answer pivots on before detail arrives. Describe the shape suggested by claims and edges: converging, splitting into camps, or forming dependency chains. Establish the ground by stating what is broadly supported and therefore stable. Move into tension by presenting conflicting claims as real forks requiring choice, making explicit what choosing one implies. Surface low-support claims with high connectivity next, placed beside what they enable or depend upon. Then surface low-support claims that challenge high-support ones, placed beside what they destabilize or reframe. Close by naming what remains uncharted: decisive questions the outputs did not address, expressed as ghosts at the boundary, and now the reader traverses what you have mapped.
+
 <narrative>
-Not a summary. A landscape the reader walks through. Use **[Label|claim_id]** anchors.
-
-Begin with the governing variable—if tradeoff or conflict edges exist, name the dimension along which the answer pivots.
-
-Signal the shape: converging? splitting into camps? sequential chain?
-
-Establish the ground: claims with broad support are the floor.
-
-Move to the tension: claims with conflict or tradeoff edges. Present opposing positions—the axis should be visible in the verb-phrases. Do not resolve; reveal what choosing requires.
-
-Surface the edges: claims with few supporters but high connectivity, or challenger role. Place adjacent to what they challenge.
-
-Close with what remains uncharted. Ghosts are the boundary.
-
-Do not synthesize a verdict. The landscape is the product.`;
+...</narrative>`;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -206,7 +138,8 @@ Do not synthesize a verdict. The landscape is the product.`;
 
 export interface ParseResult {
   success: boolean;
-  output?: SemanticMapperOutput;
+  output?: UnifiedMapperOutput;
+  narrative?: string;
   errors?: Array<{ field: string; issue: string; context?: string }>;
   warnings?: string[];
 }
@@ -216,29 +149,30 @@ export interface ParseResult {
  */
 export function parseSemanticMapperOutput(
   rawResponse: string,
-  shadowStatements: ShadowStatement[]
+  _shadowStatements?: unknown
 ): ParseResult {
-  const validIds = new Set(shadowStatements.map(s => s.id));
-  const result = baseParseOutput(rawResponse, validIds);
+  const result = baseParseOutput(rawResponse);
 
-  function isSemanticMapperOutput(parsed: unknown): parsed is SemanticMapperOutput {
+  function isUnifiedMapperOutput(parsed: unknown): parsed is UnifiedMapperOutput {
     return (
       parsed !== null &&
       typeof parsed === 'object' &&
-      'claims' in parsed &&
-      Array.isArray((parsed as { claims: unknown }).claims)
+      Array.isArray((parsed as { claims?: unknown }).claims) &&
+      Array.isArray((parsed as { edges?: unknown }).edges) &&
+      Array.isArray((parsed as { conditionals?: unknown }).conditionals)
     );
   }
 
-  const output = isSemanticMapperOutput(result.output) ? result.output : undefined;
+  const output = isUnifiedMapperOutput(result.output) ? result.output : undefined;
   const errors = result.errors ? [...result.errors] : [];
   if (result.success && !output) {
-    errors.push({ field: 'output', issue: 'Invalid SemanticMapperOutput shape' });
+    errors.push({ field: 'output', issue: 'Invalid UnifiedMapperOutput shape' });
   }
 
   return {
     success: result.success && !!output,
     output: output,
+    narrative: result.narrative,
     errors: errors,
     warnings: result.warnings
   };

@@ -25,6 +25,8 @@
   "description": "",
   "dependencies": {
     "@huggingface/transformers": "^3.5.1",
+    "@noble/hashes": "^1.4.0",
+    "@noble/secp256k1": "^2.1.0",
     "@tanstack/react-virtual": "^3.13.12",
     "d3-force": "^3.0.0",
     "framer-motion": "^12.23.25",

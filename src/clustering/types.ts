@@ -29,10 +29,11 @@ export interface ParagraphCluster {
 
     // Quality metrics
     cohesion: number;                // 0-1, average similarity to centroid
+    pairwiseCohesion: number;        // 0-1, average similarity across all member pairs
 
     // Uncertainty detection
     uncertain: boolean;
-    uncertaintyReasons: string[];    // ["low_cohesion", "stance_diversity", "oversized", "high_contested_ratio", "conflicting_signals"]
+    uncertaintyReasons: string[];    // ["low_cohesion", "dumbbell_cluster", "stance_diversity", "oversized", "high_contested_ratio", "conflicting_signals"]
 
     // Expansion (only when uncertain=true)
     expansion?: {

@@ -23,6 +23,7 @@ export {
     cosineSimilarity,
     buildDistanceMatrix,
     computeCohesion,
+    pairwiseCohesion,
 } from './distance';
 
 // HAC algorithm

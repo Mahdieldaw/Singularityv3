@@ -135,6 +135,58 @@ export async function generateEmbeddings(
     });
 }
 
+export async function generateTextEmbeddings(
+    texts: string[],
+    config: ClusteringConfig = DEFAULT_CONFIG
+): Promise<Map<string, Float32Array>> {
+    await ensureOffscreen();
+
+    const ids = texts.map((_, idx) => String(idx));
+
+    return new Promise((resolve, reject) => {
+        chrome.runtime.sendMessage(
+            {
+                type: 'GENERATE_EMBEDDINGS',
+                payload: {
+                    texts,
+                    dimensions: config.embeddingDimensions,
+                    modelId: config.modelId,
+                },
+            },
+            (response) => {
+                if (chrome.runtime.lastError) {
+                    reject(new Error(chrome.runtime.lastError.message));
+                    return;
+                }
+
+                if (!response?.success) {
+                    reject(new Error(response?.error || 'Embedding generation failed'));
+                    return;
+                }
+
+                const embeddings = new Map<string, Float32Array>();
+                for (let i = 0; i < ids.length; i++) {
+                    const rawEntry = response.result.embeddings?.[i];
+                    if (!rawEntry || !Array.isArray(rawEntry) || rawEntry.length === 0) {
+                        reject(new Error(`Missing or malformed embedding for text ${ids[i]}`));
+                        return;
+                    }
+
+                    const rawData = rawEntry as number[];
+                    const truncatedData = rawData.length > config.embeddingDimensions
+                        ? rawData.slice(0, config.embeddingDimensions)
+                        : rawData;
+
+                    const emb = new Float32Array(truncatedData);
+                    embeddings.set(ids[i], normalizeEmbedding(emb) as Float32Array<ArrayBuffer>);
+                }
+
+                resolve(embeddings);
+            }
+        );
+    });
+}
+
 /**
  * Preload embedding model (call during idle time).
  */

@@ -31,16 +31,13 @@ function stanceAdjustedSimilarity(
     stanceA: Stance,
     stanceB: Stance
 ): number {
-    const opposing: Record<Stance, Stance> = {
-        prescriptive: 'cautionary',
-        cautionary: 'prescriptive',
-        assertive: 'uncertain',
-        uncertain: 'assertive',
-        prerequisite: 'dependent',
-        dependent: 'prerequisite',
-    };
+    const opposing: Array<[Stance, Stance]> = [
+        ['prescriptive', 'cautionary'],
+        ['assertive', 'uncertain'],
+    ];
 
-    if (opposing[stanceA] === stanceB) {
+    const isOpposing = opposing.some(([x, y]) => (stanceA === x && stanceB === y) || (stanceA === y && stanceB === x));
+    if (isOpposing) {
         return baseSim * 0.6;
     }
 
@@ -48,11 +45,19 @@ function stanceAdjustedSimilarity(
         return baseSim * 1.1;
     }
 
+    const isSequencePair =
+        (stanceA === 'prerequisite' && stanceB === 'dependent') ||
+        (stanceA === 'dependent' && stanceB === 'prerequisite');
+    if (isSequencePair) {
+        return baseSim * 1.05;
+    }
+
     return baseSim;
 }
 
-function modelDiversityWeight(modelA: number, modelB: number): number {
-    return modelA !== modelB ? 1.15 : 1.0;
+function modelDiversityWeight(baseSim: number, modelA: number, modelB: number): number {
+    if (modelA === modelB) return 1.0;
+    return baseSim > 0.6 ? 1.15 : 1.0;
 }
 
 /**
@@ -106,7 +111,7 @@ export function buildDistanceMatrix(
             const metaB = paragraphMetaById.get(ids[j]);
             if (metaA && metaB) {
                 sim = stanceAdjustedSimilarity(sim, metaA.dominantStance, metaB.dominantStance);
-                sim *= modelDiversityWeight(metaA.modelIndex, metaB.modelIndex);
+                sim *= modelDiversityWeight(sim, metaA.modelIndex, metaB.modelIndex);
                 sim = Math.max(-1, Math.min(1, sim));
             }
 
@@ -148,6 +153,32 @@ export function computeCohesion(
         const sim = cosineSimilarity(emb, centroidEmb);
         totalSim += quantizeSimilarity(sim);
         count++;
+    }
+
+    return count > 0 ? totalSim / count : 0;
+}
+
+export function pairwiseCohesion(
+    memberIds: string[],
+    embeddings: Map<string, Float32Array>
+): number {
+    if (memberIds.length <= 1) return 1.0;
+
+    let totalSim = 0;
+    let count = 0;
+
+    for (let i = 0; i < memberIds.length; i++) {
+        const embA = embeddings.get(memberIds[i]);
+        if (!embA) continue;
+
+        for (let j = i + 1; j < memberIds.length; j++) {
+            const embB = embeddings.get(memberIds[j]);
+            if (!embB) continue;
+
+            const sim = cosineSimilarity(embA, embB);
+            totalSim += quantizeSimilarity(sim);
+            count++;
+        }
     }
 
     return count > 0 ? totalSim / count : 0;
