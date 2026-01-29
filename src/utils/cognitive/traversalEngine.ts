@@ -10,6 +10,16 @@ import type { EnrichedClaim, MapperEdge, ConditionalPruner } from '../../../shar
 
 export type ClaimStatus = 'active' | 'pruned';
 
+type ClaimLike = {
+  id: string;
+  label: string;
+  text?: string;
+  description?: string;
+  sourceStatementIds?: string[];
+  gates?: any;
+  conflicts?: any;
+};
+
 export interface ConflictOption {
   claimId: string;
   label: string;
@@ -35,6 +45,7 @@ export interface ForcingPoint {
   // Type-specific
   affectedClaims?: string[];           // For conditionals
   options?: ConflictOption[];          // For conflicts
+  blockedByGateIds?: string[];         // For conflicts (conditional gate IDs)
   
   // Provenance
   sourceStatementIds: string[];
@@ -65,27 +76,201 @@ export interface TraversalState {
 }
 
 export interface TraversalGraph {
-  claims: EnrichedClaim[];
-  edges: MapperEdge[];
-  conditionals: ConditionalPruner[];
+  claims: any[];
+  edges?: any[];
+  conditionals?: any[];
+  tiers?: any[];
+  tensions?: any[];
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
 // FORCING POINT EXTRACTION
 // ═══════════════════════════════════════════════════════════════════════════
 
+function normalizeClaims(input: any): ClaimLike[] {
+  const rawClaims = Array.isArray(input?.claims) ? input.claims : [];
+  return rawClaims
+    .map((c: any) => {
+      const id = String(c?.id || '').trim();
+      if (!id) return null;
+      const label = String(c?.label || c?.id || '').trim();
+      const text =
+        typeof c?.text === 'string'
+          ? c.text
+          : (typeof c?.description === 'string' ? c.description : undefined);
+      const sourceStatementIds = Array.isArray(c?.sourceStatementIds)
+        ? c.sourceStatementIds.map((s: any) => String(s)).filter(Boolean)
+        : undefined;
+      return {
+        id,
+        label: label || id,
+        text,
+        description: typeof c?.description === 'string' ? c.description : undefined,
+        sourceStatementIds,
+        gates: c?.gates,
+        conflicts: c?.conflicts,
+      } satisfies ClaimLike;
+    })
+    .filter((c: any): c is ClaimLike => !!c);
+}
+
+type NormalizedConditional = ConditionalPruner & { sourceStatementIds?: string[] };
+
+function normalizeConditionals(input: any): NormalizedConditional[] {
+  const raw = Array.isArray(input?.conditionals) ? input.conditionals : [];
+  const hasAffectedClaims = raw.some((c: any) => Array.isArray(c?.affectedClaims));
+  if (hasAffectedClaims) {
+    return raw
+      .map((c: any) => {
+        const id = String(c?.id || '').trim();
+        const question = String(c?.question || c?.condition || c?.prompt || id || '').trim();
+        const affectedClaims = Array.isArray(c?.affectedClaims)
+          ? c.affectedClaims.map((x: any) => String(x)).filter(Boolean)
+          : [];
+        if (!id || affectedClaims.length === 0) return null;
+        const sourceStatementIds = Array.isArray(c?.sourceStatementIds)
+          ? c.sourceStatementIds.map((s: any) => String(s)).filter(Boolean)
+          : undefined;
+        return { id, question, affectedClaims, sourceStatementIds } satisfies NormalizedConditional;
+      })
+      .filter((c: any): c is NormalizedConditional => !!c);
+  }
+
+  const tiers = Array.isArray(input?.tiers) ? input.tiers : [];
+  const gates = tiers
+    .map((t: any) => (Array.isArray(t?.gates) ? t.gates : []))
+    .flat()
+    .filter((g: any) => g && String(g?.type || '') === 'conditional');
+
+  const seen = new Set<string>();
+  const conditionals: NormalizedConditional[] = [];
+  for (const gate of gates) {
+    const id = String(gate?.id || '').trim();
+    if (!id || seen.has(id)) continue;
+    const affectedClaims = Array.isArray(gate?.blockedClaims)
+      ? gate.blockedClaims.map((x: any) => String(x)).filter(Boolean)
+      : [];
+    if (affectedClaims.length === 0) continue;
+    const question = String(gate?.question || gate?.condition || id).trim();
+    const sourceStatementIds = Array.isArray(gate?.sourceStatementIds)
+      ? gate.sourceStatementIds.map((s: any) => String(s)).filter(Boolean)
+      : undefined;
+    conditionals.push({ id, question, affectedClaims, sourceStatementIds });
+    seen.add(id);
+  }
+  return conditionals;
+}
+
+function pairKeyFor(aId: string, bId: string): string {
+  return [aId, bId].sort().join('::');
+}
+
+function normalizeEdges(input: any): { edges: MapperEdge[]; conflictBlocks: Map<string, string[]> } {
+  const conflictBlocks = new Map<string, string[]>();
+
+  if (Array.isArray(input?.edges)) {
+    const edges = input.edges.filter(Boolean) as MapperEdge[];
+    return { edges, conflictBlocks };
+  }
+
+  const edges: any[] = [];
+  const rawClaims = Array.isArray(input?.claims) ? input.claims : [];
+
+  for (const claim of rawClaims) {
+    const toId = String(claim?.id || '').trim();
+    if (!toId) continue;
+    const prereqs = Array.isArray(claim?.gates?.prerequisites) ? claim.gates.prerequisites : [];
+    for (const prereq of prereqs) {
+      const fromId = String(prereq?.claimId || '').trim();
+      if (!fromId) continue;
+      edges.push({ from: fromId, to: toId, type: 'prerequisite' } satisfies MapperEdge);
+    }
+  }
+
+  const tensions = Array.isArray(input?.tensions) ? input.tensions : [];
+  if (tensions.length > 0) {
+    const seen = new Set<string>();
+    for (const t of tensions) {
+      const aId = String(t?.claimAId || '').trim();
+      const bId = String(t?.claimBId || '').trim();
+      if (!aId || !bId) continue;
+      const pk = pairKeyFor(aId, bId);
+      if (seen.has(pk)) continue;
+      seen.add(pk);
+      const question = String(t?.question || '').trim() || undefined;
+      const e: any = { from: aId, to: bId, type: 'conflict', question } satisfies MapperEdge;
+      if (Array.isArray(t?.sourceStatementIds)) {
+        e.sourceStatementIds = t.sourceStatementIds.map((s: any) => String(s)).filter(Boolean);
+      }
+      edges.push(e);
+      if (Array.isArray(t?.blockedByGates)) {
+        conflictBlocks.set(pk, t.blockedByGates.map((g: any) => String(g)).filter(Boolean));
+      }
+    }
+    return { edges: edges as MapperEdge[], conflictBlocks };
+  }
+
+  const seen = new Set<string>();
+  for (const claim of rawClaims) {
+    const fromId = String(claim?.id || '').trim();
+    if (!fromId) continue;
+    const conflicts = Array.isArray(claim?.conflicts) ? claim.conflicts : [];
+    for (const c of conflicts) {
+      const toId = String(c?.claimId || '').trim();
+      if (!toId) continue;
+      const pk = pairKeyFor(fromId, toId);
+      if (seen.has(pk)) continue;
+      seen.add(pk);
+      const question = String(c?.question || '').trim() || undefined;
+      edges.push({ from: fromId, to: toId, type: 'conflict', question } satisfies MapperEdge);
+    }
+  }
+
+  return { edges: edges as MapperEdge[], conflictBlocks };
+}
+
+function normalizeTraversalGraph(input: any): {
+  claims: ClaimLike[];
+  edges: MapperEdge[];
+  conditionals: NormalizedConditional[];
+  conflictBlocks: Map<string, string[]>;
+} {
+  const claims = normalizeClaims(input);
+  const { edges, conflictBlocks } = normalizeEdges(input);
+  const conditionals = normalizeConditionals(input);
+  return { claims, edges, conditionals, conflictBlocks };
+}
+
+function getEdgesFromGraph(graph: any): MapperEdge[] {
+  if (Array.isArray(graph?.edges)) return graph.edges as MapperEdge[];
+  return normalizeEdges(graph).edges;
+}
+
 export function extractForcingPoints(
   graph: TraversalGraph
 ): ForcingPoint[] {
+  console.log('=== extractForcingPoints INPUT ===');
+  console.log('Raw graph:', graph);
+  console.log('graph.claims:', (graph as any)?.claims);
+  console.log('graph.edges:', (graph as any)?.edges);
+  console.log('graph.conditionals:', (graph as any)?.conditionals);
+
   const forcingPoints: ForcingPoint[] = [];
-  const claimMap = new Map(graph.claims.map(c => [c.id, c]));
+  const normalized = normalizeTraversalGraph(graph);
+
+  console.log('=== AFTER NORMALIZATION ===');
+  console.log('normalized.claims:', normalized.claims.length, normalized.claims);
+  console.log('normalized.edges:', normalized.edges.length, normalized.edges);
+  console.log('normalized.conditionals:', normalized.conditionals.length, normalized.conditionals);
+
+  const claimMap = new Map(normalized.claims.map(c => [c.id, c]));
   let fpCounter = 0;
 
   // ─────────────────────────────────────────────────────────────────────────
   // TIER 0: Conditionals (Pruners)
   // ─────────────────────────────────────────────────────────────────────────
   
-  for (const cond of graph.conditionals || []) {
+  for (const cond of normalized.conditionals || []) {
     const normalizedAffected = (Array.isArray((cond as any)?.affectedClaims) ? (cond as any).affectedClaims : [])
       .map((cid: any) => String(cid || '').trim())
       .filter((cid: string) => cid.length > 0);
@@ -101,10 +286,8 @@ export function extractForcingPoints(
     ).sort();
 
     const rawCondId = String((cond as any)?.id || '').trim();
-    const fallbackId = `fp_cond_${fpCounter++}`;
-    const id = rawCondId
-      ? (rawCondId.startsWith('fp_cond_') ? rawCondId : `fp_cond_${rawCondId}`)
-      : fallbackId;
+    const fallbackId = `cond_${fpCounter++}`;
+    const id = rawCondId || fallbackId;
 
     const rawQuestion = String(
       ((cond as any)?.question ?? (cond as any)?.condition ?? (cond as any)?.prompt ?? '') || ''
@@ -143,12 +326,12 @@ export function extractForcingPoints(
   
   const conflictPairs = new Set<string>();
   
-  for (const edge of graph.edges || []) {
+  for (const edge of normalized.edges || []) {
     if (edge.type !== 'conflict') continue;
     
     const aId = edge.from;
     const bId = edge.to;
-    const pairKey = [aId, bId].sort().join('::');
+    const pairKey = pairKeyFor(aId, bId);
     
     if (conflictPairs.has(pairKey)) continue;
     conflictPairs.add(pairKey);
@@ -158,19 +341,28 @@ export function extractForcingPoints(
     if (!a || !b) continue;
     
     // Find prerequisites for each option (advisory context)
-    const aPrereqs = findPrerequisites(aId, graph.edges, claimMap);
-    const bPrereqs = findPrerequisites(bId, graph.edges, claimMap);
+    const aPrereqs = findPrerequisites(aId, normalized.edges, claimMap);
+    const bPrereqs = findPrerequisites(bId, normalized.edges, claimMap);
     
-    const sourceStatementIds = Array.from(
-      new Set([
-        ...(a.sourceStatementIds || []),
-        ...(b.sourceStatementIds || [])
-      ])
-    ).sort();
+    const edgeSourceIds = Array.isArray((edge as any)?.sourceStatementIds)
+      ? (edge as any).sourceStatementIds.map((s: any) => String(s)).filter(Boolean)
+      : [];
+    const sourceStatementIds = Array.from(new Set([
+      ...(a.sourceStatementIds || []),
+      ...(b.sourceStatementIds || []),
+      ...edgeSourceIds,
+    ])).sort();
     
     const id = `fp_conflict_${pairKey}`;
     const question = String((edge as any).question || '').trim() 
       || `Choose between: ${a.label} vs ${b.label}`;
+    const blockedByGateIds = Array.from(
+      new Set(
+        (normalized.conflictBlocks.get(pairKey) || [])
+          .map((g) => String(g).trim())
+          .filter(Boolean)
+      )
+    ).sort();
 
     forcingPoints.push({
       id,
@@ -192,6 +384,7 @@ export function extractForcingPoints(
           prerequisites: bPrereqs,
         },
       ],
+      blockedByGateIds: blockedByGateIds.length > 0 ? blockedByGateIds : undefined,
       sourceStatementIds,
     });
   }
@@ -205,7 +398,7 @@ export function extractForcingPoints(
 function findPrerequisites(
   claimId: string,
   edges: MapperEdge[],
-  claimMap: Map<string, EnrichedClaim>
+  claimMap: Map<string, ClaimLike>
 ): PrerequisiteInfo[] {
   return edges
     .filter(e => e.type === 'prerequisite' && e.to === claimId)
@@ -272,7 +465,7 @@ export function resolveConditional(
     }
     
     // Cascade pruning to dependent claims
-    cascadePruning(nextState, graph.edges, prunedIds);
+    cascadePruning(nextState, getEdgesFromGraph(graph), prunedIds);
     
     nextState.pathSteps.push(
       `✗ "${forcingPoint.condition}" — ${forcingPoint.affectedClaims.length} claim(s) pruned`
@@ -321,7 +514,7 @@ export function resolveConflict(
     }
     
     // Cascade pruning to dependent claims
-    cascadePruning(nextState, graph.edges, prunedIds);
+    cascadePruning(nextState, getEdgesFromGraph(graph), prunedIds);
     
     const rejectedLabels = rejected.map(r => r.label).join(', ');
     nextState.pathSteps.push(
@@ -340,24 +533,40 @@ export function getLiveForcingPoints(
   forcingPoints: ForcingPoint[],
   state: TraversalState
 ): ForcingPoint[] {
-  return forcingPoints.filter(fp => {
-    // Already resolved?
+  const liveConditionals = forcingPoints.filter((fp) => {
+    if (fp.type !== 'conditional') return false;
+    if (state.resolutions.has(fp.id)) return false;
+    if (!fp.affectedClaims) return false;
+    return fp.affectedClaims.some((cid) => state.claimStatuses.get(cid) === 'active');
+  });
+
+  const hasLiveConditionals = liveConditionals.length > 0;
+
+  return forcingPoints.filter((fp) => {
     if (state.resolutions.has(fp.id)) return false;
 
-    // For conditionals: are any affected claims still active?
     if (fp.type === 'conditional' && fp.affectedClaims) {
-      const hasActive = fp.affectedClaims.some(
-        cid => state.claimStatuses.get(cid) === 'active'
-      );
+      const hasActive = fp.affectedClaims.some((cid) => state.claimStatuses.get(cid) === 'active');
       if (!hasActive) return false;
     }
 
-    // For conflicts: are both options still active?
-    if (fp.type === 'conflict' && fp.options) {
-      const activeOptions = fp.options.filter(
-        opt => state.claimStatuses.get(opt.claimId) === 'active'
-      );
-      if (activeOptions.length < 2) return false;
+    if (fp.type === 'conflict') {
+      if (hasLiveConditionals) return false;
+
+      if (Array.isArray(fp.blockedByGateIds) && fp.blockedByGateIds.length > 0) {
+        const isBlocked = fp.blockedByGateIds.some((gateId) => {
+          const r = state.resolutions.get(gateId);
+          return !(r?.type === 'conditional' && r.satisfied === true);
+        });
+        if (isBlocked) return false;
+      }
+
+      if (fp.options) {
+        const activeOptions = fp.options.filter(
+          (opt) => state.claimStatuses.get(opt.claimId) === 'active'
+        );
+        if (activeOptions.length < 2) return false;
+      }
     }
 
     return true;
@@ -375,17 +584,17 @@ export function isTraversalComplete(
 // QUERIES
 // ═══════════════════════════════════════════════════════════════════════════
 
-export function getActiveClaims(
-  claims: EnrichedClaim[],
+export function getActiveClaims<T extends { id: string }>(
+  claims: T[],
   state: TraversalState
-): EnrichedClaim[] {
+): T[] {
   return claims.filter(c => state.claimStatuses.get(c.id) === 'active');
 }
 
-export function getPrunedClaims(
-  claims: EnrichedClaim[],
+export function getPrunedClaims<T extends { id: string }>(
+  claims: T[],
   state: TraversalState
-): EnrichedClaim[] {
+): T[] {
   return claims.filter(c => state.claimStatuses.get(c.id) === 'pruned');
 }
 

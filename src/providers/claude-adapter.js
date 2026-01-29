@@ -10,8 +10,9 @@ import {
   errorHandler,
   isProviderAuthError,
   createProviderAuthError,
-  isNetworkError
-} from '../utils/ErrorHandler.js';
+  isNetworkError,
+  normalizeError
+} from '../utils/ErrorHandler';
 
 // Provider-specific adapter debug flag (off by default)
 const CLAUDE_ADAPTER_DEBUG = false;
@@ -54,9 +55,10 @@ export class ClaudeAdapter {
    */
   async ask(prompt, providerContext = null, sessionId = undefined, onChunk = undefined, signal = undefined) {
     try {
-      const meta = providerContext?.meta || providerContext || {};
+      const ctx = Object(providerContext);
+      const meta = ctx.meta || providerContext || {};
       const hasChat = Boolean(
-        meta.chatId || providerContext?.chatId || providerContext?.threadUrl,
+        meta.chatId || ctx.chatId || ctx.threadUrl,
       );
 
       pad(`[ProviderAdapter] ASK_STARTED provider=${this.id} hasContext=${hasChat}`);
@@ -151,6 +153,7 @@ export class ClaudeAdapter {
         try {
           return await this._handleAuthError(error, req, onChunk, signal, _isRetry);
         } catch (authError) {
+          const normalizedAuthError = normalizeError(authError);
           return {
             providerId: this.id,
             ok: false,
@@ -158,8 +161,8 @@ export class ClaudeAdapter {
             errorCode: 'AUTH_REQUIRED',
             latencyMs: Date.now() - startTime,
             meta: {
-              error: authError.toString(),
-              details: authError.details,
+              error: normalizedAuthError.message,
+              details: normalizedAuthError.details,
             },
           };
         }
@@ -206,16 +209,17 @@ export class ClaudeAdapter {
           },
         };
       } catch (handledError) {
+        const normalizedHandledError = normalizeError(handledError);
         // Convert handled error to response format
         return {
           providerId: this.id,
           ok: false,
           text: aggregatedText || null,
-          errorCode: handledError.code || "unknown",
+          errorCode: normalizedHandledError.code || "unknown",
           latencyMs: Date.now() - startTime,
           meta: {
-            error: handledError.toString(),
-            details: handledError.details,
+            error: normalizedHandledError.message,
+            details: normalizedHandledError.details,
           },
         };
       }
@@ -304,6 +308,7 @@ export class ClaudeAdapter {
         try {
           return await this._handleAuthError(error, { originalPrompt: prompt, meta: providerContext }, onChunk, signal, _isRetry, true);
         } catch (authError) {
+          const normalizedAuthError = normalizeError(authError);
           return {
             providerId: this.id,
             ok: false,
@@ -311,8 +316,8 @@ export class ClaudeAdapter {
             errorCode: 'AUTH_REQUIRED',
             latencyMs: Date.now() - startTime,
             meta: {
-              error: authError.toString(),
-              details: authError.details,
+              error: normalizedAuthError.message,
+              details: normalizedAuthError.details,
               chatId: providerContext?.chatId ?? meta.chatId,
             },
           };
@@ -359,15 +364,16 @@ export class ClaudeAdapter {
           },
         };
       } catch (handledError) {
+        const normalizedHandledError = normalizeError(handledError);
         return {
           providerId: this.id,
           ok: false,
           text: aggregatedText || null,
-          errorCode: handledError.code || "unknown",
+          errorCode: normalizedHandledError.code || "unknown",
           latencyMs: Date.now() - startTime,
           meta: {
-            error: handledError.toString(),
-            details: handledError.details,
+            error: normalizedHandledError.message,
+            details: normalizedHandledError.details,
             chatId: providerContext?.chatId,
           },
         };

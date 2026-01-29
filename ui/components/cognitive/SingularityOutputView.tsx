@@ -19,6 +19,7 @@ interface SingularityError {
     error?: string;
     requiresReauth?: boolean;
     code?: string;
+    retryable?: boolean;
 }
 
 const isSingularityError = (value: unknown): value is SingularityError => {
@@ -149,6 +150,10 @@ const SingularityOutputView: React.FC<SingularityOutputViewProps> = ({
 
     const renderContent = () => {
         if (isError) {
+            const retryable =
+                isSingularityError(error) && typeof error.retryable === "boolean"
+                    ? error.retryable
+                    : undefined;
             return (
                 <div className="py-8 space-y-6">
                     <PipelineErrorBanner
@@ -157,6 +162,7 @@ const SingularityOutputView: React.FC<SingularityOutputViewProps> = ({
                         onRetry={(pid) => onRecompute({ providerId: pid })}
                         errorMessage={getErrorMessage(error)}
                         requiresReauth={isSingularityError(error) ? !!error.requiresReauth : false}
+                        retryable={retryable}
                     />
                     <div className="flex justify-center">
                         {renderSwitcher('pill')}

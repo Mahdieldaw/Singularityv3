@@ -1,3 +1,4 @@
+// @ts-nocheck
 const { buildAll } = require("./build-common");
 const fs = require("fs");
 

@@ -6,12 +6,14 @@ import { SingularityOutputState } from '../../hooks/useSingularityOutput';
 import { CouncilOrbs } from '../CouncilOrbs';
 import { LLM_PROVIDERS_CONFIG } from '../../constants';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { selectedModelsAtom, workflowProgressForTurnFamily, activeSplitPanelAtom, currentSessionIdAtom, turnStreamingStateFamily, isDecisionMapOpenAtom } from '../../state/atoms';
+import { selectedModelsAtom, workflowProgressForTurnFamily, activeSplitPanelAtom, currentSessionIdAtom, turnStreamingStateFamily, isDecisionMapOpenAtom, providerErrorsForTurnFamily } from '../../state/atoms';
 import { MetricsRibbon } from './MetricsRibbon';
 import StructureGlyph from '../StructureGlyph';
 import { computeProblemStructureFromArtifact, computeStructuralAnalysis } from '../../../src/core/PromptMethods';
 import { MapperArtifact } from '../../../shared/contract';
 import { TraversalGraphView } from '../traversal/TraversalGraphView';
+import { PipelineErrorBanner } from '../PipelineErrorBanner';
+import { useProviderActions } from '../../hooks/providers/useProviderActions';
 
 interface CognitiveOutputRendererProps {
     aiTurn: AiTurn;
@@ -50,6 +52,8 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
     const setDecisionMapOpen = useSetAtom(isDecisionMapOpenAtom);
     const currentSessionId = useAtomValue(currentSessionIdAtom);
     const effectiveSessionId = currentSessionId || aiTurn.sessionId;
+    const providerErrors = useAtomValue(providerErrorsForTurnFamily(aiTurn.id));
+    const { handleRetryProvider } = useProviderActions(effectiveSessionId || undefined, aiTurn.id);
 
     const hasSingularityText = useMemo(() => {
         return String(singularityState.output?.text || "").trim().length > 0;
@@ -114,6 +118,23 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
         }
     }, [aiTurn.mapperArtifact]);
 
+    if (aiTurn.pipelineStatus === 'error') {
+        const pipelineError = (aiTurn.meta as any)?.pipelineError;
+        return (
+            <div className="w-full max-w-3xl mx-auto animate-in fade-in duration-500">
+                <div className="flex flex-col gap-6 mb-8">
+                    <PipelineErrorBanner
+                        type="singularity"
+                        failedProviderId={(aiTurn.meta as any)?.singularity || ''}
+                        onRetry={(pid) => triggerAndSwitch({ providerId: pid })}
+                        errorMessage={pipelineError || 'Pipeline failed unexpectedly'}
+                        retryable={true}
+                    />
+                </div>
+            </div>
+        );
+    }
+
     const isAwaitingTraversal = aiTurn.pipelineStatus === 'awaiting_traversal';
     const hasTraversalGraph = !!aiTurn.mapperArtifact?.traversalGraph && !!effectiveSessionId;
     const isPipelineComplete = !aiTurn.pipelineStatus || aiTurn.pipelineStatus === 'complete';
@@ -129,6 +150,38 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
         if (canShowResponse) return 'response';
         return 'loading';
     }, [isAwaitingTraversal, canShowTraversal, viewOverride, canShowResponse]);
+
+    const mappingFailure = useMemo(() => {
+        if (!mapperProviderId) return null;
+        const raw = (aiTurn.mappingResponses as any)?.[mapperProviderId];
+        const arr = Array.isArray(raw) ? raw : (raw ? [raw] : []);
+        const latest = arr.length > 0 ? arr[arr.length - 1] : null;
+        if (!latest) return null;
+        const status = String(latest.status || '');
+        const isError = status === 'error' || status === 'failed' || status === 'skipped';
+        if (!isError) return null;
+
+        const metaError = (latest.meta as any)?.error;
+        const metaRetryable = (latest.meta as any)?.retryable;
+        const metaRequiresReauth = (latest.meta as any)?.requiresReauth;
+        const classifiedError: any = (providerErrors as any)?.[mapperProviderId];
+        const errorMessage =
+            typeof metaError === 'string'
+                ? metaError
+                : (metaError?.message || classifiedError?.message || "Mapping failed.");
+        const requiresReauth = !!(metaError?.requiresReauth ?? metaRequiresReauth ?? classifiedError?.requiresReauth);
+        const retryable =
+            typeof metaError?.retryable === "boolean"
+                ? metaError.retryable
+                : (typeof metaRetryable === "boolean" ? metaRetryable : (typeof classifiedError?.retryable === "boolean" ? classifiedError.retryable : undefined));
+
+        return {
+            providerId: String(mapperProviderId),
+            errorMessage,
+            requiresReauth,
+            retryable,
+        };
+    }, [aiTurn.mappingResponses, mapperProviderId, providerErrors]);
 
 
     return (
@@ -218,6 +271,19 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
             </div>
 
             {/* === MAIN CONTENT AREA === */}
+            {mappingFailure && currentView !== 'traverse' && (
+                <div className="mb-6">
+                    <PipelineErrorBanner
+                        type="mapping"
+                        failedProviderId={mappingFailure.providerId}
+                        onRetry={(pid) => handleRetryProvider(pid, "mapping")}
+                        errorMessage={mappingFailure.errorMessage}
+                        requiresReauth={mappingFailure.requiresReauth}
+                        retryable={mappingFailure.retryable}
+                        onContinue={() => setViewOverride('response')}
+                    />
+                </div>
+            )}
             {currentView === 'response' ? (
                 <SingularityOutputView
                     aiTurn={aiTurn}
@@ -229,10 +295,12 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
                 <div className="animate-in fade-in duration-500">
                     <TraversalGraphView
                         traversalGraph={aiTurn.mapperArtifact!.traversalGraph!}
+                        conditionals={aiTurn.mapperArtifact!.conditionals || []}
                         claims={aiTurn.mapperArtifact!.claims || []}
                         originalQuery={aiTurn.mapperArtifact!.query || ''}
                         sessionId={effectiveSessionId!}
                         aiTurnId={aiTurn.id}
+                        pipelineStatus={aiTurn.pipelineStatus}
                         onComplete={() => setViewOverride('response')}
                     />
                 </div>

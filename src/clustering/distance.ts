@@ -57,7 +57,7 @@ function stanceAdjustedSimilarity(
 
 function modelDiversityWeight(baseSim: number, modelA: number, modelB: number): number {
     if (modelA === modelB) return 1.0;
-    return baseSim > 0.6 ? 1.15 : 1.0;
+    return baseSim > 0.55 ? 1.15 : 1.0;
 }
 
 /**

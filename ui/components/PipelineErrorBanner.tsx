@@ -3,7 +3,7 @@ import { LLM_PROVIDERS_CONFIG } from '../constants';
 import clsx from 'clsx';
 
 interface PipelineErrorBannerProps {
-    type: 'mapping' | 'singularity';
+    type: 'batch' | 'mapping' | 'singularity';
     failedProviderId: string;
     onRetry: (pid: string) => void;
     onExplore?: () => void;
@@ -11,6 +11,7 @@ interface PipelineErrorBannerProps {
     compact?: boolean;
     errorMessage?: string;
     requiresReauth?: boolean;
+    retryable?: boolean;
 }
 
 export const PipelineErrorBanner: React.FC<PipelineErrorBannerProps> = ({
@@ -22,11 +23,13 @@ export const PipelineErrorBanner: React.FC<PipelineErrorBannerProps> = ({
     compact = false,
     errorMessage,
     requiresReauth = false,
+    retryable = true,
 }) => {
     const [showDropdown, setShowDropdown] = useState(false);
 
     const getTitle = () => {
         switch (type) {
+            case 'batch': return 'Model unavailable';
             case 'mapping': return 'Mapping unavailable';
             case 'singularity': return 'Intelligence unavailable';
             default: return 'Step unavailable';
@@ -36,6 +39,7 @@ export const PipelineErrorBanner: React.FC<PipelineErrorBannerProps> = ({
     const getDescription = () => {
         if (errorMessage) return errorMessage;
         switch (type) {
+            case 'batch': return 'This model did not return a response for this turn.';
             case 'mapping': return 'Advanced insights require a successful cross-reference of multiple sources.';
             case 'singularity': return 'The intelligence is currently unavailable.';
             default: return 'An error occurred during this pipeline step.';
@@ -44,6 +48,7 @@ export const PipelineErrorBanner: React.FC<PipelineErrorBannerProps> = ({
 
     const getIcon = () => {
         switch (type) {
+            case 'batch': return '🤖';
             case 'mapping': return '📊';
             case 'singularity': return '🧠';
 
@@ -89,12 +94,14 @@ export const PipelineErrorBanner: React.FC<PipelineErrorBannerProps> = ({
             </div>
 
             <div className="flex flex-wrap items-center gap-2 mt-1">
-                <button
-                    onClick={() => onRetry(failedProviderId)}
-                    className="px-3 py-1.5 rounded-lg bg-surface-raised border border-border-subtle text-xs font-medium text-text-primary hover:bg-surface-highlight transition-all flex items-center gap-1.5"
-                >
-                    <span>🔄</span> Retry {failedModelName}
-                </button>
+                {retryable && (
+                    <button
+                        onClick={() => onRetry(failedProviderId)}
+                        className="px-3 py-1.5 rounded-lg bg-surface-raised border border-border-subtle text-xs font-medium text-text-primary hover:bg-surface-highlight transition-all flex items-center gap-1.5"
+                    >
+                        <span>🔄</span> Retry {failedModelName}
+                    </button>
+                )}
 
                 {requiresReauth && (
                     <button

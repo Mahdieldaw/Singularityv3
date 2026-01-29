@@ -11,6 +11,7 @@ import {
     turnIdsAtom,
     turnsMapAtom,
     workflowProgressForTurnFamily,
+    providerErrorsForTurnFamily,
 } from "../state/atoms";
 import { LLM_PROVIDERS_CONFIG } from "../constants";
 import { useProviderActions } from "../hooks/providers/useProviderActions";
@@ -21,6 +22,7 @@ import { CopyButton } from "./CopyButton";
 import { formatProviderResponseForMd } from "../utils/copy-format-utils";
 import clsx from "clsx";
 import { safeLazy } from "../utils/safeLazy";
+import { PipelineErrorBanner } from "./PipelineErrorBanner";
 
 // Lazy load ArtifactOverlay - only shown when user clicks artifact badge
 const ArtifactOverlay = safeLazy(() => import("./ArtifactOverlay").then(m => ({ default: m.ArtifactOverlay })));
@@ -68,6 +70,7 @@ export const ModelResponsePanel: React.FC<ModelResponsePanelProps> = React.memo(
     const turnIds = useAtomValue(turnIdsAtom);
     const turnsMap = useAtomValue(turnsMapAtom);
     const workflowProgress = useAtomValue(workflowProgressForTurnFamily(shownTurnId));
+    const providerErrors = useAtomValue(providerErrorsForTurnFamily(shownTurnId));
 
 
     // Actions hook
@@ -103,13 +106,20 @@ export const ModelResponsePanel: React.FC<ModelResponsePanelProps> = React.memo(
         const isError = rawIsError && !isGenerating;
 
         const errorObj = (latestResponse?.meta as any)?.error;
+        const classifiedError: any = (providerErrors as any)?.[shownProviderId];
+        const metaRetryable = (latestResponse?.meta as any)?.retryable;
+        const metaRequiresReauth = (latestResponse?.meta as any)?.requiresReauth;
         const errorMsg = typeof errorObj === 'string'
             ? errorObj
-            : (errorObj?.message || (latestResponse?.meta as any)?.skippedReason || ((status as string) === 'skipped' ? "Skipped by system" : "Error occurred"));
-        const requiresReauth = !!errorObj?.requiresReauth;
+            : (errorObj?.message || classifiedError?.message || (latestResponse?.meta as any)?.skippedReason || ((status as string) === 'skipped' ? "Skipped by system" : "Error occurred"));
+        const requiresReauth = !!(errorObj?.requiresReauth ?? metaRequiresReauth ?? classifiedError?.requiresReauth);
+        const retryable =
+            typeof errorObj?.retryable === "boolean"
+                ? errorObj.retryable
+                : (typeof metaRetryable === "boolean" ? metaRetryable : (typeof classifiedError?.retryable === "boolean" ? classifiedError.retryable : undefined));
 
-        return { status, text, hasText, isStreaming: isGenerating, isError, artifacts, errorMsg, requiresReauth, stage };
-    }, [latestResponse, shownProviderId, workflowProgress]);
+        return { status, text, hasText, isStreaming: isGenerating, isError, artifacts, errorMsg, requiresReauth, retryable, stage };
+    }, [latestResponse, shownProviderId, workflowProgress, providerErrors]);
 
     const chatInputHeight = useAtomValue(chatInputHeightAtom);
 
@@ -313,7 +323,7 @@ export const ModelResponsePanel: React.FC<ModelResponsePanelProps> = React.memo(
                         </button>
                     )}
 
-                    {(derivedState.isError || (derivedState.status === 'completed' && !derivedState.hasText)) && (
+                    {(derivedState.isError || (derivedState.status === 'completed' && !derivedState.hasText)) && derivedState.retryable !== false && (
                         <button
                             onClick={() => handleRetryProvider(shownProviderId)}
                             className="text-xs bg-intent-danger/20 text-intent-danger px-2 py-1 rounded hover:bg-intent-danger/30 transition-colors"
@@ -372,6 +382,23 @@ export const ModelResponsePanel: React.FC<ModelResponsePanelProps> = React.memo(
                 style={{ paddingBottom: (chatInputHeight || 80) + 24 }}
             >
                 <div className="p-4 w-fit min-w-full">
+                    {(derivedState.isError || (derivedState.status === 'completed' && !derivedState.hasText)) && (
+                        <div className="mb-4">
+                            <PipelineErrorBanner
+                                type="batch"
+                                failedProviderId={shownProviderId}
+                                onRetry={(pid) => handleRetryProvider(pid)}
+                                errorMessage={
+                                    derivedState.isError
+                                        ? derivedState.errorMsg || "Error occurred"
+                                        : "No response received."
+                                }
+                                requiresReauth={derivedState.requiresReauth}
+                                retryable={derivedState.retryable}
+                                compact
+                            />
+                        </div>
+                    )}
                     {/* Main response - Remove redundant overflow props */}
                     <div className="prose prose-sm max-w-none dark:prose-invert">
                         <MarkdownDisplay content={displayContent} />

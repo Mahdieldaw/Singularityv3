@@ -139,7 +139,7 @@ export function buildTwoGraphs(
     }
 
     // Check each kNN edge for mutuality
-    for (const [key, edge] of knnEdgeMap) {
+    for (const edge of knnEdgeMap.values()) {
         const sourceNeighbors = rankedNeighbors.get(edge.source) ?? [];
         const targetNeighbors = rankedNeighbors.get(edge.target) ?? [];
 

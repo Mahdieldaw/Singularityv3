@@ -7,8 +7,9 @@ import { authManager } from '../core/auth-manager.js';
 import {
   errorHandler,
   isProviderAuthError,
-  createProviderAuthError
-} from '../utils/ErrorHandler.js';
+  createProviderAuthError,
+  normalizeError
+} from '../utils/ErrorHandler';
 
 const QWEN_ADAPTER_DEBUG = false;
 const pad = (...args) => {
@@ -131,16 +132,21 @@ export class QwenAdapter {
           },
         };
       } catch (handledError) {
+        const normalizedHandledError = normalizeError(handledError);
+        const suppressed =
+          handledError && typeof handledError === 'object' && 'suppressed' in handledError
+            ? handledError.suppressed
+            : undefined;
         return {
           providerId: this.id,
           ok: false,
           text: aggregatedText || null,
-          errorCode: handledError.code || "unknown",
+          errorCode: normalizedHandledError.code || "unknown",
           latencyMs: Date.now() - startTime,
           meta: {
-            error: handledError.toString(),
-            details: handledError.details,
-            suppressed: handledError.suppressed,
+            error: normalizedHandledError.message,
+            details: normalizedHandledError.details,
+            suppressed,
             ...meta,
           },
         };
@@ -266,16 +272,21 @@ export class QwenAdapter {
           },
         };
       } catch (handledError) {
+        const normalizedHandledError = normalizeError(handledError);
+        const suppressed =
+          handledError && typeof handledError === 'object' && 'suppressed' in handledError
+            ? handledError.suppressed
+            : undefined;
         return {
           providerId: this.id,
           ok: false,
           text: aggregatedText || null,
-          errorCode: handledError.code || "unknown",
+          errorCode: normalizedHandledError.code || "unknown",
           latencyMs: Date.now() - startTime,
           meta: {
-            error: handledError.toString(),
-            details: handledError.details,
-            suppressed: handledError.suppressed,
+            error: normalizedHandledError.message,
+            details: normalizedHandledError.details,
+            suppressed,
             ...meta,
           },
         };
@@ -285,7 +296,8 @@ export class QwenAdapter {
 
   async ask(prompt, providerContext = null, sessionId = undefined, onChunk = undefined, signal = undefined) {
     try {
-      const meta = providerContext?.meta || providerContext || {};
+      const ctx = Object(providerContext);
+      const meta = ctx.meta || providerContext || {};
       const hasContinuation = Boolean(meta.sessionId || meta.parentMsgId);
       pad(`[ProviderAdapter] ASK_STARTED provider=${this.id} hasContext=${hasContinuation}`);
 

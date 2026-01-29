@@ -7,7 +7,7 @@ export class PersistenceMonitor {
   constructor() {
     this.metrics = {
       operations: new Map(),
-      errors: [],
+      errors: new Array(),
       performance: new Map(),
       connections: new Map(),
     };
@@ -49,6 +49,9 @@ export class PersistenceMonitor {
 
   /**
    * Record an operation completion
+   * @param {string|null} operationId
+   * @param {any} [result]
+   * @param {any} [error]
    */
   endOperation(operationId, result = null, error = null) {
     if (!this.isEnabled || !operationId) return;

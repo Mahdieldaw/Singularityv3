@@ -6,8 +6,9 @@ import { classifyError } from '../error-classifier.js';
 import {
   errorHandler,
   isProviderAuthError,
-  createMultiProviderAuthError
-} from '../../utils/ErrorHandler.js';
+  createMultiProviderAuthError,
+  getErrorMessage
+} from '../../utils/ErrorHandler';
 import { buildReactiveBridge } from '../../services/ReactiveBridge';
 import { PROMPT_TEMPLATES } from '../templates/prompt-templates.js';
 // computeExplore import removed (unused)
@@ -169,10 +170,38 @@ export class StepExecutor {
             }
           } catch (_) { }
         },
-        onProviderComplete: (providerId, _resultWrapper) => {
+        onProviderComplete: (providerId, resultWrapper) => {
           try {
-            this.healthTracker.recordSuccess(providerId);
             const entry = providerStatuses.find((s) => s.providerId === providerId);
+            if (resultWrapper && resultWrapper.status === "rejected") {
+              const err = resultWrapper.reason;
+              const classified = classifyError(err);
+              try {
+                this.healthTracker.recordFailure(providerId, err);
+              } catch (_) { }
+
+              if (entry) {
+                entry.status = 'failed';
+                entry.progress = 100;
+                entry.error = classified;
+              }
+
+              streamingManager.port.postMessage({
+                type: 'WORKFLOW_PROGRESS',
+                sessionId: context.sessionId,
+                aiTurnId: context.canonicalAiTurnId || 'unknown',
+                phase: 'batch',
+                providerStatuses,
+                completedCount: providerStatuses.filter((p) => p.status === 'completed').length,
+                totalCount: providers.length,
+              });
+              return;
+            }
+
+            try {
+              this.healthTracker.recordSuccess(providerId);
+            } catch (_) { }
+
             if (entry) {
               entry.status = 'completed';
               entry.progress = 100;
@@ -235,11 +264,17 @@ export class StepExecutor {
           });
 
           errors.forEach((error, providerId) => {
+            const providerResponse = error?.providerResponse;
             formattedResults[providerId] = {
               providerId: providerId,
               text: "",
               status: "failed",
-              meta: { _rawError: error.message },
+              meta: {
+                _rawError: error.message,
+                errorCode: error?.code,
+                providerError: providerResponse?.meta?.error,
+                providerDetails: providerResponse?.meta?.details,
+              },
             };
 
             if (isProviderAuthError(error)) {
@@ -252,6 +287,13 @@ export class StepExecutor {
               if (entry) {
                 entry.status = 'failed';
                 entry.error = classified;
+              }
+              if (formattedResults[providerId]?.meta) {
+                formattedResults[providerId].meta.retryable = classified?.retryable;
+                formattedResults[providerId].meta.retryAfterMs = classified?.retryAfterMs;
+                formattedResults[providerId].meta.errorType = classified?.type;
+                formattedResults[providerId].meta.errorMessage = classified?.message;
+                formattedResults[providerId].meta.requiresReauth = classified?.requiresReauth;
               }
             } catch (_) { }
           });
@@ -375,6 +417,10 @@ export class StepExecutor {
     const { buildSemanticMapperPrompt, parseSemanticMapperOutput } = await import('../../ConciergeService/semanticMapper');
     const { reconstructProvenance } = await import('../../ConciergeService/claimAssembly');
     const { extractForcingPoints } = await import('../../utils/cognitive/traversalEngine');
+    const { enrichStatementsWithGeometry } = await import('../../geometry/enrichment');
+    const { buildStatementFates } = await import('../../geometry/interpretation/fateTracking');
+    const { findUnattendedRegions } = await import('../../geometry/interpretation/coverageAudit');
+    const { buildCompletenessReport } = await import('../../geometry/interpretation/completenessReport');
 
     // 2. Shadow Extraction (Mechanical)
     // Map sourceData to expected format (modelIndex, content)
@@ -406,6 +452,8 @@ export class StepExecutor {
     let substrateDegenerate = null;
     let substrateDegenerateReason = null;
     let preSemanticInterpretation = null;
+    let substrate = null;
+    let enrichmentResult = null;
     if (paragraphResult.paragraphs.length > 0) {
       try {
         const clusteringModule = await import('../../clustering');
@@ -419,6 +467,7 @@ export class StepExecutor {
           DEFAULT_CONFIG
         );
 
+        /** @type {"none" | "webgpu" | "wasm"} */
         let embeddingBackend = 'none';
         try {
           const status = await getEmbeddingStatus();
@@ -427,7 +476,7 @@ export class StepExecutor {
           }
         } catch (_) { }
 
-        const substrate = buildGeometricSubstrate(
+        substrate = buildGeometricSubstrate(
           paragraphResult.paragraphs,
           embeddingResult.embeddings,
           embeddingBackend
@@ -436,7 +485,9 @@ export class StepExecutor {
         try {
           substrateDegenerate = isDegenerate(substrate);
           substrateDegenerateReason = substrateDegenerate
-            ? String(substrate?.degenerateReason || 'unknown')
+            ? (substrate && typeof substrate === 'object' && 'degenerateReason' in substrate
+              ? String(substrate.degenerateReason)
+              : 'unknown')
             : null;
         } catch (_) {
           substrateDegenerate = null;
@@ -541,6 +592,31 @@ export class StepExecutor {
           preSemanticInterpretation = null;
         }
 
+        try {
+          const regions = Array.isArray(preSemanticInterpretation?.regionization?.regions)
+            ? preSemanticInterpretation.regionization.regions
+            : [];
+          if (substrate && regions.length > 0) {
+            enrichmentResult = enrichStatementsWithGeometry(
+              shadowResult.statements,
+              paragraphResult.paragraphs,
+              substrate,
+              regions
+            );
+            if (enrichmentResult?.unenrichedCount > 0) {
+              console.warn(
+                `[Enrichment] ${enrichmentResult.unenrichedCount}/${shadowResult.statements.length} statements could not be enriched`,
+                enrichmentResult.failures.slice(0, 5)
+              );
+            }
+          } else {
+            enrichmentResult = null;
+          }
+        } catch (err) {
+          enrichmentResult = null;
+          console.warn('[Enrichment] Failed:', getErrorMessage(err));
+        }
+
         if (clusteringResult) {
           const nonSingletons = clusteringResult.clusters.filter(c => c.paragraphIds.length > 1);
           console.log(`[StepExecutor] Clustering results:`);
@@ -566,7 +642,7 @@ export class StepExecutor {
         }
       } catch (clusteringError) {
         // Per design: skip clustering entirely on failure, continue without
-        console.warn('[StepExecutor] Clustering failed, continuing without clusters:', clusteringError.message);
+        console.warn('[StepExecutor] Clustering failed, continuing without clusters:', getErrorMessage(clusteringError));
         clusteringResult = null;
       }
     } else {
@@ -655,25 +731,6 @@ export class StepExecutor {
                   supporters: Array.isArray(c.supporters) ? c.supporters : [],
                 }));
 
-                const stanceFromSourceStatements = (sourceStatements) => {
-                  if (!Array.isArray(sourceStatements) || sourceStatements.length === 0) return 'assertive';
-                  const weights = new Map();
-                  for (const s of sourceStatements) {
-                    const stance = String(s?.stance || 'assertive');
-                    const conf = typeof s?.confidence === 'number' ? s.confidence : 0;
-                    weights.set(stance, (weights.get(stance) || 0) + conf);
-                  }
-                  let best = 'assertive';
-                  let bestWeight = -Infinity;
-                  for (const [stance, weight] of weights.entries()) {
-                    if (weight > bestWeight) {
-                      best = stance;
-                      bestWeight = weight;
-                    }
-                  }
-                  return best;
-                };
-
                 const enrichedClaims = await reconstructProvenance(
                   mapperClaimsForProvenance,
                   shadowResult.statements,
@@ -685,7 +742,39 @@ export class StepExecutor {
                   unifiedEdges
                 );
 
-                const enrichedById = new Map(enrichedClaims.map((c) => [c.id, c]));
+                let completeness = null;
+                try {
+                  if (substrate && Array.isArray(regions) && regions.length > 0) {
+                    const statementFates = buildStatementFates(shadowResult.statements, enrichedClaims);
+                    const unattendedRegions = findUnattendedRegions(
+                      substrate,
+                      paragraphResult.paragraphs,
+                      enrichedClaims,
+                      regions,
+                      shadowResult.statements
+                    );
+                    const completenessReport = buildCompletenessReport(
+                      statementFates,
+                      unattendedRegions,
+                      shadowResult.statements,
+                      regions.length
+                    );
+                    completeness = {
+                      report: completenessReport,
+                      statementFates: Object.fromEntries(statementFates),
+                      unattendedRegions,
+                    };
+                    console.log('[Reconciliation] Completeness:', {
+                      statementCoverage: `${(completenessReport.statements.coverageRatio * 100).toFixed(1)}%`,
+                      regionCoverage: `${(completenessReport.regions.coverageRatio * 100).toFixed(1)}%`,
+                      verdict: completenessReport.verdict.recommendation,
+                      estimatedMissedClaims: completenessReport.verdict.estimatedMissedClaims
+                    });
+                  }
+                } catch (err) {
+                  completeness = null;
+                  console.warn('[Reconciliation] Failed:', getErrorMessage(err));
+                }
 
                 const claimOrder = new Map();
                 for (let i = 0; i < enrichedClaims.length; i++) {
@@ -717,7 +806,7 @@ export class StepExecutor {
 
                 const conflictComponents = [];
                 const visited = new Set();
-                for (const id of conflictClaimIdSet) {
+                for (const id of Array.from(conflictClaimIdSet)) {
                   if (visited.has(id)) continue;
                   const stack = [id];
                   const component = [];
@@ -727,7 +816,7 @@ export class StepExecutor {
                     component.push(cur);
                     const neighbors = conflictAdj.get(cur);
                     if (!neighbors) continue;
-                    for (const n of neighbors) {
+                    for (const n of Array.from(neighbors)) {
                       if (visited.has(n)) continue;
                       visited.add(n);
                       stack.push(n);
@@ -748,39 +837,126 @@ export class StepExecutor {
                   ...conflictComponents.map((claimIds, i) => ({ tierIndex: i + 1, claimIds, gates: [] })),
                 ];
 
+                const tierByClaimId = new Map();
+                for (const t of tiers) {
+                  const ids = Array.isArray(t?.claimIds) ? t.claimIds : [];
+                  for (const id of ids) {
+                    if (!tierByClaimId.has(id)) tierByClaimId.set(id, t.tierIndex);
+                  }
+                }
+
+                const claimLabelById = new Map(
+                  enrichedClaims.map((c) => [c.id, c.label]),
+                );
+
+                const enablesById = new Map();
+                const conflictsById = new Map();
+                const prerequisiteGatesByClaimId = new Map();
+
+                for (const e of unifiedEdges) {
+                  if (!e) continue;
+                  if (e.type === 'prerequisite') {
+                    const from = String(e.from || '').trim();
+                    const to = String(e.to || '').trim();
+                    if (!from || !to) continue;
+                    if (!enablesById.has(from)) enablesById.set(from, new Set());
+                    enablesById.get(from).add(to);
+                    if (!prerequisiteGatesByClaimId.has(to)) prerequisiteGatesByClaimId.set(to, []);
+                    const fromLabel = claimLabelById.get(from) || from;
+                    prerequisiteGatesByClaimId.get(to).push({
+                      id: `prereq_${from}_${to}`,
+                      claimId: from,
+                      condition: 'prerequisite',
+                      question: `Do you have "${fromLabel}"?`,
+                      sourceStatementIds: [],
+                    });
+                  } else if (e.type === 'conflict') {
+                    const from = String(e.from || '').trim();
+                    const to = String(e.to || '').trim();
+                    if (!from || !to) continue;
+                    if (!conflictsById.has(from)) conflictsById.set(from, []);
+                    const fromLabel = claimLabelById.get(from) || from;
+                    const toLabel = claimLabelById.get(to) || to;
+                    conflictsById.get(from).push({
+                      claimId: to,
+                      question: String(e.question || '').trim() || `${fromLabel} vs ${toLabel}`,
+                      sourceStatementIds: [],
+                    });
+                  }
+                }
+
+                const serializedClaims = enrichedClaims.map((c) => {
+                  const id = String(c?.id || '').trim();
+                  const supporters = Array.isArray(c?.supporters) ? c.supporters : [];
+                  const sourceStatementIds = Array.isArray(c?.sourceStatementIds)
+                    ? c.sourceStatementIds.map((s) => String(s)).filter(Boolean)
+                    : [];
+
+                  const tier = tierByClaimId.get(id) ?? 0;
+                  const enables = enablesById.has(id) ? Array.from(enablesById.get(id)) : [];
+                  const conflicts = conflictsById.has(id) ? conflictsById.get(id) : [];
+                  const prerequisites = prerequisiteGatesByClaimId.has(id)
+                    ? prerequisiteGatesByClaimId.get(id)
+                    : [];
+
+                  return {
+                    id,
+                    label: String(c?.label || id),
+                    stance: 'NEUTRAL',
+                    gates: {
+                      conditionals: [],
+                      prerequisites,
+                    },
+                    enables,
+                    conflicts,
+                    sourceStatementIds,
+                    supporterModels: supporters,
+                    supportRatio: typeof c?.supportRatio === 'number' ? c.supportRatio : 0,
+                    hasConditionalSignal: Boolean(c?.hasConditionalSignal),
+                    hasSequenceSignal: Boolean(c?.hasSequenceSignal),
+                    hasTensionSignal: Boolean(c?.hasTensionSignal),
+                    tier,
+                  };
+                });
+
                 const traversalGraph = {
-                  claims: enrichedClaims,
+                  claims: serializedClaims,
                   edges: unifiedEdges,
                   conditionals: unifiedConditionals,
                   tiers,
                   maxTier: tiers.length - 1,
-                };
-
-                const forcingPoints = extractForcingPoints(traversalGraph);
-
-                const serializedTraversalGraph = {
-                  claims: enrichedClaims.map((c) => ({
-                    id: c.id,
-                    label: c.label,
-                    description: c.text,
-                    stance: stanceFromSourceStatements(c.sourceStatements),
-                    gates: { conditionals: [], prerequisites: [] },
-                    enables: [],
-                    conflicts: [],
-                    sourceStatementIds: Array.isArray(c.sourceStatementIds) ? c.sourceStatementIds : [],
-                    supporterModels: Array.isArray(c.supporters) ? c.supporters : [],
-                    supportRatio: typeof c.supportRatio === 'number' ? c.supportRatio : 0,
-                    hasConditionalSignal: !!c.hasConditionalSignal,
-                    hasSequenceSignal: !!c.hasSequenceSignal,
-                    hasTensionSignal: !!c.hasTensionSignal,
-                    tier: 0,
-                  })),
-                  tensions: [],
-                  tiers,
-                  maxTier: tiers.length - 1,
                   roots: [],
+                  tensions: [],
                   cycles: [],
                 };
+
+                const forcingPoints = extractForcingPoints(traversalGraph).map((fp) => {
+                  const options = Array.isArray(fp?.options)
+                    ? fp.options
+                        .map((o) => ({
+                          claimId: String(o?.claimId || '').trim(),
+                          label: String(o?.label || '').trim(),
+                        }))
+                        .filter((o) => o.claimId && o.label)
+                    : undefined;
+
+                  return {
+                    id: String(fp?.id || '').trim(),
+                    type: fp?.type,
+                    tier: typeof fp?.tier === 'number' ? fp.tier : 0,
+                    question: String(fp?.question || '').trim(),
+                    condition: String(fp?.condition || '').trim(),
+                    ...(options ? { options } : {}),
+                    unlocks: [],
+                    prunes: [],
+                    blockedBy: Array.isArray(fp?.blockedByGateIds)
+                      ? fp.blockedByGateIds.map((g) => String(g)).filter(Boolean)
+                      : [],
+                    sourceStatementIds: Array.isArray(fp?.sourceStatementIds)
+                      ? fp.sourceStatementIds.map((s) => String(s)).filter(Boolean)
+                      : [],
+                  };
+                });
 
                 try {
                   // Shadow Delta
@@ -792,17 +968,22 @@ export class StepExecutor {
                   shadowDelta = computeShadowDelta(shadowResult, referencedIds, payload.originalPrompt);
                   topUnindexed = getTopUnreferenced(shadowDelta, 10);
 
+                  const EDGE_SUPPORTS = 'supports';
+                  const EDGE_PREREQUISITE = 'prerequisite';
+                  const EDGE_CONFLICTS = 'conflicts';
+                  const EDGE_TRADEOFF = 'tradeoff';
+
                   const mappedEdges = unifiedEdges
                     .filter((e) => e && e.from && e.to && (e.type === 'prerequisite' || e.type === 'conflict'))
                     .map((e) => {
                       if (e.type === 'prerequisite') {
-                        return { from: e.from, to: e.to, type: 'prerequisite' };
+                        return { from: e.from, to: e.to, type: EDGE_PREREQUISITE };
                       }
                       const q = typeof e.question === 'string' ? e.question.trim() : '';
                       return {
                         from: e.from,
                         to: e.to,
-                        type: q ? 'conflicts' : 'tradeoff',
+                        type: q ? EDGE_CONFLICTS : EDGE_TRADEOFF,
                       };
                     });
                   
@@ -817,7 +998,7 @@ export class StepExecutor {
                     const key = `${from}::${to}::supports`;
                     if (supportKey.has(key)) continue;
                     supportKey.add(key);
-                    derivedSupportEdges.push({ from, to, type: 'supports' });
+                    derivedSupportEdges.push({ from, to, type: EDGE_SUPPORTS });
                   }
                   
                   for (const cond of unifiedConditionals) {
@@ -831,12 +1012,12 @@ export class StepExecutor {
                         const k1 = `${a}::${b}::supports`;
                         if (!supportKey.has(k1)) {
                           supportKey.add(k1);
-                          derivedSupportEdges.push({ from: a, to: b, type: 'supports' });
+                          derivedSupportEdges.push({ from: a, to: b, type: EDGE_SUPPORTS });
                         }
                         const k2 = `${b}::${a}::supports`;
                         if (!supportKey.has(k2)) {
                           supportKey.add(k2);
-                          derivedSupportEdges.push({ from: b, to: a, type: 'supports' });
+                          derivedSupportEdges.push({ from: b, to: a, type: EDGE_SUPPORTS });
                         }
                       }
                     }
@@ -861,13 +1042,15 @@ export class StepExecutor {
                     traversalGraph,
                     forcingPoints,
                     preSemantic: preSemanticInterpretation || null,
+                    ...(completeness ? { completeness } : {}),
 
                     // SHADOW DATA
                     shadow: {
                       statements: shadowResult.statements,
                       audit: shadowDelta.audit,
-                      topUnindexed: topUnindexed,
-                      processingTime: (shadowDelta.processingTimeMs || 0) + (shadowResult.meta?.processingTimeMs || 0)
+                      topUnreferenced: Array.isArray(topUnindexed)
+                        ? topUnindexed.map((u) => u?.statement).filter(Boolean)
+                        : []
                     },
                     ...(paragraphResult?.meta ? { paragraphProjection: paragraphResult.meta } : {}),
                     ...(paragraphClusteringSummary ? { paragraphClustering: paragraphClusteringSummary } : {}),
@@ -878,7 +1061,7 @@ export class StepExecutor {
                     if (preSemanticInterpretation && mapperArtifact) {
                       const { computeStructuralAnalysis } = await import('../PromptMethods');
                       const { validateStructuralMapping } = await import('../../geometry/interpretation');
-                      const postSemantic = computeStructuralAnalysis(mapperArtifact);
+                      const postSemantic = computeStructuralAnalysis(JSON.parse(JSON.stringify(mapperArtifact)));
                       structuralValidation = validateStructuralMapping(preSemanticInterpretation, postSemantic);
                     }
                   } catch (_) {
@@ -893,7 +1076,7 @@ export class StepExecutor {
                     originalPrompt: payload.originalPrompt,
                     turn: context.turn,
                     citationCount: citationOrder.length,
-                    error: err.message
+                    error: getErrorMessage(err)
                   });
                   throw err; // Rethrow to handle consistently upstream
                 }
@@ -916,6 +1099,7 @@ export class StepExecutor {
                     topUnreferenced: topUnindexed || null,
                     referencedIds: referencedIds ? Array.from(referencedIds || []) : null,
                   },
+                  enrichmentResult: enrichmentResult || null,
                   paragraphProjection: paragraphResult || null,
                   clustering: {
                     result: clusteringResult
@@ -1403,7 +1587,7 @@ export class StepExecutor {
         analysis = computeStructuralAnalysis(mapperArtifact);
       } catch (e) {
         console.error("[StepExecutor] computeStructuralAnalysis failed:", e);
-        throw new Error(`Structural Analysis Failed: ${e.message || String(e)}`);
+        throw new Error(`Structural Analysis Failed: ${getErrorMessage(e)}`);
       }
     }
 

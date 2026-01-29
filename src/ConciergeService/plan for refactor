@@ -1,3 +1,12 @@
+mplement the spec with these additions:
+Before Phase 2: Implement geometry interpretation layer (src/geometry/interpretation/*) that produces PreSemanticInterpretation from substrate. This includes lens derivation, regionization, profiling, opposition detection, and hint building.
+In Phase 2: Use MapperGeometricHints (not raw substrate) in prompt builder. Include attention regions and specific guidance about semantic oppositions.
+In Phase 3: Add regionProfiles parameter to reconstructProvenance(). Attach geometricSignals to each EnrichedClaim tracking which geometric tiers backed it.
+After Phase 7: Implement validateStructuralMapping() that compares predicted vs actual shape, tier alignment, and conflict precision/recall. Store validation in MapperArtifact.
+Follow the spec's type reconciliation and traversal logic exactly. The additions above integrate the geometry layer you've already built but the spec didn't wire up."
+
+
+
 Phase 2: Semantic Mapper
 File: semanticMapper.ts
 Remove these helper functions:
@@ -20,31 +29,21 @@ If substrate is degenerate or unavailable, return a neutral signal indicating ge
 
 Update buildSemanticMapperPrompt:
 
-Change the function signature to accept: userQuery, paragraphs (ShadowParagraph array), and substrate (GeometricSubstrate).
+Change the function signature to accept: userQuery, paragraphs (ShadowParagraph array), and geomtrichionts
 
-Replace the prompt content entirely. The new prompt should contain:
-
-Opening identity statement establishing the Epistemic Cartographer role with mandate to distill signal while preserving incommensurable insights.
+update the prompt section  The new prompt should contain:
 
 Shape signal section using the helper above.
-
-User query section with the original query.
 
 Model outputs section with the clean text from buildCleanModelOutputs.
 
 Task description explaining:
 
-Index positions not topics
-A position is a stance that can be supported, opposed, or traded against
-Where multiple sources reach the same position, note convergence in supporters array
-Where sources oppose each other, create conflict edges
-Where one position depends on another, create prerequisite edges
-Identify conditionals that test unchangeable facts about user situation
-Instructions for conditionals:
+with conditonals
 
 Generate binary yes/no questions about unchangeable facts
-Questions should be answerable without technical knowledge
-If answered NO, the affected claims become inapplicable
+that should be answerable without technical knowledge and
+If answered NO, that claim would  become inapplicable
 Example: "Are you deploying to a browser environment?" — if NO, browser-specific claims are pruned
 Instructions for conflict edges:
 

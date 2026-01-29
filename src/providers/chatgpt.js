@@ -504,7 +504,14 @@ export class ChatGPTSessionApi {
     // Prefer SSE path
     if (ct.includes("text/event-stream")) {
       this._sesLog("[ChatGPT Session] Processing SSE stream...");
-      const reader = res.body.getReader();
+      const bodyStream = res.body;
+      if (!bodyStream) {
+        throw new ChatGPTProviderError(
+          "failedToReadResponse",
+          "Empty response body",
+        );
+      }
+      const reader = bodyStream.getReader();
       let carry = "";
       let aggText = "";
       let done = false;
@@ -747,6 +754,7 @@ export class ChatGPTSessionApi {
     const scripts = await this._getScripts();
     const key = AE_CONFIG.pow.$dpl;
     for (const s of scripts) {
+      if (!s) continue;
       try {
         const u = new URL(s);
         const v = u.searchParams.get(key);

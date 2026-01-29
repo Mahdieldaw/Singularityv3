@@ -164,7 +164,10 @@ export class GeminiSessionApi {
       delete this.sharedState.prefetchedToken; // Consume once
     }
     if (!token) {
-      token = await this._fetchToken();
+      token = (await this._fetchToken()) || null;
+    }
+    if (!token) {
+      throw this._createError("failedToExtractToken", "Missing Gemini token.");
     }
 
     // Generate collision-resistant request ID
@@ -175,8 +178,9 @@ export class GeminiSessionApi {
     // Get model configuration
     const modelConfig = GeminiModels[model] || GeminiModels["gemini-flash"];
 
+    const { at, bl } = token;
     const body = new URLSearchParams({
-      at: token.at,
+      at,
       "f.req": JSON.stringify([null, JSON.stringify([[prompt], null, cursor])]),
     });
 
@@ -212,7 +216,7 @@ export class GeminiSessionApi {
       },
       signal: internalAbortController.signal,
       query: {
-        bl: token.bl,
+        bl,
         rt: "c",
         _reqid: reqId,
       },
@@ -365,7 +369,6 @@ export class GeminiSessionApi {
                 if (text && text.trim().length > 0) {
                   if (ttftTimer) {
                     clearTimeout(ttftTimer);
-                    ttftTimer = null;
                   }
                   ttftMet = true;
 
@@ -432,7 +435,8 @@ export class GeminiSessionApi {
       }
     } catch (e) {
       if (this.isOwnError(e)) throw e;
-      if (abortHint && abortHint.type) this._throw(abortHint.type, abortHint.details);
+      const hint = Object(abortHint);
+      if (hint.type) this._throw(hint.type, hint.details);
       this._throw("failedToReadResponse", { step: "data", error: e });
     }
 
@@ -730,13 +734,14 @@ export class GeminiSessionApi {
       try {
         return await fn.call(this, ...args);
       } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
         let err;
         if (this.isOwnError(e)) err = e;
         else if (String(e) === "TypeError: Failed to fetch")
-          err = this._createError("network", e.message);
+          err = this._createError("network", msg);
         else if (String(e) === "AbortError: The user aborted a request.")
-          err = this._createError("aborted", e.message);
-        else err = this._createError("unknown", e.message);
+          err = this._createError("aborted", msg);
+        else err = this._createError("unknown", msg);
         if (err.details) this._logError(err.message, err.details);
         else this._logError(err.message);
         throw err;

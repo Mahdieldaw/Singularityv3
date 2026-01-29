@@ -302,10 +302,10 @@ export class CognitivePipelineHandler {
             if (turnInCurrentInstance === 1) {
               // Turn 1: Full buildConciergePrompt with prior context if fresh spawn after COMMIT
               conciergePromptType = "full";
-              conciergePromptSeed = {
+              const conciergePromptSeedBase = {
                 isFirstTurn: true,
                 activeWorkflow: conciergeState?.activeWorkflow || undefined,
-                priorContext: undefined, // Fix inferred type error
+                priorContext: undefined,
                 shadow: structuralAnalysis?.shadow
                   ? {
                     audit: structuralAnalysis.shadow.audit,
@@ -314,24 +314,34 @@ export class CognitivePipelineHandler {
                   : undefined,
               };
 
-              // If fresh spawn after COMMIT, inject prior context
-              if (conciergeState?.commitPending && conciergeState?.pendingHandoff) {
-                conciergePromptSeed.priorContext = {
-                  handoff: conciergeState.pendingHandoff,
-                  committed: conciergeState.pendingHandoff?.commit || null,
-                };
-                console.log(`[CognitiveHandler] Fresh spawn with prior context from COMMIT`);
+              conciergePromptSeed =
+                conciergeState?.commitPending && conciergeState?.pendingHandoff
+                  ? {
+                      ...conciergePromptSeedBase,
+                      priorContext: {
+                        handoff: conciergeState.pendingHandoff,
+                        committed: conciergeState.pendingHandoff?.commit || null,
+                      },
+                    }
+                  : conciergePromptSeedBase;
+
+              if (conciergePromptSeed.priorContext) {
+                console.log(
+                  `[CognitiveHandler] Fresh spawn with prior context from COMMIT`,
+                );
               }
 
               if (typeof ConciergeService.buildConciergePrompt === 'function') {
-                conciergePrompt = ConciergeService.buildConciergePrompt(
-                  userMessageForSingularity,
-                  structuralAnalysis,
-                  {
-                    ...conciergePromptSeed,
-                    ghosts: mapperArtifact.ghosts || []
-                  },
-                );
+                if (structuralAnalysis) {
+                  conciergePrompt = ConciergeService.buildConciergePrompt(
+                    userMessageForSingularity,
+                    structuralAnalysis,
+                    {
+                      ...conciergePromptSeed,
+                      ghosts: mapperArtifact.ghosts || [],
+                    },
+                  );
+                }
               } else {
                 console.warn("[CognitiveHandler] ConciergeService.buildConciergePrompt missing");
               }
@@ -365,11 +375,13 @@ export class CognitivePipelineHandler {
             console.warn("[CognitiveHandler] Prompt building failed, using fallback");
             conciergePromptType = "standard_fallback";
             if (ConciergeService && typeof ConciergeService.buildConciergePrompt === 'function') {
-              conciergePrompt = ConciergeService.buildConciergePrompt(
-                userMessageForSingularity,
-                structuralAnalysis,
-                { ghosts: mapperArtifact.ghosts || [] }
-              );
+              if (structuralAnalysis) {
+                conciergePrompt = ConciergeService.buildConciergePrompt(
+                  userMessageForSingularity,
+                  structuralAnalysis,
+                  { ghosts: mapperArtifact.ghosts || [] },
+                );
+              }
             } else {
               console.error("[CognitiveHandler] ConciergeService.buildConciergePrompt unavailable for fallback");
             }
@@ -537,12 +549,13 @@ export class CognitivePipelineHandler {
           console.error("[CognitiveHandler] Singularity execution failed:", singularityErr);
           try {
             if (singularityStep?.stepId) {
+              const msg = singularityErr instanceof Error ? singularityErr.message : String(singularityErr);
               this.port.postMessage({
                 type: "WORKFLOW_STEP_UPDATE",
                 sessionId: context.sessionId,
                 stepId: singularityStep.stepId,
                 status: "failed",
-                error: singularityErr?.message || String(singularityErr),
+                error: msg,
               });
             }
           } catch (err) {
@@ -814,12 +827,13 @@ export class CognitivePipelineHandler {
     } catch (error) {
       console.error(`[CognitiveHandler] Orchestration failed:`, error);
       try {
+        const msg = error instanceof Error ? error.message : String(error);
         this.port.postMessage({
           type: "WORKFLOW_STEP_UPDATE",
           sessionId: sessionId || "unknown",
           stepId: `continue-singularity-error`,
           status: "failed",
-          error: error.message || String(error),
+          error: msg,
           ...(isRecompute ? { isRecompute: true, sourceTurnId: sourceTurnId || aiTurnId } : {}),
         });
       } catch (err) {

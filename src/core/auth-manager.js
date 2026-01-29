@@ -31,6 +31,7 @@ class AuthManager {
 
         // Initialization flag
         this._initialized = false;
+        this._initPromise = null;
     }
 
     /**
@@ -42,21 +43,28 @@ class AuthManager {
             console.log('[AuthManager] Already initialized, skipping');
             return;
         }
+        if (this._initPromise) {
+            await this._initPromise;
+            return;
+        }
 
-        console.log('[AuthManager] Initializing...');
+        this._initPromise = (async () => {
+            console.log('[AuthManager] Initializing...');
 
-        // 1. Load from storage (instant)
-        const stored = await chrome.storage.local.get('provider_auth_status');
-        this._cookieStatus = stored.provider_auth_status || {};
+            const stored = await chrome.storage.local.get('provider_auth_status');
+            this._cookieStatus = stored.provider_auth_status || {};
 
-        // 2. Setup real-time listeners
-        this._setupCookieListeners();
+            await this.checkAllCookies();
 
-        // 3. Initial cookie check
-        await this.checkAllCookies();
+            this._initialized = true;
+            console.log('[AuthManager] Initialized:', this._cookieStatus);
+        })();
 
-        this._initialized = true;
-        console.log('[AuthManager] Initialized:', this._cookieStatus);
+        try {
+            await this._initPromise;
+        } finally {
+            this._initPromise = null;
+        }
     }
 
     /**
@@ -113,7 +121,8 @@ class AuthManager {
             }
         }));
 
-        status.grok = await this._verifyGrok();
+        // Grok uses anonymous sessions (no cookies) - verify on-demand via verifyProvider()
+        status.grok = this._cookieStatus['grok'] ?? false;
 
         // Update cache and storage
         this._cookieStatus = status;
@@ -164,7 +173,8 @@ class AuthManager {
                     valid = this._cookieStatus[providerId] ?? false;
             }
         } catch (e) {
-            console.warn(`[AuthManager] Verification failed for ${providerId}:`, e.message);
+            const msg = e instanceof Error ? e.message : String(e);
+            console.warn(`[AuthManager] Verification failed for ${providerId}:`, msg);
             // Fall back to cookie status
             valid = this._cookieStatus[providerId] ?? false;
         }
@@ -331,10 +341,12 @@ class AuthManager {
             const hasBaggage = html.includes('<meta name="baggage" content="');
             const hasSentryTrace = html.includes('<meta name="sentry-trace" content="');
             const hasScripts = html.includes('/_next/static/chunks/');
+            const hasVerificationToken = html.includes('grok-site-verification');
 
-            return hasBaggage && hasSentryTrace && hasScripts;
+            return hasBaggage && hasSentryTrace && hasScripts && hasVerificationToken;
         } catch (e) {
-            console.warn('[AuthManager] Grok verification failed:', e?.message || String(e));
+            const msg = e instanceof Error ? e.message : String(e);
+            console.warn('[AuthManager] Grok verification failed:', msg);
             return false;
         }
     }
@@ -344,45 +356,44 @@ class AuthManager {
      * EXACT COPY of chrome.cookies.onChanged listener from sw-entry.js
      */
     _setupCookieListeners() {
-        chrome.cookies.onChanged.addListener(async (changeInfo) => {
-            try {
-                const { cookie, removed } = changeInfo;
+        chrome.cookies.onChanged.addListener((changeInfo) => {
+            void this.handleCookieChange(changeInfo);
+        });
+    }
 
-                // Find which provider this cookie belongs to
-                const match = AUTH_COOKIES.find(c =>
-                    cookie.domain.includes(c.domain) && cookie.name === c.name
-                );
+    async handleCookieChange(changeInfo) {
+        try {
+            const { cookie, removed } = changeInfo;
 
-                if (!match) return;
+            const match = AUTH_COOKIES.find(c =>
+                cookie.domain.includes(c.domain) && cookie.name === c.name
+            );
 
-                const wasAuthed = this._cookieStatus[match.provider];
-                const nowAuthed = !removed;
+            if (!match) return;
 
-                if (wasAuthed !== nowAuthed) {
-                    console.log(`[AuthManager] Cookie change: ${match.provider} ${wasAuthed} → ${nowAuthed}`);
+            const wasAuthed = this._cookieStatus[match.provider];
+            const nowAuthed = !removed;
 
-                    // Update status
-                    this._cookieStatus[match.provider] = nowAuthed;
+            if (wasAuthed !== nowAuthed) {
+                console.log(`[AuthManager] Cookie change: ${match.provider} ${wasAuthed} → ${nowAuthed}`);
 
-                    // Handle Gemini variants
-                    if (match.provider === "gemini") {
-                        GEMINI_VARIANTS.forEach(variant => {
-                            this._cookieStatus[variant] = nowAuthed;
-                        });
-                    }
+                this._cookieStatus[match.provider] = nowAuthed;
 
-                    // Invalidate verification cache
-                    this._verificationCache.delete(match.provider.split('-')[0]);
-
-                    // Persist to storage
-                    await chrome.storage.local.set({
-                        provider_auth_status: this._cookieStatus
+                if (match.provider === "gemini") {
+                    GEMINI_VARIANTS.forEach(variant => {
+                        this._cookieStatus[variant] = nowAuthed;
                     });
                 }
-            } catch (err) {
-                console.error('[AuthManager] Error in cookie change listener:', err);
+
+                this._verificationCache.delete(match.provider.split('-')[0]);
+
+                await chrome.storage.local.set({
+                    provider_auth_status: this._cookieStatus
+                });
             }
-        });
+        } catch (err) {
+            console.error('[AuthManager] Error handling cookie change:', err);
+        }
     }
 
     /**

@@ -526,7 +526,11 @@ export class ConnectionHandler {
       // ========================================================================
       // Execute
       // ========================================================================
-      await this.workflowEngine.execute(workflowRequest, resolvedContext);
+      const engine = this.workflowEngine;
+      if (!engine) {
+        throw new Error("WorkflowEngine not initialized");
+      }
+      await engine.execute(workflowRequest, resolvedContext);
 
       try {
         const key = `inflight:${workflowRequest.context.sessionId}:${workflowRequest.context.canonicalAiTurnId}`;
@@ -535,12 +539,13 @@ export class ConnectionHandler {
     } catch (error) {
       console.error("[ConnectionHandler] Workflow failed:", error);
       try {
+        const msg = error instanceof Error ? error.message : String(error);
         this.port.postMessage({
           type: "WORKFLOW_STEP_UPDATE",
           sessionId: executeRequest?.sessionId || "unknown",
           stepId: "handler-error",
           status: "failed",
-          error: error.message || String(error),
+          error: msg,
           // Attach recompute metadata when applicable
           isRecompute: executeRequest?.type === "recompute",
           sourceTurnId: executeRequest?.sourceTurnId,
@@ -548,7 +553,7 @@ export class ConnectionHandler {
         this.port.postMessage({
           type: "WORKFLOW_COMPLETE",
           sessionId: executeRequest?.sessionId || "unknown",
-          error: error.message || String(error),
+          error: msg,
         });
       } catch (e) {
         console.error("[ConnectionHandler] Failed to send error message:", e);

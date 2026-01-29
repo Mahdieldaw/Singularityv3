@@ -199,7 +199,9 @@ const BusController = {
     (t && (o.proxy = t), a && (o.this = a), this._handlers[e].push(o));
   },
 
-  _off(e, t = null, n = null) {
+  _off(e, t, n) {
+    t = t ?? null;
+    n = n ?? null;
     if (!this._handlers[e]) return;
 
     this._handlers[e] = this._handlers[e].filter((e) => {
@@ -288,7 +290,8 @@ const BusController = {
       if (!this._isBusMsg(msg)) return;
 
       // Helper to respond back to the iframe requestor
-      const respondToIframe = (m, result = null) => {
+      const respondToIframe = (m, result) => {
+        result = result ?? null;
         if (!m?.reqId) return;
         try {
           this._iframe?.contentWindow?.postMessage(
@@ -463,7 +466,8 @@ const BusController = {
             chrome.runtime.lastError ? e(null) : e(t);
           });
         } catch (n) {
-          if (n.message === "Extension context invalidated.") return;
+          const msg = n instanceof Error ? n.message : String(n);
+          if (msg === "Extension context invalidated.") return;
           console.error("Bus error:", n);
           e(null);
         }
@@ -538,7 +542,7 @@ const BusController = {
       window.addEventListener("message", n);
     }),
 
-  _callHandlers({ name: e, args: n, argsStr: a }, o = null) {
+  _callHandlers({ name: e, args: n, argsStr: a }, o) {
     let i = this._handlers[e];
     if (!i) return null;
 

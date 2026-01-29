@@ -1,32 +1,82 @@
 import React from 'react';
-import { useAtomValue } from 'jotai';
+import { useAtomValue, useAtom } from 'jotai';
 
 import { useTraversal } from '../../hooks/useTraversal';
-import { TraversalGateCard } from './TraversalGateCard';
 import { TraversalForcingPointCard } from './TraversalForcingPointCard';
 import { buildTraversalContinuationPrompt } from '../../utils/traversal-prompt-builder';
-import type { Claim, TraversalGate } from '../../../shared/contract';
+import type { Claim } from '../../../shared/contract';
 import { CONTINUE_COGNITIVE_WORKFLOW, WORKFLOW_STEP_UPDATE } from '../../../shared/messaging';
 import api from '../../services/extension-api';
-import { singularityProviderAtom } from '../../state/atoms';
+import { singularityProviderAtom, traversalStateByTurnAtom } from '../../state/atoms';
+import type { ClaimStatus, Resolution, TraversalState } from '../../../src/utils/cognitive/traversalEngine';
 
 interface TraversalGraphViewProps {
   traversalGraph: any;
+  conditionals?: any[];
   claims: Claim[];
   originalQuery: string;
   sessionId: string;
   aiTurnId: string;
+  pipelineStatus?: string | null;
   onComplete?: () => void;
 }
 
 export const TraversalGraphView: React.FC<TraversalGraphViewProps> = ({
   traversalGraph,
+  conditionals,
   claims,
   originalQuery,
   sessionId,
   aiTurnId,
+  pipelineStatus,
   onComplete
 }) => {
+  const cleanGraph = React.useMemo(() => {
+    const rawClaims = (traversalGraph as any)?.claims;
+    const rawConditionals = (traversalGraph as any)?.conditionals;
+
+    const claimsAreCorrupted =
+      Array.isArray(rawClaims) && rawClaims.length > 0 && typeof rawClaims[0] === 'string';
+    const conditionalsAreCorrupted =
+      Array.isArray(rawConditionals) && rawConditionals.length > 0 && typeof rawConditionals[0] === 'string';
+
+    return {
+      ...(traversalGraph || {}),
+      claims: claimsAreCorrupted ? claims : rawClaims,
+      conditionals: conditionalsAreCorrupted ? (conditionals || []) : rawConditionals,
+    };
+  }, [claims, conditionals, traversalGraph]);
+
+  const singularityProvider = useAtomValue(singularityProviderAtom);
+  const [traversalStateByTurn, setTraversalStateByTurn] = useAtom(traversalStateByTurnAtom);
+  const [isSubmitting, setIsSubmitting] = React.useState(false);
+  const [submissionError, setSubmissionError] = React.useState<string | null>(null);
+  const isReadOnly = !pipelineStatus || pipelineStatus !== 'awaiting_traversal';
+
+  const deserializeTraversalState = (saved: any): TraversalState | null => {
+    if (!saved) return null;
+    try {
+      const claimStatusesArr = Array.isArray(saved.claimStatuses) ? saved.claimStatuses : [];
+      const resolutionsArr = Array.isArray(saved.resolutions) ? saved.resolutions : [];
+      const pathStepsArr = Array.isArray(saved.pathSteps) ? saved.pathSteps : [];
+      return {
+        claimStatuses: new Map<string, ClaimStatus>(claimStatusesArr as any),
+        resolutions: new Map<string, Resolution>(resolutionsArr as any),
+        pathSteps: pathStepsArr as any,
+      };
+    } catch {
+      return null;
+    }
+  };
+
+  const hydrationTurnIdRef = React.useRef<string | null>(null);
+  const hydratedOverrideRef = React.useRef<TraversalState | null>(null);
+
+  if (hydrationTurnIdRef.current !== aiTurnId) {
+    hydrationTurnIdRef.current = aiTurnId;
+    hydratedOverrideRef.current = deserializeTraversalState(traversalStateByTurn?.[aiTurnId]);
+  }
+
   const {
     state,
     resolveGate,
@@ -36,12 +86,20 @@ export const TraversalGraphView: React.FC<TraversalGraphViewProps> = ({
     reset,
     forcingPoints,
     getResolution,
-  } = useTraversal(traversalGraph, claims as any);
-  const singularityProvider = useAtomValue(singularityProviderAtom);
-  const [isSubmitting, setIsSubmitting] = React.useState(false);
-  const [submissionError, setSubmissionError] = React.useState<string | null>(null);
+  } = useTraversal(cleanGraph as any, claims as any, hydratedOverrideRef.current);
+
+  React.useEffect(() => {
+    setTraversalStateByTurn((draft: any) => {
+      draft[aiTurnId] = {
+        claimStatuses: Array.from((state.claimStatuses || new Map()).entries()),
+        resolutions: Array.from((state.resolutions || new Map()).entries()),
+        pathSteps: Array.isArray(state.pathSteps) ? state.pathSteps : [],
+      };
+    });
+  }, [aiTurnId, state, setTraversalStateByTurn]);
 
   const handleSubmitToConcierge = async () => {
+    if (isReadOnly) return;
     setIsSubmitting(true);
     setSubmissionError(null);
 
@@ -114,7 +172,7 @@ export const TraversalGraphView: React.FC<TraversalGraphViewProps> = ({
             }
 
             if (msg.type === 'CONTINUATION_ERROR' && msg.aiTurnId === aiTurnId) {
-              finish(() => reject(new Error(msg.error || 'Continuation failed')));
+              finish(() => reject(new Error(String(msg.error || 'Continuation failed'))));
               return;
             }
 
@@ -188,13 +246,6 @@ export const TraversalGraphView: React.FC<TraversalGraphViewProps> = ({
     }
   };
 
-  const tiersArray = React.useMemo(() => {
-    return Array.isArray(traversalGraph?.tiers) && traversalGraph.tiers.length > 0
-      ? traversalGraph.tiers
-      : [{ tierIndex: 0, claimIds: claims.map(c => c.id), gates: [] }];
-  }, [claims, traversalGraph]);
-
-  const sortedTiers = [...tiersArray].sort((a: any, b: any) => a.tierIndex - b.tierIndex);
   const liveIds = new Set((liveForcingPoints || []).map((fp: any) => fp?.id).filter(Boolean));
   const displayForcingPoints = (forcingPoints || [])
     .filter((fp: any) => fp && (liveIds.has(fp.id) || !!getResolution(fp.id)))
@@ -215,116 +266,15 @@ export const TraversalGraphView: React.FC<TraversalGraphViewProps> = ({
             Resolve gates and make choices to generate personalized guidance
           </p>
         </div>
-        <button
-          onClick={reset}
-          className="px-3 py-1.5 rounded-lg bg-surface-highlight hover:bg-surface-raised border border-border-subtle text-xs font-medium transition-colors"
-        >
-          Reset
-        </button>
+        {!isReadOnly && (
+          <button
+            onClick={reset}
+            className="px-3 py-1.5 rounded-lg bg-surface-highlight hover:bg-surface-raised border border-border-subtle text-xs font-medium transition-colors"
+          >
+            Reset
+          </button>
+        )}
       </div>
-
-      {/* Tiers */}
-      {sortedTiers.map((tier: any) => {
-        const blockingGates = Array.isArray(tier.gates) ? tier.gates : [];
-        const isUnlocked =
-          tier.tierIndex === 0 ||
-          blockingGates.length === 0 ||
-          blockingGates.every((gate: any) => {
-            const r = getResolution(String(gate.id));
-            return r?.type === 'conditional' && r.satisfied === true;
-          });
-        const tierClaims = Array.isArray(tier.claimIds)
-          ? tier.claimIds.map((id: string) => claims.find((c: any) => c.id === id)).filter(Boolean)
-          : Array.isArray(tier.claims)
-            ? tier.claims
-            : [];
-
-        return (
-          <div key={tier.tierIndex} className="mb-6">
-            {/* Gates before this tier */}
-            {(tier.tierIndex === 0
-              ? (forcingPoints || []).filter((fp: any) => fp?.type === 'conditional')
-              : blockingGates
-            ).map((gateOrFp: any) => {
-              const isFp = gateOrFp?.type === 'conditional' && gateOrFp?.affectedClaims;
-              const gate: TraversalGate = isFp
-                ? {
-                  id: String(gateOrFp.id),
-                  type: 'conditional',
-                  condition: String(gateOrFp.condition || gateOrFp.question || gateOrFp.id),
-                  question: String(gateOrFp.question || gateOrFp.condition || gateOrFp.id),
-                  blockedClaims: Array.isArray(gateOrFp.affectedClaims) ? gateOrFp.affectedClaims : [],
-                  sourceStatementIds: Array.isArray(gateOrFp.sourceStatementIds) ? gateOrFp.sourceStatementIds : [],
-                }
-                : gateOrFp;
-
-              const resolution = getResolution(String(gate.id));
-
-              return (
-                <TraversalGateCard
-                  key={gate.id}
-                  gate={gate}
-                  isResolved={!!resolution && resolution.type === 'conditional'}
-                  resolution={resolution?.type === 'conditional'
-                    ? { satisfied: resolution.satisfied === true, userInput: resolution.userInput }
-                    : undefined}
-                  onResolve={resolveGate}
-                />
-              );
-            })}
-
-            {/* Tier header */}
-            <div className={`p-4 rounded-t-xl border-2 border-b-0 ${isUnlocked
-              ? 'bg-surface-raised border-brand-500/30'
-              : 'bg-surface-subtle border-border-subtle opacity-50'
-              }`}>
-              <div className="flex items-center gap-2">
-                {isUnlocked ? '🔓' : '🔒'}
-                <span className="font-bold text-text-primary">
-                  Tier {tier.tierIndex}: {tier.tierIndex === 0 ? 'Foundation' : 'Dependent Claims'}
-                </span>
-                <span className="text-xs text-text-muted">
-                  ({tierClaims.length} claim{tierClaims.length !== 1 ? 's' : ''})
-                </span>
-              </div>
-            </div>
-
-            {/* Tier claims */}
-            <div className={`p-4 rounded-b-xl border-2 border-t-0 ${isUnlocked
-              ? 'bg-surface-raised border-brand-500/30'
-              : 'bg-surface-subtle border-border-subtle opacity-50'
-              }`}>
-              <div className="flex gap-3 overflow-x-auto pb-2">
-                {tierClaims.map((claim: any) => (
-                  <div
-                    key={claim.id}
-                    className="flex-shrink-0 w-64 p-3 rounded-lg bg-surface-highlight border border-border-subtle"
-                  >
-                    <div className="text-sm font-bold text-text-primary mb-1">
-                      {claim.label}
-                    </div>
-                    <div className="text-xs text-text-muted line-clamp-2">
-                      {claim.text}
-                    </div>
-                    {claim.supporters && claim.supporters.length > 0 && (
-                      <div className="mt-2 flex -space-x-1">
-                        {claim.supporters.map((modelIdx: number, i: number) => (
-                          <div
-                            key={i}
-                            className="w-5 h-5 rounded-full bg-brand-500 border-2 border-surface flex items-center justify-center text-xs font-bold text-white"
-                          >
-                            {modelIdx}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        );
-      })}
 
       {/* Forcing Points */}
       {displayForcingPoints.length > 0 && (
@@ -360,6 +310,7 @@ export const TraversalGraphView: React.FC<TraversalGraphViewProps> = ({
               gateResolution={gateResolution}
               onResolveConflict={resolveForcingPoint}
               onResolveGate={resolveGate}
+              disabled={isReadOnly}
             />
               );
             })()
@@ -368,7 +319,7 @@ export const TraversalGraphView: React.FC<TraversalGraphViewProps> = ({
       )}
 
       {/* Submit button */}
-      {isComplete && (
+      {isComplete && !isReadOnly && (
         <div className="mt-8 p-6 rounded-xl bg-gradient-to-br from-green-500/10 to-brand-500/10 border-2 border-green-500/30 animate-in fade-in slide-in-from-bottom-4">
           <div className="text-center">
             <div className="text-lg font-bold text-text-primary mb-2">

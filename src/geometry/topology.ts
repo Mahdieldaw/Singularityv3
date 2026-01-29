@@ -76,7 +76,7 @@ export function computeTopology(
     const components: Component[] = [];
     let compIdx = 0;
 
-    for (const [root, nodeIds] of componentMap) {
+    for (const [, nodeIds] of componentMap) {
         // Sort nodeIds deterministically
         nodeIds.sort((a, b) => a.localeCompare(b));
 

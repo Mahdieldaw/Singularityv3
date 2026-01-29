@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * EMBEDDING CONTROLLER - OFFSCREEN DOCUMENT
  * 

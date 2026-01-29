@@ -84,7 +84,7 @@ console.log('══════════════════════�
 
 console.log('First 5 statements:\n');
 for (const stmt of shadowResult.statements.slice(0, 5)) {
-    const signals = [];
+    const signals: string[] = [];
     if (stmt.signals.sequence) signals.push('SEQ');
     if (stmt.signals.tension) signals.push('TENS');
     if (stmt.signals.conditional) signals.push('COND');
@@ -157,7 +157,7 @@ const topUnreferenced = getTopUnreferenced(delta, 5);
 console.log(`Top ${topUnreferenced.length} unreferenced statements (by adjusted score):\n`);
 
 for (const u of topUnreferenced) {
-    const signals = [];
+    const signals: string[] = [];
     if (u.statement.signals.sequence) signals.push('SEQ');
     if (u.statement.signals.tension) signals.push('TENS');
     if (u.statement.signals.conditional) signals.push('COND');

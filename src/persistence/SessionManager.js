@@ -33,7 +33,7 @@ export class SessionManager {
     return this._toJsonSafe(artifact, { maxDepth: 20, maxStringLength: 250000 });
   }
 
-  _toJsonSafe(value, opts = {}, _seen = new WeakSet(), _depth = 0) {
+  _toJsonSafe(value, opts = {}, _stack = new WeakSet(), _depth = 0) {
     const maxDepth = typeof opts.maxDepth === "number" ? opts.maxDepth : 6;
     const maxStringLength =
       typeof opts.maxStringLength === "number" ? opts.maxStringLength : 250000;
@@ -53,18 +53,27 @@ export class SessionManager {
     if (_depth >= maxDepth) return undefined;
 
     if (Array.isArray(value)) {
+      try {
+        if (_stack.has(value)) return "[Circular]";
+        _stack.add(value);
+      } catch (_) {
+        return String(value);
+      }
       const arr = [];
       for (const item of value) {
-        const safe = this._toJsonSafe(item, opts, _seen, _depth + 1);
+        const safe = this._toJsonSafe(item, opts, _stack, _depth + 1);
         if (safe !== undefined) arr.push(safe);
       }
+      try {
+        _stack.delete(value);
+      } catch (_) { }
       return arr;
     }
 
     if (t === "object") {
       try {
-        if (_seen.has(value)) return "[Circular]";
-        _seen.add(value);
+        if (_stack.has(value)) return "[Circular]";
+        _stack.add(value);
       } catch (_) {
         return String(value);
       }
@@ -73,9 +82,12 @@ export class SessionManager {
 
       const out = {};
       for (const [k, v] of Object.entries(value)) {
-        const safe = this._toJsonSafe(v, opts, _seen, _depth + 1);
+        const safe = this._toJsonSafe(v, opts, _stack, _depth + 1);
         if (safe !== undefined) out[k] = safe;
       }
+      try {
+        _stack.delete(value);
+      } catch (_) { }
       return out;
     }
 
@@ -289,7 +301,7 @@ export class SessionManager {
       const wrapped = new Error(
         `[SessionManager] Persistence adapter failure during initialize (aiTurnId=${aiTurnId}, existingUserTurnId=${existingUserTurnId}, sessionId=${sessionId})`,
       );
-      wrapped.cause = base;
+      void base;
       throw wrapped;
     }
 

@@ -546,8 +546,9 @@ const Orb: React.FC<OrbProps> = ({
     const state = useAtomValue(providerEffectiveStateFamily({ turnId, providerId: pid }));
 
     // For active variant, we don't use turn state status, we use selection state
-    const isStreaming = variant !== "active" && state.latestResponse?.status === 'streaming';
+    const isStreaming = variant !== "active" && (workflowStage === 'streaming' || state.latestResponse?.status === 'streaming');
     const hasError = variant !== "active" && (
+        workflowStage === 'error' ||
         state.latestResponse?.status === 'error' ||
         (state.latestResponse?.status as any) === 'failed' ||
         (state.latestResponse?.status as any) === 'skipped'
@@ -657,6 +658,7 @@ const Orb: React.FC<OrbProps> = ({
                     // Status Effects
                     isStreaming && "council-orb-streaming",
                     hasError && "council-orb-error",
+                    hasError && "opacity-70 grayscale",
 
                     // Active Mode Selection Dimming
                     // Unselected: Distinctly "Off" but visible logos. Low opacity (40%) + Grayscale.
@@ -695,6 +697,7 @@ const Orb: React.FC<OrbProps> = ({
                     <div className="council-orb__logo" style={{ backgroundImage: `url('${logoSrc}')` }} />
                 )}
                 {(isStreaming || workflowStage === 'streaming') && <div className="council-orb__pulse" />}
+                {hasError && isTurnContext && <div className="council-orb__error-mark">✕</div>}
             </button>
 
             {/* Workflow Stage Indicator */}
@@ -703,7 +706,7 @@ const Orb: React.FC<OrbProps> = ({
                     {workflowStage === 'thinking' && '🤔'}
                     {workflowStage === 'streaming' && '💬'}
 
-                    {workflowStage === 'error' && '⚠️'}
+                    {workflowStage === 'error' && '✕'}
                 </div>
             )}
 

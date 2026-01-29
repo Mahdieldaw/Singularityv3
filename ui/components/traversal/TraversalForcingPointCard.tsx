@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
 
-import { Claim } from '../../../shared/contract';
+import type { Claim } from '../../../shared/contract';
 
 interface ForcingPointOption {
   claimId: string;
   label: string;
+  text?: string;
+  prerequisites?: Array<{ claimId: string; label: string; text?: string }>;
 }
 
 interface TraversalForcingPointCardProps {
@@ -25,6 +27,7 @@ interface TraversalForcingPointCardProps {
   gateResolution?: { satisfied: boolean; userInput?: string };
   onResolveConflict: (forcingPointId: string, claimId: string, label: string) => void;
   onResolveGate: (forcingPointId: string, satisfied: boolean, userInput?: string) => void;
+  disabled?: boolean;
 }
 
 export const TraversalForcingPointCard: React.FC<TraversalForcingPointCardProps> = ({
@@ -34,7 +37,8 @@ export const TraversalForcingPointCard: React.FC<TraversalForcingPointCardProps>
   resolution,
   gateResolution,
   onResolveConflict,
-  onResolveGate
+  onResolveGate,
+  disabled
 }) => {
   const [selectedOption, setSelectedOption] = useState<string | null>(
     resolution?.selectedClaimId || null
@@ -121,10 +125,11 @@ export const TraversalForcingPointCard: React.FC<TraversalForcingPointCardProps>
           </div>
         )}
 
-        {!isResolved && (
+        {!isResolved && !disabled && (
           <div className="mt-4">
             <button
-              onClick={() => setExpanded(!expanded)}
+              onClick={() => !disabled && setExpanded(!expanded)}
+              disabled={disabled}
               className="px-3 py-1.5 rounded-lg bg-surface-highlight hover:bg-surface-raised border border-border-subtle text-xs font-medium transition-colors"
             >
               {expanded ? 'Collapse' : 'Resolve'}
@@ -142,6 +147,7 @@ export const TraversalForcingPointCard: React.FC<TraversalForcingPointCardProps>
                 id={`fp-input-${forcingPoint.id}`}
                 value={userInput}
                 onChange={(e) => setUserInput(e.target.value)}
+                disabled={disabled}
                 placeholder="Add any details that make your answer specific"
                 className="w-full px-3 py-2 rounded-lg bg-surface-raised border border-border-subtle text-sm text-text-primary placeholder-text-muted resize-none focus:outline-none focus:ring-2 focus:ring-brand-500"
                 rows={3}
@@ -150,26 +156,31 @@ export const TraversalForcingPointCard: React.FC<TraversalForcingPointCardProps>
             <div className="flex gap-2">
               <button
                 onClick={() => {
+                  if (disabled) return;
                   onResolveGate(forcingPoint.id, true, userInput.trim() || undefined);
                   setExpanded(false);
                 }}
+                disabled={disabled}
                 className="flex-1 px-4 py-2 rounded-lg bg-green-500/10 hover:bg-green-500/20 border border-green-500/30 text-green-500 font-medium text-sm transition-colors"
               >
                 ✓ Yes
               </button>
               <button
                 onClick={() => {
+                  if (disabled) return;
                   onResolveGate(forcingPoint.id, false, userInput.trim() || undefined);
                   setExpanded(false);
                 }}
+                disabled={disabled}
                 className="flex-1 px-4 py-2 rounded-lg bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-500 font-medium text-sm transition-colors"
               >
                 ✗ No
               </button>
             </div>
             <button
-              onClick={() => setExpanded(false)}
-              className="w-full px-4 py-2 rounded-lg bg-surface-highlight hover:bg-surface-raised border border-border-subtle text-text-secondary font-medium text-sm transition-colors"
+              onClick={() => !disabled && setExpanded(false)}
+              disabled={disabled}
+              className="w-full px-4 py-2 rounded-lg bg-surface-highlight hover:bg-surface-raised border border-border-subtle text-text-secondary font-medium text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Cancel
             </button>
@@ -205,26 +216,29 @@ export const TraversalForcingPointCard: React.FC<TraversalForcingPointCardProps>
         </div>
       </div>
 
-      <div className="space-y-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         {(forcingPoint.options || []).map((option) => {
           const claim = claims.find(c => c.id === option.claimId);
+          const optionAny: any = option as any;
+          const detailsText = String(claim?.text || optionAny?.text || '').trim();
+          const prerequisites = Array.isArray(optionAny?.prerequisites) ? optionAny.prerequisites : [];
           const isSelected = selectedOption === option.claimId;
           const isThisResolved = isResolved && resolution?.selectedClaimId === option.claimId;
 
           return (
             <button
               key={option.claimId}
-              onClick={() => !isResolved && setSelectedOption(option.claimId)}
-              disabled={isResolved}
-              className={`w-full p-4 rounded-lg border-2 text-left transition-all ${isThisResolved
+              onClick={() => !isResolved && !disabled && setSelectedOption(option.claimId)}
+              disabled={isResolved || disabled}
+              className={`w-full h-full p-4 rounded-lg border-2 text-left transition-all ${isThisResolved
                 ? 'border-green-500 bg-green-500/10'
                 : isSelected
                   ? 'border-brand-500 bg-brand-500/10'
                   : 'border-border-subtle bg-surface-raised hover:border-brand-500/50'
-                } ${isResolved && !isThisResolved ? 'opacity-40' : ''}`}
+                } ${(isResolved || disabled) && !isThisResolved ? 'opacity-40' : ''}`}
               role="radio"
               aria-checked={isThisResolved || isSelected}
-              aria-disabled={isResolved}
+              aria-disabled={isResolved || disabled}
               aria-label={option.label}
             >
               <div className="flex items-start gap-3">
@@ -243,9 +257,26 @@ export const TraversalForcingPointCard: React.FC<TraversalForcingPointCardProps>
                   <div className="font-bold text-text-primary mb-1">
                     {option.label}
                   </div>
-                  {claim?.text && (
+                  {detailsText && (
                     <div className="text-sm text-text-muted mb-2">
-                      {claim.text}
+                      {detailsText}
+                    </div>
+                  )}
+                  {prerequisites.length > 0 && (
+                    <div className="mt-2">
+                      <div className="text-xs text-text-muted mb-1">Prerequisites</div>
+                      <div className="space-y-1">
+                        {prerequisites.map((p: any) => {
+                          const label = String(p?.label || p?.claimId || '').trim();
+                          if (!label) return null;
+                          const extra = String(p?.text || '').trim();
+                          return (
+                            <div key={String(p?.claimId || label)} className="text-xs text-text-muted">
+                              {extra ? `${label} — ${extra}` : label}
+                            </div>
+                          );
+                        })}
+                      </div>
                     </div>
                   )}
                 </div>
@@ -255,7 +286,7 @@ export const TraversalForcingPointCard: React.FC<TraversalForcingPointCardProps>
         })}
       </div>
 
-      {!isResolved && selectedOption && (
+      {!isResolved && selectedOption && !disabled && (
         <button
           onClick={handleConfirm}
           className="mt-4 w-full px-6 py-3 rounded-lg bg-brand-500 hover:bg-brand-600 text-white font-bold transition-colors"

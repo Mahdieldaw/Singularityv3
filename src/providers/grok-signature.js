@@ -226,11 +226,11 @@ export function generateSign(
   verificationToken,
   svg,
   xValues,
-  timeN = null,
-  randomFloat = null
+  timeN,
+  randomFloat
 ) {
   // Timestamp: seconds since epoch offset
-  const n = timeN ?? Math.floor(Date.now() / 1000) - 1682924400;
+  const n = typeof timeN === 'number' ? timeN : Math.floor(Date.now() / 1000) - 1682924400;
 
   // Pack as little-endian 32-bit unsigned integer
   const t = new Uint8Array(4);
@@ -249,7 +249,7 @@ export function generateSign(
   const digest = sha256(encoder.encode(msg)).slice(0, 16);
 
   // Generate prefix byte (Python uses floor(random() * 256) which is always 0-255)
-  const prefixByte = Math.floor((randomFloat ?? Math.random()) * 256);
+  const prefixByte = Math.floor((typeof randomFloat === 'number' ? randomFloat : Math.random()) * 256);
 
   // Assemble final array: [prefix, verification, timestamp, digest, 3]
   const assembled = new Uint8Array(1 + r.length + 4 + 16 + 1);

@@ -11,8 +11,10 @@ import { authManager } from '../core/auth-manager.js';
 import {
   errorHandler,
   isProviderAuthError,
+  isRateLimitError,
   createProviderAuthError,
-} from '../utils/ErrorHandler.js';
+  normalizeError,
+} from '../utils/ErrorHandler';
 
 // Provider-specific adapter debug flag (off by default)
 const GROK_ADAPTER_DEBUG = false;
@@ -47,8 +49,11 @@ export class GrokAdapter {
     signal = undefined
   ) {
     try {
-      const meta = providerContext?.meta || providerContext || {};
-      const hasContinuation = Boolean(meta.conversationId || meta.parentResponseId);
+      const ctx = Object(providerContext);
+      const meta = ctx.meta || providerContext || {};
+      const hasContinuation = Boolean(
+        meta.conversationId || meta.parentResponseId,
+      );
       pad(`[ProviderAdapter] ASK_STARTED provider=${this.id} hasContext=${hasContinuation}`);
 
       let res;
@@ -230,6 +235,21 @@ export class GrokAdapter {
   // ─────────────────────────────────────────────────────────────────────────
 
   async _handleError(error, aggregatedText, startTime, req, onChunk, signal, _isRetry) {
+    if (isRateLimitError(error)) {
+      return {
+        providerId: this.id,
+        ok: false,
+        text: aggregatedText || null,
+        errorCode: "RATE_LIMITED",
+        latencyMs: Date.now() - startTime,
+        meta: {
+          error: error?.message || "Rate limit reached.",
+          status: error?.status || error?.response?.status || 429,
+          headers: error?.headers,
+        },
+      };
+    }
+
     // Check for Grok-specific auth errors
     if (isProviderAuthError(error) || this._isGrokAuthError(error)) {
       authManager.invalidateCache(this.id);
@@ -285,15 +305,16 @@ export class GrokAdapter {
         },
       };
     } catch (handledError) {
+      const normalizedHandledError = normalizeError(handledError);
       return {
         providerId: this.id,
         ok: false,
         text: aggregatedText || null,
-        errorCode: handledError.code || 'unknown',
+        errorCode: normalizedHandledError.code || 'unknown',
         latencyMs: Date.now() - startTime,
         meta: {
-          error: handledError.toString(),
-          details: handledError.details,
+          error: normalizedHandledError.message,
+          details: normalizedHandledError.details,
         },
       };
     }
@@ -311,6 +332,23 @@ export class GrokAdapter {
     _isRetry
   ) {
     const meta = providerContext?.meta || providerContext || {};
+
+    if (isRateLimitError(error)) {
+      return {
+        providerId: this.id,
+        ok: false,
+        text: aggregatedText || null,
+        errorCode: "RATE_LIMITED",
+        latencyMs: Date.now() - startTime,
+        meta: {
+          error: error?.message || "Rate limit reached.",
+          status: error?.status || error?.response?.status || 429,
+          headers: error?.headers,
+          conversationId: meta.conversationId,
+          parentResponseId: meta.parentResponseId,
+        },
+      };
+    }
 
     if (isProviderAuthError(error) || this._isGrokAuthError(error)) {
       authManager.invalidateCache(this.id);
@@ -379,15 +417,16 @@ export class GrokAdapter {
         },
       };
     } catch (handledError) {
+      const normalizedHandledError = normalizeError(handledError);
       return {
         providerId: this.id,
         ok: false,
         text: aggregatedText || null,
-        errorCode: handledError.code || 'unknown',
+        errorCode: normalizedHandledError.code || 'unknown',
         latencyMs: Date.now() - startTime,
         meta: {
-          error: handledError.toString(),
-          details: handledError.details,
+          error: normalizedHandledError.message,
+          details: normalizedHandledError.details,
           conversationId: meta.conversationId,
           parentResponseId: meta.parentResponseId,
         },

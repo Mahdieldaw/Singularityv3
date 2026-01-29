@@ -58,7 +58,8 @@ export async function runPreflight(request, authStatus, availableProviders) {
     try {
         locks = await getProviderLocks();
     } catch (e) {
-        warnings.push(`Failed to fetch provider locks: ${e.message || String(e)}`);
+        const msg = e instanceof Error ? e.message : String(e);
+        warnings.push(`Failed to fetch provider locks: ${msg}`);
     }
 
     // === Filter batch providers ===

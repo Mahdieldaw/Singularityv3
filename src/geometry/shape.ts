@@ -28,7 +28,6 @@ export function classifyShape(
     const { components, largestComponentRatio, isolationRatio, globalStrongDensity } = topology;
 
     // Fragmentation score: many small components + high isolation
-    const avgComponentSize = nodeCount / Math.max(1, components.length);
     const fragmentationScore = Math.min(1,
         (1 - largestComponentRatio) * 0.5 +
         isolationRatio * 0.3 +

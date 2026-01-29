@@ -11,6 +11,7 @@ const TIER_THRESHOLDS = {
     },
     hill: {
         minModelDiversityRatio: 0.25,
+        minModelDiversityAbsolute: 2,
         minInternalDensity: 0.1,
     },
 };
@@ -85,7 +86,13 @@ function assignTier(
     ) {
         return 'peak';
     }
-    if (modelDiversityRatio >= hill.minModelDiversityRatio || internalDensity >= hill.minInternalDensity) return 'hill';
+    if (
+        modelDiversity >= hill.minModelDiversityAbsolute &&
+        modelDiversityRatio >= hill.minModelDiversityRatio &&
+        internalDensity >= hill.minInternalDensity
+    ) {
+        return 'hill';
+    }
     return 'floor';
 }
 

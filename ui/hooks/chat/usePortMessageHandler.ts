@@ -786,7 +786,7 @@ export function usePortMessageHandler(enabled: boolean = true) {
           try {
             const { providerStatuses, phase } = message as any;
             const mapStatusToStage = (
-              status: 'queued' | 'active' | 'streaming' | 'completed' | 'failed',
+              status: 'queued' | 'active' | 'streaming' | 'completed' | 'failed' | 'skipped' | string,
               _phase: 'batch' | 'mapping'
             ) => {
               if (status === 'queued') return 'idle';
@@ -794,6 +794,7 @@ export function usePortMessageHandler(enabled: boolean = true) {
               if (status === 'streaming') return 'streaming';
               if (status === 'completed') return 'complete';
               if (status === 'failed') return 'error';
+              if (status === 'skipped') return 'error';
               return 'idle';
             };
             if (Array.isArray(providerStatuses)) {

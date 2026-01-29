@@ -4,6 +4,47 @@
  * Classify errors for user-facing messaging and retry logic
  */
 export function classifyError(error) {
+  if (error && (error.code === "AUTH_REQUIRED" || error.errorCode === "AUTH_REQUIRED")) {
+    return {
+      type: 'auth_expired',
+      message: error?.message || 'Authentication expired. Please log in again.',
+      retryable: false,
+      requiresReauth: true
+    };
+  }
+
+  if (error && (error.code === "CIRCUIT_BREAKER_OPEN" || error.errorCode === "CIRCUIT_BREAKER_OPEN")) {
+    return {
+      type: 'circuit_open',
+      message: error?.message || 'Provider temporarily unavailable.',
+      retryable: false
+    };
+  }
+
+  if (error && (error.code === "INPUT_TOO_LONG" || error.errorCode === "INPUT_TOO_LONG")) {
+    return {
+      type: 'input_too_long',
+      message: error?.message || "Input exceeds provider limit.",
+      retryable: false
+    };
+  }
+
+  if (error && (error.code === "NETWORK_ERROR" || error.errorCode === "NETWORK_ERROR")) {
+    return {
+      type: 'network',
+      message: error?.message || 'Network connection failed.',
+      retryable: true
+    };
+  }
+
+  if (error && (error.code === "TIMEOUT" || error.errorCode === "TIMEOUT")) {
+    return {
+      type: 'timeout',
+      message: error?.message || 'Request timed out. Retrying may help.',
+      retryable: true
+    };
+  }
+
   if (error && error.code === "RATE_LIMITED") {
     const retryAfterMs =
       parseRetryAfter(error) || parseRateLimitResetMsFromMessage(error) || 60000;

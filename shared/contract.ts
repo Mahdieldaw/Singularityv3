@@ -858,7 +858,7 @@ export interface ConflictForcingPoint {
 export type UnifiedForcingPoint = ConditionalForcingPoint | PrerequisiteForcingPoint | ConflictForcingPoint;
 export type ForcingPoint = UnifiedForcingPoint | SerializedForcingPoint;
 
-export type PipelineStatus = 'running' | 'awaiting_traversal' | 'complete' | 'error';
+export type PipelineStatus = 'in_progress' | 'awaiting_traversal' | 'complete' | 'error';
 
 export interface ParagraphProjectionMeta {
   totalParagraphs: number;
@@ -885,6 +885,14 @@ export interface PipelineShadowStatement {
   };
   location: PipelineShadowStatementLocation;
   fullParagraph: string;
+  geometricCoordinates?: {
+    paragraphId: string;
+    componentId: string | null;
+    regionId: string | null;
+    knnDegree: number;
+    mutualDegree: number;
+    isolationScore: number;
+  };
 }
 
 export interface PipelineShadowExtractionMeta {
@@ -1149,6 +1157,84 @@ export interface StructuralValidation {
   };
 }
 
+export interface EnrichmentResult {
+  enrichedCount: number;
+  unenrichedCount: number;
+  failures: Array<{
+    statementId: string;
+    reason: 'no_paragraph' | 'no_node';
+  }>;
+}
+
+export interface StatementFate {
+  statementId: string;
+  regionId: string | null;
+  claimIds: string[];
+  fate: 'primary' | 'supporting' | 'orphan' | 'noise';
+  reason: string;
+  shadowMetadata: {
+    stance: ShadowStance;
+    confidence: number;
+    signalWeight: number;
+    geometricIsolation: number;
+  };
+}
+
+export interface UnattendedRegion {
+  id: string;
+  nodeIds: string[];
+  statementIds: string[];
+  statementCount: number;
+  modelDiversity: number;
+  avgIsolation: number;
+  likelyClaim: boolean;
+  reason:
+    | 'stance_diversity'
+    | 'high_connectivity'
+    | 'bridge_region'
+    | 'isolated_noise'
+    | 'insufficient_signals';
+  bridgesTo: string[];
+}
+
+export interface CompletenessReport {
+  statements: {
+    total: number;
+    inClaims: number;
+    orphaned: number;
+    noise: number;
+    coverageRatio: number;
+  };
+  regions: {
+    total: number;
+    attended: number;
+    unattended: number;
+    unattendedWithLikelyClaims: number;
+    coverageRatio: number;
+  };
+  verdict: {
+    complete: boolean;
+    confidence: 'high' | 'medium' | 'low';
+    estimatedMissedClaims: number;
+    recommendation: 'coverage_acceptable' | 'review_orphans' | 'possible_gaps';
+  };
+  recovery: {
+    highSignalOrphans: Array<{
+      statementId: string;
+      text: string;
+      stance: string;
+      signalWeight: number;
+      reason: string;
+    }>;
+    unattendedRegionPreviews: Array<{
+      regionId: string;
+      statementPreviews: string[];
+      reason: string;
+      likelyClaim: boolean;
+    }>;
+  };
+}
+
 export interface PipelineArtifacts {
   shadow?: {
     extraction?: PipelineShadowExtractionResult | null;
@@ -1156,6 +1242,7 @@ export interface PipelineArtifacts {
     topUnreferenced?: PipelineUnreferencedStatement[] | null;
     referencedIds?: string[] | null;
   } | null;
+  enrichmentResult?: EnrichmentResult | null;
   paragraphProjection?: PipelineParagraphProjectionResult | null;
   clustering?: {
     result?: PipelineClusteringResult | null;
@@ -1191,6 +1278,7 @@ export interface MapperArtifact extends MapperOutput {
   traversalGraph?: SerializedTraversalGraph;
   forcingPoints?: ForcingPoint[];
   conditionals?: ConditionalPruner[];
+  preSemantic?: PreSemanticInterpretation | null;
 
   shadow?: {
     statements: ShadowStatement[];
@@ -1201,6 +1289,11 @@ export interface MapperArtifact extends MapperOutput {
   paragraphProjection?: ParagraphProjectionMeta;
   paragraphClustering?: ParagraphClusteringSummary;
   substrate?: GeometricSubstrateSummary;
+  completeness?: {
+    report: CompletenessReport;
+    statementFates: Record<string, StatementFate>;
+    unattendedRegions: UnattendedRegion[];
+  };
 }
 
 
@@ -1669,6 +1762,14 @@ export interface ShadowEntry {
       sentenceIndex: number;
     };
     fullParagraph: string;
+    geometricCoordinates?: {
+      paragraphId: string;
+      componentId: string | null;
+      regionId: string | null;
+      knnDegree: number;
+      mutualDegree: number;
+      isolationScore: number;
+    };
   };
   queryRelevance: number;
   signalWeight: number;

@@ -12,8 +12,8 @@ export class DNRUtils {
   static sessionRules = new Map();
   static ruleIdCounter = 10000; // Start high to avoid conflicts
   static debugEnabled = false;
-  static debugListener = null;
-  static cleanupInterval = null;
+  static debugListener;
+  static cleanupInterval;
   static initialized = false;
   static STORAGE_KEY = "dnr_rules_backup";
 
@@ -421,7 +421,7 @@ export class DNRUtils {
       );
     }
 
-    this.debugListener = null;
+    this.debugListener = undefined;
     this.debugEnabled = false;
     this.dbg("DNR: Debug mode disabled");
   }
@@ -444,7 +444,7 @@ export class DNRUtils {
   static stopPeriodicCleanup() {
     if (this.cleanupInterval) {
       clearInterval(this.cleanupInterval);
-      this.cleanupInterval = null;
+      this.cleanupInterval = undefined;
       this.dbg("DNR: Stopped periodic cleanup");
     }
   }

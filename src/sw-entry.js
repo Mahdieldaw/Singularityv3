@@ -33,12 +33,16 @@ import { authManager } from './core/auth-manager.js';
 // Persistence Layer Imports
 import { SessionManager } from "./persistence/SessionManager.js";
 import { initializePersistenceLayer } from "./persistence/index.js";
-import { errorHandler } from "./utils/ErrorHandler.js";
+import { errorHandler, getErrorMessage } from "./utils/ErrorHandler";
 import { persistenceMonitor } from "./core/PersistenceMonitor.js";
 
 // Global Services Registry
-import { services } from "./core/service-registry.js";
+import { ServiceRegistry } from "./core/service-registry.js";
 import { parseUnifiedMapperOutput } from '../shared/parsing-utils.js';
+
+const services = /** @type {import("./core/service-registry.js").ServiceRegistry} */ (
+  /** @type {unknown} */ (ServiceRegistry.getInstance())
+);
 
 // ============================================================================
 // FEATURE FLAGS (Source of Truth)
@@ -54,6 +58,45 @@ try {
 
 // Initialize BusController globally (needed for message bus)
 self["BusController"] = BusController;
+
+globalThis.HTOS_DEBUG = {
+  verifyProvider: async (providerId) => authManager.verifyProvider(String(providerId || "")),
+  verifyAll: async () => authManager.verifyAll(),
+  getAuthStatus: async (forceRefresh = false) => authManager.getAuthStatus(Boolean(forceRefresh)),
+  executeSingle: async (providerId, prompt, options = {}) => {
+    const svcs = await initializeGlobalServices();
+    const pid = String(providerId || "").toLowerCase();
+    const p = String(prompt || "");
+    const timeout = Number.isFinite(options?.timeout) ? options.timeout : 60000;
+    return svcs.orchestrator.executeSingle(p, pid, { timeout });
+  },
+  getProviderAdapter: async (providerId) => {
+    const svcs = await initializeGlobalServices();
+    return svcs.providerRegistry?.getAdapter?.(String(providerId || "").toLowerCase()) || null;
+  },
+};
+
+// Debounce map for cookie changes
+const cookieChangeDebounce = new Map();
+
+// Top-level registration - ensures listener is always registered when SW loads
+chrome.cookies.onChanged.addListener((changeInfo) => {
+  const key = `${changeInfo.cookie.domain}:${changeInfo.cookie.name}`;
+
+  if (cookieChangeDebounce.has(key)) {
+    clearTimeout(cookieChangeDebounce.get(key));
+  }
+
+  const timeoutId = setTimeout(() => {
+    cookieChangeDebounce.delete(key);
+
+    void authManager.initialize().then(() => {
+      void authManager.handleCookieChange(changeInfo);
+    });
+  }, 100);
+
+  cookieChangeDebounce.set(key, timeoutId);
+});
 
 // ============================================================================
 // LIFECYCLE & STARTUP HANDLERS (Unified)
@@ -333,7 +376,13 @@ class FaultTolerantOrchestrator {
 
         const adapter = providerRegistry?.getAdapter(providerId);
         if (!adapter) {
-          return { providerId, status: "rejected", reason: new Error(`Provider ${providerId} not available`) };
+          const err = new Error(`Provider ${providerId} not available`);
+          try {
+            if (options.onProviderComplete) {
+              options.onProviderComplete(providerId, { status: "rejected", reason: err });
+            }
+          } catch (_) { }
+          return { providerId, status: "rejected", reason: err };
         }
 
         let aggregatedText = "";
@@ -373,6 +422,30 @@ class FaultTolerantOrchestrator {
 
           if (!result.text && aggregatedText) result.text = aggregatedText;
 
+          if (result && result.ok === false) {
+            const message =
+              (typeof result?.meta?.error === "string" && result.meta.error) ||
+              (typeof result?.meta?.details === "string" && result.meta.details) ||
+              (typeof result?.errorCode === "string" && result.errorCode) ||
+              "Provider request failed";
+
+            const err = new Error(message);
+            const enrichedErr = /** @type {Error & { code?: string; status?: number; headers?: any; details?: any; providerResponse?: any }} */ (err);
+            enrichedErr.code = result?.errorCode || "unknown";
+            if (result?.meta && typeof result.meta === "object") {
+              if (result.meta.status) enrichedErr.status = result.meta.status;
+              if (result.meta.headers) enrichedErr.headers = result.meta.headers;
+              if (result.meta.details) enrichedErr.details = result.meta.details;
+            }
+            enrichedErr.providerResponse = result;
+            try {
+              if (options.onProviderComplete) {
+                options.onProviderComplete(providerId, { status: "rejected", reason: enrichedErr, providerResponse: result });
+              }
+            } catch (_) { }
+            return { providerId, status: "rejected", reason: enrichedErr };
+          }
+
           // ✅ Granular completion signal
           if (options.onProviderComplete) {
             options.onProviderComplete(providerId, { status: "fulfilled", value: result });
@@ -382,12 +455,25 @@ class FaultTolerantOrchestrator {
 
         } catch (error) {
           if (aggregatedText) {
-            const val = { text: aggregatedText, meta: {}, softError: { name: error.name, message: error.message } };
+            const name =
+              error && typeof error === "object" && "name" in error
+                ? String(error.name)
+                : "Error";
+            const message =
+              error && typeof error === "object" && "message" in error
+                ? String(error.message)
+                : String(error);
+            const val = { text: aggregatedText, meta: {}, softError: { name, message } };
             if (options.onProviderComplete) {
               options.onProviderComplete(providerId, { status: "fulfilled", value: val });
             }
             return { providerId, status: "fulfilled", value: val };
           }
+          try {
+            if (options.onProviderComplete) {
+              options.onProviderComplete(providerId, { status: "rejected", reason: error });
+            }
+          } catch (_) { }
           return { providerId, status: "rejected", reason: error };
         }
       })();
@@ -450,13 +536,45 @@ async function initializeGlobalServices() {
   // For now, simple singleton promise pattern.
   if (globalServicesPromise) return globalServicesPromise;
 
+  const existingOrchestrator = services.get('orchestrator');
+  const existingSessionManager = services.get('sessionManager');
+  const existingCompiler = services.get('compiler');
+  const existingContextResolver = services.get('contextResolver');
+  const existingPersistenceLayer = services.get('persistenceLayer');
+  const existingAuthManager = services.get('authManager');
+  const existingProviderRegistry = services.get('providerRegistry');
+
+  if (
+    existingOrchestrator &&
+    existingSessionManager &&
+    existingCompiler &&
+    existingContextResolver &&
+    existingPersistenceLayer &&
+    existingAuthManager &&
+    existingProviderRegistry
+  ) {
+    const ready = {
+      orchestrator: existingOrchestrator,
+      sessionManager: existingSessionManager,
+      compiler: existingCompiler,
+      contextResolver: existingContextResolver,
+      persistenceLayer: existingPersistenceLayer,
+      authManager: existingAuthManager,
+      providerRegistry: existingProviderRegistry,
+    };
+    globalServicesPromise = Promise.resolve(ready);
+    return globalServicesPromise;
+  }
+
+  const keysBeforeInit = new Set(services.services.keys());
+
   globalServicesPromise = (async () => {
     try {
       console.log("[SW] 🚀 Initializing global services...");
 
       // Ensure auth manager is ready (idempotent)
       await authManager.initialize();
-      services.register('authManager', authManager);
+      if (!services.get('authManager')) services.register('authManager', authManager);
 
       await initializeGlobalInfrastructure();
       const pl = await initializePersistence();
@@ -464,11 +582,11 @@ async function initializeGlobalServices() {
       await initializeProviders();
       await initializeOrchestrator();
 
-      const compiler = new WorkflowCompiler(sm);
-      services.register('compiler', compiler);
+      const compiler = services.get('compiler') || new WorkflowCompiler(sm);
+      if (!services.get('compiler')) services.register('compiler', compiler);
 
-      const contextResolver = new ContextResolver(sm);
-      services.register('contextResolver', contextResolver);
+      const contextResolver = services.get('contextResolver') || new ContextResolver(sm);
+      if (!services.get('contextResolver')) services.register('contextResolver', contextResolver);
 
       // MapperService deprecated; semantic mapper handles mapping now.
       // If backward compatibility is desired, inject an adapter via options instead of registering a global MapperService.
@@ -490,6 +608,11 @@ async function initializeGlobalServices() {
       };
     } catch (error) {
       console.error("[SW] ❌ Global services initialization failed:", error);
+      for (const key of Array.from(services.services.keys())) {
+        if (!keysBeforeInit.has(key)) {
+          services.unregister(key);
+        }
+      }
       globalServicesPromise = null;
       throw error;
     }
@@ -576,7 +699,7 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
 
     switch (message.type) {
       case "REFRESH_AUTH_STATUS":
-        authManager.getAuthStatus(true).then(s => sendResponse({ success: true, data: s })).catch(e => sendResponse({ success: false, error: e.message }));
+        authManager.getAuthStatus(true).then(s => sendResponse({ success: true, data: s })).catch(e => sendResponse({ success: false, error: getErrorMessage(e) }));
         return true;
 
       case "VERIFY_AUTH_TOKEN":
@@ -584,7 +707,46 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
           const pid = message.payload?.providerId;
           const res = pid ? { [pid]: await authManager.verifyProvider(pid) } : await authManager.verifyAll();
           sendResponse({ success: true, data: res });
-        })().catch(e => sendResponse({ success: false, error: e.message }));
+        })().catch(e => sendResponse({ success: false, error: getErrorMessage(e) }));
+        return true;
+
+      case "GENERATE_EMBEDDINGS":
+      case "PRELOAD_MODEL":
+      case "EMBEDDING_STATUS":
+        (async () => {
+          await OffscreenController.init();
+
+          const response = await new Promise((resolve) => {
+            chrome.runtime.sendMessage(
+              { ...message, __fromUnified: true },
+              (r) => {
+                if (chrome.runtime.lastError) {
+                  resolve({ success: false, error: chrome.runtime.lastError.message });
+                } else {
+                  resolve(r);
+                }
+              },
+            );
+          });
+
+          sendResponse(response);
+        })().catch(e => sendResponse({ success: false, error: getErrorMessage(e) }));
+        return true;
+
+      case "DEBUG_EXECUTE_SINGLE":
+        (async () => {
+          const providerId = String(message.payload?.providerId || "").toLowerCase();
+          const prompt = String(message.payload?.prompt || "");
+          const timeout = Number.isFinite(message.payload?.timeout) ? message.payload.timeout : 60000;
+          if (!providerId) throw new Error("Missing providerId");
+          if (!prompt) throw new Error("Missing prompt");
+          const orchestrator = svcs.orchestrator;
+          if (!orchestrator || typeof orchestrator.executeSingle !== "function") {
+            throw new Error("Orchestrator not available");
+          }
+          const result = await orchestrator.executeSingle(prompt, providerId, { timeout });
+          sendResponse({ success: true, data: result });
+        })().catch(e => sendResponse({ success: false, error: getErrorMessage(e) }));
         return true;
 
 
@@ -744,7 +906,7 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
               providerContexts
             }
           });
-        })().catch(e => sendResponse({ success: false, error: e.message }));
+        })().catch(e => sendResponse({ success: false, error: getErrorMessage(e) }));
         return true;
       }
 
@@ -770,7 +932,7 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
                 message.sessionId || message.payload?.sessionId,
               ),
           });
-          sendResponse({ success: false, error: handledError.message });
+          sendResponse({ success: false, error: getErrorMessage(handledError) });
         }
         return true;
       }
@@ -822,7 +984,7 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
           sendResponse({ success: true, removed });
         } catch (e) {
           console.error("[SW] DELETE_SESSION failed:", e);
-          sendResponse({ success: false, error: e?.message || String(e) });
+          sendResponse({ success: false, error: getErrorMessage(e) });
         }
         return true;
       }
@@ -859,7 +1021,7 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
           });
         } catch (e) {
           console.error("[SW] DELETE_SESSIONS failed:", e);
-          sendResponse({ success: false, error: e?.message || String(e) });
+          sendResponse({ success: false, error: getErrorMessage(e) });
         }
         return true;
       }
@@ -908,7 +1070,7 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
           });
         } catch (e) {
           console.error("[SW] RENAME_SESSION failed:", e);
-          sendResponse({ success: false, error: e?.message || String(e) });
+          sendResponse({ success: false, error: getErrorMessage(e) });
         }
         return true;
       }
@@ -936,13 +1098,14 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
       // ---------------------
     }
   } catch (e) {
-    sendResponse({ success: false, error: e.message });
+    sendResponse({ success: false, error: getErrorMessage(e) });
     return true;
   }
 }
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request?.$bus) return false;
+  if (request?.__fromUnified) return false;
   if (request?.type === "offscreen.heartbeat") {
     sendResponse({ alive: true });
     return true;
@@ -972,7 +1135,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     handleUnifiedMessage(request, sender, sendResponse)
       .catch(err => {
         try {
-          sendResponse({ success: false, error: err.message });
+          sendResponse({ success: false, error: getErrorMessage(err) });
         } catch (e) { /* ignore channel closed */ }
       });
     return true;
@@ -993,7 +1156,7 @@ chrome.runtime.onConnect.addListener(async (port) => {
     console.log("[SW] Connection handler ready");
   } catch (error) {
     console.error("[SW] Failed to initialize connection handler:", error);
-    try { port.postMessage({ type: "INITIALIZATION_FAILED", error: error.message }); } catch (_) { }
+    try { port.postMessage({ type: "INITIALIZATION_FAILED", error: getErrorMessage(error) }); } catch (_) { }
   }
 });
 
@@ -1005,4 +1168,3 @@ chrome.action?.onClicked.addListener(async () => {
 // ============================================================================
 // MAIN BOOTSTRAP
 // ============================================================================
-handleStartup("initial-load");

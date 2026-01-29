@@ -97,7 +97,10 @@ const VerticalOrb: React.FC<VerticalOrbProps> = ({
     const state = useAtomValue(providerEffectiveStateFamily({ turnId, providerId: pid }));
 
     const isStreaming = state.latestResponse?.status === 'streaming';
-    const hasError = state.latestResponse?.status === 'error';
+    const hasError =
+        state.latestResponse?.status === 'error' ||
+        (state.latestResponse?.status as any) === 'failed' ||
+        (state.latestResponse?.status as any) === 'skipped';
     const isHovered = hoveredOrb === pid;
 
     return (

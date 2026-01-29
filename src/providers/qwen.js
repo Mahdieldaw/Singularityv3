@@ -106,7 +106,9 @@ export class QwenSessionApi {
   }
 
   async _fetchCsrfToken() {
-    if (this._csrfToken) return this._csrfToken;
+    const existingToken = this._csrfToken;
+    if (typeof existingToken === "string" && existingToken.length > 0)
+      return existingToken;
     try {
       const response = await this.fetch(`${QWEN_WEB_BASE}/`, {
         credentials: "include",
@@ -114,13 +116,21 @@ export class QwenSessionApi {
       const html = await response.text();
       const match = /csrfToken\s?=\s?"([^"]+)"/.exec(html);
       if (!match || !match[1]) {
-        this._throw("csrf", "Failed to extract CSRF token from page HTML.");
+        throw this._createError(
+          "csrf",
+          "Failed to extract CSRF token from page HTML.",
+        );
       }
-      this._csrfToken = match[1];
-      return this._csrfToken;
+      const token = match[1];
+      this._csrfToken = token;
+      return token;
     } catch (e) {
       if (this.isOwnError(e)) throw e;
-      this._throw("network", `Failed to fetch CSRF token: ${e.message}`);
+      const msg = e instanceof Error ? e.message : String(e);
+      throw this._createError(
+        "network",
+        `Failed to fetch CSRF token: ${msg}`,
+      );
     }
   }
 
@@ -214,8 +224,13 @@ export class QwenSessionApi {
         break; // Success or non-500 error
       } catch (e) {
         // Network error - surface as network Qwen error
-        this._throw("network", `Conversation POST failed: ${e.message}`);
+        const msg = e instanceof Error ? e.message : String(e);
+        this._throw("network", `Conversation POST failed: ${msg}`);
       }
+    }
+
+    if (!response) {
+      throw this._createError("network", "Conversation POST failed.");
     }
 
     // If server indicates not authorized / requires session (or non-200), create session then retry
@@ -278,7 +293,8 @@ export class QwenSessionApi {
         try {
           response = await doConversationPost(retryBody);
         } catch (e) {
-          this._throw("network", `Conversation retry failed: ${e.message}`);
+          const msg = e instanceof Error ? e.message : String(e);
+          this._throw("network", `Conversation retry failed: ${msg}`);
         }
 
         if (!response.ok) {
@@ -301,7 +317,14 @@ export class QwenSessionApi {
     let finalSessionId = sessionId || "";
     let finalMsgId = parentMsgId || null;
 
-    const reader = response.body.getReader();
+    const body = response.body;
+    if (!body) {
+      throw this._createError(
+        "unknown",
+        "Empty response body from Qwen.",
+      );
+    }
+    const reader = body.getReader();
     const decoder = new TextDecoder();
     let carry = "";
     try {
@@ -424,13 +447,14 @@ export class QwenSessionApi {
       try {
         return await fn.call(this, ...args);
       } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
         let err;
         if (this.isOwnError(e)) err = e;
         else if (String(e) === "TypeError: Failed to fetch")
-          err = this._createError("network", e.message);
+          err = this._createError("network", msg);
         else if (String(e)?.includes("aborted"))
-          err = this._createError("aborted", e.message);
-        else err = this._createError("unknown", e.message);
+          err = this._createError("aborted", msg);
+        else err = this._createError("unknown", msg);
         this._logError(err.message, err.details);
         throw err;
       }

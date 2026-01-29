@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from "react";
-import type { StructuralAnalysis } from "../../../shared/contract";
+import type { EnrichmentResult, MapperArtifact, StructuralAnalysis } from "../../../shared/contract";
 import clsx from "clsx";
 import { CopyButton } from "../CopyButton";
 
@@ -18,9 +18,13 @@ interface StructuralDebugPanelProps {
     analysis: StructuralAnalysis;
     semanticMapperPrompt?: string | null;
     rawMappingText?: string | null;
+    completeness?: MapperArtifact['completeness'] | null;
+    enrichmentResult?: EnrichmentResult | null;
+    traversalGraph?: MapperArtifact['traversalGraph'] | null;
+    forcingPoints?: MapperArtifact['forcingPoints'] | null;
 }
 
-export const StructuralDebugPanel: React.FC<StructuralDebugPanelProps> = ({ analysis, semanticMapperPrompt, rawMappingText }) => {
+export const StructuralDebugPanel: React.FC<StructuralDebugPanelProps> = ({ analysis, semanticMapperPrompt, rawMappingText, completeness, enrichmentResult, traversalGraph, forcingPoints }) => {
     const [showRaw, setShowRaw] = useState(false);
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -113,6 +117,119 @@ export const StructuralDebugPanel: React.FC<StructuralDebugPanelProps> = ({ anal
         return "🔴";
     };
 
+    const completenessReport = completeness?.report || null;
+    type FateCounts = { primary: number; supporting: number; orphan: number; noise: number; total: number };
+    const fateCounts = useMemo<FateCounts>(() => {
+        const counts: Omit<FateCounts, 'total'> = { primary: 0, supporting: 0, orphan: 0, noise: 0 };
+        const statementFates = completeness?.statementFates || {};
+        for (const fate of Object.values(statementFates)) {
+            const key = (fate as any)?.fate;
+            if (key === 'primary') counts.primary += 1;
+            else if (key === 'supporting') counts.supporting += 1;
+            else if (key === 'orphan') counts.orphan += 1;
+            else if (key === 'noise') counts.noise += 1;
+        }
+        const total = Object.values(statementFates).length;
+        return { ...counts, total };
+    }, [completeness?.statementFates]);
+
+    const formatPct = (ratio: number | null | undefined) => {
+        if (ratio == null || Number.isNaN(ratio)) return "—";
+        return `${(ratio * 100).toFixed(1)}%`;
+    };
+
+    const formatPctCount = (count: number, total: number) => {
+        if (!total) return "—";
+        return `${((count / total) * 100).toFixed(1)}%`;
+    };
+
+    const recommendationBadge = (rec: any) => {
+        const label =
+            rec === 'coverage_acceptable'
+                ? 'Coverage acceptable'
+                : rec === 'review_orphans'
+                    ? 'Review orphans'
+                    : rec === 'possible_gaps'
+                        ? 'Possible gaps'
+                        : String(rec || '—');
+        const className =
+            rec === 'coverage_acceptable'
+                ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/20'
+                : rec === 'review_orphans'
+                    ? 'bg-yellow-500/15 text-yellow-400 border-yellow-500/20'
+                    : rec === 'possible_gaps'
+                        ? 'bg-red-500/15 text-red-400 border-red-500/20'
+                        : 'bg-surface-highlight/20 text-text-muted border-border-subtle';
+        return (
+            <span className={clsx("inline-flex items-center px-2 py-0.5 rounded-full border text-[11px]", className)}>
+                {label}
+            </span>
+        );
+    };
+
+    const orphanStanceCounts = useMemo(() => {
+        const counts = new Map<string, number>();
+        const statementFates = completeness?.statementFates || {};
+        for (const f of Object.values(statementFates)) {
+            const fate = (f as any)?.fate;
+            if (fate !== 'orphan') continue;
+            const stance = String((f as any)?.shadowMetadata?.stance || 'unknown');
+            counts.set(stance, (counts.get(stance) || 0) + 1);
+        }
+        return Array.from(counts.entries()).sort((a, b) => b[1] - a[1]);
+    }, [completeness?.statementFates]);
+
+    const highSignalOrphans = useMemo(() => {
+        const statementFates = completeness?.statementFates || {};
+        const orphans = Object.values(statementFates)
+            .filter((f: any) => f?.fate === 'orphan' && (f?.shadowMetadata?.signalWeight ?? 0) >= 2)
+            .map((f: any) => ({
+                statementId: String(f.statementId),
+                regionId: f.regionId ?? null,
+                claimIds: Array.isArray(f.claimIds) ? f.claimIds : [],
+                stance: String(f?.shadowMetadata?.stance || ''),
+                confidence: typeof f?.shadowMetadata?.confidence === 'number' ? f.shadowMetadata.confidence : null,
+                signalWeight: typeof f?.shadowMetadata?.signalWeight === 'number' ? f.shadowMetadata.signalWeight : null,
+                geometricIsolation: typeof f?.shadowMetadata?.geometricIsolation === 'number' ? f.shadowMetadata.geometricIsolation : null,
+                reason: String(f?.reason || ''),
+            }))
+            .sort((a, b) => {
+                const sw = (b.signalWeight ?? 0) - (a.signalWeight ?? 0);
+                if (sw !== 0) return sw;
+                const conf = (b.confidence ?? 0) - (a.confidence ?? 0);
+                if (conf !== 0) return conf;
+                return (b.geometricIsolation ?? 0) - (a.geometricIsolation ?? 0);
+            });
+        return orphans;
+    }, [completeness?.statementFates]);
+
+    const traversalSummary = useMemo(() => {
+        const tg = traversalGraph as any;
+        const tiers = Array.isArray(tg?.tiers) ? tg.tiers : [];
+        const tensions = Array.isArray(tg?.tensions) ? tg.tensions : [];
+        const roots = Array.isArray(tg?.roots) ? tg.roots : [];
+        const cycles = Array.isArray(tg?.cycles) ? tg.cycles : [];
+        const claims = Array.isArray(tg?.claims) ? tg.claims : [];
+        const maxTier = typeof tg?.maxTier === 'number' ? tg.maxTier : null;
+        const gatesFlat = tiers.flatMap((t: any) =>
+            Array.isArray(t?.gates) ? t.gates.map((g: any) => ({ tierIndex: t.tierIndex, ...g })) : []
+        );
+        return { tiers, tensions, roots, cycles, claims, maxTier, gatesFlat };
+    }, [traversalGraph]);
+
+    const forcingPointsSummary = useMemo(() => {
+        const fps = Array.isArray(forcingPoints) ? forcingPoints : [];
+        const counts = new Map<string, number>();
+        let pendingConflicts = 0;
+        for (const fp of fps as any[]) {
+            const type = String((fp as any)?.type || 'unknown');
+            counts.set(type, (counts.get(type) || 0) + 1);
+            if (type === 'conflict' && (fp as any)?.status === 'pending') pendingConflicts += 1;
+        }
+        const byType = Array.from(counts.entries()).sort((a, b) => b[1] - a[1]);
+        return { total: fps.length, byType, pendingConflicts, forcingPoints: fps as any[] };
+    }, [forcingPoints]);
+
     // Get primary pattern - support both old and new field names
     const primaryPattern = analysis.shape.primary || (analysis.shape as any).primaryPattern || 'unknown';
     const secondaryPatterns = analysis.shape.patterns || [];
@@ -184,6 +301,550 @@ export const StructuralDebugPanel: React.FC<StructuralDebugPanelProps> = ({ anal
                 </pre>
             ) : (
                 <div className="space-y-4">
+                    <details open>
+                        <summary className="cursor-pointer text-sm font-semibold flex items-center gap-2">
+                            <span>Shadow & Geometry</span>
+                            <span className="text-[10px] text-text-muted uppercase tracking-wide">pipelineArtifacts.enrichmentResult</span>
+                        </summary>
+                        <div className="mt-2 text-xs space-y-3">
+                            {!enrichmentResult ? (
+                                <div className="text-text-muted">No geometry enrichment result captured for this turn.</div>
+                            ) : (
+                                <>
+                                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                                        <div>
+                                            <div className="text-text-muted">Enriched</div>
+                                            <div className="font-mono">{enrichmentResult.enrichedCount}</div>
+                                        </div>
+                                        <div>
+                                            <div className="text-text-muted">Unenriched</div>
+                                            <div className="font-mono">{enrichmentResult.unenrichedCount}</div>
+                                        </div>
+                                        <div>
+                                            <div className="text-text-muted">Total</div>
+                                            <div className="font-mono">{enrichmentResult.enrichedCount + enrichmentResult.unenrichedCount}</div>
+                                        </div>
+                                        <div>
+                                            <div className="text-text-muted">% enriched</div>
+                                            <div className="font-mono">
+                                                {formatPct(
+                                                    (enrichmentResult.enrichedCount + enrichmentResult.unenrichedCount) > 0
+                                                        ? enrichmentResult.enrichedCount / (enrichmentResult.enrichedCount + enrichmentResult.unenrichedCount)
+                                                        : null
+                                                )}
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div className="space-y-2 pt-2 border-t border-border-subtle/60">
+                                        <div className="text-[11px] font-semibold text-text-secondary">
+                                            {enrichmentResult.unenrichedCount}/{enrichmentResult.enrichedCount + enrichmentResult.unenrichedCount} statements not enriched
+                                        </div>
+                                        {enrichmentResult.failures.length === 0 ? (
+                                            <div className="text-text-muted">No failures</div>
+                                        ) : (
+                                            <div className="max-h-60 overflow-auto border border-border-subtle rounded-md">
+                                                <table className="min-w-full text-[11px]">
+                                                    <thead className="bg-surface-highlight/20">
+                                                        <tr>
+                                                            <th className="px-2 py-1 text-left">Statement ID</th>
+                                                            <th className="px-2 py-1 text-left">Reason</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {enrichmentResult.failures.slice(0, 12).map((f) => (
+                                                            <tr key={f.statementId} className="border-t border-border-subtle/60">
+                                                                <td className="px-2 py-1 font-mono text-text-secondary">{f.statementId}</td>
+                                                                <td className="px-2 py-1">{f.reason}</td>
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        )}
+                                    </div>
+                                </>
+                            )}
+                        </div>
+                    </details>
+
+                    <details open>
+                        <summary className="cursor-pointer text-sm font-semibold flex items-center gap-2">
+                            <span>Completeness (Mapper)</span>
+                            <span className="text-[10px] text-text-muted uppercase tracking-wide">mapperArtifact.completeness</span>
+                        </summary>
+                        <div className="mt-2 text-xs space-y-3">
+                            {!completenessReport ? (
+                                <div className="text-text-muted">No completeness report found on this turn.</div>
+                            ) : (
+                                <>
+                                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                                        <div>
+                                            <div className="text-text-muted">Statement coverage</div>
+                                            <div className="font-mono">{formatPct(completenessReport.statements.coverageRatio)}</div>
+                                        </div>
+                                        <div>
+                                            <div className="text-text-muted">Region coverage</div>
+                                            <div className="font-mono">{formatPct(completenessReport.regions.coverageRatio)}</div>
+                                        </div>
+                                        <div>
+                                            <div className="text-text-muted">Recommendation</div>
+                                            <div>{recommendationBadge(completenessReport.verdict.recommendation)}</div>
+                                        </div>
+                                        <div>
+                                            <div className="text-text-muted">Estimated missed claims</div>
+                                            <div className="font-mono">{completenessReport.verdict.estimatedMissedClaims}</div>
+                                        </div>
+                                    </div>
+
+                                    <div className="grid grid-cols-2 md:grid-cols-5 gap-2 pt-2 border-t border-border-subtle/60">
+                                        <div className="col-span-2 md:col-span-1">
+                                            <div className="text-text-muted">Fates total</div>
+                                            <div className="font-mono">{fateCounts.total}</div>
+                                        </div>
+                                        <div>
+                                            <div className="text-text-muted">Primary</div>
+                                            <div className="font-mono">{fateCounts.primary} <span className="text-text-muted">({formatPctCount(fateCounts.primary, fateCounts.total)})</span></div>
+                                        </div>
+                                        <div>
+                                            <div className="text-text-muted">Supporting</div>
+                                            <div className="font-mono">{fateCounts.supporting} <span className="text-text-muted">({formatPctCount(fateCounts.supporting, fateCounts.total)})</span></div>
+                                        </div>
+                                        <div>
+                                            <div className="text-text-muted">Orphan</div>
+                                            <div className="font-mono">{fateCounts.orphan} <span className="text-text-muted">({formatPctCount(fateCounts.orphan, fateCounts.total)})</span></div>
+                                        </div>
+                                        <div>
+                                            <div className="text-text-muted">Noise</div>
+                                            <div className="font-mono">{fateCounts.noise} <span className="text-text-muted">({formatPctCount(fateCounts.noise, fateCounts.total)})</span></div>
+                                        </div>
+                                    </div>
+
+                                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2 pt-2 border-t border-border-subtle/60">
+                                        <div>
+                                            <div className="text-text-muted">Coverage by claims</div>
+                                            <div className="font-mono">
+                                                {fateCounts.total > 0 ? formatPct((fateCounts.primary + fateCounts.supporting) / fateCounts.total) : "—"}
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <div className="text-text-muted">Verdict</div>
+                                            <div className="font-mono">{completenessReport.verdict.complete ? "complete" : "incomplete"}</div>
+                                        </div>
+                                        <div>
+                                            <div className="text-text-muted">Confidence</div>
+                                            <div className="font-mono">{completenessReport.verdict.confidence}</div>
+                                        </div>
+                                        <div>
+                                            <div className="text-text-muted">Regions unattended (likely)</div>
+                                            <div className="font-mono">
+                                                {completenessReport.regions.unattended}{" "}
+                                                <span className="text-text-muted">({completenessReport.regions.unattendedWithLikelyClaims})</span>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2 pt-2 border-t border-border-subtle/60">
+                                        <div>
+                                            <div className="text-text-muted">Statements total</div>
+                                            <div className="font-mono">{completenessReport.statements.total}</div>
+                                        </div>
+                                        <div>
+                                            <div className="text-text-muted">In claims</div>
+                                            <div className="font-mono">{completenessReport.statements.inClaims}</div>
+                                        </div>
+                                        <div>
+                                            <div className="text-text-muted">Orphaned</div>
+                                            <div className="font-mono">{completenessReport.statements.orphaned}</div>
+                                        </div>
+                                        <div>
+                                            <div className="text-text-muted">Noise</div>
+                                            <div className="font-mono">{completenessReport.statements.noise}</div>
+                                        </div>
+                                    </div>
+
+                                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2 pt-2 border-t border-border-subtle/60">
+                                        <div>
+                                            <div className="text-text-muted">Regions total</div>
+                                            <div className="font-mono">{completenessReport.regions.total}</div>
+                                        </div>
+                                        <div>
+                                            <div className="text-text-muted">Attended</div>
+                                            <div className="font-mono">{completenessReport.regions.attended}</div>
+                                        </div>
+                                        <div>
+                                            <div className="text-text-muted">Unattended</div>
+                                            <div className="font-mono">{completenessReport.regions.unattended}</div>
+                                        </div>
+                                        <div>
+                                            <div className="text-text-muted">Unattended likely</div>
+                                            <div className="font-mono">{completenessReport.regions.unattendedWithLikelyClaims}</div>
+                                        </div>
+                                    </div>
+
+                                    <div className="space-y-2 pt-2 border-t border-border-subtle/60">
+                                        <div className="text-[11px] font-semibold text-text-secondary">High-signal orphans (from statement fates)</div>
+                                        {highSignalOrphans.length === 0 ? (
+                                            <div className="text-text-muted">None</div>
+                                        ) : (
+                                            <div className="max-h-72 overflow-auto border border-border-subtle rounded-md">
+                                                <table className="min-w-full text-[11px]">
+                                                    <thead className="bg-surface-highlight/20">
+                                                        <tr>
+                                                            <th className="px-2 py-1 text-left">Statement</th>
+                                                            <th className="px-2 py-1 text-left">Region</th>
+                                                            <th className="px-2 py-1 text-left">Stance</th>
+                                                            <th className="px-2 py-1 text-right">Signal</th>
+                                                            <th className="px-2 py-1 text-right">Conf</th>
+                                                            <th className="px-2 py-1 text-right">Iso</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {highSignalOrphans.slice(0, 25).map((o) => (
+                                                            <tr key={o.statementId} className="border-t border-border-subtle/60">
+                                                                <td className="px-2 py-1 font-mono text-text-secondary">{o.statementId}</td>
+                                                                <td className="px-2 py-1 font-mono text-text-secondary">{o.regionId || "—"}</td>
+                                                                <td className="px-2 py-1 font-mono text-text-secondary">{o.stance}</td>
+                                                                <td className="px-2 py-1 text-right font-mono">{o.signalWeight ?? "—"}</td>
+                                                                <td className="px-2 py-1 text-right font-mono">{o.confidence == null ? "—" : o.confidence.toFixed(2)}</td>
+                                                                <td className="px-2 py-1 text-right font-mono">{o.geometricIsolation == null ? "—" : o.geometricIsolation.toFixed(2)}</td>
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    <div className="space-y-2 pt-2 border-t border-border-subtle/60">
+                                        <div className="text-[11px] font-semibold text-text-secondary">Orphans by stance</div>
+                                        {orphanStanceCounts.length === 0 ? (
+                                            <div className="text-text-muted">None</div>
+                                        ) : (
+                                            <div className="max-h-48 overflow-auto border border-border-subtle rounded-md">
+                                                <table className="min-w-full text-[11px]">
+                                                    <thead className="bg-surface-highlight/20">
+                                                        <tr>
+                                                            <th className="px-2 py-1 text-left">Stance</th>
+                                                            <th className="px-2 py-1 text-right">Count</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {orphanStanceCounts.map(([stance, count]) => (
+                                                            <tr key={stance} className="border-t border-border-subtle/60">
+                                                                <td className="px-2 py-1 font-mono text-text-secondary">{stance}</td>
+                                                                <td className="px-2 py-1 text-right font-mono">{count}</td>
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    <div className="space-y-2 pt-2 border-t border-border-subtle/60">
+                                        <div className="text-[11px] font-semibold text-text-secondary">Unattended regions (diagnostics)</div>
+                                        {(completeness?.unattendedRegions || []).length === 0 ? (
+                                            <div className="text-text-muted">None</div>
+                                        ) : (
+                                            <div className="max-h-72 overflow-auto border border-border-subtle rounded-md">
+                                                <table className="min-w-full text-[11px]">
+                                                    <thead className="bg-surface-highlight/20">
+                                                        <tr>
+                                                            <th className="px-2 py-1 text-left">Region</th>
+                                                            <th className="px-2 py-1 text-left">Reason</th>
+                                                            <th className="px-2 py-1 text-right">Statements</th>
+                                                            <th className="px-2 py-1 text-right">Diversity</th>
+                                                            <th className="px-2 py-1 text-right">Avg iso</th>
+                                                            <th className="px-2 py-1 text-center">Likely</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {(completeness?.unattendedRegions || []).map((r) => (
+                                                            <tr key={r.id} className="border-t border-border-subtle/60">
+                                                                <td className="px-2 py-1 font-mono text-text-secondary">{r.id}</td>
+                                                                <td className="px-2 py-1">{r.reason}</td>
+                                                                <td className="px-2 py-1 text-right font-mono">{r.statementCount}</td>
+                                                                <td className="px-2 py-1 text-right font-mono">{r.modelDiversity}</td>
+                                                                <td className="px-2 py-1 text-right font-mono">{r.avgIsolation.toFixed(2)}</td>
+                                                                <td className="px-2 py-1 text-center font-mono">{r.likelyClaim ? "true" : "false"}</td>
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    <div className="space-y-2 pt-2 border-t border-border-subtle/60">
+                                        <div className="text-[11px] font-semibold text-text-secondary">High-signal orphans</div>
+                                        {completenessReport.recovery.highSignalOrphans.length === 0 ? (
+                                            <div className="text-text-muted">None</div>
+                                        ) : (
+                                            <div className="max-h-60 overflow-auto border border-border-subtle rounded-md">
+                                                <table className="min-w-full text-[11px]">
+                                                    <thead className="bg-surface-highlight/20">
+                                                        <tr>
+                                                            <th className="px-2 py-1 text-left">Text</th>
+                                                            <th className="px-2 py-1 text-left">Stance</th>
+                                                            <th className="px-2 py-1 text-right">Signal</th>
+                                                            <th className="px-2 py-1 text-left">Reason</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {completenessReport.recovery.highSignalOrphans.map((o) => (
+                                                            <tr key={o.statementId} className="border-t border-border-subtle/60">
+                                                                <td className="px-2 py-1">
+                                                                    <div className="whitespace-pre-wrap leading-snug">{o.text}</div>
+                                                                </td>
+                                                                <td className="px-2 py-1 font-mono text-text-secondary">{o.stance}</td>
+                                                                <td className="px-2 py-1 text-right font-mono">{o.signalWeight}</td>
+                                                                <td className="px-2 py-1 text-text-muted">{o.reason}</td>
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    <div className="space-y-2 pt-2 border-t border-border-subtle/60">
+                                        <div className="text-[11px] font-semibold text-text-secondary">Unattended regions</div>
+                                        {completenessReport.recovery.unattendedRegionPreviews.length === 0 ? (
+                                            <div className="text-text-muted">None</div>
+                                        ) : (
+                                            <div className="space-y-2">
+                                                {completenessReport.recovery.unattendedRegionPreviews.map((r) => (
+                                                    <div
+                                                        key={r.regionId}
+                                                        className="bg-surface border border-border-subtle rounded-lg p-3"
+                                                    >
+                                                        <div className="flex items-center justify-between gap-3">
+                                                            <div className="font-mono text-[11px] text-text-secondary">{r.regionId}</div>
+                                                            <div className="text-[11px] text-text-muted">{r.reason}</div>
+                                                        </div>
+                                                        <div className="mt-1 text-[10px] text-text-muted">
+                                                            likelyClaim: <span className="font-mono">{r.likelyClaim ? "true" : "false"}</span>
+                                                        </div>
+                                                        {r.statementPreviews.length > 0 && (
+                                                            <div className="mt-2 space-y-1">
+                                                                {r.statementPreviews.map((s, idx) => (
+                                                                    <div key={`${r.regionId}-${idx}`} className="text-[11px] leading-snug text-text-secondary whitespace-pre-wrap">
+                                                                        {s}
+                                                                    </div>
+                                                                ))}
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+                                </>
+                            )}
+                        </div>
+                    </details>
+
+                    <details open>
+                        <summary className="cursor-pointer text-sm font-semibold flex items-center gap-2">
+                            <span>Traversal (Mapper)</span>
+                            <span className="text-[10px] text-text-muted uppercase tracking-wide">mapperArtifact.traversalGraph</span>
+                        </summary>
+                        <div className="mt-2 text-xs space-y-3">
+                            {!traversalGraph ? (
+                                <div className="text-text-muted">No traversal graph found on this turn.</div>
+                            ) : (
+                                <>
+                                    <div className="grid grid-cols-2 md:grid-cols-6 gap-2">
+                                        <div>
+                                            <div className="text-text-muted">Claims</div>
+                                            <div className="font-mono">{traversalSummary.claims.length}</div>
+                                        </div>
+                                        <div>
+                                            <div className="text-text-muted">Tiers</div>
+                                            <div className="font-mono">{traversalSummary.tiers.length}</div>
+                                        </div>
+                                        <div>
+                                            <div className="text-text-muted">Max tier</div>
+                                            <div className="font-mono">{traversalSummary.maxTier ?? "—"}</div>
+                                        </div>
+                                        <div>
+                                            <div className="text-text-muted">Tensions</div>
+                                            <div className="font-mono">{traversalSummary.tensions.length}</div>
+                                        </div>
+                                        <div>
+                                            <div className="text-text-muted">Roots</div>
+                                            <div className="font-mono">{traversalSummary.roots.length}</div>
+                                        </div>
+                                        <div>
+                                            <div className="text-text-muted">Cycles</div>
+                                            <div className="font-mono">{traversalSummary.cycles.length}</div>
+                                        </div>
+                                    </div>
+
+                                    <div className="space-y-2 pt-2 border-t border-border-subtle/60">
+                                        <div className="text-[11px] font-semibold text-text-secondary">Tier summary</div>
+                                        {traversalSummary.tiers.length === 0 ? (
+                                            <div className="text-text-muted">No tiers</div>
+                                        ) : (
+                                            <div className="max-h-60 overflow-auto border border-border-subtle rounded-md">
+                                                <table className="min-w-full text-[11px]">
+                                                    <thead className="bg-surface-highlight/20">
+                                                        <tr>
+                                                            <th className="px-2 py-1 text-left">Tier</th>
+                                                            <th className="px-2 py-1 text-right">Claims</th>
+                                                            <th className="px-2 py-1 text-right">Gates</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {traversalSummary.tiers.map((t: any) => (
+                                                            <tr key={String(t?.tierIndex)} className="border-t border-border-subtle/60">
+                                                                <td className="px-2 py-1 font-mono text-text-secondary">{String(t?.tierIndex)}</td>
+                                                                <td className="px-2 py-1 text-right font-mono">{Array.isArray(t?.claimIds) ? t.claimIds.length : 0}</td>
+                                                                <td className="px-2 py-1 text-right font-mono">{Array.isArray(t?.gates) ? t.gates.length : 0}</td>
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    <div className="space-y-2 pt-2 border-t border-border-subtle/60">
+                                        <div className="text-[11px] font-semibold text-text-secondary">Gates</div>
+                                        {traversalSummary.gatesFlat.length === 0 ? (
+                                            <div className="text-text-muted">No gates</div>
+                                        ) : (
+                                            <div className="max-h-72 overflow-auto border border-border-subtle rounded-md">
+                                                <table className="min-w-full text-[11px]">
+                                                    <thead className="bg-surface-highlight/20">
+                                                        <tr>
+                                                            <th className="px-2 py-1 text-left">Tier</th>
+                                                            <th className="px-2 py-1 text-left">Type</th>
+                                                            <th className="px-2 py-1 text-left">Gate</th>
+                                                            <th className="px-2 py-1 text-left">Question</th>
+                                                            <th className="px-2 py-1 text-right">Blocked</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {traversalSummary.gatesFlat.slice(0, 40).map((g: any) => (
+                                                            <tr key={String(g?.id)} className="border-t border-border-subtle/60 align-top">
+                                                                <td className="px-2 py-1 font-mono text-text-secondary">{String(g?.tierIndex ?? "—")}</td>
+                                                                <td className="px-2 py-1 font-mono text-text-secondary">{String(g?.type ?? "—")}</td>
+                                                                <td className="px-2 py-1 font-mono text-text-secondary">{String(g?.id)}</td>
+                                                                <td className="px-2 py-1">
+                                                                    <div className="whitespace-pre-wrap leading-snug">{String(g?.question || g?.condition || "").trim() || "—"}</div>
+                                                                </td>
+                                                                <td className="px-2 py-1 text-right font-mono">{Array.isArray(g?.blockedClaims) ? g.blockedClaims.length : 0}</td>
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    <details>
+                                        <summary className="cursor-pointer text-[11px] font-semibold text-text-secondary">
+                                            Raw traversalGraph JSON
+                                        </summary>
+                                        <pre className="mt-2 text-[11px] leading-snug bg-surface border border-border-subtle rounded-lg p-3 overflow-x-auto">
+                                            {JSON.stringify(traversalGraph, null, 2)}
+                                        </pre>
+                                    </details>
+                                </>
+                            )}
+                        </div>
+                    </details>
+
+                    <details open>
+                        <summary className="cursor-pointer text-sm font-semibold flex items-center gap-2">
+                            <span>Forcing Points (Mapper)</span>
+                            <span className="text-[10px] text-text-muted uppercase tracking-wide">mapperArtifact.forcingPoints</span>
+                        </summary>
+                        <div className="mt-2 text-xs space-y-3">
+                            {forcingPointsSummary.total === 0 ? (
+                                <div className="text-text-muted">No forcing points found on this turn.</div>
+                            ) : (
+                                <>
+                                    <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+                                        <div>
+                                            <div className="text-text-muted">Total</div>
+                                            <div className="font-mono">{forcingPointsSummary.total}</div>
+                                        </div>
+                                        <div className="md:col-span-2">
+                                            <div className="text-text-muted">By type</div>
+                                            <div className="font-mono">
+                                                {forcingPointsSummary.byType.map(([t, c]) => `${t}:${c}`).join("  ") || "—"}
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <div className="text-text-muted">Pending conflicts</div>
+                                            <div className="font-mono">{forcingPointsSummary.pendingConflicts}</div>
+                                        </div>
+                                        <div>
+                                            <div className="text-text-muted">Preview</div>
+                                            <div className="font-mono">{Math.min(forcingPointsSummary.total, 20)}</div>
+                                        </div>
+                                    </div>
+
+                                    <div className="max-h-80 overflow-auto border border-border-subtle rounded-md">
+                                        <table className="min-w-full text-[11px]">
+                                            <thead className="bg-surface-highlight/20">
+                                                <tr>
+                                                    <th className="px-2 py-1 text-left">ID</th>
+                                                    <th className="px-2 py-1 text-left">Type</th>
+                                                    <th className="px-2 py-1 text-right">Tier</th>
+                                                    <th className="px-2 py-1 text-left">Question</th>
+                                                    <th className="px-2 py-1 text-left">Details</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {forcingPointsSummary.forcingPoints.slice(0, 20).map((fp: any) => {
+                                                    const type = String(fp?.type || "—");
+                                                    const tier = typeof fp?.tier === "number" ? fp.tier : "—";
+                                                    const question = String(fp?.question || fp?.condition || "").trim() || "—";
+                                                    const details =
+                                                        type === "conflict"
+                                                            ? (fp?.optionA && fp?.optionB
+                                                                ? `${String(fp.optionA.label)} ↔ ${String(fp.optionB.label)} (${String(fp?.status || "—")})`
+                                                                : Array.isArray(fp?.options)
+                                                                    ? `${fp.options.length} options`
+                                                                    : String(fp?.status || "—"))
+                                                            : type === "prerequisite"
+                                                                ? String(fp?.claimLabel || fp?.claimId || "—")
+                                                                : type === "conditional"
+                                                                    ? `${Array.isArray(fp?.affectedClaims) ? fp.affectedClaims.length : 0} affected`
+                                                                    : "—";
+                                                    return (
+                                                        <tr key={String(fp?.id)} className="border-t border-border-subtle/60 align-top">
+                                                            <td className="px-2 py-1 font-mono text-text-secondary">{String(fp?.id)}</td>
+                                                            <td className="px-2 py-1 font-mono text-text-secondary">{type}</td>
+                                                            <td className="px-2 py-1 text-right font-mono">{String(tier)}</td>
+                                                            <td className="px-2 py-1">
+                                                                <div className="whitespace-pre-wrap leading-snug">{question}</div>
+                                                            </td>
+                                                            <td className="px-2 py-1 text-text-muted">{details}</td>
+                                                        </tr>
+                                                    );
+                                                })}
+                                            </tbody>
+                                        </table>
+                                    </div>
+
+                                    <details>
+                                        <summary className="cursor-pointer text-[11px] font-semibold text-text-secondary">
+                                            Raw forcingPoints JSON
+                                        </summary>
+                                        <pre className="mt-2 text-[11px] leading-snug bg-surface border border-border-subtle rounded-lg p-3 overflow-x-auto">
+                                            {JSON.stringify(forcingPoints, null, 2)}
+                                        </pre>
+                                    </details>
+                                </>
+                            )}
+                        </div>
+                    </details>
+
                     {/* PHASE 1: Graph Topology */}
                     <details open>
                         <summary className="cursor-pointer text-sm font-semibold flex items-center gap-2">

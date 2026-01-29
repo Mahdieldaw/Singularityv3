@@ -6,6 +6,7 @@ import { PersistenceCoordinator } from './execution/PersistenceCoordinator';
 import { TurnEmitter } from './execution/TurnEmitter';
 import { CognitivePipelineHandler } from './execution/CognitivePipelineHandler';
 import { parseMapperArtifact } from '../../shared/parsing-utils';
+import { classifyError } from './error-classifier.js';
 
 export class WorkflowEngine {
   /* _options: Reserved for future configuration or interface compatibility */
@@ -129,7 +130,30 @@ export class WorkflowEngine {
       await this._persistAndFinalize(request, context, steps, stepResults, resolvedContext);
 
     } catch (error) {
+      const criticalMessage = error instanceof Error ? error.message : String(error);
       console.error(`[WorkflowEngine] Critical workflow execution error:`, error);
+      try {
+        await this._persistAndFinalize(request, context, steps, stepResults, resolvedContext);
+        return;
+      } catch (persistError) {
+        const persistMessage =
+          persistError instanceof Error ? persistError.message : String(persistError);
+        if (context?.canonicalAiTurnId && this.sessionManager?.adapter) {
+          try {
+            const turn = await this.sessionManager.adapter.get("turns", context.canonicalAiTurnId);
+            if (turn && turn.pipelineStatus === 'in_progress') {
+              turn.pipelineStatus = 'error';
+              turn.meta = {
+                ...(turn.meta || {}),
+                pipelineError: criticalMessage || persistMessage || 'Pipeline failed'
+              };
+              await this.sessionManager.adapter.put("turns", turn);
+            }
+          } catch (markError) {
+            console.error('[WorkflowEngine] Failed to mark turn as errored:', markError);
+          }
+        }
+      }
       this.port.postMessage({
         type: "WORKFLOW_COMPLETE",
         sessionId: context.sessionId,
@@ -179,8 +203,16 @@ export class WorkflowEngine {
       return result;
 
     } catch (error) {
-      stepResults.set(step.stepId, { status: "failed", error: error.message });
-      this._emitStepUpdate(step, context, { error: error.message }, resolvedContext, "failed");
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const classified = classifyError(error);
+      stepResults.set(step.stepId, { status: "failed", error: classified });
+      this._emitStepUpdate(
+        step,
+        context,
+        { error: classified?.message || errorMessage },
+        resolvedContext,
+        "failed",
+      );
       throw error;
     }
   }
@@ -357,24 +389,10 @@ export class WorkflowEngine {
   }
 
   async _persistAndFinalize(request, context, steps, stepResults, resolvedContext) {
-    const result = {
-      batchOutputs: {},
-      mappingOutputs: {},
-      singularityOutputs: {},
-    };
-
-    const stepById = new Map((steps || []).map((s) => [s.stepId, s]));
-    stepResults.forEach((stepResult, stepId) => {
-      if (stepResult.status !== "completed") return;
-      const step = stepById.get(stepId);
-      if (!step) return;
-      if (step.type === "prompt") {
-        result.batchOutputs = stepResult.result?.results || {};
-      } else if (step.type === "mapping") {
-        const providerId = step.payload?.mappingProvider;
-        if (providerId) result.mappingOutputs[providerId] = stepResult.result;
-      }
-    });
+    const result = this.persistenceCoordinator.buildPersistenceResultFromStepResults(
+      steps,
+      stepResults
+    );
 
     const persistRequest = {
       type: resolvedContext?.type || "unknown",

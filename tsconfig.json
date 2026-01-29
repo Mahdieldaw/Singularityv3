@@ -1,11 +1,16 @@
 {
   "compilerOptions": {
-    "target": "ES2021",
+    "useUnknownInCatchVariables": false,
+    "target": "es2022",
     "baseUrl": ".",
     "lib": [
       "DOM",
       "ES2021"
     ],
+    "allowJs": false,
+    "checkJs": false,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "jsx": "react-jsx",
@@ -45,7 +50,7 @@
     "./**/*.ts",
     "./**/*.tsx",
     "./**/*.d.ts",
-    "src/utils/logger.js"
+  "./**/*.js"
   ],
   "exclude": [
     "dist",

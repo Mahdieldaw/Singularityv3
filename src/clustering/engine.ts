@@ -238,7 +238,10 @@ export function buildClusters(
     _shadowStatements: ShadowStatement[],
     embeddings: Map<string, Float32Array>,
     config: ClusteringConfig = DEFAULT_CONFIG,
-    mutualGraph?: MutualKnnGraph
+    mutualGraph?: MutualKnnGraph,
+    options?: {
+        adjustDistanceByParagraphMeta?: boolean;
+    }
 ): ClusteringResult {
     const startTime = performance.now();
 
@@ -305,7 +308,11 @@ export function buildClusters(
     }
 
     // Build distance matrix
-    const distances = buildDistanceMatrix(paragraphIds, embeddings, paragraphs);
+    const distances = buildDistanceMatrix(
+        paragraphIds,
+        embeddings,
+        options?.adjustDistanceByParagraphMeta === false ? undefined : paragraphs
+    );
 
     let maxSim = -Infinity;
     let validPairCount = 0;

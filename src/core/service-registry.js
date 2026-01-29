@@ -8,7 +8,7 @@
  * throughout the application without circular imports or global pollution.
  */
 export class ServiceRegistry {
-    static instance = null;
+    static instance;
 
     constructor() {
         this.services = new Map();
@@ -31,6 +31,14 @@ export class ServiceRegistry {
 
     get(name) {
         return this.services.get(name);
+    }
+
+    has(name) {
+        return this.services.has(name);
+    }
+
+    unregister(name) {
+        return this.services.delete(name);
     }
 
     // Quick accessors for common services

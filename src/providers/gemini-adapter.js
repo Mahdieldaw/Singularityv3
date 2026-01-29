@@ -8,8 +8,9 @@ import { authManager } from '../core/auth-manager.js';
 import {
   errorHandler,
   isProviderAuthError,
-  createProviderAuthError
-} from '../utils/ErrorHandler.js';
+  createProviderAuthError,
+  normalizeError
+} from '../utils/ErrorHandler';
 
 const GEMINI_ADAPTER_DEBUG = false;
 const pad = (...args) => {
@@ -171,15 +172,16 @@ export class GeminiAdapter {
           },
         };
       } catch (handledError) {
+        const normalizedHandledError = normalizeError(handledError);
         return {
           providerId: this.id,
           ok: false,
           text: null,
-          errorCode: handledError.code || "unknown",
+          errorCode: normalizedHandledError.code || "unknown",
           latencyMs: Date.now() - startTime,
           meta: {
-            error: handledError.toString(),
-            details: handledError.details,
+            error: normalizedHandledError.message,
+            details: normalizedHandledError.details,
           },
         };
       }
@@ -327,16 +329,17 @@ export class GeminiAdapter {
           },
         };
       } catch (handledError) {
+        const normalizedHandledError = normalizeError(handledError);
         return {
           providerId: this.id,
           ok: false,
           text: null,
-          errorCode: handledError.code || "unknown",
+          errorCode: normalizedHandledError.code || "unknown",
           latencyMs: Date.now() - startTime,
           meta: {
-            error: handledError.toString(),
-            details: handledError.details,
-            cursor: providerContext?.cursor ?? providerContext?.meta?.cursor,
+            error: normalizedHandledError.message,
+            details: normalizedHandledError.details,
+            cursor: Object(providerContext)?.cursor ?? Object(providerContext)?.meta?.cursor,
           },
         };
       }
@@ -348,8 +351,9 @@ export class GeminiAdapter {
    */
   async ask(prompt, providerContext = null, sessionId = undefined, onChunk = undefined, signal = undefined) {
     try {
-      const meta = providerContext?.meta || providerContext || {};
-      const hasCursor = Boolean(meta.cursor || providerContext?.cursor);
+      const ctx = Object(providerContext);
+      const meta = ctx.meta || providerContext || {};
+      const hasCursor = Boolean(meta.cursor || ctx.cursor);
 
       pad(`[ProviderAdapter] ASK_STARTED provider=${this.id} hasContext=${hasCursor}`);
 

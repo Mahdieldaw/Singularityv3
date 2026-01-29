@@ -265,7 +265,7 @@ export function formatSessionForMarkdown(fullSession: { title: string, turns: Tu
             // Resolve effective user prompt
             // If aiTurn.userTurnId matches lastUserTurn.id, use that.
             // Else find it? (But we just have the array here).
-            let userPrompt = null;
+            let userPrompt: string | null = null;
             if (lastUserTurn && lastUserTurn.id === aiTurn.userTurnId) {
                 userPrompt = lastUserTurn.text;
                 lastUserTurn = null; // Mark as consumed

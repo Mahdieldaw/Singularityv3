@@ -8,7 +8,7 @@
  * Build-phase safe: emitted to dist/providers/*
  */
 
-import { generateKeys, signChallenge, bytesToHex, hexToBytes, base64ToBytes } from './grok-crypto.js';
+import { generateKeys, signChallenge, bytesToHex, hexToBytes } from './grok-crypto.js';
 import { 
   generateSign, 
   between, 
@@ -118,11 +118,12 @@ const XSID_CACHE = new Map([
 // ═══════════════════════════════════════════════════════════════════════════
 
 export class GrokProviderError extends Error {
-  constructor(type, details) {
-    super(type);
+  constructor(type, details, extra = undefined) {
+    super(details || type);
     this.name = 'GrokProviderError';
     this.type = type;
     this.details = details;
+    if (extra && typeof extra === "object") Object.assign(this, extra);
   }
 
   get is() {
@@ -150,6 +151,7 @@ export class GrokSessionApi {
     // Session state
     this._keys = null;
     this._cRun = 0;
+    /** @type {string[]} */
     this._actions = [];
     this._xsidScript = '';
     this._baggage = '';
@@ -172,13 +174,13 @@ export class GrokSessionApi {
    * Send a message to Grok
    * 
    * @param {string} message - User message
-   * @param {Object} options - Options
-   * @param {AbortSignal} options.signal - Abort signal
-   * @param {Object} options.extraData - Continuation data from previous response
+   * @param {Object} [options] - Options
+   * @param {AbortSignal} [options.signal] - Abort signal
+   * @param {Object} [options.extraData] - Continuation data from previous response
    * @param {Function} onChunk - Streaming callback
    * @returns {Promise<Object>} Response with text, stream_response, images, extra_data
    */
-  async ask(message, options = {}, onChunk = () => {}) {
+  async ask(message, options = /** @type {{ signal?: AbortSignal; extraData?: any }} */ ({}), onChunk = () => {}) {
     const { signal, extraData } = options;
     
     try {
@@ -190,12 +192,14 @@ export class GrokSessionApi {
       return await this._startConvo(message, extraData, onChunk, signal);
     } catch (e) {
       if (e?.name === 'AbortError' || String(e).includes('aborted')) {
-        throw this._createError('aborted', e.message);
+        const msg = e instanceof Error ? e.message : String(e);
+        throw this._createError('aborted', msg);
       }
       if (e instanceof GrokProviderError) {
         throw e;
       }
-      throw this._createError('unknown', e.message || String(e));
+      const msg = e instanceof Error ? e.message : String(e);
+      throw this._createError('unknown', msg);
     }
   }
 
@@ -261,6 +265,24 @@ export class GrokSessionApi {
 
     const text = await res.text();
 
+    if (res.status === 429) {
+      const retryAfter = res.headers.get('Retry-After');
+      let messageText = text;
+      try {
+        const parsed = JSON.parse(text);
+        messageText =
+          parsed?.error?.message ||
+          parsed?.message ||
+          parsed?.error ||
+          messageText;
+      } catch (_) { }
+
+      throw this._createError('tooManyRequests', String(messageText || 'Rate limit reached.'), {
+        status: 429,
+        headers: retryAfter ? { 'Retry-After': retryAfter } : undefined,
+      });
+    }
+
     if (text.includes('modelResponse')) {
       return this._parseResponse(text, extraData, onChunk);
     }
@@ -313,6 +335,11 @@ export class GrokSessionApi {
     this._keys = { privateKey: extraData.privateKey, userPublicKey: [] };
   }
 
+  /**
+   * @param {string[]} scripts
+   * @param {string} _html
+   * @returns {Promise<[string[], string]>}
+   */
   async _parseGrokScripts(scripts, _html) {
     // Check cached mappings first
     for (const mapping of GROK_MAPPINGS) {
@@ -322,7 +349,6 @@ export class GrokSessionApi {
     }
 
     // Dynamic parsing (fallback)
-    let actionScript = '';
     let scriptContent1 = '';
     let scriptContent2 = '';
 
@@ -333,7 +359,6 @@ export class GrokSessionApi {
 
         if (content.includes('anonPrivateKey')) {
           scriptContent1 = content;
-          actionScript = script;
         } else if (content.includes('880932)')) {
           scriptContent2 = content;
         }
@@ -379,7 +404,11 @@ export class GrokSessionApi {
     if (this._cRun === 0) {
       // First request: multipart with public key
       const formData = new FormData();
-      const publicKeyBlob = new Blob([new Uint8Array(this._keys.userPublicKey)], {
+      const keys = this._keys;
+      if (!keys) {
+        throw this._createError('unknown', 'Missing Grok keypair');
+      }
+      const publicKeyBlob = new Blob([new Uint8Array(keys.userPublicKey)], {
         type: 'application/octet-stream',
       });
       formData.append('1', publicKeyBlob, 'blob');
@@ -436,14 +465,18 @@ export class GrokSessionApi {
             const challengeHex = hexString.substring(challengeStart, endIdx);
             const challengeBytes = hexToBytes(challengeHex);
 
-            this._challengeDict = await signChallenge(challengeBytes, this._keys.privateKey);
+            const keys = this._keys;
+            if (!keys || !keys.privateKey) {
+              throw this._createError('unknown', 'Missing Grok private key');
+            }
+            this._challengeDict = await signChallenge(challengeBytes, keys.privateKey);
             this._log('c_request 1: challenge signed');
           }
         }
       } else if (this._cRun === 2) {
         // Parse verification token and SVG
         [this._verificationToken, this._anim] = parseVerificationToken(text);
-        this._svgData = parseSvgData(text, this._anim);
+        this._svgData = parseSvgData(text, this._anim) || '';
         this._numbers = await this._fetchXsidNumbers();
 
         this._log('c_request 2: verification token obtained, anim =', this._anim);
@@ -641,7 +674,7 @@ export class GrokSessionApi {
         sentry_trace: this._sentryTrace,
         conversationId,
         parentResponseId: parentResponse,
-        privateKey: this._keys.privateKey,
+        privateKey: this._keys ? this._keys.privateKey : undefined,
       },
     };
   }
@@ -666,8 +699,8 @@ export class GrokSessionApi {
       .join('');
   }
 
-  _createError(type, details) {
-    return new GrokProviderError(type, details);
+  _createError(type, details, extra) {
+    return new GrokProviderError(type, details, extra);
   }
 
   _log(...args) {

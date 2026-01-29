@@ -42,6 +42,15 @@ export interface ShadowStatement {
 
     location: ShadowStatementLocation;
     fullParagraph: string;         // For context/evidence
+
+    geometricCoordinates?: {
+        paragraphId: string;
+        componentId: string | null;
+        regionId: string | null;
+        knnDegree: number;
+        mutualDegree: number;
+        isolationScore: number;
+    };
 }
 
 export interface ShadowStatementLocation {

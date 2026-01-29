@@ -9,8 +9,10 @@ import { authManager } from '../core/auth-manager.js';
 import {
   errorHandler,
   isProviderAuthError,
-  createProviderAuthError
-} from '../utils/ErrorHandler.js';
+  createProviderAuthError,
+  getErrorMessage,
+  normalizeError
+} from '../utils/ErrorHandler';
 
 // Provider-specific adapter debug flag (off by default)
 const CHATGPT_ADAPTER_DEBUG = false;
@@ -36,7 +38,8 @@ export class ChatGPTAdapter {
    */
   async ask(prompt, providerContext = null, sessionId = undefined, onChunk = undefined, signal = undefined) {
     try {
-      const meta = providerContext?.meta || providerContext || {};
+      const ctx = Object(providerContext);
+      const meta = ctx.meta || providerContext || {};
       const hasContinuation = Boolean(
         meta.conversationId || meta.parentMessageId || meta.messageId,
       );
@@ -55,7 +58,7 @@ export class ChatGPTAdapter {
       } catch (_) { }
       return res;
     } catch (e) {
-      console.warn(`[ProviderAdapter] ASK_FAILED provider=${this.id}:`, e?.message || String(e));
+      console.warn(`[ProviderAdapter] ASK_FAILED provider=${this.id}:`, getErrorMessage(e));
       throw e;
     }
   }
@@ -72,7 +75,7 @@ export class ChatGPTAdapter {
       }
       return { error: "no-controller" };
     } catch (e) {
-      return { error: (e && e.message) || String(e) };
+      return { error: getErrorMessage(e) };
     }
   }
 
@@ -200,8 +203,9 @@ export class ChatGPTAdapter {
 
     } catch (error) {
       // Unwrap special thrown thinking-result
-      if (error && error.__chatgpt_adapter_thinking_result) {
-        return error.__chatgpt_adapter_thinking_result;
+      if (error && typeof error === 'object') {
+        const thinkingResult = Reflect.get(error, '__chatgpt_adapter_thinking_result');
+        if (thinkingResult) return thinkingResult;
       }
 
       // Observe auth failure and update status
@@ -226,15 +230,17 @@ export class ChatGPTAdapter {
 
       // Avoid infinite recursion on retries
       if (_isRetry) {
+        const normalized = normalizeError(error);
+        const type = error && typeof error === 'object' ? Reflect.get(error, 'type') : undefined;
         return {
           providerId: this.id,
           ok: false,
           text: aggregated || null,
-          errorCode: (error && (error.code || error.type)) || "unknown",
+          errorCode: normalized.code || (type != null ? String(type) : undefined) || "unknown",
           latencyMs: Date.now() - startTime,
           meta: {
-            error: error?.toString?.() || String(error),
-            details: error?.details,
+            error: normalized.message,
+            details: normalized.details,
           },
         };
       }
@@ -259,19 +265,20 @@ export class ChatGPTAdapter {
           latencyMs: Date.now() - startTime,
           meta: {
             error: "no recovery",
-            details: error?.details || error?.message
+            details: normalizeError(error).details || normalizeError(error).message
           },
         };
       } catch (handledError) {
+        const normalized = normalizeError(handledError);
         return {
           providerId: this.id,
           ok: false,
           text: aggregated || null,
-          errorCode: handledError.code || "unknown",
+          errorCode: normalized.code || "unknown",
           latencyMs: Date.now() - startTime,
           meta: {
-            error: handledError.toString(),
-            details: handledError.details,
+            error: normalized.message,
+            details: normalized.details,
           },
         };
       }
@@ -375,15 +382,17 @@ export class ChatGPTAdapter {
       }
 
       if (_isRetry) {
+        const normalized = normalizeError(error);
+        const type = error && typeof error === 'object' ? Reflect.get(error, 'type') : undefined;
         return {
           providerId: this.id,
           ok: false,
           text: aggregated || null,
-          errorCode: (error && (error.code || error.type)) || "unknown",
+          errorCode: normalized.code || (type != null ? String(type) : undefined) || "unknown",
           latencyMs: Date.now() - startTime,
           meta: {
-            error: error?.toString?.() || String(error),
-            details: error?.details,
+            error: normalized.message,
+            details: normalized.details,
             conversationId: conversationIdIn,
             parentMessageId: parentMessageIdIn,
           },
@@ -416,21 +425,22 @@ export class ChatGPTAdapter {
           latencyMs: Date.now() - startTime,
           meta: {
             error: "no recovery",
-            details: error?.details || error?.message,
+            details: normalizeError(error).details || normalizeError(error).message,
             conversationId: conversationIdIn,
             parentMessageId: parentMessageIdIn,
           },
         };
       } catch (handledError) {
+        const normalized = normalizeError(handledError);
         return {
           providerId: this.id,
           ok: false,
           text: aggregated || null,
-          errorCode: handledError.code || "unknown",
+          errorCode: normalized.code || "unknown",
           latencyMs: Date.now() - startTime,
           meta: {
-            error: handledError.toString(),
-            details: handledError.details,
+            error: normalized.message,
+            details: normalized.details,
             conversationId: conversationIdIn,
             parentMessageId: parentMessageIdIn,
           },

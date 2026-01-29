@@ -206,7 +206,7 @@ export function computeTargetedAnalysis(
         for (const cond of graph.conditionals || []) {
             if (!Array.isArray(cond?.affectedClaims)) continue;
             if (!cond.affectedClaims.includes(c.id)) continue;
-            const fpId = cond?.id ? `fp_cond_${String(cond.id)}` : '';
+            const fpId = String(cond?.id || '').trim();
             if (!fpId) continue;
             const resolution = traversalState.resolutions.get(fpId);
             if (!resolution) {

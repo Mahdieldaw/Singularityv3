@@ -219,7 +219,7 @@ export const assignPercentileFlags = (
             : 0;
 
 
-        const isHighSupport = consensusIds.has(claim.id);
+        const isHighSupport = topClaimIds.has(claim.id);
         const isLowSupport = isInBottomPercentile(claim.supportRatio, allSupportRatios, 0.3);
         const isHighLeverage = isInTopPercentile(claim.leverage, allLeverages, 0.25);
         const isLeverageInversion = isLowSupport && isHighLeverage;

@@ -266,7 +266,7 @@ export function formatUnreferencedForPrompt(
     output += 'These statements were extracted but not used in claims:\n\n';
 
     for (const u of top) {
-        const signalTags = [];
+        const signalTags: string[] = [];
         if (u.statement.signals.sequence) signalTags.push('SEQ');
         if (u.statement.signals.tension) signalTags.push('TENS');
         if (u.statement.signals.conditional) signalTags.push('COND');
@@ -339,5 +339,4 @@ export function extractReferencedIds(
 
     return ids;
 }
-
 

@@ -359,7 +359,14 @@ export class ClaudeSessionApi {
       let fullText = "";
       let isFirstChunk = true;
       let softError = null;
-      const reader = response.body.getReader();
+      const bodyStream = response.body;
+      if (!bodyStream) {
+        throw new ClaudeProviderError(
+          "failedToReadResponse",
+          "Empty response body",
+        );
+      }
+      const reader = bodyStream.getReader();
       const carry = { carryOver: "" };
 
       try {
@@ -559,12 +566,15 @@ export class ClaudeSessionApi {
       }
     } catch (e) {
       if (e?.error?.code === "model_not_allowed") {
-        this._throw("badModel", e.message);
-      } else if (String(e) === "TypeError: Failed to fetch") {
-        this._throw("network", e.message);
-      } else {
-        this._throw("unknown", e.message);
+        throw this._createError("badModel", e.message);
       }
+      if (String(e) === "TypeError: Failed to fetch") {
+        throw this._createError("network", e.message);
+      }
+      throw this._createError("unknown", e.message);
+    }
+    if (!response) {
+      throw this._createError("network", "Failed to fetch Claude response.");
     }
     return response;
   }

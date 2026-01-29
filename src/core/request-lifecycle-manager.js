@@ -226,13 +226,13 @@ export class HTOSRequestStateManager {
    * @param {Object} error - Error object with classification
    * @param {string} errorDetails - Detailed error information
    */
-  handleRequestError(chat, error, errorDetails = null) {
+  handleRequestError(chat, error, errorDetails) {
     const errorUpdate = {
       error: error.type || "unexpected",
       done: true,
     };
 
-    if (errorDetails) {
+    if (typeof errorDetails === "string" && errorDetails) {
       errorUpdate.errorDetails = errorDetails;
     }
 

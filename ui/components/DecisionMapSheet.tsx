@@ -1246,6 +1246,7 @@ export const DecisionMapSheet = React.memo(() => {
       { key: 'pipeline_shadow_delta', label: 'Shadow Delta', kind: 'json' as const, value: p?.shadow?.delta ?? null, group: 'Shadow', disabled: !hasValue(p?.shadow?.delta, 'json') },
       { key: 'pipeline_shadow_top_unreferenced', label: 'Top Unreferenced', kind: 'json' as const, value: p?.shadow?.topUnreferenced ?? null, group: 'Shadow', disabled: !hasValue(p?.shadow?.topUnreferenced, 'json') },
       { key: 'pipeline_shadow_referenced_ids', label: 'Referenced IDs', kind: 'json' as const, value: p?.shadow?.referencedIds ?? null, group: 'Shadow', disabled: !hasValue(p?.shadow?.referencedIds, 'json') },
+      { key: 'pipeline_enrichment_result', label: 'Geometry Enrichment', kind: 'json' as const, value: p?.enrichmentResult ?? null, group: 'Shadow', disabled: !hasValue(p?.enrichmentResult, 'json') },
 
       { key: 'pipeline_paragraph_projection', label: 'Paragraph Projection', kind: 'json' as const, value: p?.paragraphProjection ?? null, group: 'Projection', disabled: !hasValue(p?.paragraphProjection, 'json') },
 
@@ -1262,6 +1263,10 @@ export const DecisionMapSheet = React.memo(() => {
       { key: 'pipeline_raw_mapping_text', label: 'Raw Mapping Text', kind: 'text' as const, value: p?.prompts?.rawMappingText || rawMappingText || '', group: 'Prompts', disabled: !hasValue(p?.prompts?.rawMappingText || rawMappingText || '', 'text') },
 
       { key: 'mapper_artifact', label: 'Mapper Artifact', kind: 'json' as const, value: mapperArtifact, group: 'Mapper', disabled: !hasValue(mapperArtifact, 'json') },
+      { key: 'mapper_problem_structure', label: 'Problem Structure', kind: 'json' as const, value: (mapperArtifact as any)?.problemStructure || null, group: 'Mapper', disabled: !hasValue((mapperArtifact as any)?.problemStructure || null, 'json') },
+      { key: 'mapper_completeness', label: 'Completeness', kind: 'json' as const, value: (mapperArtifact as any)?.completeness || null, group: 'Mapper', disabled: !hasValue((mapperArtifact as any)?.completeness || null, 'json') },
+      { key: 'mapper_conditionals', label: 'Conditionals', kind: 'json' as const, value: (mapperArtifact as any)?.conditionals || null, group: 'Mapper', disabled: !hasValue((mapperArtifact as any)?.conditionals || null, 'json') },
+      { key: 'mapper_full_analysis', label: 'Full Structural Analysis', kind: 'json' as const, value: (mapperArtifact as any)?.fullAnalysis || null, group: 'Mapper', disabled: !hasValue((mapperArtifact as any)?.fullAnalysis || null, 'json') },
       { key: 'traversal_graph', label: 'Traversal Graph', kind: 'json' as const, value: (mapperArtifact as any)?.traversalGraph || null, group: 'Mapper', disabled: !hasValue((mapperArtifact as any)?.traversalGraph || null, 'json') },
       { key: 'forcing_points', label: 'Forcing Points', kind: 'json' as const, value: (mapperArtifact as any)?.forcingPoints || null, group: 'Mapper', disabled: !hasValue((mapperArtifact as any)?.forcingPoints || null, 'json') },
 
@@ -1634,7 +1639,15 @@ export const DecisionMapSheet = React.memo(() => {
                       </div>
                     ) : (
                       <Suspense fallback={<div className="w-full h-full flex items-center justify-center opacity-50"><div className="w-8 h-8 rounded-full border-2 border-brand-500 border-t-transparent animate-spin" /></div>}>
-                        <StructuralDebugPanel analysis={structuralAnalysis} semanticMapperPrompt={semanticMapperPrompt} rawMappingText={rawMappingText} />
+                        <StructuralDebugPanel
+                          analysis={structuralAnalysis}
+                          semanticMapperPrompt={semanticMapperPrompt}
+                          rawMappingText={rawMappingText}
+                          completeness={(aiTurn as any)?.mapperArtifact?.completeness || (parsedMapping as any)?.artifact?.completeness || null}
+                          enrichmentResult={(resolvedPipelineArtifacts as any)?.enrichmentResult || null}
+                          traversalGraph={(aiTurn as any)?.mapperArtifact?.traversalGraph || (parsedMapping as any)?.artifact?.traversalGraph || null}
+                          forcingPoints={(aiTurn as any)?.mapperArtifact?.forcingPoints || (parsedMapping as any)?.artifact?.forcingPoints || null}
+                        />
                       </Suspense>
                     )}
                   </m.div>
