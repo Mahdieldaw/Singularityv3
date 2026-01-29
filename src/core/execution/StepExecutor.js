@@ -2,7 +2,7 @@ import { DEFAULT_THREAD } from '../../../shared/messaging.js';
 import { ArtifactProcessor } from '../../../shared/artifact-processor';
 import { PROVIDER_LIMITS } from '../../../shared/provider-limits';
 import { parseMapperArtifact } from '../../../shared/parsing-utils';
-import { classifyError } from '../error-classifier.js';
+import { classifyError } from '../error-classifier';
 import {
   errorHandler,
   isProviderAuthError,
@@ -140,6 +140,7 @@ export class StepExecutor {
     }
 
     return new Promise((resolve, reject) => {
+      const completedProviders = new Set();
       this.orchestrator.executeParallelFanout(enhancedPrompt, allowedProviders, {
         sessionId: context.sessionId,
         useThinking,
@@ -199,7 +200,10 @@ export class StepExecutor {
             }
 
             try {
-              this.healthTracker.recordSuccess(providerId);
+              if (!completedProviders.has(providerId)) {
+                completedProviders.add(providerId);
+                this.healthTracker.recordSuccess(providerId);
+              }
             } catch (_) { }
 
             if (entry) {
@@ -253,7 +257,10 @@ export class StepExecutor {
               ...(result.softError ? { softError: result.softError } : {}),
             };
             try {
-              this.healthTracker.recordSuccess(providerId);
+              if (!completedProviders.has(providerId)) {
+                completedProviders.add(providerId);
+                this.healthTracker.recordSuccess(providerId);
+              }
               const entry = providerStatuses.find((s) => s.providerId === providerId);
               if (entry) {
                 entry.status = 'completed';

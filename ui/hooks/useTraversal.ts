@@ -60,15 +60,13 @@ export function useTraversal(
     return initTraversalState(claims);
   }, [claims]);
 
-  const [state, setState] = useState<TraversalState>(() => initialStateOverride || initialState);
+  const [state, setState] = useState<TraversalState>(() => initialStateOverride ?? initialState);
 
   useEffect(() => {
-    if (initialStateOverride) {
+    if (initialStateOverride != null) {
       setState(initialStateOverride);
-      return;
     }
-    setState(initialState);
-  }, [initialState, initialStateOverride]);
+  }, [initialStateOverride]);
 
   const resolveGate = useCallback(
     (fpId: string, satisfied: boolean, userInput?: string) => {
@@ -91,8 +89,8 @@ export function useTraversal(
   );
 
   const reset = useCallback(() => {
-    setState(initialState);
-  }, [initialState]);
+    setState(initialStateOverride ?? initialState);
+  }, [initialState, initialStateOverride]);
 
   const getResolution = useCallback((fpId: string) => state.resolutions.get(fpId), [state.resolutions]);
 

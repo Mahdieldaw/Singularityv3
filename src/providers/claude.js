@@ -565,6 +565,9 @@ export class ClaudeSessionApi {
         this._throw("badOrgId");
       }
     } catch (e) {
+      if (e instanceof ClaudeProviderError) {
+        throw e;
+      }
       if (e?.error?.code === "model_not_allowed") {
         throw this._createError("badModel", e.message);
       }

@@ -37,16 +37,16 @@ export interface ForcingPoint {
   id: string;
   type: 'conditional' | 'conflict';
   tier: number;
-  
+
   // Universal
   question: string;
   condition: string;
-  
+
   // Type-specific
   affectedClaims?: string[];           // For conditionals
   options?: ConflictOption[];          // For conflicts
   blockedByGateIds?: string[];         // For conflicts (conditional gate IDs)
-  
+
   // Provenance
   sourceStatementIds: string[];
 }
@@ -54,11 +54,11 @@ export interface ForcingPoint {
 export interface Resolution {
   forcingPointId: string;
   type: 'conditional' | 'conflict';
-  
+
   // Conditional resolution
   satisfied?: boolean;
   userInput?: string;
-  
+
   // Conflict resolution
   selectedClaimId?: string;
   selectedLabel?: string;
@@ -67,10 +67,10 @@ export interface Resolution {
 export interface TraversalState {
   // Claim status tracking
   claimStatuses: Map<string, ClaimStatus>;
-  
+
   // Resolution tracking
   resolutions: Map<string, Resolution>;
-  
+
   // Path summary for synthesis
   pathSteps: string[];
 }
@@ -119,22 +119,6 @@ type NormalizedConditional = ConditionalPruner & { sourceStatementIds?: string[]
 function normalizeConditionals(input: any): NormalizedConditional[] {
   const raw = Array.isArray(input?.conditionals) ? input.conditionals : [];
   const hasAffectedClaims = raw.some((c: any) => Array.isArray(c?.affectedClaims));
-  if (hasAffectedClaims) {
-    return raw
-      .map((c: any) => {
-        const id = String(c?.id || '').trim();
-        const question = String(c?.question || c?.condition || c?.prompt || id || '').trim();
-        const affectedClaims = Array.isArray(c?.affectedClaims)
-          ? c.affectedClaims.map((x: any) => String(x)).filter(Boolean)
-          : [];
-        if (!id || affectedClaims.length === 0) return null;
-        const sourceStatementIds = Array.isArray(c?.sourceStatementIds)
-          ? c.sourceStatementIds.map((s: any) => String(s)).filter(Boolean)
-          : undefined;
-        return { id, question, affectedClaims, sourceStatementIds } satisfies NormalizedConditional;
-      })
-      .filter((c: any): c is NormalizedConditional => !!c);
-  }
 
   const tiers = Array.isArray(input?.tiers) ? input.tiers : [];
   const gates = tiers
@@ -142,22 +126,57 @@ function normalizeConditionals(input: any): NormalizedConditional[] {
     .flat()
     .filter((g: any) => g && String(g?.type || '') === 'conditional');
 
-  const seen = new Set<string>();
-  const conditionals: NormalizedConditional[] = [];
+  const byId = new Map<string, NormalizedConditional>();
+
+  const merge = (next: NormalizedConditional) => {
+    const prev = byId.get(next.id);
+    if (!prev) {
+      byId.set(next.id, next);
+      return;
+    }
+    const affectedClaims = Array.from(new Set([...(prev.affectedClaims || []), ...(next.affectedClaims || [])]));
+    const sourceStatementIds = Array.from(
+      new Set([...(prev.sourceStatementIds || []), ...(next.sourceStatementIds || [])])
+    );
+    const question = (prev.question && prev.question !== prev.id) ? prev.question : next.question;
+    byId.set(next.id, {
+      id: prev.id,
+      question,
+      affectedClaims,
+      sourceStatementIds: sourceStatementIds.length > 0 ? sourceStatementIds : undefined,
+    });
+  };
+
+  for (const c of raw) {
+    const id = String(c?.id || '').trim();
+    if (!id) continue;
+    const question = String(c?.question || c?.condition || c?.prompt || id || '').trim() || id;
+    const affectedClaims = Array.isArray(c?.affectedClaims)
+      ? c.affectedClaims.map((x: any) => String(x)).filter(Boolean)
+      : [];
+    if (affectedClaims.length === 0) continue;
+    const sourceStatementIds = Array.isArray(c?.sourceStatementIds)
+      ? c.sourceStatementIds.map((s: any) => String(s)).filter(Boolean)
+      : undefined;
+    merge({ id, question, affectedClaims, sourceStatementIds } satisfies NormalizedConditional);
+  }
+
   for (const gate of gates) {
     const id = String(gate?.id || '').trim();
-    if (!id || seen.has(id)) continue;
+    if (!id) continue;
     const affectedClaims = Array.isArray(gate?.blockedClaims)
       ? gate.blockedClaims.map((x: any) => String(x)).filter(Boolean)
       : [];
     if (affectedClaims.length === 0) continue;
-    const question = String(gate?.question || gate?.condition || id).trim();
+    const question = String(gate?.question || gate?.condition || id).trim() || id;
     const sourceStatementIds = Array.isArray(gate?.sourceStatementIds)
       ? gate.sourceStatementIds.map((s: any) => String(s)).filter(Boolean)
       : undefined;
-    conditionals.push({ id, question, affectedClaims, sourceStatementIds });
-    seen.add(id);
+    merge({ id, question, affectedClaims, sourceStatementIds } satisfies NormalizedConditional);
   }
+
+  const conditionals = Array.from(byId.values());
+  if (!hasAffectedClaims && conditionals.length === 0) return [];
   return conditionals;
 }
 
@@ -165,11 +184,31 @@ function pairKeyFor(aId: string, bId: string): string {
   return [aId, bId].sort().join('::');
 }
 
+function isValidMapperEdge(edge: any): edge is MapperEdge {
+  if (!edge || typeof edge !== 'object') return false;
+  const from = (edge as any).from;
+  const to = (edge as any).to;
+  const type = (edge as any).type;
+  if (typeof from !== 'string' || !from.trim()) return false;
+  if (typeof to !== 'string' || !to.trim()) return false;
+  if (type === 'prerequisite') return true;
+  if (type === 'conflict') {
+    const q = (edge as any).question;
+    if (typeof q === 'undefined' || q === null) return true;
+    return typeof q === 'string';
+  }
+  return false;
+}
+
 function normalizeEdges(input: any): { edges: MapperEdge[]; conflictBlocks: Map<string, string[]> } {
   const conflictBlocks = new Map<string, string[]>();
 
   if (Array.isArray(input?.edges)) {
-    const edges = input.edges.filter(Boolean) as MapperEdge[];
+    const rawEdges = input.edges.filter(Boolean);
+    const edges = rawEdges.filter(isValidMapperEdge);
+    if (edges.length !== rawEdges.length) {
+      console.warn(`[TraversalEngine] Dropped ${rawEdges.length - edges.length} invalid edges from input.edges`);
+    }
     return { edges, conflictBlocks };
   }
 
@@ -242,26 +281,24 @@ function normalizeTraversalGraph(input: any): {
 }
 
 function getEdgesFromGraph(graph: any): MapperEdge[] {
-  if (Array.isArray(graph?.edges)) return graph.edges as MapperEdge[];
+  if (Array.isArray(graph?.edges)) {
+    const rawEdges = graph.edges.filter(Boolean);
+    const edges = rawEdges.filter(isValidMapperEdge);
+    if (edges.length !== rawEdges.length) {
+      console.warn(`[TraversalEngine] Dropped ${rawEdges.length - edges.length} invalid edges from graph.edges`);
+    }
+    return edges;
+  }
   return normalizeEdges(graph).edges;
 }
 
 export function extractForcingPoints(
   graph: TraversalGraph
 ): ForcingPoint[] {
-  console.log('=== extractForcingPoints INPUT ===');
-  console.log('Raw graph:', graph);
-  console.log('graph.claims:', (graph as any)?.claims);
-  console.log('graph.edges:', (graph as any)?.edges);
-  console.log('graph.conditionals:', (graph as any)?.conditionals);
 
   const forcingPoints: ForcingPoint[] = [];
   const normalized = normalizeTraversalGraph(graph);
 
-  console.log('=== AFTER NORMALIZATION ===');
-  console.log('normalized.claims:', normalized.claims.length, normalized.claims);
-  console.log('normalized.edges:', normalized.edges.length, normalized.edges);
-  console.log('normalized.conditionals:', normalized.conditionals.length, normalized.conditionals);
 
   const claimMap = new Map(normalized.claims.map(c => [c.id, c]));
   let fpCounter = 0;
@@ -269,14 +306,14 @@ export function extractForcingPoints(
   // ─────────────────────────────────────────────────────────────────────────
   // TIER 0: Conditionals (Pruners)
   // ─────────────────────────────────────────────────────────────────────────
-  
+
   for (const cond of normalized.conditionals || []) {
     const normalizedAffected = (Array.isArray((cond as any)?.affectedClaims) ? (cond as any).affectedClaims : [])
       .map((cid: any) => String(cid || '').trim())
       .filter((cid: string) => cid.length > 0);
     const affectedClaims: string[] = Array.from(new Set<string>(normalizedAffected));
     if (affectedClaims.length === 0) continue;
-    
+
     const sourceStatementIds = Array.from(
       new Set(
         affectedClaims
@@ -323,27 +360,27 @@ export function extractForcingPoints(
   // ─────────────────────────────────────────────────────────────────────────
   // TIER 1+: Conflicts (Crucibles)
   // ─────────────────────────────────────────────────────────────────────────
-  
+
   const conflictPairs = new Set<string>();
-  
+
   for (const edge of normalized.edges || []) {
     if (edge.type !== 'conflict') continue;
-    
+
     const aId = edge.from;
     const bId = edge.to;
     const pairKey = pairKeyFor(aId, bId);
-    
+
     if (conflictPairs.has(pairKey)) continue;
     conflictPairs.add(pairKey);
-    
+
     const a = claimMap.get(aId);
     const b = claimMap.get(bId);
     if (!a || !b) continue;
-    
+
     // Find prerequisites for each option (advisory context)
     const aPrereqs = findPrerequisites(aId, normalized.edges, claimMap);
     const bPrereqs = findPrerequisites(bId, normalized.edges, claimMap);
-    
+
     const edgeSourceIds = Array.isArray((edge as any)?.sourceStatementIds)
       ? (edge as any).sourceStatementIds.map((s: any) => String(s)).filter(Boolean)
       : [];
@@ -352,9 +389,9 @@ export function extractForcingPoints(
       ...(b.sourceStatementIds || []),
       ...edgeSourceIds,
     ])).sort();
-    
+
     const id = `fp_conflict_${pairKey}`;
-    const question = String((edge as any).question || '').trim() 
+    const question = String((edge as any).question || '').trim()
       || `Choose between: ${a.label} vs ${b.label}`;
     const blockedByGateIds = Array.from(
       new Set(
@@ -391,7 +428,7 @@ export function extractForcingPoints(
 
   // Sort: conditionals first (tier 0), then conflicts
   forcingPoints.sort((a, b) => a.tier - b.tier);
-  
+
   return forcingPoints;
 }
 
@@ -458,15 +495,15 @@ export function resolveConditional(
   // Apply pruning if not satisfied
   if (!satisfied && forcingPoint.affectedClaims) {
     const prunedIds: string[] = [];
-    
+
     for (const claimId of forcingPoint.affectedClaims) {
       prunedIds.push(claimId);
       nextState.claimStatuses.set(claimId, 'pruned');
     }
-    
+
     // Cascade pruning to dependent claims
     cascadePruning(nextState, getEdgesFromGraph(graph), prunedIds);
-    
+
     nextState.pathSteps.push(
       `✗ "${forcingPoint.condition}" — ${forcingPoint.affectedClaims.length} claim(s) pruned`
     );
@@ -506,16 +543,16 @@ export function resolveConflict(
     const rejected = forcingPoint.options.filter(
       opt => opt.claimId !== selectedClaimId
     );
-    
+
     const prunedIds: string[] = [];
     for (const opt of rejected) {
       prunedIds.push(opt.claimId);
       nextState.claimStatuses.set(opt.claimId, 'pruned');
     }
-    
+
     // Cascade pruning to dependent claims
     cascadePruning(nextState, getEdgesFromGraph(graph), prunedIds);
-    
+
     const rejectedLabels = rejected.map(r => r.label).join(', ');
     nextState.pathSteps.push(
       `→ Chose "${selectedLabel}" over "${rejectedLabels}"`
@@ -624,7 +661,7 @@ function cascadePruning(
 
   while (queue.length > 0) {
     const prunedId = queue.shift()!;
-    
+
     // Skip if we've already processed this claim's dependents
     if (processed.has(prunedId)) continue;
     processed.add(prunedId);

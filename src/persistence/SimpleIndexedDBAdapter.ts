@@ -158,7 +158,7 @@ export class SimpleIndexedDBAdapter {
           return new Promise<SimpleRecord>((resolve, reject) => {
             // If the store has a keyPath defined, IndexedDB requires that we DO NOT provide
             // an explicit key argument to put(). Passing a key would raise a DataError DOMException.
-            const hasKeyPath = (store as any).keyPath !== null && (store as any).keyPath !== undefined;
+            const hasKeyPath = store.keyPath !== null && store.keyPath !== undefined;
             const request = hasKeyPath
               ? store.put(clonedValue)
               : (key ? store.put(clonedValue, key) : store.put(clonedValue));
@@ -174,6 +174,59 @@ export class SimpleIndexedDBAdapter {
         `persistence:put(${resolved}, ${key || value.id}) - error:`,
         error,
       );
+      throw error;
+    }
+  }
+
+  async update(
+    storeName: string,
+    key: string,
+    updater: (current: SimpleRecord | undefined) => SimpleRecord | undefined,
+  ): Promise<SimpleRecord | undefined> {
+    this.ensureReady();
+    const resolved = this.resolveStoreName(storeName);
+    try {
+      const result = await withTransaction(
+        this.db!,
+        [resolved],
+        "readwrite",
+        async (tx) => {
+          const store = tx.objectStore(resolved);
+          const current = await new Promise<SimpleRecord | undefined>(
+            (resolve, reject) => {
+              const request = store.get(key);
+              request.onsuccess = () => resolve(request.result || undefined);
+              request.onerror = () => reject(request.error);
+            },
+          );
+
+          const next = updater(
+            current ? JSON.parse(JSON.stringify(current)) : undefined,
+          );
+          if (!next) return undefined;
+
+          const clonedValue = JSON.parse(JSON.stringify(next));
+          const now = Date.now();
+          if (!clonedValue.id) clonedValue.id = key;
+          if (!clonedValue.createdAt) clonedValue.createdAt = current?.createdAt || now;
+          clonedValue.updatedAt = now;
+
+          await new Promise<void>((resolve, reject) => {
+            const hasKeyPath = store.keyPath !== null && store.keyPath !== undefined;
+            const request = hasKeyPath
+              ? store.put(clonedValue)
+              : store.put(clonedValue, key);
+            request.onsuccess = () => resolve();
+            request.onerror = () => reject(request.error);
+          });
+
+          return clonedValue;
+        },
+      );
+
+      return result;
+    } catch (error) {
+      console.error(`persistence:update(${resolved}, ${key}) - error:`, error);
       throw error;
     }
   }
@@ -198,7 +251,7 @@ export class SimpleIndexedDBAdapter {
         "readwrite",
         async (tx) => {
           const store = tx.objectStore(resolved);
-          const hasKeyPath = (store as any).keyPath !== null && (store as any).keyPath !== undefined;
+          const hasKeyPath = store.keyPath !== null && store.keyPath !== undefined;
 
           // Process all puts within the single transaction
           const promises = values.map(value => {

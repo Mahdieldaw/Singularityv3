@@ -120,15 +120,25 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
 
     if (aiTurn.pipelineStatus === 'error') {
         const pipelineError = (aiTurn.meta as any)?.pipelineError;
+        const metaRetryable = (aiTurn.meta as any)?.retryable;
+        const retryable =
+            typeof metaRetryable === "boolean"
+                ? metaRetryable
+                : (typeof (pipelineError as any)?.retryable === "boolean" ? (pipelineError as any).retryable : true);
+        const failedProviderId = (aiTurn.meta as any)?.singularity || undefined;
+        const errorMessage =
+            typeof pipelineError === "string"
+                ? pipelineError
+                : ((pipelineError as any)?.message || "Pipeline failed unexpectedly");
         return (
             <div className="w-full max-w-3xl mx-auto animate-in fade-in duration-500">
                 <div className="flex flex-col gap-6 mb-8">
                     <PipelineErrorBanner
                         type="singularity"
-                        failedProviderId={(aiTurn.meta as any)?.singularity || ''}
+                        failedProviderId={failedProviderId}
                         onRetry={(pid) => triggerAndSwitch({ providerId: pid })}
-                        errorMessage={pipelineError || 'Pipeline failed unexpectedly'}
-                        retryable={true}
+                        errorMessage={errorMessage}
+                        retryable={retryable}
                     />
                 </div>
             </div>
@@ -301,6 +311,7 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
                         sessionId={effectiveSessionId!}
                         aiTurnId={aiTurn.id}
                         pipelineStatus={aiTurn.pipelineStatus}
+                        hasReceivedSingularityResponse={hasSingularityText}
                         onComplete={() => setViewOverride('response')}
                     />
                 </div>

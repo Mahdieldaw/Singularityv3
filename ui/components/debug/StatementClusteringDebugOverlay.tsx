@@ -199,7 +199,10 @@ export function StatementClusteringDebugOverlay() {
         ),
       ),
       modelId: String(modelId || base.modelId),
-      minParagraphsForClustering: Math.max(1, Math.floor(minItems)),
+      minParagraphsForClustering: Math.max(
+        1,
+        Math.floor(Number.isFinite(minItems) ? minItems : base.minParagraphsForClustering),
+      ),
     };
   }, [embeddingDimensionsText, minItems, modelId, preset, similarityThresholdText]);
 
@@ -426,7 +429,16 @@ export function StatementClusteringDebugOverlay() {
                     Min items
                     <input
                       value={String(minItems)}
-                      onChange={(e) => setMinItems(Number(e.target.value))}
+                      onChange={(e) => {
+                        const raw = e.target.value;
+                        if (raw.trim() === "") {
+                          setMinItems(1);
+                          return;
+                        }
+                        const next = Number(raw);
+                        if (!Number.isFinite(next)) return;
+                        setMinItems(next);
+                      }}
                       className="bg-chip border border-border-subtle rounded px-2 py-1 text-xs text-text-primary font-mono"
                       inputMode="numeric"
                     />

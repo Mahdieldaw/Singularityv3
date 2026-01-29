@@ -76,16 +76,18 @@ export function findUnattendedRegions(
         const modelIndices = new Set<number>();
         let totalIsolation = 0;
         let totalMutualDegree = 0;
+        let processedCount = 0;
 
         for (const nodeId of region.nodeIds) {
             const node = nodeById.get(nodeId);
             if (!node) continue;
+            processedCount += 1;
             modelIndices.add(node.modelIndex);
             totalIsolation += node.isolationScore;
             totalMutualDegree += node.mutualDegree;
         }
 
-        const denom = Math.max(1, region.nodeIds.length);
+        const denom = Math.max(1, processedCount);
         const avgIsolation = totalIsolation / denom;
         const avgMutualDegree = totalMutualDegree / denom;
 

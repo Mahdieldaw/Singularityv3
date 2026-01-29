@@ -381,19 +381,19 @@ export const StructuralDebugPanel: React.FC<StructuralDebugPanelProps> = ({ anal
                                     <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
                                         <div>
                                             <div className="text-text-muted">Statement coverage</div>
-                                            <div className="font-mono">{formatPct(completenessReport.statements.coverageRatio)}</div>
+                                            <div className="font-mono">{formatPct(completenessReport?.statements?.coverageRatio)}</div>
                                         </div>
                                         <div>
                                             <div className="text-text-muted">Region coverage</div>
-                                            <div className="font-mono">{formatPct(completenessReport.regions.coverageRatio)}</div>
+                                            <div className="font-mono">{formatPct(completenessReport?.regions?.coverageRatio)}</div>
                                         </div>
                                         <div>
                                             <div className="text-text-muted">Recommendation</div>
-                                            <div>{recommendationBadge(completenessReport.verdict.recommendation)}</div>
+                                            <div>{recommendationBadge(completenessReport?.verdict?.recommendation)}</div>
                                         </div>
                                         <div>
                                             <div className="text-text-muted">Estimated missed claims</div>
-                                            <div className="font-mono">{completenessReport.verdict.estimatedMissedClaims}</div>
+                                            <div className="font-mono">{completenessReport?.verdict?.estimatedMissedClaims ?? "—"}</div>
                                         </div>
                                     </div>
 
@@ -424,22 +424,28 @@ export const StructuralDebugPanel: React.FC<StructuralDebugPanelProps> = ({ anal
                                         <div>
                                             <div className="text-text-muted">Coverage by claims</div>
                                             <div className="font-mono">
-                                                {fateCounts.total > 0 ? formatPct((fateCounts.primary + fateCounts.supporting) / fateCounts.total) : "—"}
+                                                {fateCounts?.total > 0 ? formatPct((fateCounts.primary + fateCounts.supporting) / fateCounts.total) : "—"}
                                             </div>
                                         </div>
                                         <div>
                                             <div className="text-text-muted">Verdict</div>
-                                            <div className="font-mono">{completenessReport.verdict.complete ? "complete" : "incomplete"}</div>
+                                            <div className="font-mono">
+                                                {completenessReport?.verdict?.complete == null
+                                                    ? "—"
+                                                    : completenessReport.verdict.complete
+                                                        ? "complete"
+                                                        : "incomplete"}
+                                            </div>
                                         </div>
                                         <div>
                                             <div className="text-text-muted">Confidence</div>
-                                            <div className="font-mono">{completenessReport.verdict.confidence}</div>
+                                            <div className="font-mono">{completenessReport?.verdict?.confidence ?? "—"}</div>
                                         </div>
                                         <div>
                                             <div className="text-text-muted">Regions unattended (likely)</div>
                                             <div className="font-mono">
-                                                {completenessReport.regions.unattended}{" "}
-                                                <span className="text-text-muted">({completenessReport.regions.unattendedWithLikelyClaims})</span>
+                                                {completenessReport?.regions?.unattended ?? "—"}{" "}
+                                                <span className="text-text-muted">({completenessReport?.regions?.unattendedWithLikelyClaims ?? "—"})</span>
                                             </div>
                                         </div>
                                     </div>
@@ -447,38 +453,38 @@ export const StructuralDebugPanel: React.FC<StructuralDebugPanelProps> = ({ anal
                                     <div className="grid grid-cols-2 md:grid-cols-4 gap-2 pt-2 border-t border-border-subtle/60">
                                         <div>
                                             <div className="text-text-muted">Statements total</div>
-                                            <div className="font-mono">{completenessReport.statements.total}</div>
+                                            <div className="font-mono">{completenessReport?.statements?.total ?? "—"}</div>
                                         </div>
                                         <div>
                                             <div className="text-text-muted">In claims</div>
-                                            <div className="font-mono">{completenessReport.statements.inClaims}</div>
+                                            <div className="font-mono">{completenessReport?.statements?.inClaims ?? "—"}</div>
                                         </div>
                                         <div>
                                             <div className="text-text-muted">Orphaned</div>
-                                            <div className="font-mono">{completenessReport.statements.orphaned}</div>
+                                            <div className="font-mono">{completenessReport?.statements?.orphaned ?? "—"}</div>
                                         </div>
                                         <div>
                                             <div className="text-text-muted">Noise</div>
-                                            <div className="font-mono">{completenessReport.statements.noise}</div>
+                                            <div className="font-mono">{completenessReport?.statements?.noise ?? "—"}</div>
                                         </div>
                                     </div>
 
                                     <div className="grid grid-cols-2 md:grid-cols-4 gap-2 pt-2 border-t border-border-subtle/60">
                                         <div>
                                             <div className="text-text-muted">Regions total</div>
-                                            <div className="font-mono">{completenessReport.regions.total}</div>
+                                            <div className="font-mono">{completenessReport?.regions?.total ?? "—"}</div>
                                         </div>
                                         <div>
                                             <div className="text-text-muted">Attended</div>
-                                            <div className="font-mono">{completenessReport.regions.attended}</div>
+                                            <div className="font-mono">{completenessReport?.regions?.attended ?? "—"}</div>
                                         </div>
                                         <div>
                                             <div className="text-text-muted">Unattended</div>
-                                            <div className="font-mono">{completenessReport.regions.unattended}</div>
+                                            <div className="font-mono">{completenessReport?.regions?.unattended ?? "—"}</div>
                                         </div>
                                         <div>
                                             <div className="text-text-muted">Unattended likely</div>
-                                            <div className="font-mono">{completenessReport.regions.unattendedWithLikelyClaims}</div>
+                                            <div className="font-mono">{completenessReport?.regions?.unattendedWithLikelyClaims ?? "—"}</div>
                                         </div>
                                     </div>
 

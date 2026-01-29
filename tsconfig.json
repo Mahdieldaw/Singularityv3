@@ -1,14 +1,14 @@
 {
   "compilerOptions": {
-    "useUnknownInCatchVariables": false,
+    "useUnknownInCatchVariables": true,
     "target": "es2022",
     "baseUrl": ".",
     "lib": [
       "DOM",
-      "ES2021"
+      "ES2022"
     ],
-    "allowJs": false,
-    "checkJs": false,
+    "allowJs": true,
+    "checkJs": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "module": "ESNext",
@@ -50,7 +50,7 @@
     "./**/*.ts",
     "./**/*.tsx",
     "./**/*.d.ts",
-  "./**/*.js"
+    "./**/*.js"
   ],
   "exclude": [
     "dist",

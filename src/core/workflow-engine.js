@@ -6,7 +6,7 @@ import { PersistenceCoordinator } from './execution/PersistenceCoordinator';
 import { TurnEmitter } from './execution/TurnEmitter';
 import { CognitivePipelineHandler } from './execution/CognitivePipelineHandler';
 import { parseMapperArtifact } from '../../shared/parsing-utils';
-import { classifyError } from './error-classifier.js';
+import { classifyError } from './error-classifier';
 
 export class WorkflowEngine {
   /* _options: Reserved for future configuration or interface compatibility */
@@ -132,34 +132,68 @@ export class WorkflowEngine {
     } catch (error) {
       const criticalMessage = error instanceof Error ? error.message : String(error);
       console.error(`[WorkflowEngine] Critical workflow execution error:`, error);
+      let finalized = false;
       try {
         await this._persistAndFinalize(request, context, steps, stepResults, resolvedContext);
-        return;
+        finalized = true;
       } catch (persistError) {
         const persistMessage =
           persistError instanceof Error ? persistError.message : String(persistError);
         if (context?.canonicalAiTurnId && this.sessionManager?.adapter) {
           try {
-            const turn = await this.sessionManager.adapter.get("turns", context.canonicalAiTurnId);
-            if (turn && turn.pipelineStatus === 'in_progress') {
-              turn.pipelineStatus = 'error';
-              turn.meta = {
-                ...(turn.meta || {}),
-                pipelineError: criticalMessage || persistMessage || 'Pipeline failed'
-              };
-              await this.sessionManager.adapter.put("turns", turn);
+            const adapter = this.sessionManager.adapter;
+            const pipelineError =
+              criticalMessage || persistMessage || 'Pipeline failed';
+
+            if (typeof adapter.update === "function") {
+              await adapter.update("turns", context.canonicalAiTurnId, (turn) => {
+                if (!turn) return turn;
+                return {
+                  ...turn,
+                  pipelineStatus: "error",
+                  meta: {
+                    ...(turn.meta || {}),
+                    pipelineError,
+                  },
+                };
+              });
+            } else {
+              const maxAttempts = 3;
+              for (let attempt = 0; attempt < maxAttempts; attempt++) {
+                const turn = await adapter.get("turns", context.canonicalAiTurnId);
+                if (!turn) break;
+                const updated = {
+                  ...turn,
+                  pipelineStatus: "error",
+                  meta: {
+                    ...(turn.meta || {}),
+                    pipelineError,
+                  },
+                };
+                try {
+                  await adapter.put("turns", updated);
+                  break;
+                } catch (retryError) {
+                  console.error(
+                    `[WorkflowEngine] Failed to mark turn as errored (attempt ${attempt + 1}/${maxAttempts}):`,
+                    retryError,
+                  );
+                }
+              }
             }
           } catch (markError) {
             console.error('[WorkflowEngine] Failed to mark turn as errored:', markError);
           }
         }
       }
-      this.port.postMessage({
-        type: "WORKFLOW_COMPLETE",
-        sessionId: context.sessionId,
-        workflowId: request.workflowId,
-        error: "A critical error occurred.",
-      });
+      if (!finalized) {
+        this.port.postMessage({
+          type: "WORKFLOW_COMPLETE",
+          sessionId: context.sessionId,
+          workflowId: request.workflowId,
+          error: "A critical error occurred.",
+        });
+      }
     } finally {
       this.streamingManager.clearCache(context?.sessionId);
     }

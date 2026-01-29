@@ -467,7 +467,10 @@ const BusController = {
           });
         } catch (n) {
           const msg = n instanceof Error ? n.message : String(n);
-          if (msg === "Extension context invalidated.") return;
+          if (msg === "Extension context invalidated.") {
+            e(null);
+            return;
+          }
           console.error("Bus error:", n);
           e(null);
         }

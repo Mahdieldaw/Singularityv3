@@ -1,12 +1,12 @@
 // src/persistence/index.ts
 
 export * from "./types";
-export * from "./database.js";
-export * from "./transactions.js";
-export * from "./SessionManager.js";
+export * from "./database";
+export * from "./transactions";
+export * from "./SessionManager";
 
-import { openDatabase, STORE_CONFIGS, SCHEMA_VERSION } from "./database.js";
-import { SimpleIndexedDBAdapter } from "./SimpleIndexedDBAdapter.js";
+import { openDatabase, STORE_CONFIGS, SCHEMA_VERSION } from "./database";
+import { SimpleIndexedDBAdapter } from "./SimpleIndexedDBAdapter";
 
 // Simplified PersistenceLayer interface
 export interface PersistenceLayer {

@@ -82,6 +82,7 @@ export function buildCompletenessReport(
     const stmtById = new Map(statements.map(s => [s.id, s]));
 
     const recoveryOrphans = highSignalOrphans
+        .filter(fate => (stmtById.get(fate.statementId)?.text ?? '').length > 0)
         .sort((a, b) => b.shadowMetadata.signalWeight - a.shadowMetadata.signalWeight)
         .slice(0, 10)
         .map(fate => {
@@ -93,8 +94,7 @@ export function buildCompletenessReport(
                 signalWeight: fate.shadowMetadata.signalWeight,
                 reason: fate.reason,
             };
-        })
-        .filter(item => item.text.length > 0);
+        });
 
     const regionPreviews = unattendedRegions
         .filter(r => r.likelyClaim)

@@ -1,5 +1,7 @@
 // src/persistence/types.ts
 
+import type { ProviderResponseType } from "../../shared/contract";
+
 // Store configuration types
 export interface StoreConfig {
   name: string;
@@ -25,10 +27,12 @@ export interface SessionRecord {
   activeThreadId: string;
   turnCount: number;
   isActive: boolean;
-  lastTurnId?: string;
+  lastTurnId?: string | null;
+  lastStructuralTurnId?: string | null;
   updatedAt: number;
   userId?: string;
   provider?: string;
+  conciergePhaseState?: Record<string, unknown>;
   metadata?: Record<string, any>;
 }
 
@@ -81,10 +85,14 @@ export interface AiTurnRecord extends BaseTurnRecord {
   };
   batchResponseCount: number;
   mappingResponseCount: number;
+  singularityResponseCount: number;
   providerContexts?: Record<string, any>;
   mapperArtifact?: any;
   pipelineArtifacts?: any;
   singularityOutput?: any;
+  storedAnalysis?: any;
+  lastContextSummary?: string;
+  pipelineStatus?: string;
 }
 
 export type TurnRecord = UserTurnRecord | AiTurnRecord;
@@ -95,10 +103,7 @@ export interface ProviderResponseRecord {
   sessionId: string;
   aiTurnId: string;
   providerId: string;
-  responseType:
-  | "batch"
-  | "mapping"
-  | "singularity";
+  responseType: ProviderResponseType;
   responseIndex: number;
   text: string;
   status: "pending" | "streaming" | "completed" | "error" | "cancelled";
@@ -122,13 +127,17 @@ export interface ProviderContextRecord {
   sessionId: string;
   providerId: string;
   threadId?: string;
-  meta: any;
   text?: string;
-  lastUpdated: number;
   createdAt: number;
   updatedAt: number;
   isActive?: boolean;
-  contextData?: any;
+  meta?: unknown;
+  lastUpdated?: number;
+  contextData?: {
+    text?: string;
+    meta?: Record<string, unknown>;
+    lastUpdated?: number;
+  };
   metadata?: Record<string, any>;
 }
 
@@ -154,3 +163,5 @@ export interface BatchWriteResult {
   success: boolean;
   errors?: Error[];
 }
+
+export type JsonSafeOpts = { maxDepth?: number; maxStringLength?: number };

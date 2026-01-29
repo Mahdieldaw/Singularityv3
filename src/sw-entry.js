@@ -31,8 +31,8 @@ import { ConnectionHandler } from "./core/connection-handler.js";
 import { authManager } from './core/auth-manager.js';
 
 // Persistence Layer Imports
-import { SessionManager } from "./persistence/SessionManager.js";
-import { initializePersistenceLayer } from "./persistence/index.js";
+import { SessionManager } from "./persistence/SessionManager";
+import { initializePersistenceLayer } from "./persistence/index";
 import { errorHandler, getErrorMessage } from "./utils/ErrorHandler";
 import { persistenceMonitor } from "./core/PersistenceMonitor.js";
 
@@ -90,9 +90,12 @@ chrome.cookies.onChanged.addListener((changeInfo) => {
   const timeoutId = setTimeout(() => {
     cookieChangeDebounce.delete(key);
 
-    void authManager.initialize().then(() => {
-      void authManager.handleCookieChange(changeInfo);
-    });
+    authManager
+      .initialize()
+      .then(() => authManager.handleCookieChange(changeInfo))
+      .catch((err) => {
+        console.error("[SW] Cookie change handler failed:", getErrorMessage(err), err);
+      });
   }, 100);
 
   cookieChangeDebounce.set(key, timeoutId);

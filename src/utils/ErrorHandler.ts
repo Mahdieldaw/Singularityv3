@@ -3,17 +3,79 @@
  * Provides comprehensive error handling, recovery strategies, and fallback mechanisms
  */
 
-import { persistenceMonitor } from "../core/PersistenceMonitor.js";
+import { persistenceMonitor } from "../core/PersistenceMonitor";
 
 // ============================================================
-// NEW: Provider authentication configuration
+// Inline types to avoid contract.ts dependencies
 // ============================================================
 
-export type ProviderConfigEntry = {
+interface ProviderConfigEntry {
   displayName: string;
   loginUrl: string;
   maxInputChars: number;
-};
+}
+
+interface RetryPolicy {
+  maxRetries: number;
+  baseDelay: number;
+  maxDelay: number;
+  backoffMultiplier: number;
+  jitter: boolean;
+}
+
+interface CircuitBreakerState {
+  state: "closed" | "open" | "half-open";
+  failures: number;
+  openedAt: number | null;
+  timeout: number;
+}
+
+type FallbackStrategy = (
+  operation: unknown,
+  context: Record<string, unknown>,
+) => Promise<unknown>;
+
+interface RecoveryStrategy {
+  name: string;
+  execute: (error: HTOSError, context: Record<string, unknown>) => Promise<unknown>;
+}
+
+type OperationFn = (context: Record<string, unknown>) => Promise<unknown>;
+
+// Error codes - union of all possible codes
+type HTOSErrorCode =
+  | "AUTH_REQUIRED"
+  | "MULTI_AUTH_REQUIRED"
+  | "RATE_LIMITED"
+  | "NETWORK_ERROR"
+  | "STORAGE_QUOTA_EXCEEDED"
+  | "INVALID_STATE"
+  | "NOT_FOUND"
+  | "TIMEOUT"
+  | "INDEXEDDB_ERROR"
+  | "INDEXEDDB_UNAVAILABLE"
+  | "SERVICE_WORKER_ERROR"
+  | "INPUT_TOO_LONG"
+  | "UNKNOWN_ERROR"
+  | "CIRCUIT_BREAKER_OPEN"
+  | "FALLBACK_UNSUPPORTED"
+  | "FALLBACK_FAILED"
+  | "CACHE_CORRUPTED"
+  | "NO_CACHE_AVAILABLE"
+  | "DIRECT_UNSUPPORTED"
+  | "NO_RECOVERY_STRATEGY"
+  | "INVALID_RETRY_POLICY"
+  | "RETRY_EXHAUSTED"
+  | "LOCALSTORAGE_SAVE_FAILED"
+  | "LOCALSTORAGE_LOAD_FAILED"
+  | "LOCALSTORAGE_DELETE_FAILED"
+  | "LOCALSTORAGE_LIST_FAILED"
+  | "DIRECT_PERSISTENCE_NOT_IMPLEMENTED"
+  | "DIRECT_SESSION_NOT_IMPLEMENTED";
+
+// ============================================================
+// Provider configuration
+// ============================================================
 
 export const PROVIDER_CONFIG: Record<string, ProviderConfigEntry> = {
   claude: {
@@ -54,10 +116,10 @@ export const PROVIDER_CONFIG: Record<string, ProviderConfigEntry> = {
 };
 
 // ============================================================
-// NEW: Auth error detection patterns
+// Auth error detection patterns
 // ============================================================
 
-const AUTH_STATUS_CODES = new Set<number>([401, 403]);
+const AUTH_STATUS_CODES = new Set([401, 403]);
 
 const AUTH_ERROR_PATTERNS = [
   /NOT_LOGIN/i,
@@ -76,13 +138,10 @@ const RATE_LIMIT_PATTERNS = [
   /try.?again.?later/i,
 ];
 
-export type HTOSErrorCode = string;
-
-export type HTOSErrorContext = Record<string, unknown>;
-
 export class HTOSError extends Error {
+  name: string;
   code: HTOSErrorCode;
-  context: HTOSErrorContext;
+  context: Record<string, unknown>;
   recoverable: boolean;
   timestamp: number;
   id: string;
@@ -90,8 +149,8 @@ export class HTOSError extends Error {
   constructor(
     message: string,
     code: HTOSErrorCode,
-    context: HTOSErrorContext = {},
-    recoverable: boolean = true,
+    context: Record<string, unknown> = {},
+    recoverable = true,
   ) {
     super(message);
     this.name = "HTOSError";
@@ -102,20 +161,11 @@ export class HTOSError extends Error {
     this.id = `error_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
   }
 
-  get details(): HTOSErrorContext {
+  get details(): Record<string, unknown> {
     return this.context;
   }
 
-  toJSON(): {
-    id: string;
-    name: string;
-    message: string;
-    code: HTOSErrorCode;
-    context: HTOSErrorContext;
-    recoverable: boolean;
-    timestamp: number;
-    stack?: string;
-  } {
+  toJSON(): Record<string, unknown> {
     return {
       id: this.id,
       name: this.name,
@@ -130,18 +180,21 @@ export class HTOSError extends Error {
 }
 
 // ============================================================
-// NEW: Provider-specific error class
+// Provider-specific error class
 // ============================================================
 
 export class ProviderAuthError extends HTOSError {
   providerId: string;
   loginUrl: string;
 
-  constructor(providerId: string, message: string | null, context: HTOSErrorContext = {}) {
+  constructor(
+    providerId: string,
+    message?: string | null,
+    context: Record<string, unknown> = {},
+  ) {
     const config = PROVIDER_CONFIG[providerId] || {
       displayName: providerId,
       loginUrl: "the provider website",
-      maxInputChars: Infinity,
     };
 
     const userMessage =
@@ -166,97 +219,61 @@ export class ProviderAuthError extends HTOSError {
   }
 }
 
-type ErrorWithResponse = {
-  status?: unknown;
-  response?: { status?: unknown } | null;
-  message?: unknown;
-  name?: unknown;
-  code?: unknown;
-  details?: unknown;
-};
-
-const getStatusCode = (error: unknown): number | undefined => {
-  if (!error || typeof error !== "object") return undefined;
-  const e = error as ErrorWithResponse;
-  const raw = e.status ?? e.response?.status;
-  if (typeof raw === "number") return raw;
-  if (typeof raw === "string") {
-    const num = Number(raw);
-    return Number.isFinite(num) ? num : undefined;
-  }
-  return undefined;
-};
-
-const getErrorName = (error: unknown): string | undefined => {
-  if (!error || typeof error !== "object") return undefined;
-  const e = error as ErrorWithResponse;
-  return typeof e.name === "string" ? e.name : undefined;
-};
-
 // ============================================================
-// NEW: Error classification helpers
+// Error classification helpers
 // ============================================================
 
 export function isProviderAuthError(error: unknown): boolean {
   if (error instanceof ProviderAuthError) return true;
-  if (error && typeof error === "object" && "code" in error) {
-    const code = (error as { code?: unknown }).code;
-    if (code === "AUTH_REQUIRED") return true;
-  }
+  if ((error as Record<string, unknown> | null)?.code === "AUTH_REQUIRED") return true;
 
-  const status = getStatusCode(error);
+  const errorObj = error as Record<string, unknown> | null;
+  const status =
+    errorObj?.status || (errorObj?.response as Record<string, unknown> | null)?.status;
   if (typeof status === "number" && AUTH_STATUS_CODES.has(status)) return true;
 
-  const message =
-    error && typeof error === "object" && "message" in error
-      ? String((error as { message?: unknown }).message)
-      : String(error);
+  const message = (errorObj?.message as string) || String(error);
   return AUTH_ERROR_PATTERNS.some((pattern) => pattern.test(message));
 }
 
 export function isRateLimitError(error: unknown): boolean {
-  const status = getStatusCode(error);
+  const errorObj = error as Record<string, unknown> | null;
+  const status =
+    errorObj?.status || (errorObj?.response as Record<string, unknown> | null)?.status;
   if (status === 429) return true;
 
-  const message =
-    error && typeof error === "object" && "message" in error
-      ? String((error as { message?: unknown }).message)
-      : String(error);
+  const message = (errorObj?.message as string) || String(error);
   return RATE_LIMIT_PATTERNS.some((pattern) => pattern.test(message));
 }
 
 export function isNetworkError(error: unknown): boolean {
   const message =
-    error && typeof error === "object" && "message" in error
-      ? String((error as { message?: unknown }).message)
-      : String(error);
+    ((error as Record<string, unknown> | null)?.message as string) || String(error);
   return /failed.?to.?fetch|network|timeout|ECONNREFUSED|ENOTFOUND/i.test(message);
 }
 
 export function createProviderAuthError(
   providerId: string,
   originalError: unknown,
-  context: HTOSErrorContext = {},
+  context: Record<string, unknown> = {},
 ): ProviderAuthError {
-  return new ProviderAuthError(providerId, null, {
+  const errorObj = originalError as Record<string, unknown> | null;
+  return new ProviderAuthError(providerId, undefined, {
     ...context,
     originalError,
-    originalMessage:
-      originalError && typeof originalError === "object" && "message" in originalError
-        ? String((originalError as { message?: unknown }).message)
-        : undefined,
-    originalStatus: getStatusCode(originalError),
+    originalMessage: errorObj?.message,
+    originalStatus: errorObj?.status,
   });
 }
 
 export function createMultiProviderAuthError(
   providerIds: string[] | null | undefined,
-  context: string = "",
-): HTOSError | ProviderAuthError | null {
+  context = "",
+): HTOSError | null {
   if (!providerIds?.length) return null;
 
   if (providerIds.length === 1) {
-    return new ProviderAuthError(providerIds[0], null);
+    return new ProviderAuthError(providerIds[0]);
   }
 
   const lines = providerIds.map((pid) => {
@@ -279,69 +296,97 @@ export function createMultiProviderAuthError(
   );
 }
 
+// ============================================================
+// Standalone utility functions (for direct import)
+// ============================================================
+
+/**
+ * Extract a user-friendly error message from any error type
+ */
 export function getErrorMessage(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  if (typeof error === "string") return error;
-  if (error && typeof error === "object" && "message" in error) {
-    return String((error as { message?: unknown }).message);
+  if (error instanceof HTOSError) {
+    return error.message;
   }
+
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  if (typeof error === "string") {
+    return error;
+  }
+
+  const errorObj = error as Record<string, unknown> | null;
+  if (errorObj?.message && typeof errorObj.message === "string") {
+    return errorObj.message;
+  }
+
   return String(error);
 }
 
-export type NormalizedError = {
-  message: string;
-  code?: string;
-  details?: unknown;
-  stack?: string;
-};
+/**
+ * Standalone normalizeError function for direct import
+ * Creates an HTOSError from any error type with appropriate classification
+ */
+export function normalizeError(
+  error: unknown,
+  context: Record<string, unknown> = {},
+): HTOSError {
+  // Already an HTOS error
+  if (error instanceof HTOSError) {
+    return error;
+  }
 
-export function normalizeError(error: unknown): NormalizedError {
-  if (error instanceof Error) {
-    const e = error as Error & { code?: unknown; details?: unknown };
-    return {
-      message: e.message,
-      code: typeof e.code !== "undefined" ? String(e.code) : undefined,
-      details: typeof e.details !== "undefined" ? e.details : undefined,
-      stack: e.stack,
-    };
+  const errorObj = error as Record<string, unknown> | null;
+  let code: HTOSErrorCode = "UNKNOWN_ERROR";
+  let recoverable = true;
+
+  // Check for provider auth errors first
+  if (isProviderAuthError(error)) {
+    code = "AUTH_REQUIRED";
+    recoverable = false;
+  } else if (isRateLimitError(error)) {
+    code = "RATE_LIMITED";
+    recoverable = true;
+  } else if (isNetworkError(error)) {
+    code = "NETWORK_ERROR";
+    recoverable = true;
   }
-  if (error && typeof error === "object") {
-    const e = error as ErrorWithResponse;
-    return {
-      message: typeof e.message !== "undefined" ? String(e.message) : String(error),
-      code: typeof e.code !== "undefined" ? String(e.code) : undefined,
-      details: typeof e.details !== "undefined" ? e.details : undefined,
-    };
+  // Categorize common errors
+  else if (errorObj?.name === "QuotaExceededError") {
+    code = "STORAGE_QUOTA_EXCEEDED";
+    recoverable = false;
+  } else if (errorObj?.name === "InvalidStateError") {
+    code = "INVALID_STATE";
+  } else if (errorObj?.name === "NotFoundError") {
+    code = "NOT_FOUND";
+  } else if (errorObj?.name === "NetworkError") {
+    code = "NETWORK_ERROR";
+  } else if (errorObj?.name === "TimeoutError") {
+    code = "TIMEOUT";
+  } else if (typeof errorObj?.message === "string" && errorObj.message.includes("IndexedDB")) {
+    code = "INDEXEDDB_ERROR";
+  } else if (typeof errorObj?.message === "string" && errorObj.message.includes("Service Worker")) {
+    code = "SERVICE_WORKER_ERROR";
+  } else if (
+    (typeof errorObj?.message === "string" && errorObj.message.includes("INPUT_TOO_LONG")) ||
+    errorObj?.code === "INPUT_TOO_LONG"
+  ) {
+    code = "INPUT_TOO_LONG";
+    recoverable = false;
   }
-  return { message: String(error) };
+
+  return new HTOSError(
+    (errorObj?.message as string) || String(error),
+    code,
+    { ...context, originalError: error },
+    recoverable,
+  );
 }
 
-export type RetryPolicy = {
-  maxRetries: number;
-  baseDelay: number;
-  maxDelay: number;
-  backoffMultiplier: number;
-  jitter: boolean;
-};
-
-export type CircuitBreakerState = {
-  state: "closed" | "open" | "half-open";
-  failures: number;
-  openedAt: number | null;
-  timeout: number;
-};
-
-export type OperationFn<TResult = unknown> = (context: Record<string, any>) => Promise<TResult>;
-
-export type FallbackStrategy = (
-  operation: string,
-  context: Record<string, any>,
-) => Promise<unknown>;
-
-export type RecoveryStrategy = {
-  name: string;
-  execute: (error: HTOSError, context: Record<string, any>) => Promise<unknown>;
-};
+// ============================================================
+// ErrorHandler class
+// ============================================================
 
 export class ErrorHandler {
   fallbackStrategies: Map<string, FallbackStrategy>;
@@ -381,16 +426,18 @@ export class ErrorHandler {
   setupDefaultStrategies(): void {
     this.fallbackStrategies.set(
       "PROVIDER_AUTH_FAILED",
-      async (_operation: string, context: Record<string, any>) => {
+      async (_operation, context) => {
         const { failedProvider, availableProviders, authManager } = context;
 
         console.warn(`🔄 Provider ${failedProvider} auth failed, checking alternatives`);
 
-        if (!availableProviders?.length || !authManager) {
-          throw new ProviderAuthError(String(failedProvider), null);
+        if (!Array.isArray(availableProviders) || !availableProviders.length || !authManager) {
+          throw new ProviderAuthError(failedProvider as string);
         }
 
-        const authStatus = await authManager.getAuthStatus();
+        const authStatus = await (
+          authManager as { getAuthStatus: () => Promise<Record<string, boolean>> }
+        ).getAuthStatus();
 
         const fallbackProvider = (availableProviders as string[]).find(
           (pid) => pid !== failedProvider && authStatus[pid] === true,
@@ -401,25 +448,25 @@ export class ErrorHandler {
           return { fallbackProvider, authStatus };
         }
 
-        throw new ProviderAuthError(String(failedProvider), null);
+        throw new ProviderAuthError(failedProvider as string);
       },
     );
 
     this.fallbackStrategies.set(
       "INDEXEDDB_UNAVAILABLE",
-      async (operation: string, context: Record<string, any>) => {
+      async (operation, context) => {
         console.warn("🔄 Falling back to localStorage for:", operation);
 
         try {
           switch (operation) {
             case "save":
-              return this.saveToLocalStorage(context.key, context.data);
+              return this.saveToLocalStorage(context.key as string, context.data);
             case "load":
-              return this.loadFromLocalStorage(context.key);
+              return this.loadFromLocalStorage(context.key as string);
             case "delete":
-              return this.deleteFromLocalStorage(context.key);
+              return this.deleteFromLocalStorage(context.key as string);
             case "list":
-              return this.listFromLocalStorage(context.prefix);
+              return this.listFromLocalStorage(context.prefix as string);
             default:
               throw new HTOSError(
                 "Unsupported fallback operation",
@@ -436,7 +483,7 @@ export class ErrorHandler {
 
     this.fallbackStrategies.set(
       "NETWORK_UNAVAILABLE",
-      async (operation: string, context: Record<string, any>) => {
+      async (operation, context) => {
         console.warn("🔄 Falling back to cache for network operation:", operation);
 
         const cacheKey = `htos_cache_${context.url || context.key}`;
@@ -458,7 +505,7 @@ export class ErrorHandler {
 
     this.fallbackStrategies.set(
       "SERVICE_WORKER_UNAVAILABLE",
-      async (operation: string, context: Record<string, any>) => {
+      async (operation, context) => {
         console.warn(
           "🔄 Falling back to direct operation (no service worker):",
           operation,
@@ -470,7 +517,10 @@ export class ErrorHandler {
           case "session":
             return this.directSessionOperation(context);
           default:
-            throw new HTOSError("Direct operation not supported", "DIRECT_UNSUPPORTED");
+            throw new HTOSError(
+              "Direct operation not supported",
+              "DIRECT_UNSUPPORTED",
+            );
         }
       },
     );
@@ -502,7 +552,10 @@ export class ErrorHandler {
     });
   }
 
-  async handleError(error: unknown, context: Record<string, any> = {}): Promise<unknown> {
+  async handleError(
+    error: unknown,
+    context: Record<string, unknown> = {},
+  ): Promise<unknown> {
     const htosError = this.normalizeError(error, context);
 
     persistenceMonitor.recordError(htosError, context);
@@ -529,55 +582,17 @@ export class ErrorHandler {
     throw htosError;
   }
 
-  normalizeError(error: unknown, context: Record<string, any> = {}): HTOSError {
-    if (error instanceof HTOSError) {
-      return error;
-    }
-
-    let code: HTOSErrorCode = "UNKNOWN_ERROR";
-    let recoverable = true;
-
-    if (isProviderAuthError(error)) {
-      code = "AUTH_REQUIRED";
-      recoverable = false;
-    } else if (isRateLimitError(error)) {
-      code = "RATE_LIMITED";
-      recoverable = true;
-    } else if (isNetworkError(error)) {
-      code = "NETWORK_ERROR";
-      recoverable = true;
-    } else if (getErrorName(error) === "QuotaExceededError") {
-      code = "STORAGE_QUOTA_EXCEEDED";
-      recoverable = false;
-    } else if (getErrorName(error) === "InvalidStateError") {
-      code = "INVALID_STATE";
-    } else if (getErrorName(error) === "NotFoundError") {
-      code = "NOT_FOUND";
-    } else if (getErrorName(error) === "NetworkError") {
-      code = "NETWORK_ERROR";
-    } else if (getErrorName(error) === "TimeoutError") {
-      code = "TIMEOUT";
-    } else if (getErrorMessage(error).includes("IndexedDB")) {
-      code = "INDEXEDDB_ERROR";
-    } else if (getErrorMessage(error).includes("Service Worker")) {
-      code = "SERVICE_WORKER_ERROR";
-    } else if (
-      getErrorMessage(error).includes("INPUT_TOO_LONG") ||
-      (error && typeof error === "object" && "code" in error && (error as { code?: unknown }).code === "INPUT_TOO_LONG")
-    ) {
-      code = "INPUT_TOO_LONG";
-      recoverable = false;
-    }
-
-    return new HTOSError(
-      getErrorMessage(error),
-      code,
-      { ...context, originalError: error },
-      recoverable,
-    );
+  /**
+   * Instance method that delegates to standalone function
+   */
+  normalizeError(error: unknown, context: Record<string, unknown> = {}): HTOSError {
+    return normalizeError(error, context);
   }
 
-  async attemptRecovery(error: HTOSError, context: Record<string, any>): Promise<unknown> {
+  async attemptRecovery(
+    error: HTOSError,
+    context: Record<string, unknown>,
+  ): Promise<unknown> {
     const strategy = this.getRecoveryStrategy(error.code);
 
     if (strategy) {
@@ -607,47 +622,63 @@ export class ErrorHandler {
         name: "Provider Auth Recovery",
         execute: async (error, context) => {
           if (context.authManager && context.providerId) {
-            context.authManager.invalidateCache(context.providerId);
-            await context.authManager.verifyProvider(context.providerId);
+            const authManager = context.authManager as {
+              invalidateCache: (pid: string) => void;
+              verifyProvider: (pid: string) => Promise<unknown>;
+            };
+            authManager.invalidateCache(context.providerId as string);
+            await authManager.verifyProvider(context.providerId as string);
           }
           throw error;
         },
       },
+
       RATE_LIMITED: {
         name: "Rate Limit Recovery",
         execute: async (_error, context) => {
           console.log(`⏳ Rate limited by ${context.providerId}, waiting...`);
           return await this.retryWithBackoff(
-            context.operation,
+            context.operation as OperationFn,
             context,
             "PROVIDER_RATE_LIMIT",
           );
         },
       },
+
       INDEXEDDB_ERROR: {
         name: "IndexedDB Recovery",
         execute: async (error, context) => {
           if (context.reinitialize) {
-            await context.reinitialize();
-            return await context.retry();
+            await (context.reinitialize as () => Promise<unknown>)();
+            return await (context.retry as () => Promise<unknown>)();
           }
           throw error;
         },
       },
+
       NETWORK_ERROR: {
         name: "Network Recovery",
         execute: async (_error, context) => {
-          return await this.retryWithBackoff(context.operation, context, "STANDARD");
+          return await this.retryWithBackoff(
+            context.operation as OperationFn,
+            context,
+            "STANDARD",
+          );
         },
       },
+
       TIMEOUT: {
         name: "Timeout Recovery",
         execute: async (_error, context) => {
           const newContext = {
             ...context,
-            timeout: (context.timeout || 5000) * 2,
+            timeout: ((context.timeout as number) || 5000) * 2,
           };
-          return await this.retryWithBackoff(context.operation, newContext, "CONSERVATIVE");
+          return await this.retryWithBackoff(
+            context.operation as OperationFn,
+            newContext,
+            "CONSERVATIVE",
+          );
         },
       },
     };
@@ -664,13 +695,13 @@ export class ErrorHandler {
     };
 
     const fallbackKey = fallbackMap[errorCode];
-    return fallbackKey ? this.fallbackStrategies.get(fallbackKey) || null : null;
+    return fallbackKey ? (this.fallbackStrategies.get(fallbackKey) ?? null) : null;
   }
 
   async retryWithBackoff(
     operation: OperationFn,
-    context: Record<string, any>,
-    policyName: string = "STANDARD",
+    context: Record<string, unknown>,
+    policyName = "STANDARD",
   ): Promise<unknown> {
     const policy = this.retryPolicies.get(policyName);
     if (!policy) {
@@ -695,7 +726,10 @@ export class ErrorHandler {
         return await operation(context);
       } catch (error) {
         lastError = error;
-        console.warn(`❌ Attempt ${attempt + 1} failed:`, getErrorMessage(error));
+        console.warn(
+          `❌ Attempt ${attempt + 1} failed:`,
+          (error as { message?: string })?.message,
+        );
       }
     }
 
@@ -720,7 +754,7 @@ export class ErrorHandler {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
-  incrementErrorCount(errorCode: HTOSErrorCode): void {
+  incrementErrorCount(errorCode: string): void {
     const count = this.errorCounts.get(errorCode) || 0;
     this.errorCounts.set(errorCode, count + 1);
   }
@@ -730,13 +764,9 @@ export class ErrorHandler {
     if (!breaker) return false;
 
     const now = Date.now();
-    if (breaker.state === "open") {
-      const openedAt = breaker.openedAt ?? now;
-      if (breaker.openedAt === null) breaker.openedAt = openedAt;
-      if (now - openedAt > breaker.timeout) {
+    if (breaker.state === "open" && breaker.openedAt !== null && now - breaker.openedAt > breaker.timeout) {
       breaker.state = "half-open";
       console.log(`🔄 Circuit breaker for ${errorCode} moved to half-open`);
-      }
     }
 
     return breaker.state === "open";
@@ -755,8 +785,7 @@ export class ErrorHandler {
       });
     }
 
-    const breaker = this.circuitBreakers.get(errorCode);
-    if (!breaker) return;
+    const breaker = this.circuitBreakers.get(errorCode)!;
 
     if (success) {
       breaker.failures = 0;
@@ -773,15 +802,20 @@ export class ErrorHandler {
     }
   }
 
-  async saveToLocalStorage(key: string, data: unknown): Promise<{ success: true; fallback: true }> {
+  async saveToLocalStorage(
+    key: string,
+    data: unknown,
+  ): Promise<{ success: true; fallback: true }> {
     try {
       const serialized = JSON.stringify(data);
       localStorage.setItem(`htos_fallback_${key}`, serialized);
       return { success: true, fallback: true };
     } catch (error) {
-      throw new HTOSError("localStorage save failed", "LOCALSTORAGE_SAVE_FAILED", {
-        error,
-      });
+      throw new HTOSError(
+        "localStorage save failed",
+        "LOCALSTORAGE_SAVE_FAILED",
+        { error },
+      );
     }
   }
 
@@ -790,9 +824,11 @@ export class ErrorHandler {
       const data = localStorage.getItem(`htos_fallback_${key}`);
       return data ? (JSON.parse(data) as unknown) : null;
     } catch (error) {
-      throw new HTOSError("localStorage load failed", "LOCALSTORAGE_LOAD_FAILED", {
-        error,
-      });
+      throw new HTOSError(
+        "localStorage load failed",
+        "LOCALSTORAGE_LOAD_FAILED",
+        { error },
+      );
     }
   }
 
@@ -801,9 +837,11 @@ export class ErrorHandler {
       localStorage.removeItem(`htos_fallback_${key}`);
       return { success: true, fallback: true };
     } catch (error) {
-      throw new HTOSError("localStorage delete failed", "LOCALSTORAGE_DELETE_FAILED", {
-        error,
-      });
+      throw new HTOSError(
+        "localStorage delete failed",
+        "LOCALSTORAGE_DELETE_FAILED",
+        { error },
+      );
     }
   }
 
@@ -821,20 +859,22 @@ export class ErrorHandler {
 
       return keys;
     } catch (error) {
-      throw new HTOSError("localStorage list failed", "LOCALSTORAGE_LIST_FAILED", {
-        error,
-      });
+      throw new HTOSError(
+        "localStorage list failed",
+        "LOCALSTORAGE_LIST_FAILED",
+        { error },
+      );
     }
   }
 
-  async directPersistenceOperation(_context: Record<string, any>): Promise<never> {
+  async directPersistenceOperation(_context: Record<string, unknown>): Promise<never> {
     throw new HTOSError(
       "Direct persistence not implemented",
       "DIRECT_PERSISTENCE_NOT_IMPLEMENTED",
     );
   }
 
-  async directSessionOperation(_context: Record<string, any>): Promise<never> {
+  async directSessionOperation(_context: Record<string, unknown>): Promise<never> {
     throw new HTOSError(
       "Direct session management not implemented",
       "DIRECT_SESSION_NOT_IMPLEMENTED",
@@ -844,7 +884,7 @@ export class ErrorHandler {
   async handleProviderError(
     error: unknown,
     providerId: string,
-    context: Record<string, any> = {},
+    context: Record<string, unknown> = {},
   ): Promise<unknown> {
     const htosError = this.normalizeError(error, {
       ...context,
@@ -893,19 +933,17 @@ export class ErrorHandler {
   getProviderErrorStats(providerId: string): {
     providerId: string;
     errors: Record<string, number>;
-    circuitBreaker: { state: CircuitBreakerState["state"]; failures: number } | null;
+    circuitBreaker: { state: string; failures: number } | null;
   } {
     const prefix = `${providerId}_`;
-    const breaker = this.circuitBreakers.get(`provider_${providerId}`) || null;
-    const stats = {
+    const stats: {
+      providerId: string;
+      errors: Record<string, number>;
+      circuitBreaker: { state: string; failures: number } | null;
+    } = {
       providerId,
-      errors: {} as Record<string, number>,
-      circuitBreaker: breaker
-        ? {
-            state: breaker.state,
-            failures: breaker.failures,
-          }
-        : null,
+      errors: {},
+      circuitBreaker: null,
     };
 
     for (const [code, count] of Array.from(this.errorCounts.entries())) {
@@ -914,21 +952,30 @@ export class ErrorHandler {
       }
     }
 
+    const breaker = this.circuitBreakers.get(`provider_${providerId}`);
+    if (breaker) {
+      stats.circuitBreaker = {
+        state: breaker.state,
+        failures: breaker.failures,
+      };
+    }
+
     return stats;
   }
 
   getErrorStats(): {
     totalErrors: number;
     errorsByCode: Record<string, number>;
-    circuitBreakers: Record<string, { state: CircuitBreakerState["state"]; failures: number; openedAt: number | null }>;
+    circuitBreakers: Record<string, { state: string; failures: number; openedAt: number | null }>;
   } {
-    const stats = {
+    const stats: {
+      totalErrors: number;
+      errorsByCode: Record<string, number>;
+      circuitBreakers: Record<string, { state: string; failures: number; openedAt: number | null }>;
+    } = {
       totalErrors: 0,
-      errorsByCode: {} as Record<string, number>,
-      circuitBreakers: {} as Record<
-        string,
-        { state: CircuitBreakerState["state"]; failures: number; openedAt: number | null }
-      >,
+      errorsByCode: {},
+      circuitBreakers: {},
     };
 
     for (const [code, count] of Array.from(this.errorCounts.entries())) {
@@ -954,11 +1001,12 @@ export class ErrorHandler {
   }
 }
 
+// Create global instance
 export const errorHandler = new ErrorHandler();
 
+// Make it available globally for debugging
 if (typeof globalThis !== "undefined") {
-  (globalThis as typeof globalThis & { __HTOS_ERROR_HANDLER?: ErrorHandler }).__HTOS_ERROR_HANDLER =
-    errorHandler;
+  (globalThis as Record<string, unknown>).__HTOS_ERROR_HANDLER = errorHandler;
 }
 
 export default errorHandler;

@@ -13,6 +13,11 @@ export type WorkflowStepType =
   | "mapping"
   | "singularity";
 
+export type ProviderResponseType =
+  | "batch"
+  | "mapping"
+  | "singularity";
+
 
 export interface SingularityPipelineSnapshot {
   userMessage?: string;
@@ -1351,10 +1356,7 @@ export interface RecomputeRequest {
   type: "recompute";
   sessionId: string;
   sourceTurnId: string;
-  stepType:
-  | "mapping"
-  | "batch"
-  | "singularity";
+  stepType: ProviderResponseType;
   targetProvider: ProviderKey;
   userMessage?: string;
   useThinking?: boolean;
@@ -1449,7 +1451,7 @@ export interface RecomputeContext {
   frozenBatchOutputs: Record<ProviderKey, ProviderResponse>;
   latestMappingOutput?: { providerId: string; text: string; meta: any } | null;
   providerContextsAtSourceTurn: Record<ProviderKey, { meta: any }>;
-  stepType: "mapping" | "batch" | "singularity";
+  stepType: ProviderResponseType;
   targetProvider: ProviderKey;
   sourceUserMessage: string;
   /** Type of concierge prompt used (e.g. starter_1, explorer_1) */
@@ -1457,6 +1459,45 @@ export interface RecomputeContext {
   /** Seed data needed to rebuild the prompt (e.g. handovers, context meta) */
   frozenSingularityPromptSeed?: any;
 }
+
+export type ProviderOutput = {
+  providerId?: string;
+  text?: string;
+  status?: string;
+  meta?: any;
+};
+
+export type PersistenceResult = {
+  batchOutputs?: Record<string, ProviderOutput>;
+  mappingOutputs?: Record<string, ProviderOutput>;
+  singularityOutputs?: Record<string, ProviderOutput>;
+};
+
+export type PersistRequest = {
+  type: "initialize" | "extend" | "recompute";
+  sessionId: string;
+  userMessage?: string;
+  canonicalUserTurnId?: string;
+  canonicalAiTurnId?: string;
+  partial?: boolean;
+  pipelineStatus?: string;
+  runId?: string | null;
+  mapperArtifact?: unknown;
+  pipelineArtifacts?: unknown;
+  storedAnalysis?: unknown;
+  singularityOutput?: unknown;
+  understandOutput?: { short_answer?: string } | null;
+  gauntletOutput?: { the_answer?: { statement?: string } } | null;
+  sourceTurnId?: string;
+  stepType?: ProviderResponseType;
+  targetProvider?: string;
+};
+
+export type PersistReturn = {
+  sessionId: string;
+  userTurnId?: string | null;
+  aiTurnId?: string;
+};
 
 // ============================================================================
 // SECTION 3: REAL-TIME MESSAGING (BACKEND -> UI)
@@ -1613,7 +1654,7 @@ export interface WorkflowPartialCompleteMessage {
 export interface ProviderResponse {
   providerId: string;
   text: string;
-  status: "pending" | "streaming" | "completed" | "error";
+  status: "pending" | "streaming" | "completed" | "error" | "failed" | "skipped";
   createdAt: number;
   updatedAt?: number;
   attemptNumber?: number;
@@ -1816,3 +1857,46 @@ export interface StructuralAnalysis {
     processingTime: number;
   };
 }
+
+export type ProviderConfigEntry = {
+  displayName: string;
+  loginUrl: string;
+  maxInputChars: number;
+};
+
+export type HTOSErrorCode = string;
+
+export type HTOSErrorContext = Record<string, unknown>;
+
+export type RetryPolicy = {
+  maxRetries: number;
+  baseDelay: number;
+  maxDelay: number;
+  backoffMultiplier: number;
+  jitter: boolean;
+};
+
+export type CircuitBreakerState = {
+  state: "closed" | "open" | "half-open";
+  failures: number;
+  openedAt: number | null;
+  timeout: number;
+};
+
+export type OperationFn<
+  TResult = unknown,
+  TContext = Record<string, unknown>,
+> = (context: TContext) => Promise<TResult>;
+
+export type FallbackStrategy<
+  TOperation = unknown,
+  TContext = Record<string, unknown>,
+> = (operation: TOperation, context: TContext) => Promise<unknown>;
+
+export type RecoveryStrategy<
+  TError = unknown,
+  TContext = Record<string, unknown>,
+> = {
+  name: string;
+  execute: (error: TError, context: TContext) => Promise<unknown>;
+};

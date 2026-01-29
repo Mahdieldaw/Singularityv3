@@ -219,9 +219,8 @@ export const TraversalForcingPointCard: React.FC<TraversalForcingPointCardProps>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         {(forcingPoint.options || []).map((option) => {
           const claim = claims.find(c => c.id === option.claimId);
-          const optionAny: any = option as any;
-          const detailsText = String(claim?.text || optionAny?.text || '').trim();
-          const prerequisites = Array.isArray(optionAny?.prerequisites) ? optionAny.prerequisites : [];
+          const detailsText = String(claim?.text || option?.text || '').trim();
+          const prerequisites = Array.isArray(option?.prerequisites) ? option.prerequisites : [];
           const isSelected = selectedOption === option.claimId;
           const isThisResolved = isResolved && resolution?.selectedClaimId === option.claimId;
 
@@ -266,7 +265,7 @@ export const TraversalForcingPointCard: React.FC<TraversalForcingPointCardProps>
                     <div className="mt-2">
                       <div className="text-xs text-text-muted mb-1">Prerequisites</div>
                       <div className="space-y-1">
-                        {prerequisites.map((p: any) => {
+                        {prerequisites.map((p) => {
                           const label = String(p?.label || p?.claimId || '').trim();
                           if (!label) return null;
                           const extra = String(p?.text || '').trim();

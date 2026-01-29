@@ -4,7 +4,7 @@ import clsx from 'clsx';
 
 interface PipelineErrorBannerProps {
     type: 'batch' | 'mapping' | 'singularity';
-    failedProviderId: string;
+    failedProviderId?: string | null;
     onRetry: (pid: string) => void;
     onExplore?: () => void;
     onContinue?: () => void;
@@ -56,11 +56,20 @@ export const PipelineErrorBanner: React.FC<PipelineErrorBannerProps> = ({
         }
     };
 
-    const failedModelName = LLM_PROVIDERS_CONFIG.find(p => p.id === failedProviderId)?.name || failedProviderId;
+    const failedProviderIdSafe =
+        typeof failedProviderId === "string" && failedProviderId.trim().length > 0
+            ? failedProviderId.trim()
+            : null;
+
+    const failedModelName =
+        (failedProviderIdSafe
+            ? (LLM_PROVIDERS_CONFIG.find(p => p.id === failedProviderIdSafe)?.name || failedProviderIdSafe)
+            : null);
 
     const handleReauth = () => {
+        if (!failedProviderIdSafe) return;
         window.dispatchEvent(
-            new CustomEvent('provider-reauth', { detail: { providerId: failedProviderId } })
+            new CustomEvent('provider-reauth', { detail: { providerId: failedProviderIdSafe } })
         );
     };
 
@@ -94,16 +103,16 @@ export const PipelineErrorBanner: React.FC<PipelineErrorBannerProps> = ({
             </div>
 
             <div className="flex flex-wrap items-center gap-2 mt-1">
-                {retryable && (
+                {retryable && failedProviderIdSafe && (
                     <button
-                        onClick={() => onRetry(failedProviderId)}
+                        onClick={() => onRetry(failedProviderIdSafe)}
                         className="px-3 py-1.5 rounded-lg bg-surface-raised border border-border-subtle text-xs font-medium text-text-primary hover:bg-surface-highlight transition-all flex items-center gap-1.5"
                     >
                         <span>🔄</span> Retry {failedModelName}
                     </button>
                 )}
 
-                {requiresReauth && (
+                {requiresReauth && failedProviderIdSafe && (
                     <button
                         onClick={handleReauth}
                         className="px-3 py-1.5 rounded-lg bg-intent-danger/10 border border-intent-danger/20 text-xs font-medium text-intent-danger hover:bg-intent-danger/20 transition-all flex items-center gap-1.5"
@@ -126,7 +135,9 @@ export const PipelineErrorBanner: React.FC<PipelineErrorBannerProps> = ({
                             <div className="absolute bottom-full left-0 mb-2 w-48 bg-surface-raised border border-border-subtle rounded-xl shadow-elevated p-1.5 z-50 animate-in fade-in zoom-in-95 duration-150">
                                 <div className="text-[10px] text-text-muted px-2 py-1 font-medium uppercase tracking-wider border-b border-border-subtle/30 mb-1">Select Model</div>
                                 <div className="max-h-48 overflow-y-auto no-scrollbar">
-                                    {LLM_PROVIDERS_CONFIG.filter(p => p.id !== failedProviderId).map(p => (
+                                    {LLM_PROVIDERS_CONFIG
+                                        .filter(p => !failedProviderIdSafe || p.id !== failedProviderIdSafe)
+                                        .map(p => (
                                         <button
                                             key={p.id}
                                             onClick={() => {

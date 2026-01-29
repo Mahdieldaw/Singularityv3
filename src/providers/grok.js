@@ -123,13 +123,22 @@ export class GrokProviderError extends Error {
     this.name = 'GrokProviderError';
     this.type = type;
     this.details = details;
-    if (extra && typeof extra === "object") Object.assign(this, extra);
+    if (extra && typeof extra === "object") {
+      const isPlainObject = Object.prototype.toString.call(extra) === "[object Object]";
+      if (isPlainObject) {
+        for (const key of Object.keys(extra)) {
+          if (key === "__proto__" || key === "prototype" || key === "constructor") continue;
+          this[key] = extra[key];
+        }
+      }
+    }
   }
 
   get is() {
     return {
       login: this.type === 'login',
       antiBot: this.type === 'antiBot',
+      tooManyRequests: this.type === 'tooManyRequests',
       network: this.type === 'network',
       aborted: this.type === 'aborted',
       unknown: this.type === 'unknown',

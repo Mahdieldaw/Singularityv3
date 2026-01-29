@@ -96,11 +96,10 @@ const VerticalOrb: React.FC<VerticalOrbProps> = ({
     const pid = String(provider.id);
     const state = useAtomValue(providerEffectiveStateFamily({ turnId, providerId: pid }));
 
-    const isStreaming = state.latestResponse?.status === 'streaming';
-    const hasError =
-        state.latestResponse?.status === 'error' ||
-        (state.latestResponse?.status as any) === 'failed' ||
-        (state.latestResponse?.status as any) === 'skipped';
+    const status = state.latestResponse?.status;
+    const isStreaming = status === 'streaming';
+    const hasError = status === 'error' || status === 'failed';
+    const isSkipped = status === 'skipped';
     const isHovered = hoveredOrb === pid;
 
     return (
@@ -110,7 +109,7 @@ const VerticalOrb: React.FC<VerticalOrbProps> = ({
                 className={clsx(
                     "rounded-full transition-all duration-200 relative",
                     isActive ? "w-4 h-4 opacity-100 ring-2 ring-brand-500 ring-offset-2 ring-offset-surface-raised" : "w-2 h-2 opacity-40 hover:opacity-80 hover:scale-125",
-                    hasError ? "bg-intent-danger" : "bg-text-secondary",
+                    isSkipped ? "bg-border-subtle" : (hasError ? "bg-intent-danger" : "bg-text-secondary"),
                     isStreaming && "animate-pulse bg-intent-warning"
                 )}
                 style={{ backgroundColor: isActive ? provider.color : undefined }}

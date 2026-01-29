@@ -32,6 +32,7 @@ class AuthManager {
         // Initialization flag
         this._initialized = false;
         this._initPromise = null;
+        this._cookieListenersSetup = false;
     }
 
     /**
@@ -55,6 +56,18 @@ class AuthManager {
             this._cookieStatus = stored.provider_auth_status || {};
 
             await this.checkAllCookies();
+
+            if (!this._cookieListenersSetup) {
+                const cookiesApi = chrome?.cookies;
+                const canListen =
+                    cookiesApi &&
+                    cookiesApi.onChanged &&
+                    typeof cookiesApi.onChanged.addListener === 'function';
+                if (canListen) {
+                    this._setupCookieListeners();
+                    this._cookieListenersSetup = true;
+                }
+            }
 
             this._initialized = true;
             console.log('[AuthManager] Initialized:', this._cookieStatus);

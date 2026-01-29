@@ -18,6 +18,7 @@ interface TraversalGraphViewProps {
   sessionId: string;
   aiTurnId: string;
   pipelineStatus?: string | null;
+  hasReceivedSingularityResponse?: boolean;
   onComplete?: () => void;
 }
 
@@ -29,6 +30,7 @@ export const TraversalGraphView: React.FC<TraversalGraphViewProps> = ({
   sessionId,
   aiTurnId,
   pipelineStatus,
+  hasReceivedSingularityResponse,
   onComplete
 }) => {
   const cleanGraph = React.useMemo(() => {
@@ -51,7 +53,8 @@ export const TraversalGraphView: React.FC<TraversalGraphViewProps> = ({
   const [traversalStateByTurn, setTraversalStateByTurn] = useAtom(traversalStateByTurnAtom);
   const [isSubmitting, setIsSubmitting] = React.useState(false);
   const [submissionError, setSubmissionError] = React.useState<string | null>(null);
-  const isReadOnly = !pipelineStatus || pipelineStatus !== 'awaiting_traversal';
+  const isAwaitingTraversal = pipelineStatus === 'awaiting_traversal';
+  const isReadOnly = !isAwaitingTraversal && !!hasReceivedSingularityResponse;
 
   const deserializeTraversalState = (saved: any): TraversalState | null => {
     if (!saved) return null;
@@ -310,7 +313,7 @@ export const TraversalGraphView: React.FC<TraversalGraphViewProps> = ({
               gateResolution={gateResolution}
               onResolveConflict={resolveForcingPoint}
               onResolveGate={resolveGate}
-              disabled={isReadOnly}
+              disabled={isReadOnly || isSubmitting}
             />
               );
             })()
@@ -319,21 +322,23 @@ export const TraversalGraphView: React.FC<TraversalGraphViewProps> = ({
       )}
 
       {/* Submit button */}
-      {isComplete && !isReadOnly && (
+      {isComplete && (
         <div className="mt-8 p-6 rounded-xl bg-gradient-to-br from-green-500/10 to-brand-500/10 border-2 border-green-500/30 animate-in fade-in slide-in-from-bottom-4">
           <div className="text-center">
             <div className="text-lg font-bold text-text-primary mb-2">
               ✓ All Decision Points Resolved
             </div>
             <p className="text-sm text-text-muted mb-4">
-              Ready to generate your personalized synthesis based on your choices
+              {isReadOnly
+                ? 'Personalized guidance already generated for this traversal.'
+                : 'Ready to generate your personalized synthesis based on your choices'}
             </p>
             <button
               onClick={handleSubmitToConcierge}
-              disabled={isSubmitting}
+              disabled={isSubmitting || isReadOnly}
               className="px-8 py-3 rounded-lg bg-brand-500 hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold text-sm transition-colors"
             >
-              {isSubmitting ? 'Generating...' : 'Generate Personalized Guidance'}
+              {isReadOnly ? 'Guidance Generated' : (isSubmitting ? 'Generating...' : 'Generate Personalized Guidance')}
             </button>
             {submissionError && (
               <div className="mt-2">
@@ -342,7 +347,7 @@ export const TraversalGraphView: React.FC<TraversalGraphViewProps> = ({
                 </div>
                 <button
                   onClick={handleSubmitToConcierge}
-                  disabled={isSubmitting}
+                  disabled={isSubmitting || isReadOnly}
                   className="mt-2 px-3 py-1.5 rounded-lg bg-surface-highlight hover:bg-surface-raised border border-border-subtle text-xs font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   Retry
