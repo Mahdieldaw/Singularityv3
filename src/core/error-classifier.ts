@@ -168,7 +168,6 @@ export function classifyError(error: unknown): ProviderError {
   if (
     errorType === "rate_limit_error" ||
     errorType === "tooManyRequests" ||
-    errorType === "RATE_LIMITED" ||
     nestedErrorType === "rate_limit_error" ||
     /rate[_\s-]?limit/i.test(message)
   ) {

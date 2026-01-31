@@ -91,6 +91,12 @@ export interface TopologyMetrics {
     globalStrongDensity: number;     // strong edges / max possible
 }
 
+export interface Layout2D {
+    method: 'umap' | 'spectral' | 'force';
+    coordinates: Record<string, [number, number]>;
+    buildTimeMs: number;
+}
+
 // ───────────────────────────────────────────────────────────────────────────
 // FULL SUBSTRATE
 // ───────────────────────────────────────────────────────────────────────────
@@ -110,6 +116,8 @@ export interface GeometricSubstrate {
     topology: TopologyMetrics;
 
     shape: ShapeClassification;
+
+    layout2d?: Layout2D;
 
     // Provenance
     meta: {

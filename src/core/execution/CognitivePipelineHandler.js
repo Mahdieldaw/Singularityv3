@@ -56,6 +56,9 @@ export class CognitivePipelineHandler {
           if (currentAiTurn) {
             currentAiTurn.pipelineStatus = 'awaiting_traversal';
             currentAiTurn.mapperArtifact = safeMapperArtifact;
+            if (context?.pipelineArtifacts || mappingResult?.pipelineArtifacts) {
+              currentAiTurn.pipelineArtifacts = context?.pipelineArtifacts || mappingResult?.pipelineArtifacts;
+            }
             await this.sessionManager.adapter.put("turns", currentAiTurn);
           }
 
@@ -306,12 +309,6 @@ export class CognitivePipelineHandler {
                 isFirstTurn: true,
                 activeWorkflow: conciergeState?.activeWorkflow || undefined,
                 priorContext: undefined,
-                shadow: structuralAnalysis?.shadow
-                  ? {
-                    audit: structuralAnalysis.shadow.audit,
-                    topUnindexed: structuralAnalysis.shadow.topUnindexed,
-                  }
-                  : undefined,
               };
 
               conciergePromptSeed =
@@ -332,16 +329,10 @@ export class CognitivePipelineHandler {
               }
 
               if (typeof ConciergeService.buildConciergePrompt === 'function') {
-                if (structuralAnalysis) {
-                  conciergePrompt = ConciergeService.buildConciergePrompt(
-                    userMessageForSingularity,
-                    structuralAnalysis,
-                    {
-                      ...conciergePromptSeed,
-                      ghosts: mapperArtifact.ghosts || [],
-                    },
-                  );
-                }
+                conciergePrompt = ConciergeService.buildConciergePrompt(
+                  userMessageForSingularity,
+                  conciergePromptSeed,
+                );
               } else {
                 console.warn("[CognitiveHandler] ConciergeService.buildConciergePrompt missing");
               }
@@ -375,13 +366,10 @@ export class CognitivePipelineHandler {
             console.warn("[CognitiveHandler] Prompt building failed, using fallback");
             conciergePromptType = "standard_fallback";
             if (ConciergeService && typeof ConciergeService.buildConciergePrompt === 'function') {
-              if (structuralAnalysis) {
-                conciergePrompt = ConciergeService.buildConciergePrompt(
-                  userMessageForSingularity,
-                  structuralAnalysis,
-                  { ghosts: mapperArtifact.ghosts || [] },
-                );
-              }
+              conciergePrompt = ConciergeService.buildConciergePrompt(
+                userMessageForSingularity,
+                { isFirstTurn: turnInCurrentInstance === 1 },
+              );
             } else {
               console.error("[CognitiveHandler] ConciergeService.buildConciergePrompt unavailable for fallback");
             }
@@ -658,6 +646,23 @@ export class CognitivePipelineHandler {
         throw new Error(`MapperArtifact missing for turn ${aiTurnId}.`);
       }
 
+      const pipelineArtifacts = aiTurn.pipelineArtifacts;
+      let chewedSubstrate = null;
+      if (payload?.isTraversalContinuation && payload?.traversalState && pipelineArtifacts?.sourceData) {
+        try {
+          const { buildChewedSubstrate, normalizeTraversalState } = await import('../../skeletonization');
+          chewedSubstrate = await buildChewedSubstrate({
+            statements: mapperArtifact.shadow?.statements || [],
+            paragraphs: pipelineArtifacts.paragraphProjection?.paragraphs || [],
+            claims: mapperArtifact.claims || [],
+            traversalState: normalizeTraversalState(payload.traversalState),
+            sourceData: pipelineArtifacts.sourceData,
+          });
+        } catch (_) {
+          chewedSubstrate = null;
+        }
+      }
+
       const preferredProvider = providerId ||
         aiTurn.meta?.singularity ||
         aiTurn.meta?.mapper ||
@@ -669,7 +674,8 @@ export class CognitivePipelineHandler {
         canonicalUserTurnId: userTurnId,
         userMessage: originalPrompt,
         // Pass flag to context for orchestration logic if needed
-        isTraversalContinuation: payload.isTraversalContinuation
+        isTraversalContinuation: payload.isTraversalContinuation,
+        chewedSubstrate
       };
 
       const executorOptions = {
@@ -695,7 +701,8 @@ export class CognitivePipelineHandler {
           mappingText: latestMappingText,
           mappingMeta: latestMappingMeta,
           useThinking: payload.useThinking || false,
-          isTraversalContinuation: payload.isTraversalContinuation
+          isTraversalContinuation: payload.isTraversalContinuation,
+          chewedSubstrate
         },
       };
 

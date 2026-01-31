@@ -19,7 +19,7 @@ export const ConciergePipelinePanel: React.FC<ConciergePipelinePanelProps> = ({ 
 
         try {
             const selection = { stance: 'default' as const, reason: 'universal', confidence: 1.0 };
-            const prompt = ConciergeService.buildConciergePrompt(userMessage, analysis, {});
+            const prompt = ConciergeService.buildConciergePrompt(userMessage, {});
 
             let leakageDetected = !!state.output.leakageDetected;
             let leakageViolations = state.output.leakageViolations || [];

@@ -28,7 +28,9 @@ const getSessionLogger = (): LoggerLike => {
       g.logger ||
       (g.window ? (g.window as Record<string, unknown>)["processLogger"] || (g.window as Record<string, unknown>)["logger"] : null);
     if (candidate && typeof (candidate as LoggerLike).error === "function") return candidate as LoggerLike;
-  } catch (_) { }
+  } catch (err) {
+    console.error("[SessionManager] Error retrieving global logger:", err);
+  }
   return console;
 };
 
@@ -79,9 +81,11 @@ type ExistingProviderContext = {
   sessionId?: string;
   providerId: string;
   threadId?: string;
+  // Legacy top-level fields for migration
   meta?: unknown;
   text?: string;
   lastUpdated?: number;
+
   createdAt?: number;
   updatedAt?: number;
   isActive?: boolean;
@@ -90,12 +94,10 @@ type ExistingProviderContext = {
 };
 
 export class SessionManager {
-  isExtensionContext: boolean;
   adapter: SimpleIndexedDBAdapter | null;
   isInitialized: boolean;
 
   constructor() {
-    this.isExtensionContext = false;
     this.adapter = null;
     this.isInitialized = false;
   }
@@ -206,7 +208,7 @@ export class SessionManager {
       const arr: unknown[] = [];
       for (const item of value) {
         const safe = this._toJsonSafe(item, opts, _stack, _depth + 1);
-        if (safe !== undefined) arr.push(safe);
+        arr.push(safe !== undefined ? safe : null);
       }
       try {
         _stack.delete(value);
@@ -1015,7 +1017,8 @@ export class SessionManager {
     let records: unknown;
     try {
       records = await adapter.getResponsesByTurnId(aiTurnId);
-    } catch (_) {
+    } catch (err) {
+      getSessionLogger().error("[SessionManager] _getExistingResponsesByTurnId failed", err);
       return [];
     }
     if (!Array.isArray(records)) return [];
@@ -1055,7 +1058,7 @@ export class SessionManager {
     if (isString(text)) out.text = text;
 
     out.status = value["status"];
-    
+
     const meta = value["meta"];
     if (isPlainObject(meta)) out.meta = meta;
 
@@ -1074,7 +1077,8 @@ export class SessionManager {
     let records: unknown;
     try {
       records = await adapter.getContextsBySessionId(sessionId);
-    } catch (_) {
+    } catch (err) {
+      getSessionLogger().error("[SessionManager] _getExistingContextsBySessionId failed", err);
       return [];
     }
     if (!Array.isArray(records)) return [];
@@ -1101,6 +1105,9 @@ export class SessionManager {
     const threadId = value["threadId"];
     if (isString(threadId)) out.threadId = threadId;
 
+    // Preserve legacy top-level fields for migration in updateProviderContext logic if needed,
+    // or just read them here to populate contextData if missing.
+    // However, ExistingProviderContext definition allows them to exist so we can read old records.
     out.meta = value["meta"];
     out.contextData = value["contextData"];
     out.metadata = value["metadata"];
@@ -1134,6 +1141,10 @@ export class SessionManager {
    * Initialize the session manager.
    */
   async initialize(config: { adapter?: SimpleIndexedDBAdapter | null; initTimeoutMs?: number } = {}): Promise<void> {
+    if (this.isInitialized) {
+      console.log("[SessionManager] Already initialized");
+      return;
+    }
     const { adapter = null, initTimeoutMs = 8000 } = config || {};
 
     console.log("[SessionManager] Initializing with persistence adapter...");
@@ -1159,589 +1170,600 @@ export class SessionManager {
         const runId = inflight["runId"];
         if (typeof runId === "string" && runId) return { runId };
       }
-    } catch (_) { }
+      const runId = inflight["runId"];
+      if (typeof runId === "string" && runId) return { runId };
+    }
+    } catch(err) {
+    getSessionLogger().error("[SessionManager] _attachRunIdMeta failed", err);
+  }
     return {};
   }
 
   /**
    * Get or create a session (persistence-backed with cache)
    */
-  async getOrCreateSession(sessionId: string): Promise<SessionRecord> {
-    if (!sessionId) throw new Error("sessionId required");
-    const adapter = this._requireAdapter();
+  async getOrCreateSession(sessionId: string): Promise < SessionRecord > {
+  if(!sessionId) throw new Error("sessionId required");
+  const adapter = this._requireAdapter();
 
-    const raw = await adapter.get("sessions", sessionId) as unknown;
-    if (!raw) {
-      const now = Date.now();
-      const sessionRecord: SessionRecord = {
-        id: sessionId,
-        title: "",
-        defaultThreadId: DEFAULT_THREAD,
-        activeThreadId: DEFAULT_THREAD,
-        turnCount: 0,
-        isActive: true,
-        createdAt: now,
-        updatedAt: now,
-        lastActivity: now,
-        lastTurnId: null,
-      };
+  const raw = await adapter.get("sessions", sessionId) as unknown;
+  if(!raw) {
+    const now = Date.now();
+    const sessionRecord: SessionRecord = {
+      id: sessionId,
+      title: "",
+      defaultThreadId: DEFAULT_THREAD,
+      activeThreadId: DEFAULT_THREAD,
+      turnCount: 0,
+      isActive: true,
+      createdAt: now,
+      updatedAt: now,
+      lastActivity: now,
+      lastTurnId: null,
+    };
 
-      await adapter.put("sessions", sessionRecord);
+    await adapter.put("sessions", sessionRecord);
 
-      const defaultThread: Record<string, unknown> = {
-        id: DEFAULT_THREAD,
-        sessionId,
-        parentThreadId: null,
-        branchPointTurnId: null,
-        title: "Main Thread",
-        isActive: true,
-        createdAt: now,
-        updatedAt: now,
-      };
-      await adapter.put("threads", defaultThread);
+    const defaultThread: Record<string, unknown> = {
+      id: DEFAULT_THREAD,
+      sessionId,
+      parentThreadId: null,
+      branchPointTurnId: null,
+      title: "Main Thread",
+      isActive: true,
+      createdAt: now,
+      updatedAt: now,
+    };
+    await adapter.put("threads", defaultThread);
 
-      console.log(`[SessionManager] Created new session: ${sessionId}`);
-      return sessionRecord;
-    }
+    console.log(`[SessionManager] Created new session: ${sessionId}`);
+    return sessionRecord;
+  }
 
     const normalized = this._normalizeSessionRecord(raw, sessionId);
-    let needsRepair = false;
-    if (isPlainObject(raw)) {
-      needsRepair =
-        !isString(raw["title"]) ||
-        !isString(raw["defaultThreadId"]) ||
-        !isString(raw["activeThreadId"]) ||
-        !isNumber(raw["turnCount"]) ||
-        !isNumber(raw["createdAt"]) ||
-        !isNumber(raw["updatedAt"]) ||
-        !isNumber(raw["lastActivity"]) ||
-        typeof raw["isActive"] !== "boolean";
-    }
-    if (needsRepair) {
-      await adapter.put("sessions", normalized);
-    }
+  let needsRepair = false;
+  if(isPlainObject(raw)) {
+  needsRepair =
+    !isString(raw["title"]) ||
+    !isString(raw["defaultThreadId"]) ||
+    !isString(raw["activeThreadId"]) ||
+    !isNumber(raw["turnCount"]) ||
+    !isNumber(raw["createdAt"]) ||
+    !isNumber(raw["updatedAt"]) ||
+    !isNumber(raw["lastActivity"]) ||
+    typeof raw["isActive"] !== "boolean";
+}
+if (needsRepair) {
+  await adapter.put("sessions", normalized);
+}
 
-    return normalized;
+return normalized;
   }
 
   /**
    * Save session (enhanced with persistence layer support)
    */
-  async saveSession(sessionId: string): Promise<void> {
-    try {
-      const adapter = this._requireAdapter();
-      const raw = await adapter.get("sessions", sessionId) as unknown;
-      if (raw) {
-        const sessionRecord = this._normalizeSessionRecord(raw, sessionId);
-        sessionRecord.updatedAt = Date.now();
-        await adapter.put("sessions", sessionRecord);
-        console.log(`[SessionManager] Updated session ${sessionId} timestamp`);
-      }
-    } catch (error) {
-      console.error(
-        `[SessionManager] Failed to update session ${sessionId}:`,
-        error,
-      );
+  async saveSession(sessionId: string): Promise < void> {
+  try {
+    const adapter = this._requireAdapter();
+    const raw = await adapter.get("sessions", sessionId) as unknown;
+    if(raw) {
+      const sessionRecord = this._normalizeSessionRecord(raw, sessionId);
+      sessionRecord.updatedAt = Date.now();
+      await adapter.put("sessions", sessionRecord);
+      console.log(`[SessionManager] Updated session ${sessionId} timestamp`);
     }
+  } catch(error) {
+    console.error(
+      `[SessionManager] Failed to update session ${sessionId}:`,
+      error,
+    );
   }
+}
 
   /**
    * Delete session (enhanced with persistence layer support)
    */
-  async deleteSession(sessionId: string): Promise<boolean> {
-    try {
-      const adapter = this._requireAdapter();
-      
-      await adapter.transaction(
-        [
-          "sessions",
-          "threads",
-          "turns",
-          "provider_responses",
-          "provider_contexts",
-          "metadata",
-        ],
-        "readwrite",
-        async (tx: IDBTransaction) => {
-          const getAllByIndex = <T extends { id?: string; key?: string; sessionId?: string; providerId?: string }>(
-            store: IDBObjectStore,
-            indexName: string,
-            key: IDBValidKey | IDBKeyRange,
-          ): Promise<T[]> =>
-            new Promise((resolve, reject) => {
-              let idx: IDBIndex;
-              try {
-                idx = store.index(indexName);
-              } catch (e) {
-                return reject(e);
-              }
-              const req = idx.getAll(key);
-              req.onsuccess = () => resolve((req.result || []) as T[]);
-              req.onerror = () => reject(req.error);
-            });
+  async deleteSession(sessionId: string): Promise < boolean > {
+  try {
+    const adapter = this._requireAdapter();
 
-          // 1) Delete session record
-          await new Promise<boolean>((resolve, reject) => {
-            const req = tx.objectStore("sessions").delete(sessionId);
-            req.onsuccess = () => resolve(true);
+    await adapter.transaction(
+      [
+        "sessions",
+        "threads",
+        "turns",
+        "provider_responses",
+        "provider_contexts",
+        "metadata",
+      ],
+      "readwrite",
+      async (tx: IDBTransaction) => {
+        const getAllByIndex = <T extends { id?: string; key?: string; sessionId?: string; providerId?: string }>(
+          store: IDBObjectStore,
+          indexName: string,
+          key: IDBValidKey | IDBKeyRange,
+        ): Promise<T[]> =>
+          new Promise((resolve, reject) => {
+            let idx: IDBIndex;
+            try {
+              idx = store.index(indexName);
+            } catch (e) {
+              return reject(e);
+            }
+            const req = idx.getAll(key);
+            req.onsuccess = () => resolve((req.result || []) as T[]);
             req.onerror = () => reject(req.error);
           });
 
-          // 2) Threads by session
-          const threadsStore = tx.objectStore("threads");
-          const threads = await getAllByIndex<{ id: string }>(
-            threadsStore,
-            "bySessionId",
-            sessionId,
-          );
-          for (const t of threads) {
-            await new Promise<boolean>((resolve, reject) => {
-              const req = threadsStore.delete(t.id);
-              req.onsuccess = () => resolve(true);
-              req.onerror = () => reject(req.error);
-            });
-          }
+        // 1) Delete session record
+        await new Promise<boolean>((resolve, reject) => {
+          const req = tx.objectStore("sessions").delete(sessionId);
+          req.onsuccess = () => resolve(true);
+          req.onerror = () => reject(req.error);
+        });
 
-          // 3) Turns by session
-          const turnsStore = tx.objectStore("turns");
-          const turns = await getAllByIndex<{ id: string }>(
-            turnsStore,
-            "bySessionId",
-            sessionId,
-          );
-          for (const turn of turns) {
-            await new Promise<boolean>((resolve, reject) => {
-              const req = turnsStore.delete(turn.id);
-              req.onsuccess = () => resolve(true);
-              req.onerror = () => reject(req.error);
-            });
-          }
+        // 2) Threads by session
+        const threadsStore = tx.objectStore("threads");
+        const threads = await getAllByIndex<{ id: string }>(
+          threadsStore,
+          "bySessionId",
+          sessionId,
+        );
+        for (const t of threads) {
+          await new Promise<boolean>((resolve, reject) => {
+            const req = threadsStore.delete(t.id);
+            req.onsuccess = () => resolve(true);
+            req.onerror = () => reject(req.error);
+          });
+        }
 
-          // 4) Provider responses by sessionId
-          const responsesStore = tx.objectStore("provider_responses");
-          const responses = await getAllByIndex<{ id: string }>(
-            responsesStore,
-            "bySessionId",
-            sessionId,
-          );
-          for (const r of responses) {
-            await new Promise<boolean>((resolve, reject) => {
-              const req = responsesStore.delete(r.id);
-              req.onsuccess = () => resolve(true);
-              req.onerror = () => reject(req.error);
-            });
-          }
+        // 3) Turns by session
+        const turnsStore = tx.objectStore("turns");
+        const turns = await getAllByIndex<{ id: string }>(
+          turnsStore,
+          "bySessionId",
+          sessionId,
+        );
+        for (const turn of turns) {
+          await new Promise<boolean>((resolve, reject) => {
+            const req = turnsStore.delete(turn.id);
+            req.onsuccess = () => resolve(true);
+            req.onerror = () => reject(req.error);
+          });
+        }
 
-          // 5) Provider contexts by session (composite key delete)
-          const contextsStore = tx.objectStore("provider_contexts");
-          const contexts = await getAllByIndex<{ sessionId: string; providerId: string }>(
-            contextsStore,
-            "bySessionId",
-            sessionId,
-          );
-          for (const ctx of contexts) {
-            await new Promise<boolean>((resolve, reject) => {
-              const key = [ctx.sessionId, ctx.providerId];
-              const req = contextsStore.delete(key as unknown as IDBValidKey);
-              req.onsuccess = () => resolve(true);
-              req.onerror = () => reject(req.error);
-            });
-          }
+        // 4) Provider responses by sessionId
+        const responsesStore = tx.objectStore("provider_responses");
+        const responses = await getAllByIndex<{ id: string }>(
+          responsesStore,
+          "bySessionId",
+          sessionId,
+        );
+        for (const r of responses) {
+          await new Promise<boolean>((resolve, reject) => {
+            const req = responsesStore.delete(r.id);
+            req.onsuccess = () => resolve(true);
+            req.onerror = () => reject(req.error);
+          });
+        }
 
-          // 6) Metadata scoped to this session
-          const metaStore = tx.objectStore("metadata");
-          const metasBySession = await getAllByIndex<{ key: string }>(
-            metaStore,
-            "bySessionId",
-            sessionId,
-          );
-          for (const m of metasBySession) {
-            await new Promise<boolean>((resolve, reject) => {
-              const req = metaStore.delete(m.key);
-              req.onsuccess = () => resolve(true);
-              req.onerror = () => reject(req.error);
-            });
-          }
-        },
-      );
+        // 5) Provider contexts by session (composite key delete)
+        const contextsStore = tx.objectStore("provider_contexts");
+        const contexts = await getAllByIndex<{ sessionId: string; providerId: string }>(
+          contextsStore,
+          "bySessionId",
+          sessionId,
+        );
+        for (const ctx of contexts) {
+          await new Promise<boolean>((resolve, reject) => {
+            const key = [ctx.sessionId, ctx.providerId];
+            const req = contextsStore.delete(key as unknown as IDBValidKey);
+            req.onsuccess = () => resolve(true);
+            req.onerror = () => reject(req.error);
+          });
+        }
 
-      return true;
-    } catch (error) {
-      console.error(
-        `[SessionManager] Failed to delete session ${sessionId} from persistence layer:`,
-        error,
-      );
-      throw error;
-    }
+        // 6) Metadata scoped to this session
+        const metaStore = tx.objectStore("metadata");
+        const metasBySession = await getAllByIndex<{ key: string }>(
+          metaStore,
+          "bySessionId",
+          sessionId,
+        );
+        for (const m of metasBySession) {
+          await new Promise<boolean>((resolve, reject) => {
+            const req = metaStore.delete(m.key);
+            req.onsuccess = () => resolve(true);
+            req.onerror = () => reject(req.error);
+          });
+        }
+      },
+    );
+
+    return true;
+  } catch(error) {
+    console.error(
+      `[SessionManager] Failed to delete session ${sessionId} from persistence layer:`,
+      error,
+    );
+    throw error;
   }
+}
 
   /**
    * Update provider context (enhanced with persistence layer support)
    * MATCHES JS BEHAVIOR - contextData.lastUpdated, not top-level lastUpdated
    */
   async updateProviderContext(
-    sessionId: string,
-    providerId: string,
-    result: ProviderOutput = {},
-  ): Promise<void> {
-    if (!sessionId || !providerId) return;
-    try {
-      const adapter = this._requireAdapter();
-      const session = await this.getOrCreateSession(sessionId);
+  sessionId: string,
+  providerId: string,
+  result: ProviderOutput = {},
+): Promise < void> {
+  if(!sessionId || !providerId) return;
+try {
+  const adapter = this._requireAdapter();
+  const session = await this.getOrCreateSession(sessionId);
 
-      // Get or create provider context via indexed query by session
-      let contexts: Array<Record<string, unknown>> = [];
-      try {
-        const rawContexts = await adapter.getContextsBySessionId(sessionId);
-        contexts = (Array.isArray(rawContexts) ? rawContexts : []) as Array<Record<string, unknown>>;
-        // Narrow to target provider
-        contexts = contexts.filter(
-          (context) => context.providerId === providerId,
-        );
-      } catch (e) {
-        console.warn(
-          "[SessionManager] updateProviderContext: contexts lookup failed, using empty set",
-          e,
-        );
-        contexts = [];
-      }
-      
-      // Select the most recent context by updatedAt (fallback createdAt)
-      let contextRecord: Record<string, unknown> | null = null;
-      if (contexts.length > 0) {
-        const sorted = contexts.sort((a, b) => {
-          const ta = (a.updatedAt as number) ?? (a.createdAt as number) ?? 0;
-          const tb = (b.updatedAt as number) ?? (b.createdAt as number) ?? 0;
-          return tb - ta; // newest first
-        });
-        contextRecord = sorted[0];
-        console.log(
-          `[SessionManager] updateProviderContext: selected latest context for ${providerId} in ${sessionId}`,
-          {
-            candidates: contexts.length,
-            selectedId: contextRecord.id,
-            selectedUpdatedAt: contextRecord.updatedAt,
-            selectedCreatedAt: contextRecord.createdAt,
-          },
-        );
-      }
+  // Get or create provider context via indexed query by session
+  let contexts: Array<Record<string, unknown>> = [];
+  try {
+    const rawContexts = await adapter.getContextsBySessionId(sessionId);
+    contexts = (Array.isArray(rawContexts) ? rawContexts : []) as Array<Record<string, unknown>>;
+    // Narrow to target provider
+    contexts = contexts.filter(
+      (context) => context.providerId === providerId,
+    );
+  } catch (e) {
+    console.warn(
+      "[SessionManager] updateProviderContext: contexts lookup failed, using empty set",
+      e,
+    );
+    contexts = [];
+  }
 
-      if (!contextRecord) {
-        // Create new context - MATCH JS EXACTLY (no meta, no lastUpdated at top level)
-        contextRecord = {
-          id: `ctx-${sessionId}-${providerId}-${Date.now()}`,
-          sessionId: sessionId,
-          providerId: providerId,
-          threadId: DEFAULT_THREAD,
-          contextData: {},
-          isActive: true,
-          createdAt: Date.now(),
-          updatedAt: Date.now(),
-        };
-      }
+  // Select the most recent context by updatedAt (fallback createdAt)
+  let contextRecord: Record<string, unknown> | null = null;
+  if (contexts.length > 0) {
+    const sorted = contexts.sort((a, b) => {
+      const ta = (a.updatedAt as number) ?? (a.createdAt as number) ?? 0;
+      const tb = (b.updatedAt as number) ?? (b.createdAt as number) ?? 0;
+      return tb - ta; // newest first
+    });
+    contextRecord = sorted[0];
+    console.log(
+      `[SessionManager] updateProviderContext: selected latest context for ${providerId} in ${sessionId}`,
+      {
+        candidates: contexts.length,
+        selectedId: contextRecord.id,
+        selectedUpdatedAt: contextRecord.updatedAt,
+        selectedCreatedAt: contextRecord.createdAt,
+      },
+    );
+  }
 
-      // Update context data - MATCH JS: lastUpdated goes INSIDE contextData
-      const existingContext = (contextRecord.contextData || {}) as Record<string, unknown>;
-      contextRecord.contextData = {
-        ...existingContext,
-        text: result?.text || (existingContext.text as string) || "",
-        meta: {
-          ...this._safeMeta(existingContext.meta || {}),
-          ...this._safeMeta(result?.meta || {}),
-        },
-        lastUpdated: Date.now(),  // Inside contextData, not top-level
-      };
-      contextRecord.updatedAt = Date.now();  // This is the only top-level timestamp update
+  if (!contextRecord) {
+    // Create new context - MATCH JS EXACTLY (no meta, no lastUpdated at top level)
+    contextRecord = {
+      id: `ctx-${sessionId}-${providerId}-${Date.now()}`,
+      sessionId: sessionId,
+      providerId: providerId,
+      threadId: DEFAULT_THREAD,
+      contextData: {},
+      isActive: true,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+  }
 
-      // Save or update context
-      await adapter.put("provider_contexts", contextRecord);
+  // Update context data - MATCH JS: lastUpdated goes INSIDE contextData
+  const existingContext = (contextRecord.contextData || {}) as Record<string, unknown>;
+  contextRecord.contextData = {
+    ...existingContext,
+    text: result?.text || (existingContext.text as string) || "",
+    meta: {
+      ...this._safeMeta(existingContext.meta || {}),
+      ...this._safeMeta(result?.meta || {}),
+    },
+    lastUpdated: Date.now(),  // Inside contextData, not top-level
+  };
+  contextRecord.updatedAt = Date.now();  // This is the only top-level timestamp update
 
-      // Direct session update for activity tracking
-      if (session) {
-        session.lastActivity = Date.now();
-        session.updatedAt = Date.now();
-        await adapter.put("sessions", session);
-      }
-    } catch (error) {
-      console.error(
-        `[SessionManager] Failed to update provider context in persistence layer:`,
-        error,
-      );
-      throw error;
-    }
+  // Save or update context
+  await adapter.put("provider_contexts", contextRecord);
+
+  // Direct session update for activity tracking
+  if (session) {
+    session.lastActivity = Date.now();
+    session.updatedAt = Date.now();
+    await adapter.put("sessions", session);
+  }
+} catch (error) {
+  console.error(
+    `[SessionManager] Failed to update provider context in persistence layer:`,
+    error,
+  );
+  throw error;
+}
   }
 
   /**
    * Batch update multiple provider contexts in a single pass.
    */
   async updateProviderContextsBatch(
-    sessionId: string,
-    updates: Record<string, ProviderOutput> = {},
-    options: { contextRole?: ProviderResponseType | null } = {},
-  ): Promise<void> {
-    const { contextRole = null } = options;
-    if (!sessionId || !updates || typeof updates !== "object") return;
+  sessionId: string,
+  updates: Record<string, ProviderOutput> = {},
+  options: { contextRole?: ProviderResponseType | null } = {},
+): Promise < void> {
+  const { contextRole = null } = options;
+  if(!sessionId || !updates || typeof updates !== "object") return;
 
-    try {
-      const adapter = this._requireAdapter();
-      const session = await this.getOrCreateSession(sessionId);
-      const now = Date.now();
+try {
+  const adapter = this._requireAdapter();
+  const session = await this.getOrCreateSession(sessionId);
+  const now = Date.now();
 
-      // Load all existing contexts once using indexed query
-      let sessionContexts: Array<Record<string, unknown>> = [];
-      try {
-        const rawContexts = await adapter.getContextsBySessionId(sessionId);
-        sessionContexts = (Array.isArray(rawContexts) ? rawContexts : []) as Array<Record<string, unknown>>;
-      } catch (e) {
-        console.warn(
-          "[SessionManager] updateProviderContextsBatch: contexts lookup failed; proceeding with empty list",
-          e,
-        );
-        sessionContexts = [];
-      }
-      
-      const latestByProvider: Record<string, { record: Record<string, unknown>; _ts: number }> = {};
-      for (const ctx of sessionContexts) {
-        const pid = ctx.providerId as string;
-        const ts = (ctx.updatedAt as number) ?? (ctx.createdAt as number) ?? 0;
-        const existing = latestByProvider[pid];
-        if (!existing || ts > (existing._ts || 0)) {
-          latestByProvider[pid] = { record: ctx, _ts: ts };
-        }
-      }
+  // Load all existing contexts once using indexed query
+  let sessionContexts: Array<Record<string, unknown>> = [];
+  try {
+    const rawContexts = await adapter.getContextsBySessionId(sessionId);
+    sessionContexts = (Array.isArray(rawContexts) ? rawContexts : []) as Array<Record<string, unknown>>;
+  } catch (e) {
+    console.warn(
+      "[SessionManager] updateProviderContextsBatch: contexts lookup failed; proceeding with empty list",
+      e,
+    );
+    sessionContexts = [];
+  }
 
-      // Apply updates
-      for (const [providerId, result] of Object.entries(updates)) {
-        const effectivePid = contextRole ? `${providerId}:${contextRole}` : providerId;
-
-        let contextRecord: Record<string, unknown> | undefined = latestByProvider[effectivePid]?.record;
-        if (!contextRecord) {
-          // MATCH JS: no meta, no lastUpdated at top level in new context
-          contextRecord = {
-            id: `ctx-${sessionId}-${effectivePid}-${now}-${Math.random().toString(36).slice(2, 8)}`,
-            sessionId,
-            providerId: effectivePid,
-            threadId: DEFAULT_THREAD,
-            contextData: {},
-            isActive: true,
-            createdAt: now,
-            updatedAt: now,
-          };
-        }
-
-        const existingData = (contextRecord.contextData || {}) as Record<string, unknown>;
-        contextRecord.contextData = {
-          ...existingData,
-          text: result?.text || (existingData.text as string) || "",
-          meta: {
-            ...this._safeMeta(existingData.meta || {}),
-            ...this._safeMeta(result?.meta || {}),
-          },
-          lastUpdated: now,  // Inside contextData
-        };
-        contextRecord.updatedAt = now;
-
-        await adapter.put("provider_contexts", contextRecord);
-      }
-
-      // Direct session update for activity tracking
-      if (session) {
-        session.lastActivity = now;
-        session.updatedAt = now;
-        await adapter.put("sessions", session);
-      }
-    } catch (error) {
-      console.error(
-        "[SessionManager] Failed to batch update provider contexts:",
-        error,
-      );
+  const latestByProvider: Record<string, { record: Record<string, unknown>; _ts: number }> = {};
+  for (const ctx of sessionContexts) {
+    const pid = ctx.providerId as string;
+    const ts = (ctx.updatedAt as number) ?? (ctx.createdAt as number) ?? 0;
+    const existing = latestByProvider[pid];
+    if (!existing || ts > (existing._ts || 0)) {
+      latestByProvider[pid] = { record: ctx, _ts: ts };
     }
+  }
+
+  // Apply updates
+  for (const [providerId, result] of Object.entries(updates)) {
+    const effectivePid = contextRole ? `${providerId}:${contextRole}` : providerId;
+
+    let contextRecord: Record<string, unknown> | undefined = latestByProvider[effectivePid]?.record;
+    if (!contextRecord) {
+      // MATCH JS: no meta, no lastUpdated at top level in new context
+      contextRecord = {
+        id: `ctx-${sessionId}-${effectivePid}-${now}-${Math.random().toString(36).slice(2, 8)}`,
+        sessionId,
+        providerId: effectivePid,
+        threadId: DEFAULT_THREAD,
+        contextData: {},
+        isActive: true,
+        createdAt: now,
+        updatedAt: now,
+      };
+    }
+
+    const existingData = (contextRecord.contextData || {}) as Record<string, unknown>;
+    contextRecord.contextData = {
+      ...existingData,
+      text: result?.text || (existingData.text as string) || "",
+      meta: {
+        ...this._safeMeta(existingData.meta || {}),
+        ...this._safeMeta(result?.meta || {}),
+      },
+      lastUpdated: now,  // Inside contextData
+    };
+    contextRecord.updatedAt = now;
+
+    await adapter.put("provider_contexts", contextRecord);
+  }
+
+  // Direct session update for activity tracking
+  if (session) {
+    session.lastActivity = now;
+    session.updatedAt = now;
+    await adapter.put("sessions", session);
+  }
+} catch (error) {
+  console.error(
+    "[SessionManager] Failed to batch update provider contexts:",
+    error,
+  );
+}
   }
 
   /**
    * Get provider contexts (persistence-backed, backward compatible shape)
    */
   async getProviderContexts(
-    sessionId: string,
-    _threadId: string = DEFAULT_THREAD,
-    options: { contextRole?: ProviderResponseType | null } = {},
-  ): Promise<Record<string, { meta: unknown }>> {
-    const { contextRole = null } = options;
-    try {
-      if (!sessionId) {
-        console.warn(
-          "[SessionManager] getProviderContexts called without sessionId",
-        );
-        return {};
-      }
-      if (!this.adapter || !this.adapter.isReady()) {
-        console.warn(
-          "[SessionManager] getProviderContexts called but adapter is not ready",
-        );
-        return {};
-      }
-
-      const rawRecords = await this.adapter.getContextsBySessionId(sessionId);
-      const contextRecords = (Array.isArray(rawRecords) ? rawRecords : []) as Array<Record<string, unknown>>;
-      // TODO(types): Adapter method should return typed array
-
-      const contexts: Record<string, { meta: unknown }> = {};
-      for (const record of contextRecords) {
-        const contextData = record.contextData as Record<string, unknown> | undefined;
-        if (record.providerId && contextData?.meta) {
-          const pid = record.providerId as string;
-
-          if (contextRole) {
-            const suffix = `:${contextRole}`;
-            if (pid.endsWith(suffix)) {
-              const baseId = pid.slice(0, -suffix.length);
-              contexts[baseId] = { meta: contextData.meta };
-            }
-          } else {
-            if (!pid.includes(":")) {
-              contexts[pid] = { meta: contextData.meta };
-            }
-          }
-        }
-      }
-
-      return contexts;
-    } catch (e) {
-      console.error("[SessionManager] getProviderContexts failed:", e);
+  sessionId: string,
+  _threadId: string = DEFAULT_THREAD,
+  options: { contextRole?: ProviderResponseType | null } = {},
+): Promise < Record < string, { meta: unknown } >> {
+  const { contextRole = null } = options;
+  try {
+    if(!sessionId) {
+      console.warn(
+        "[SessionManager] getProviderContexts called without sessionId",
+      );
       return {};
     }
-  }
+      if(!this.adapter || !this.adapter.isReady()) {
+  console.warn(
+    "[SessionManager] getProviderContexts called but adapter is not ready",
+  );
+  return {};
+}
 
-  /**
-   * Extract decision map context from narrative section
-   */
-  _extractContextFromMapping(text: string): string {
-    if (!text) return "";
+const rawRecords = await this.adapter.getContextsBySessionId(sessionId);
+const contextRecords = (Array.isArray(rawRecords) ? rawRecords : []) as Array<Record<string, unknown>>;
+// TODO(types): Adapter method should return typed array
 
-    const consensusMatch = text.match(/Consensus:/i);
-    if (consensusMatch && consensusMatch.index !== undefined) {
-      return text.slice(consensusMatch.index).trim();
-    }
+const contexts: Record<string, { meta: unknown }> = {};
+for (const record of contextRecords) {
+  const contextData = record.contextData as Record<string, unknown> | undefined;
+  if (record.providerId && contextData?.meta) {
+    const pid = record.providerId as string;
 
-    return text.trim();
-  }
-
-  /**
-   * Combine extracted answers + artifacts into context blob
-   */
-  _buildContextSummary(_result: PersistenceResult, request: PersistRequest): string {
-
-    let summary = "";
-
-    if (request?.understandOutput?.short_answer) {
-      summary += `<previous_answer>\n${request.understandOutput.short_answer}\n</previous_answer>\n\n`;
-    } else if (request?.gauntletOutput?.the_answer?.statement) {
-      summary += `<previous_answer>\n${request.gauntletOutput.the_answer.statement}\n</previous_answer>\n\n`;
-    }
-
-    const finalSummary = summary.trim();
-    console.log("[SessionManager] Built Context Summary:", {
-      length: finalSummary.length,
-      preview: finalSummary.slice(0, 100).replace(/\n/g, "\\n") + "...",
-      hasPreviousAnswer: finalSummary.includes("<previous_answer>"),
-    });
-
-    return finalSummary;
-  }
-
-  async persistContextBridge(sessionId: string, turnId: string, bridge: Record<string, unknown>): Promise<void> {
-    try {
-      if (!this.adapter) return;
-      const record = { ...bridge, sessionId, createdAt: Date.now() };
-      await this.adapter.put("context_bridges", record, turnId);
-    } catch (_) { }
-  }
-
-  async getContextBridge(turnId: string): Promise<unknown> {
-    try {
-      if (!this.adapter) return null;
-      return await this.adapter.get("context_bridges", turnId);
-    } catch (_) {
-      return null;
-    }
-  }
-
-  async getLatestContextBridge(sessionId: string): Promise<unknown> {
-    try {
-      if (!this.adapter) return null;
-      const turns = await this.adapter.getTurnsBySessionId(sessionId) as Array<Record<string, unknown>>;
-      if (!Array.isArray(turns) || turns.length === 0) return null;
-      for (let i = turns.length - 1; i >= 0; i--) {
-        const t = turns[i];
-        if (t?.type === "ai") {
-          const br = await this.getContextBridge(t.id as string);
-          if (br) return br;
-        }
+    if (contextRole) {
+      const suffix = `:${contextRole}`;
+      if (pid.endsWith(suffix)) {
+        const baseId = pid.slice(0, -suffix.length);
+        contexts[baseId] = { meta: contextData.meta };
       }
-      return null;
-    } catch (_) {
-      return null;
-    }
-  }
-
-  _defaultConciergePhaseState(): Record<string, unknown> {
-    return {
-      hasRunConcierge: false,
-      lastSingularityProviderId: null,
-      activeWorkflow: null,
-      turnInCurrentInstance: 0,
-      pendingHandoff: null,
-      commitPending: false,
-    };
-  }
-
-  async getConciergePhaseState(sessionId: string): Promise<Record<string, unknown>> {
-    try {
-      if (!this.adapter || !this.adapter.isReady()) {
-        return this._defaultConciergePhaseState();
+    } else {
+      if (!pid.includes(":")) {
+        contexts[pid] = { meta: contextData.meta };
       }
-      const raw = await this.adapter.get("sessions", sessionId) as unknown;
-      if (!raw) return this._defaultConciergePhaseState();
-      const session = this._normalizeSessionRecord(raw, sessionId);
-      const state = session.conciergePhaseState;
-      if (!isPlainObject(state)) return this._defaultConciergePhaseState();
-      return {
-        ...this._defaultConciergePhaseState(),
-        ...state,
-      };
-    } catch (_) {
-      return this._defaultConciergePhaseState();
     }
   }
+}
 
-  async setConciergePhaseState(sessionId: string, phaseState: unknown): Promise<boolean> {
-    try {
-      if (!this.adapter) return false;
-      const raw = await this.adapter.get("sessions", sessionId) as unknown;
-      if (!raw) return false;
-      const session = this._normalizeSessionRecord(raw, sessionId);
-      const now = Date.now();
-      const updated = {
-        ...session,
-        conciergePhaseState: this._toJsonSafe(phaseState) || this._defaultConciergePhaseState(),
-        lastActivity: now,
-        updatedAt: now,
-      };
-      await this.adapter.put("sessions", updated, sessionId);
-      return true;
-    } catch (_) {
-      return false;
-    }
+return contexts;
+    } catch (e) {
+  console.error("[SessionManager] getProviderContexts failed:", e);
+  return {};
+}
   }
 
-  /**
-   * Get persistence adapter status
-   */
-  getPersistenceStatus(): { persistenceEnabled: true; isInitialized: boolean; adapterReady: boolean } {
-    return {
-      persistenceEnabled: true,
-      isInitialized: this.isInitialized,
-      adapterReady: this.adapter?.isReady() || false,
+/**
+ * Extract decision map context from narrative section
+ */
+_extractContextFromMapping(text: string): string {
+  if (!text) return "";
+
+  const consensusMatch = text.match(/Consensus:/i);
+  if (consensusMatch && consensusMatch.index !== undefined) {
+    return text.slice(consensusMatch.index).trim();
+  }
+
+  return text.trim();
+}
+
+/**
+ * Combine extracted answers + artifacts into context blob
+ */
+_buildContextSummary(_result: PersistenceResult, request: PersistRequest): string {
+
+  let summary = "";
+
+  if (request?.understandOutput?.short_answer) {
+    summary += `<previous_answer>\n${request.understandOutput.short_answer}\n</previous_answer>\n\n`;
+  } else if (request?.gauntletOutput?.the_answer?.statement) {
+    summary += `<previous_answer>\n${request.gauntletOutput.the_answer.statement}\n</previous_answer>\n\n`;
+  }
+
+  const finalSummary = summary.trim();
+  console.log("[SessionManager] Built Context Summary:", {
+    length: finalSummary.length,
+    preview: finalSummary.slice(0, 100).replace(/\n/g, "\\n") + "...",
+    hasPreviousAnswer: finalSummary.includes("<previous_answer>"),
+  });
+
+  return finalSummary;
+}
+
+  async persistContextBridge(sessionId: string, turnId: string, bridge: Record<string, unknown>): Promise < void> {
+  try {
+    if(!this.adapter) return;
+    const record = { ...bridge, sessionId, createdAt: Date.now() };
+    await this.adapter.put("context_bridges", record, turnId);
+    const record = { ...bridge, sessionId, createdAt: Date.now() };
+    await this.adapter.put("context_bridges", record, turnId);
+  } catch(err) {
+    getSessionLogger().error("[SessionManager] persistContextBridge failed", err);
+  }
+}
+
+  async getContextBridge(turnId: string): Promise < unknown > {
+  try {
+    if(!this.adapter) return null;
+    return await this.adapter.get("context_bridges", turnId);
+  } catch(err) {
+    getSessionLogger().error("[SessionManager] getContextBridge failed", err);
+    return null;
+  }
+}
+
+  async getLatestContextBridge(sessionId: string): Promise < unknown > {
+  try {
+    if(!this.adapter) return null;
+    const turns = await this.adapter.getTurnsBySessionId(sessionId) as Array<Record<string, unknown>>;
+    if(!Array.isArray(turns) || turns.length === 0) return null;
+    for(let i = turns.length - 1; i >= 0; i--) {
+  const t = turns[i];
+  if (t?.type === "ai") {
+    const br = await this.getContextBridge(t.id as string);
+    if (br) return br;
+  }
+}
+return null;
+    } catch (err) {
+  getSessionLogger().error("[SessionManager] getLatestContextBridge failed", err);
+  return null;
+}
+  }
+
+_defaultConciergePhaseState(): Record < string, unknown > {
+  return {
+    hasRunConcierge: false,
+    lastSingularityProviderId: null,
+    activeWorkflow: null,
+    turnInCurrentInstance: 0,
+    pendingHandoff: null,
+    commitPending: false,
+  };
+}
+
+  async getConciergePhaseState(sessionId: string): Promise < Record < string, unknown >> {
+  try {
+    if(!this.adapter || !this.adapter.isReady()) {
+  return this._defaultConciergePhaseState();
+}
+const raw = await this.adapter.get("sessions", sessionId) as unknown;
+if (!raw) return this._defaultConciergePhaseState();
+const session = this._normalizeSessionRecord(raw, sessionId);
+const state = session.conciergePhaseState;
+if (!isPlainObject(state)) return this._defaultConciergePhaseState();
+return {
+  ...this._defaultConciergePhaseState(),
+  ...state,
+};
+    } catch (_) {
+  return this._defaultConciergePhaseState();
+}
+  }
+
+  async setConciergePhaseState(sessionId: string, phaseState: unknown): Promise < boolean > {
+  try {
+    if(!this.adapter) return false;
+    const raw = await this.adapter.get("sessions", sessionId) as unknown;
+    if(!raw) return false;
+    const session = this._normalizeSessionRecord(raw, sessionId);
+    const now = Date.now();
+    const updated = {
+      ...session,
+      conciergePhaseState: this._toJsonSafe(phaseState) || this._defaultConciergePhaseState(),
+      lastActivity: now,
+      updatedAt: now,
     };
+    await this.adapter.put("sessions", updated, sessionId);
+    return true;
+  } catch(_) {
+    return false;
   }
+}
+
+/**
+ * Get persistence adapter status
+ */
+getPersistenceStatus(): { persistenceEnabled: true; isInitialized: boolean; adapterReady: boolean } {
+  return {
+    persistenceEnabled: true,
+    isInitialized: this.isInitialized,
+    adapterReady: this.adapter?.isReady() || false,
+  };
+}
 }

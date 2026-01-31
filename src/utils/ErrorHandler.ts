@@ -158,7 +158,7 @@ export class HTOSError extends Error {
     this.context = context;
     this.recoverable = recoverable;
     this.timestamp = Date.now();
-    this.id = `error_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    this.id = `error_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
   }
 
   get details(): Record<string, unknown> {
@@ -922,6 +922,9 @@ export class ErrorHandler {
         return result;
       } catch (recoveryError) {
         this.updateCircuitBreaker(breakerKey, false);
+        if (recoveryError instanceof HTOSError && recoveryError.code === "NO_RECOVERY_STRATEGY") {
+          throw htosError;
+        }
         throw recoveryError;
       }
     }

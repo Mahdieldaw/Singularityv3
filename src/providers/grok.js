@@ -165,6 +165,7 @@ export class GrokSessionApi {
     this._xsidScript = '';
     this._baggage = '';
     this._sentryTrace = '';
+    this._pageHtml = '';
     this._anonUser = '';
     this._challengeDict = null;
     this._verificationToken = '';
@@ -231,13 +232,27 @@ export class GrokSessionApi {
       await this._cRequest(this._actions[1], signal);
       await this._cRequest(this._actions[2], signal);
 
-      xsid = generateSign(
-        '/rest/app-chat/conversations/new',
-        'POST',
-        this._verificationToken,
-        this._svgData,
-        this._numbers
-      );
+      try {
+        xsid = generateSign(
+          '/rest/app-chat/conversations/new',
+          'POST',
+          this._verificationToken,
+          this._svgData,
+          this._numbers
+        );
+      } catch (e) {
+        const messageText = e instanceof Error ? e.message : String(e);
+        console.warn('[GrokSession] x-statsig-id generation failed', {
+          phase: 'new',
+          message: messageText,
+          tokenLen: this._verificationToken ? this._verificationToken.length : 0,
+          svgLen: this._svgData ? this._svgData.length : 0,
+          anim: this._anim || null,
+          numbersLen: Array.isArray(this._numbers) ? this._numbers.length : 0,
+          xsidScript: this._xsidScript || null,
+        });
+        throw this._createError('unknown', `x-statsig-id generation failed: ${messageText}`);
+      }
     } else {
       // Continuation: partial handshake
       this._loadFromExtraData(extraData);
@@ -245,13 +260,28 @@ export class GrokSessionApi {
       await this._cRequest(this._actions[1], signal);
       await this._cRequest(this._actions[2], signal);
 
-      xsid = generateSign(
-        `/rest/app-chat/conversations/${extraData.conversationId}/responses`,
-        'POST',
-        this._verificationToken,
-        this._svgData,
-        this._numbers
-      );
+      try {
+        xsid = generateSign(
+          `/rest/app-chat/conversations/${extraData.conversationId}/responses`,
+          'POST',
+          this._verificationToken,
+          this._svgData,
+          this._numbers
+        );
+      } catch (e) {
+        const messageText = e instanceof Error ? e.message : String(e);
+        console.warn('[GrokSession] x-statsig-id generation failed', {
+          phase: 'continuation',
+          message: messageText,
+          conversationId: extraData?.conversationId || null,
+          tokenLen: this._verificationToken ? this._verificationToken.length : 0,
+          svgLen: this._svgData ? this._svgData.length : 0,
+          anim: this._anim || null,
+          numbersLen: Array.isArray(this._numbers) ? this._numbers.length : 0,
+          xsidScript: this._xsidScript || null,
+        });
+        throw this._createError('unknown', `x-statsig-id generation failed: ${messageText}`);
+      }
     }
 
     // Build conversation request
@@ -263,6 +293,11 @@ export class GrokSessionApi {
     const endpoint = extraData
       ? `https://grok.com/rest/app-chat/conversations/${extraData.conversationId}/responses`
       : 'https://grok.com/rest/app-chat/conversations/new';
+
+    console.log('[GrokSession] Dispatching chat request', {
+      continuation: !!extraData,
+      endpoint,
+    });
 
     const res = await this.fetch(endpoint, {
       method: 'POST',
@@ -317,22 +352,119 @@ export class GrokSessionApi {
       },
     });
 
+    if (!res.ok) {
+      const status = res.status;
+      const text = await res.text().catch(() => '');
+      if (status === 401 || status === 403) {
+        throw this._createError('login', `Grok page load blocked (${status})`, { status });
+      }
+      if (status === 429) {
+        throw this._createError('tooManyRequests', 'Grok rate limited (429)', { status });
+      }
+      throw this._createError('network', `Grok page load failed (${status})`, { status, details: text ? text.slice(0, 300) : undefined });
+    }
+
     const html = await res.text();
+    this._pageHtml = html;
 
     // Extract meta tags
     this._baggage = between(html, '<meta name="baggage" content="', '"');
     this._sentryTrace = between(html, '<meta name="sentry-trace" content="', '-');
 
     // Parse scripts
-    const scriptMatches = html.match(/src="(\/_next\/static\/chunks\/[^"]+)"/g) || [];
-    const scripts = scriptMatches.map((m) => m.match(/src="([^"]+)"/)[1]);
+    const scriptMatches = html.match(/(?:src|href)="(\/_next\/static\/chunks\/[^"]+\.js)[^"]*"/g) || [];
+    const scripts = Array.from(
+      new Set(
+        scriptMatches
+          .map((m) => {
+            const mm = m.match(/(?:src|href)="([^"]+)"/);
+            return mm ? mm[1] : '';
+          })
+          .filter(Boolean),
+      ),
+    );
 
     // Find matching mapping
     const [actions, xsidScript] = await this._parseGrokScripts(scripts, html);
     this._actions = actions;
     this._xsidScript = xsidScript;
 
+    const missing = {
+      baggage: !this._baggage,
+      sentryTrace: !this._sentryTrace,
+      verificationToken: !html.includes('grok-site-verification'),
+      nextChunks: scripts.length === 0,
+      actions: !Array.isArray(this._actions) || this._actions.length < 3,
+      xsidScript: !this._xsidScript,
+    };
+    if (Object.values(missing).some(Boolean)) {
+      throw this._createError(
+        'unknown',
+        'Grok handshake page is missing required markers',
+        { missing },
+      );
+    }
+
     this._log('Page loaded, actions:', actions.length, 'xsid script:', xsidScript);
+  }
+
+  async _fetchSignatureFromPage(signal) {
+    const res = await this.fetch('https://grok.com/c', {
+      method: 'GET',
+      credentials: 'include',
+      signal,
+      headers: {
+        'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36',
+      },
+    });
+    if (!res.ok) return null;
+    const html = await res.text();
+    this._pageHtml = html;
+    const [token, anim] = parseVerificationToken(html);
+    let svg = parseSvgData(html, anim) || '';
+    if (!token) return null;
+    if (svg) return { token, anim, svg };
+
+    const scriptMatches = html.match(/(?:src|href)="(\/_next\/static\/chunks\/[^"]+\.js)[^"]*"/g) || [];
+    const scripts = Array.from(
+      new Set(
+        scriptMatches
+          .map((m) => {
+            const mm = m.match(/(?:src|href)="([^"]+)"/);
+            return mm ? mm[1] : '';
+          })
+          .filter(Boolean),
+      ),
+    );
+
+    const maxFetches = Math.min(60, scripts.length);
+    for (const script of scripts.slice(0, maxFetches)) {
+      try {
+        const chunkRes = await this.fetch(`https://grok.com${script}`, {
+          method: 'GET',
+          credentials: 'include',
+          signal,
+          headers: {
+            accept: '*/*',
+            'user-agent':
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36',
+          },
+        });
+        if (!chunkRes.ok) continue;
+        const chunkText = await chunkRes.text();
+        const candidate = parseSvgData(chunkText, anim) || '';
+        if (candidate && candidate.length > 50) {
+          svg = candidate;
+          break;
+        }
+      } catch (_) {
+        continue;
+      }
+    }
+
+    if (!svg) return null;
+    return { token, anim, svg };
   }
 
   _loadFromExtraData(extraData) {
@@ -484,9 +616,61 @@ export class GrokSessionApi {
         }
       } else if (this._cRun === 2) {
         // Parse verification token and SVG
-        [this._verificationToken, this._anim] = parseVerificationToken(text);
-        this._svgData = parseSvgData(text, this._anim) || '';
+        let token;
+        let anim;
+        [token, anim] = parseVerificationToken(text);
+        let svg = parseSvgData(text, anim) || '';
+
+        if (!token || !svg) {
+          let fallback = null;
+          if (this._pageHtml) {
+            const [t2, a2] = parseVerificationToken(this._pageHtml);
+            const s2 = parseSvgData(this._pageHtml, a2) || '';
+            if (t2 && s2) fallback = { token: t2, anim: a2, svg: s2 };
+          }
+          if (!fallback) {
+            try {
+              fallback = await this._fetchSignatureFromPage(signal);
+            } catch (_) {
+              fallback = null;
+            }
+          }
+          if (!token && fallback?.token) token = fallback.token;
+          if (!anim && fallback?.anim) anim = fallback.anim;
+          if (!svg && fallback?.svg) svg = fallback.svg;
+        }
+
+        this._verificationToken = token || '';
+        this._anim = anim || '';
+        this._svgData = svg || '';
         this._numbers = await this._fetchXsidNumbers();
+
+        const tokenMissing = !this._verificationToken;
+        const svgMissing = !this._svgData;
+        const xsidInvalid = !Array.isArray(this._numbers) || this._numbers.length < 4;
+        if (xsidInvalid) this._numbers = [0, 0, 0, 0];
+
+        if (tokenMissing || svgMissing) {
+          const missing = {
+            verificationToken: tokenMissing,
+            svgData: svgMissing,
+            xsidNumbers: xsidInvalid,
+          };
+          throw this._createError('unknown', 'Grok handshake missing signature materials', {
+            missing,
+            details: {
+              tokenLen: this._verificationToken ? this._verificationToken.length : 0,
+              svgLen: this._svgData ? this._svgData.length : 0,
+              anim: this._anim || null,
+              xsidScript: this._xsidScript || null,
+              numbersLen: Array.isArray(this._numbers) ? this._numbers.length : 0,
+              pageHasBaggage: !!this._pageHtml && this._pageHtml.includes('<meta name="baggage" content="'),
+              pageHasSentryTrace: !!this._pageHtml && this._pageHtml.includes('<meta name="sentry-trace" content="'),
+              pageHasVerificationToken: !!this._pageHtml && this._pageHtml.includes('grok-site-verification'),
+              pageHasNextChunks: !!this._pageHtml && this._pageHtml.includes('/_next/static/chunks/'),
+            },
+          });
+        }
 
         this._log('c_request 2: verification token obtained, anim =', this._anim);
       }

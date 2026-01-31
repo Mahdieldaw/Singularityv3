@@ -127,12 +127,9 @@ export interface ProviderContextRecord {
   sessionId: string;
   providerId: string;
   threadId?: string;
-  text?: string;
   createdAt: number;
   updatedAt: number;
   isActive?: boolean;
-  meta?: unknown;
-  lastUpdated?: number;
   contextData?: {
     text?: string;
     meta?: Record<string, unknown>;

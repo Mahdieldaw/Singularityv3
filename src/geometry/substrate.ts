@@ -19,6 +19,7 @@ import {
 } from './threshold';
 import { computeTopology } from './topology';
 import { computeNodeStats } from './nodes';
+import { computeUmapLayout } from './layout';
 
 export interface SubstrateConfig {
     k: number;
@@ -124,6 +125,8 @@ export function buildGeometricSubstrate(
 
     const shape = classifyShape(topology, n);
 
+    const layout2d = computeUmapLayout(paragraphIds, embeddings);
+
     // ─────────────────────────────────────────────────────────────────────────
     // COMPUTE NODE STATS
     // ─────────────────────────────────────────────────────────────────────────
@@ -174,6 +177,7 @@ export function buildGeometricSubstrate(
 
         topology,
         shape,
+        layout2d,
         meta: {
             embeddingSuccess: true,
             embeddingBackend,

@@ -3,7 +3,6 @@ import { useAtomValue, useAtom } from 'jotai';
 
 import { useTraversal } from '../../hooks/useTraversal';
 import { TraversalForcingPointCard } from './TraversalForcingPointCard';
-import { buildTraversalContinuationPrompt } from '../../utils/traversal-prompt-builder';
 import type { Claim } from '../../../shared/contract';
 import { CONTINUE_COGNITIVE_WORKFLOW, WORKFLOW_STEP_UPDATE } from '../../../shared/messaging';
 import api from '../../services/extension-api';
@@ -106,12 +105,7 @@ export const TraversalGraphView: React.FC<TraversalGraphViewProps> = ({
     setIsSubmitting(true);
     setSubmissionError(null);
 
-    const continuationPrompt = buildTraversalContinuationPrompt(
-      originalQuery,
-      forcingPoints,
-      getResolution,
-      claims
-    );
+    const continuationPrompt = String(originalQuery || '').trim();
 
     const maxRetries = 3;
 
@@ -225,7 +219,10 @@ export const TraversalGraphView: React.FC<TraversalGraphViewProps> = ({
                 aiTurnId,
                 userMessage: continuationPrompt,
                 providerId: singularityProvider || undefined,
-                isTraversalContinuation: true
+                isTraversalContinuation: true,
+                traversalState: {
+                  claimStatuses: Object.fromEntries(state.claimStatuses),
+                },
               }
             });
           } catch (e) {
@@ -287,34 +284,34 @@ export const TraversalGraphView: React.FC<TraversalGraphViewProps> = ({
             (() => {
               const resolution = getResolution(String(fp.id));
               const isResolved = !!resolution;
-          const conflictResolution =
-            resolution?.type === 'conflict' && !!resolution.selectedClaimId
-              ? {
-                selectedClaimId: resolution.selectedClaimId,
-                selectedLabel:
-                  resolution.selectedLabel ||
-                  String(
-                    fp?.options?.find((o: any) => o?.claimId === resolution.selectedClaimId)?.label || ''
-                  ),
-              }
-              : undefined;
+              const conflictResolution =
+                resolution?.type === 'conflict' && !!resolution.selectedClaimId
+                  ? {
+                    selectedClaimId: resolution.selectedClaimId,
+                    selectedLabel:
+                      resolution.selectedLabel ||
+                      String(
+                        fp?.options?.find((o: any) => o?.claimId === resolution.selectedClaimId)?.label || ''
+                      ),
+                  }
+                  : undefined;
               const gateResolution =
                 resolution?.type === 'conditional'
                   ? { satisfied: resolution.satisfied === true, userInput: resolution.userInput }
                   : undefined;
 
               return (
-            <TraversalForcingPointCard
-              key={fp.id}
-              forcingPoint={fp}
-              claims={claims}
-              isResolved={isResolved}
-              resolution={conflictResolution}
-              gateResolution={gateResolution}
-              onResolveConflict={resolveForcingPoint}
-              onResolveGate={resolveGate}
-              disabled={isReadOnly || isSubmitting}
-            />
+                <TraversalForcingPointCard
+                  key={fp.id}
+                  forcingPoint={fp}
+                  claims={claims}
+                  isResolved={isResolved}
+                  resolution={conflictResolution}
+                  gateResolution={gateResolution}
+                  onResolveConflict={resolveForcingPoint}
+                  onResolveGate={resolveGate}
+                  disabled={isReadOnly || isSubmitting}
+                />
               );
             })()
           ))}
@@ -345,13 +342,15 @@ export const TraversalGraphView: React.FC<TraversalGraphViewProps> = ({
                 <div className="text-xs text-red-500 font-bold">
                   {submissionError}
                 </div>
-                <button
-                  onClick={handleSubmitToConcierge}
-                  disabled={isSubmitting || isReadOnly}
-                  className="mt-2 px-3 py-1.5 rounded-lg bg-surface-highlight hover:bg-surface-raised border border-border-subtle text-xs font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  Retry
-                </button>
+                {!isReadOnly && (
+                  <button
+                    onClick={handleSubmitToConcierge}
+                    disabled={isSubmitting}
+                    className="mt-2 px-3 py-1.5 rounded-lg bg-surface-highlight hover:bg-surface-raised border border-border-subtle text-xs font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Retry
+                  </button>
+                )}
               </div>
             )}
           </div>

@@ -1024,6 +1024,36 @@ export interface GeometricSubstrateSummary {
 
 export type SubstrateSummary = GeometricSubstrateSummary;
 
+export interface PipelineSubstrateNode {
+  paragraphId: string;
+  modelIndex: number;
+  dominantStance: ShadowStance;
+  contested: boolean;
+  statementIds: string[];
+  top1Sim: number;
+  avgTopKSim: number;
+  mutualDegree: number;
+  strongDegree: number;
+  isolationScore: number;
+  componentId: string | null;
+  regionId: string | null;
+  x: number;
+  y: number;
+}
+
+export interface PipelineSubstrateEdge {
+  source: string;
+  target: string;
+  similarity: number;
+  rank: number;
+}
+
+export interface PipelineSubstrateGraph {
+  nodes: PipelineSubstrateNode[];
+  edges: PipelineSubstrateEdge[];
+  softThreshold?: number;
+}
+
 export type PipelineRegime = 'fragmented' | 'parallel_components' | 'bimodal_fork' | 'convergent_core';
 
 export interface PipelineAdaptiveLens {
@@ -1104,12 +1134,12 @@ export interface PipelineMapperGeometricHints {
   attentionRegions: Array<{
     regionId: string;
     reason:
-      | 'semantic_opposition'
-      | 'high_isolation'
-      | 'stance_inversion'
-      | 'uncertain'
-      | 'bridge'
-      | 'low_cohesion';
+    | 'semantic_opposition'
+    | 'high_isolation'
+    | 'stance_inversion'
+    | 'uncertain'
+    | 'bridge'
+    | 'low_cohesion';
     priority: 'high' | 'medium' | 'low';
     guidance: string;
   }>;
@@ -1130,11 +1160,11 @@ export interface PreSemanticInterpretation {
 
 export interface StructuralViolation {
   type:
-    | 'shape_mismatch'
-    | 'claim_count_mismatch'
-    | 'tier_mismatch'
-    | 'missed_conflict'
-    | 'false_conflict';
+  | 'shape_mismatch'
+  | 'claim_count_mismatch'
+  | 'tier_mismatch'
+  | 'missed_conflict'
+  | 'false_conflict';
   severity: 'high' | 'medium' | 'low';
   predicted: { description: string; evidence: string };
   actual: { description: string; evidence: string };
@@ -1194,11 +1224,11 @@ export interface UnattendedRegion {
   avgIsolation: number;
   likelyClaim: boolean;
   reason:
-    | 'stance_diversity'
-    | 'high_connectivity'
-    | 'bridge_region'
-    | 'isolated_noise'
-    | 'insufficient_signals';
+  | 'stance_diversity'
+  | 'high_connectivity'
+  | 'bridge_region'
+  | 'isolated_noise'
+  | 'insufficient_signals';
   bridgesTo: string[];
 }
 
@@ -1255,6 +1285,7 @@ export interface PipelineArtifacts {
   } | null;
   substrate?: {
     summary?: GeometricSubstrateSummary | null;
+    graph?: PipelineSubstrateGraph | null;
     degenerate?: boolean;
     degenerateReason?: string | null;
   } | null;
@@ -1480,17 +1511,17 @@ export type PersistRequest = {
   canonicalUserTurnId?: string;
   canonicalAiTurnId?: string;
   partial?: boolean;
-  pipelineStatus?: string;
+  pipelineStatus?: PipelineStatus;
   runId?: string | null;
-  mapperArtifact?: unknown;
-  pipelineArtifacts?: unknown;
-  storedAnalysis?: unknown;
-  singularityOutput?: unknown;
+  mapperArtifact?: MapperArtifact;
+  pipelineArtifacts?: PipelineArtifacts;
+  storedAnalysis?: StructuralAnalysis;
+  singularityOutput?: SingularityOutput;
   understandOutput?: { short_answer?: string } | null;
   gauntletOutput?: { the_answer?: { statement?: string } } | null;
   sourceTurnId?: string;
   stepType?: ProviderResponseType;
-  targetProvider?: string;
+  targetProvider?: ProviderKey;
 };
 
 export type PersistReturn = {
@@ -1891,12 +1922,14 @@ export type OperationFn<
 export type FallbackStrategy<
   TOperation = unknown,
   TContext = Record<string, unknown>,
-> = (operation: TOperation, context: TContext) => Promise<unknown>;
+  TResult = unknown,
+> = (operation: TOperation, context: TContext) => Promise<TResult>;
 
 export type RecoveryStrategy<
   TError = unknown,
   TContext = Record<string, unknown>,
+  TResult = unknown,
 > = {
   name: string;
-  execute: (error: TError, context: TContext) => Promise<unknown>;
+  execute: (error: TError, context: TContext) => Promise<TResult>;
 };

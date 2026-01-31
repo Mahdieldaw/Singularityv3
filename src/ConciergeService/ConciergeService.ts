@@ -10,12 +10,9 @@ import {
 } from "../../shared/contract";
 
 // Spatial Brief System
-import { buildPositionBrief, buildPositionBriefWithGhosts } from './positionBrief';
+import { buildPositionBrief } from './positionBrief';
 import { buildSynthesisPrompt } from './synthesisPrompt';
 // unused imports removed
-
-// Shadow Mapper types
-import type { ShadowAudit, UnindexedStatement } from '../core/PromptMethods';
 
 import {
     parseConciergeOutput,
@@ -67,13 +64,7 @@ export interface ConciergePromptOptions {
     isFirstTurn?: boolean;
     /** Prior context for fresh spawns after COMMIT or batch re-invoke */
     priorContext?: PriorContext;
-    /** Shadow analysis data (optional - computed from batch responses) */
-    shadow?: {
-        audit: ShadowAudit;
-        topUnindexed: UnindexedStatement[];
-    };
-    /** Ghost strings from MapperArtifact (v4 - geometry) */
-    ghosts?: string[];
+    evidenceSubstrate?: string;
 }
 
 export interface HandleTurnResult {
@@ -205,108 +196,13 @@ function formatActiveWorkflow(workflow: ActiveWorkflow): string {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// SHADOW MAPPER: SECTION BUILDER
-// ═══════════════════════════════════════════════════════════════════════════
-
-/**
- * Shadow data to include in concierge prompt.
- * Passed separately from StructuralAnalysis since shadow is optional.
- */
-export interface ShadowData {
-    audit: ShadowAudit;
-    topUnindexed: UnindexedStatement[];
-}
-
-const SHADOW_CONFIG = {
-    HAS_GAPS_SCORE_THRESHOLD: 0.3,
-    RELEVANCE_SCORE_THRESHOLD: 0.25,
-    MAX_RELEVANT_ITEMS: 3,
-    TEXT_TRUNCATE_LENGTH: 100,
-    TEXT_TRUNCATE_SUFFIX_LENGTH: 97,
-    SURVIVAL_RATE_WARNING_THRESHOLD: 0.5,
-    MIN_CANDIDATES_FOR_WARNING: 20,
-    MIN_CLAIMS_FOR_PRESCRIPTIVE_ALARM: 10,
-};
-
-/**
- * Build shadow section for Concierge brief.
- * Surfaces gaps detected by mechanical extraction that Primary missed.
- */
-function buildShadowSection(shadow: ShadowData): string {
-    const { audit, topUnindexed } = shadow;
-    const parts: string[] = [];
-
-    // Check if there's meaningful signal
-    const hasGaps =
-        audit.gaps.conflicts > 0 ||
-        audit.gaps.prerequisites > 0 ||
-        topUnindexed.some(u => u.adjustedScore > SHADOW_CONFIG.HAS_GAPS_SCORE_THRESHOLD);
-
-    if (!hasGaps) {
-        return '';  // Nothing significant to add
-    }
-
-    parts.push('## What Might Be Missing\n');
-
-    // Gap summary
-    if (audit.gaps.conflicts > 0) {
-        parts.push(
-            `• ${audit.gaps.conflicts} potential conflict(s) not surfaced above`
-        );
-    }
-    if (audit.gaps.prerequisites > 0) {
-        parts.push(
-            `• ${audit.gaps.prerequisites} potential dependency(ies) not surfaced above`
-        );
-    }
-    if (audit.gaps.prescriptive > 0 && audit.primaryCounts.claims < SHADOW_CONFIG.MIN_CLAIMS_FOR_PRESCRIPTIVE_ALARM) {
-        parts.push(
-            `• ${audit.gaps.prescriptive} prescriptive statement(s) detected (should/must/always)`
-        );
-    }
-
-    // Top unindexed (query-relevant)
-    const relevant = topUnindexed.filter(u => u.adjustedScore > SHADOW_CONFIG.RELEVANCE_SCORE_THRESHOLD);
-    if (relevant.length > 0) {
-        parts.push('');
-        parts.push('**Potentially missed (sorted by relevance):**');
-        for (const item of relevant.slice(0, SHADOW_CONFIG.MAX_RELEVANT_ITEMS)) {
-            const { statement } = item;
-            const typeLabel = statement.stance.charAt(0).toUpperCase() + statement.stance.slice(1);
-            const truncatedText = statement.text.length > SHADOW_CONFIG.TEXT_TRUNCATE_LENGTH
-                ? statement.text.slice(0, SHADOW_CONFIG.TEXT_TRUNCATE_SUFFIX_LENGTH) + '...'
-                : statement.text;
-            let line = `• [${typeLabel}] "${truncatedText}"`;
-            // V2 uses single modelIndex per statement, but we can mention it
-            line += ` (from perspective ${statement.modelIndex})`;
-            parts.push(line);
-        }
-    }
-
-    // Survival rate warning (if lots got filtered, patterns may be too aggressive)
-    if (audit.extraction.survivalRate < SHADOW_CONFIG.SURVIVAL_RATE_WARNING_THRESHOLD && audit.extraction.pass1Candidates > SHADOW_CONFIG.MIN_CANDIDATES_FOR_WARNING) {
-        parts.push('');
-        parts.push(
-            `*Note: Some potential signals were filtered as likely noise.*`
-        );
-    }
-
-    return parts.join('\n');
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
 // THE PROMPT BUILDER
 // ═══════════════════════════════════════════════════════════════════════════
 
 export function buildConciergePrompt(
     userMessage: string,
-    analysis: StructuralAnalysis,
     options?: ConciergePromptOptions
 ): string {
-    // Build positions using spatial arrangement (shape-aware or edge-based fallback)
-    const ghosts = options?.ghosts || [];
-    const positions = buildPositionBriefWithGhosts(analysis, ghosts);
-
     // Handoff V2: Prior context for fresh spawns after COMMIT or batch re-invoke
     const priorContextSection = options?.priorContext
         ? buildPriorContextSection(options.priorContext)
@@ -320,9 +216,8 @@ export function buildConciergePrompt(
         ? `## Active Workflow\n${formatActiveWorkflow(options.activeWorkflow)}\n`
         : '';
 
-    // Shadow Mapper: What mechanical extraction found that Primary missed
-    const shadowSection = options?.shadow
-        ? buildShadowSection(options.shadow)
+    const evidenceSubstrateSection = options?.evidenceSubstrate
+        ? `<EVIDENCE_SUBSTRATE>\n${options.evidenceSubstrate}\n</EVIDENCE_SUBSTRATE>\n\n`
         : '';
 
     // Universal prompt - no stance, no shape guidance, no labels
@@ -348,10 +243,7 @@ The suggestions are a starting point, not a boundary.
 ${userMessage}
 </USER_QUERY>
 
-${priorContextSection ? `<CONTEXT non_authoritative="true">\n${priorContextSection}${historySection}</CONTEXT>\n\n` : historySection}${workflowSection ? `${workflowSection}\n` : ''}<POSITIONS>
-${positions}</POSITIONS>
-
-${shadowSection ? `${shadowSection}\n\n` : ''}<RESPONSE_INSTRUCTIONS>
+${priorContextSection ? `<CONTEXT non_authoritative="true">\n${priorContextSection}${historySection}</CONTEXT>\n\n` : historySection}${workflowSection ? `${workflowSection}\n` : ''}${evidenceSubstrateSection}<RESPONSE_INSTRUCTIONS>
 Answer the question directly.
 
 Choose a path that fits the user's reality, not the elegance of an idea.
@@ -550,7 +442,7 @@ export async function handleTurn(
         : { stance: 'default' as ConciergeStance, reason: 'universal' as const };
 
     // Build and execute prompt
-    const prompt = buildConciergePrompt(userMessage, analysis, {
+    const prompt = buildConciergePrompt(userMessage, {
         conversationHistory: options?.conversationHistory,
         activeWorkflow: options?.activeWorkflow,
         isFirstTurn: options?.isFirstTurn,

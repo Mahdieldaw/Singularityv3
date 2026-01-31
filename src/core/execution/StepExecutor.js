@@ -66,7 +66,8 @@ export class StepExecutor {
     const activeProviders = [];
     try {
       for (const pid of providers) {
-        const check = this.healthTracker.shouldAttempt(pid);
+        const bypassCircuit = options?.isRecompute === true;
+        const check = bypassCircuit ? { allowed: true } : this.healthTracker.shouldAttempt(pid);
         if (!check.allowed) {
           providerStatuses.push({
             providerId: pid,
@@ -177,52 +178,54 @@ export class StepExecutor {
             if (resultWrapper && resultWrapper.status === "rejected") {
               const err = resultWrapper.reason;
               const classified = classifyError(err);
-              try {
-                this.healthTracker.recordFailure(providerId, err);
-              } catch (_) { }
-
-              if (entry) {
-                entry.status = 'failed';
-                entry.progress = 100;
-                entry.error = classified;
-              }
-
-              streamingManager.port.postMessage({
-                type: 'WORKFLOW_PROGRESS',
-                sessionId: context.sessionId,
-                aiTurnId: context.canonicalAiTurnId || 'unknown',
-                phase: 'batch',
-                providerStatuses,
-                completedCount: providerStatuses.filter((p) => p.status === 'completed').length,
-                totalCount: providers.length,
-              });
-              return;
-            }
-
-            try {
               if (!completedProviders.has(providerId)) {
                 completedProviders.add(providerId);
-                this.healthTracker.recordSuccess(providerId);
+                this.healthTracker.recordFailure(providerId, err);
               }
             } catch (_) { }
 
             if (entry) {
-              entry.status = 'completed';
+              entry.status = 'failed';
               entry.progress = 100;
-              if (entry.error) delete entry.error;
+              entry.error = classified;
+            }
 
-              streamingManager.port.postMessage({
-                type: 'WORKFLOW_PROGRESS',
-                sessionId: context.sessionId,
-                aiTurnId: context.canonicalAiTurnId || 'unknown',
-                phase: 'batch',
-                providerStatuses,
-                completedCount: providerStatuses.filter((p) => p.status === 'completed').length,
-                totalCount: providers.length,
-              });
+            streamingManager.port.postMessage({
+              type: 'WORKFLOW_PROGRESS',
+              sessionId: context.sessionId,
+              aiTurnId: context.canonicalAiTurnId || 'unknown',
+              phase: 'batch',
+              providerStatuses,
+              completedCount: providerStatuses.filter((p) => p.status === 'completed').length,
+              totalCount: providers.length,
+            });
+            return;
+          }
+
+            try {
+            if (!completedProviders.has(providerId)) {
+              completedProviders.add(providerId);
+              this.healthTracker.recordSuccess(providerId);
             }
           } catch (_) { }
-        },
+
+          if (entry) {
+            entry.status = 'completed';
+            entry.progress = 100;
+            if (entry.error) delete entry.error;
+
+            streamingManager.port.postMessage({
+              type: 'WORKFLOW_PROGRESS',
+              sessionId: context.sessionId,
+              aiTurnId: context.canonicalAiTurnId || 'unknown',
+              phase: 'batch',
+              providerStatuses,
+              completedCount: providerStatuses.filter((p) => p.status === 'completed').length,
+              totalCount: providers.length,
+            });
+          }
+        } catch(_) { }
+      },
         onError: (error) => {
           try {
             streamingManager.port.postMessage({
@@ -272,11 +275,13 @@ export class StepExecutor {
 
           errors.forEach((error, providerId) => {
             const providerResponse = error?.providerResponse;
+            const classified = classifyError(error);
             formattedResults[providerId] = {
               providerId: providerId,
               text: "",
               status: "failed",
               meta: {
+                error: classified,
                 _rawError: error.message,
                 errorCode: error?.code,
                 providerError: providerResponse?.meta?.error,
@@ -288,8 +293,10 @@ export class StepExecutor {
               authErrors.push(error);
             }
             try {
-              this.healthTracker.recordFailure(providerId, error);
-              const classified = classifyError(error);
+              if (!completedProviders.has(providerId)) {
+                completedProviders.add(providerId);
+                this.healthTracker.recordFailure(providerId, error);
+              }
               const entry = providerStatuses.find((s) => s.providerId === providerId);
               if (entry) {
                 entry.status = 'failed';
@@ -381,1305 +388,1388 @@ export class StepExecutor {
           });
         },
       });
-    });
-  }
+  });
+}
 
   async executeMappingStep(step, context, stepResults, workflowContexts, options) {
-    const { streamingManager } = options;
-    const artifactProcessor = new ArtifactProcessor();
-    const payload = step.payload;
-    const sourceData = await this._resolveSourceData(
-      payload,
-      context,
-      stepResults,
-      options
-    );
+  const { streamingManager } = options;
+  const artifactProcessor = new ArtifactProcessor();
+  const payload = step.payload;
+  const sourceData = await this._resolveSourceData(
+    payload,
+    context,
+    stepResults,
+    options
+  );
 
-    if (sourceData.length < 2) {
-      throw new Error(
-        `Mapping requires at least 2 valid sources, but found ${sourceData.length}.`,
+  if (sourceData.length < 2) {
+    throw new Error(
+      `Mapping requires at least 2 valid sources, but found ${sourceData.length}.`,
+    );
+  }
+
+  wdbg(
+    `[StepExecutor] Running mapping with ${sourceData.length
+    } sources: ${sourceData.map((s) => s.providerId).join(", ")} `,
+  );
+
+  const providerOrder = Array.isArray(payload.providerOrder)
+    ? payload.providerOrder
+    : sourceData.map((s) => s.providerId);
+  const citationOrder = providerOrder.filter((pid) =>
+    sourceData.some((s) => s.providerId === pid),
+  );
+
+  const indexedSourceData = sourceData.map((s, idx) => {
+    const modelIndex = citationOrder.findIndex((pid) => pid === s.providerId) + 1;
+    return {
+      providerId: s.providerId,
+      modelIndex: modelIndex > 0 ? modelIndex : idx + 1,
+      text: s.text,
+    };
+  });
+
+  // ══════════════════════════════════════════════════════════════════════
+  // NEW PIPELINE: Shadow -> Semantic -> Traversal
+  // ══════════════════════════════════════════════════════════════════════
+
+  // 1. Import new modules dynamically
+  // Import shadow module once at function scope so callbacks can use its exports without awaiting
+  const shadowModule = await import('../../shadow');
+  const { extractShadowStatements, computeShadowDelta, getTopUnreferenced } = shadowModule;
+  const { buildSemanticMapperPrompt, parseSemanticMapperOutput } = await import('../../ConciergeService/semanticMapper');
+  const { reconstructProvenance } = await import('../../ConciergeService/claimAssembly');
+  const { extractForcingPoints } = await import('../../utils/cognitive/traversalEngine');
+  const { enrichStatementsWithGeometry } = await import('../../geometry/enrichment');
+  const { buildStatementFates } = await import('../../geometry/interpretation/fateTracking');
+  const { findUnattendedRegions } = await import('../../geometry/interpretation/coverageAudit');
+  const { buildCompletenessReport } = await import('../../geometry/interpretation/completenessReport');
+
+  // 2. Shadow Extraction (Mechanical)
+  // Map sourceData to expected format (modelIndex, content)
+  const shadowInput = sourceData.map(s => {
+    const idx = citationOrder.findIndex(pid => pid === s.providerId) + 1;
+    return { modelIndex: idx > 0 ? idx : 99, content: s.text };
+  });
+
+  console.log(`[StepExecutor] Extracting shadow statements from ${shadowInput.length} models...`);
+  const shadowResult = extractShadowStatements(shadowInput);
+  console.log(`[StepExecutor] Extracted ${shadowResult.statements.length} shadow statements.`);
+
+  // ════════════════════════════════════════════════════════════════════════
+  // 2.5 PARAGRAPH PROJECTION (sync, fast)
+  // ════════════════════════════════════════════════════════════════════════
+  const { projectParagraphs } = shadowModule;
+  const paragraphResult = projectParagraphs(shadowResult.statements);
+  console.log(`[StepExecutor] Projected ${paragraphResult.paragraphs.length} paragraphs ` +
+    `(${paragraphResult.meta.contestedCount} contested, ` +
+    `${paragraphResult.meta.processingTimeMs.toFixed(1)}ms)`);
+
+  // ════════════════════════════════════════════════════════════════════════
+  // 2.6 CLUSTERING (async, may fail gracefully)
+  // ════════════════════════════════════════════════════════════════════════
+  let clusteringResult = null;
+  let embeddingResult = null;
+  let paragraphClusteringSummary = null;
+  let substrateSummary = null;
+  let substrateGraph = null;
+  let substrateDegenerate = null;
+  let substrateDegenerateReason = null;
+  let preSemanticInterpretation = null;
+  let substrate = null;
+  let enrichmentResult = null;
+  if (paragraphResult.paragraphs.length > 0) {
+    try {
+      const clusteringModule = await import('../../clustering');
+      const { generateEmbeddings, getEmbeddingStatus, buildClusters, DEFAULT_CONFIG } = clusteringModule;
+      const { buildGeometricSubstrate, isDegenerate } = await import('../../geometry');
+      const { buildPreSemanticInterpretation } = await import('../../geometry/interpretation');
+
+      embeddingResult = await generateEmbeddings(
+        paragraphResult.paragraphs,
+        shadowResult.statements,
+        DEFAULT_CONFIG
       );
-    }
 
-    wdbg(
-      `[StepExecutor] Running mapping with ${sourceData.length
-      } sources: ${sourceData.map((s) => s.providerId).join(", ")} `,
-    );
-
-    const providerOrder = Array.isArray(payload.providerOrder)
-      ? payload.providerOrder
-      : sourceData.map((s) => s.providerId);
-    const citationOrder = providerOrder.filter((pid) =>
-      sourceData.some((s) => s.providerId === pid),
-    );
-
-    // ══════════════════════════════════════════════════════════════════════
-    // NEW PIPELINE: Shadow -> Semantic -> Traversal
-    // ══════════════════════════════════════════════════════════════════════
-
-    // 1. Import new modules dynamically
-    // Import shadow module once at function scope so callbacks can use its exports without awaiting
-    const shadowModule = await import('../../shadow');
-    const { extractShadowStatements, computeShadowDelta, getTopUnreferenced } = shadowModule;
-    const { buildSemanticMapperPrompt, parseSemanticMapperOutput } = await import('../../ConciergeService/semanticMapper');
-    const { reconstructProvenance } = await import('../../ConciergeService/claimAssembly');
-    const { extractForcingPoints } = await import('../../utils/cognitive/traversalEngine');
-    const { enrichStatementsWithGeometry } = await import('../../geometry/enrichment');
-    const { buildStatementFates } = await import('../../geometry/interpretation/fateTracking');
-    const { findUnattendedRegions } = await import('../../geometry/interpretation/coverageAudit');
-    const { buildCompletenessReport } = await import('../../geometry/interpretation/completenessReport');
-
-    // 2. Shadow Extraction (Mechanical)
-    // Map sourceData to expected format (modelIndex, content)
-    const shadowInput = sourceData.map(s => {
-      const idx = citationOrder.findIndex(pid => pid === s.providerId) + 1;
-      return { modelIndex: idx > 0 ? idx : 99, content: s.text };
-    });
-
-    console.log(`[StepExecutor] Extracting shadow statements from ${shadowInput.length} models...`);
-    const shadowResult = extractShadowStatements(shadowInput);
-    console.log(`[StepExecutor] Extracted ${shadowResult.statements.length} shadow statements.`);
-
-    // ════════════════════════════════════════════════════════════════════════
-    // 2.5 PARAGRAPH PROJECTION (sync, fast)
-    // ════════════════════════════════════════════════════════════════════════
-    const { projectParagraphs } = shadowModule;
-    const paragraphResult = projectParagraphs(shadowResult.statements);
-    console.log(`[StepExecutor] Projected ${paragraphResult.paragraphs.length} paragraphs ` +
-      `(${paragraphResult.meta.contestedCount} contested, ` +
-      `${paragraphResult.meta.processingTimeMs.toFixed(1)}ms)`);
-
-    // ════════════════════════════════════════════════════════════════════════
-    // 2.6 CLUSTERING (async, may fail gracefully)
-    // ════════════════════════════════════════════════════════════════════════
-    let clusteringResult = null;
-    let embeddingResult = null;
-    let paragraphClusteringSummary = null;
-    let substrateSummary = null;
-    let substrateDegenerate = null;
-    let substrateDegenerateReason = null;
-    let preSemanticInterpretation = null;
-    let substrate = null;
-    let enrichmentResult = null;
-    if (paragraphResult.paragraphs.length > 0) {
+      /** @type {"none" | "webgpu" | "wasm"} */
+      let embeddingBackend = 'none';
       try {
-        const clusteringModule = await import('../../clustering');
-        const { generateEmbeddings, getEmbeddingStatus, buildClusters, DEFAULT_CONFIG } = clusteringModule;
-        const { buildGeometricSubstrate, isDegenerate } = await import('../../geometry');
-        const { buildPreSemanticInterpretation } = await import('../../geometry/interpretation');
+        const status = await getEmbeddingStatus();
+        if (status?.backend === 'webgpu' || status?.backend === 'wasm') {
+          embeddingBackend = status.backend;
+        }
+      } catch (_) { }
 
-        embeddingResult = await generateEmbeddings(
+      substrate = buildGeometricSubstrate(
+        paragraphResult.paragraphs,
+        embeddingResult.embeddings,
+        embeddingBackend
+      );
+
+      try {
+        substrateDegenerate = isDegenerate(substrate);
+        substrateDegenerateReason = substrateDegenerate
+          ? (substrate && typeof substrate === 'object' && 'degenerateReason' in substrate
+            ? String(substrate.degenerateReason)
+            : 'unknown')
+          : null;
+      } catch (_) {
+        substrateDegenerate = null;
+        substrateDegenerateReason = null;
+      }
+
+      try {
+        const nodeCount = Array.isArray(substrate.nodes) ? substrate.nodes.length : 0;
+        const contestedCount = Array.isArray(substrate.nodes)
+          ? substrate.nodes.reduce((acc, n) => acc + (n?.contested ? 1 : 0), 0)
+          : 0;
+        const avgTop1Sim = Array.isArray(substrate.nodes) && nodeCount > 0
+          ? substrate.nodes.reduce((acc, n) => acc + (typeof n?.top1Sim === 'number' ? n.top1Sim : 0), 0) / nodeCount
+          : 0;
+        const avgIsolationScore = Array.isArray(substrate.nodes) && nodeCount > 0
+          ? substrate.nodes.reduce((acc, n) => acc + (typeof n?.isolationScore === 'number' ? n.isolationScore : 0), 0) / nodeCount
+          : 0;
+
+        substrateSummary = {
+          shape: {
+            prior: String(substrate?.shape?.prior || 'unknown'),
+            confidence: typeof substrate?.shape?.confidence === 'number' ? substrate.shape.confidence : 0,
+          },
+          topology: {
+            componentCount: typeof substrate?.topology?.componentCount === 'number' ? substrate.topology.componentCount : 0,
+            largestComponentRatio: typeof substrate?.topology?.largestComponentRatio === 'number' ? substrate.topology.largestComponentRatio : 0,
+            isolationRatio: typeof substrate?.topology?.isolationRatio === 'number' ? substrate.topology.isolationRatio : 0,
+            globalStrongDensity: typeof substrate?.topology?.globalStrongDensity === 'number' ? substrate.topology.globalStrongDensity : 0,
+          },
+          meta: {
+            embeddingSuccess: !!substrate?.meta?.embeddingSuccess,
+            embeddingBackend: substrate?.meta?.embeddingBackend || 'none',
+            nodeCount: typeof substrate?.meta?.nodeCount === 'number' ? substrate.meta.nodeCount : nodeCount,
+            knnEdgeCount: typeof substrate?.meta?.knnEdgeCount === 'number' ? substrate.meta.knnEdgeCount : 0,
+            mutualEdgeCount: typeof substrate?.meta?.mutualEdgeCount === 'number' ? substrate.meta.mutualEdgeCount : 0,
+            strongEdgeCount: typeof substrate?.meta?.strongEdgeCount === 'number' ? substrate.meta.strongEdgeCount : 0,
+            softThreshold: typeof substrate?.graphs?.strong?.softThreshold === 'number' ? substrate.graphs.strong.softThreshold : 0,
+            buildTimeMs: typeof substrate?.meta?.buildTimeMs === 'number' ? substrate.meta.buildTimeMs : 0,
+          },
+          nodes: {
+            contestedCount,
+            avgTop1Sim,
+            avgIsolationScore,
+          },
+        };
+      } catch (_) {
+        substrateSummary = null;
+      }
+
+      if (isDegenerate(substrate)) {
+        console.warn(`[StepExecutor] Degenerate substrate: ${substrate.degenerateReason}`);
+      } else {
+        console.log(
+          `[StepExecutor] Substrate shape: ${substrate.shape.prior} ` +
+          `(${substrate.shape.confidence.toFixed(2)})`
+        );
+      }
+
+      if (paragraphResult.paragraphs.length >= 3) {
+        clusteringResult = buildClusters(
           paragraphResult.paragraphs,
           shadowResult.statements,
-          DEFAULT_CONFIG
-        );
-
-        /** @type {"none" | "webgpu" | "wasm"} */
-        let embeddingBackend = 'none';
-        try {
-          const status = await getEmbeddingStatus();
-          if (status?.backend === 'webgpu' || status?.backend === 'wasm') {
-            embeddingBackend = status.backend;
-          }
-        } catch (_) { }
-
-        substrate = buildGeometricSubstrate(
-          paragraphResult.paragraphs,
           embeddingResult.embeddings,
-          embeddingBackend
+          DEFAULT_CONFIG,
+          substrate.graphs.mutual
         );
 
-        try {
-          substrateDegenerate = isDegenerate(substrate);
-          substrateDegenerateReason = substrateDegenerate
-            ? (substrate && typeof substrate === 'object' && 'degenerateReason' in substrate
-              ? String(substrate.degenerateReason)
-              : 'unknown')
-            : null;
-        } catch (_) {
-          substrateDegenerate = null;
-          substrateDegenerateReason = null;
-        }
+        clusteringResult.meta.embeddingTimeMs = embeddingResult.timeMs;
+        clusteringResult.meta.totalTimeMs = embeddingResult.timeMs + clusteringResult.meta.clusteringTimeMs;
 
         try {
-          const nodeCount = Array.isArray(substrate.nodes) ? substrate.nodes.length : 0;
-          const contestedCount = Array.isArray(substrate.nodes)
-            ? substrate.nodes.reduce((acc, n) => acc + (n?.contested ? 1 : 0), 0)
-            : 0;
-          const avgTop1Sim = Array.isArray(substrate.nodes) && nodeCount > 0
-            ? substrate.nodes.reduce((acc, n) => acc + (typeof n?.top1Sim === 'number' ? n.top1Sim : 0), 0) / nodeCount
-            : 0;
-          const avgIsolationScore = Array.isArray(substrate.nodes) && nodeCount > 0
-            ? substrate.nodes.reduce((acc, n) => acc + (typeof n?.isolationScore === 'number' ? n.isolationScore : 0), 0) / nodeCount
-            : 0;
-
-          substrateSummary = {
-            shape: {
-              prior: String(substrate?.shape?.prior || 'unknown'),
-              confidence: typeof substrate?.shape?.confidence === 'number' ? substrate.shape.confidence : 0,
-            },
-            topology: {
-              componentCount: typeof substrate?.topology?.componentCount === 'number' ? substrate.topology.componentCount : 0,
-              largestComponentRatio: typeof substrate?.topology?.largestComponentRatio === 'number' ? substrate.topology.largestComponentRatio : 0,
-              isolationRatio: typeof substrate?.topology?.isolationRatio === 'number' ? substrate.topology.isolationRatio : 0,
-              globalStrongDensity: typeof substrate?.topology?.globalStrongDensity === 'number' ? substrate.topology.globalStrongDensity : 0,
-            },
-            meta: {
-              embeddingSuccess: !!substrate?.meta?.embeddingSuccess,
-              embeddingBackend: substrate?.meta?.embeddingBackend || 'none',
-              nodeCount: typeof substrate?.meta?.nodeCount === 'number' ? substrate.meta.nodeCount : nodeCount,
-              knnEdgeCount: typeof substrate?.meta?.knnEdgeCount === 'number' ? substrate.meta.knnEdgeCount : 0,
-              mutualEdgeCount: typeof substrate?.meta?.mutualEdgeCount === 'number' ? substrate.meta.mutualEdgeCount : 0,
-              strongEdgeCount: typeof substrate?.meta?.strongEdgeCount === 'number' ? substrate.meta.strongEdgeCount : 0,
-              softThreshold: typeof substrate?.graphs?.strong?.softThreshold === 'number' ? substrate.graphs.strong.softThreshold : 0,
-              buildTimeMs: typeof substrate?.meta?.buildTimeMs === 'number' ? substrate.meta.buildTimeMs : 0,
-            },
-            nodes: {
-              contestedCount,
-              avgTop1Sim,
-              avgIsolationScore,
-            },
+          paragraphClusteringSummary = {
+            meta: { ...(clusteringResult.meta || {}) },
+            clusters: (clusteringResult.clusters || []).map((c) => ({
+              id: c.id,
+              size: Array.isArray(c.paragraphIds) ? c.paragraphIds.length : 0,
+              cohesion: typeof c.cohesion === 'number' ? c.cohesion : 0,
+              pairwiseCohesion: typeof c.pairwiseCohesion === 'number' ? c.pairwiseCohesion : 0,
+              uncertain: !!c.uncertain,
+              ...(Array.isArray(c.uncertaintyReasons) ? { uncertaintyReasons: c.uncertaintyReasons } : {}),
+            })),
           };
         } catch (_) {
-          substrateSummary = null;
-        }
-
-        if (isDegenerate(substrate)) {
-          console.warn(`[StepExecutor] Degenerate substrate: ${substrate.degenerateReason}`);
-        } else {
-          console.log(
-            `[StepExecutor] Substrate shape: ${substrate.shape.prior} ` +
-            `(${substrate.shape.confidence.toFixed(2)})`
-          );
-        }
-
-        if (paragraphResult.paragraphs.length >= 3) {
-          clusteringResult = buildClusters(
-            paragraphResult.paragraphs,
-            shadowResult.statements,
-            embeddingResult.embeddings,
-            DEFAULT_CONFIG,
-            substrate.graphs.mutual
-          );
-
-          clusteringResult.meta.embeddingTimeMs = embeddingResult.timeMs;
-          clusteringResult.meta.totalTimeMs = embeddingResult.timeMs + clusteringResult.meta.clusteringTimeMs;
-
-          try {
-            paragraphClusteringSummary = {
-              meta: { ...(clusteringResult.meta || {}) },
-              clusters: (clusteringResult.clusters || []).map((c) => ({
-                id: c.id,
-                size: Array.isArray(c.paragraphIds) ? c.paragraphIds.length : 0,
-                cohesion: typeof c.cohesion === 'number' ? c.cohesion : 0,
-                pairwiseCohesion: typeof c.pairwiseCohesion === 'number' ? c.pairwiseCohesion : 0,
-                uncertain: !!c.uncertain,
-                ...(Array.isArray(c.uncertaintyReasons) ? { uncertaintyReasons: c.uncertaintyReasons } : {}),
-              })),
-            };
-          } catch (_) {
-            paragraphClusteringSummary = null;
-          }
-        } else {
-          clusteringResult = null;
           paragraphClusteringSummary = null;
         }
+      } else {
+        clusteringResult = null;
+        paragraphClusteringSummary = null;
+      }
 
-        try {
-          if (!substrateDegenerate && typeof buildPreSemanticInterpretation === 'function') {
-            preSemanticInterpretation = buildPreSemanticInterpretation(
-              substrate,
-              paragraphResult.paragraphs,
-              Array.isArray(clusteringResult?.clusters) ? clusteringResult.clusters : undefined
-            );
-          } else {
-            preSemanticInterpretation = null;
-          }
-        } catch (_) {
+      try {
+        if (!substrateDegenerate && typeof buildPreSemanticInterpretation === 'function') {
+          preSemanticInterpretation = buildPreSemanticInterpretation(
+            substrate,
+            paragraphResult.paragraphs,
+            Array.isArray(clusteringResult?.clusters) ? clusteringResult.clusters : undefined
+          );
+        } else {
           preSemanticInterpretation = null;
         }
-
-        try {
-          const regions = Array.isArray(preSemanticInterpretation?.regionization?.regions)
-            ? preSemanticInterpretation.regionization.regions
-            : [];
-          if (substrate && regions.length > 0) {
-            enrichmentResult = enrichStatementsWithGeometry(
-              shadowResult.statements,
-              paragraphResult.paragraphs,
-              substrate,
-              regions
-            );
-            if (enrichmentResult?.unenrichedCount > 0) {
-              console.warn(
-                `[Enrichment] ${enrichmentResult.unenrichedCount}/${shadowResult.statements.length} statements could not be enriched`,
-                enrichmentResult.failures.slice(0, 5)
-              );
-            }
-          } else {
-            enrichmentResult = null;
-          }
-        } catch (err) {
-          enrichmentResult = null;
-          console.warn('[Enrichment] Failed:', getErrorMessage(err));
-        }
-
-        if (clusteringResult) {
-          const nonSingletons = clusteringResult.clusters.filter(c => c.paragraphIds.length > 1);
-          console.log(`[StepExecutor] Clustering results:`);
-          console.log(`  - Total clusters: ${clusteringResult.meta.totalClusters}`);
-          console.log(`  - Singletons: ${clusteringResult.meta.singletonCount}`);
-          console.log(`  - Multi-member: ${nonSingletons.length}`);
-          console.log(`  - Uncertain: ${clusteringResult.meta.uncertainCount}`);
-          console.log(`  - Compression: ${(clusteringResult.meta.compressionRatio * 100).toFixed(0)}%`);
-          console.log(
-            `  - Timing: embed ${clusteringResult.meta.embeddingTimeMs.toFixed(0)}ms, ` +
-            `cluster ${clusteringResult.meta.clusteringTimeMs.toFixed(0)}ms`
-          );
-
-          if (nonSingletons.length > 0) {
-            const largest = [...nonSingletons]
-              .sort((a, b) => b.paragraphIds.length - a.paragraphIds.length)
-              .slice(0, 3);
-            console.log(
-              `  - Largest clusters:`,
-              largest.map(c => `${c.id}: ${c.paragraphIds.length} paragraphs`)
-            );
-          }
-        }
-      } catch (clusteringError) {
-        // Per design: skip clustering entirely on failure, continue without
-        console.warn('[StepExecutor] Clustering failed, continuing without clusters:', getErrorMessage(clusteringError));
-        clusteringResult = null;
+      } catch (_) {
+        preSemanticInterpretation = null;
       }
-    } else {
-      console.log('[StepExecutor] Skipping embeddings/geometry (no paragraphs)');
-    }
 
-    // 3. Build Prompt (LLM) - pass pre-computed paragraph projection and clustering
-    const mappingPrompt = buildSemanticMapperPrompt(
-      payload.originalPrompt,
-      paragraphResult.paragraphs,
-      preSemanticInterpretation?.hints || null
-    );
+      try {
+        if (substrate && !substrateDegenerate && substrate.layout2d && substrate.layout2d.coordinates) {
+          const coords = substrate.layout2d.coordinates || {};
+          const regions = preSemanticInterpretation?.regionization?.regions || [];
 
-    const promptLength = mappingPrompt.length;
-    console.log(`[StepExecutor] Semantic Mapper prompt length for ${payload.mappingProvider}: ${promptLength} chars`);
+          const paragraphToRegion = new Map();
+          for (const region of regions) {
+            for (const nodeId of region.nodeIds || []) {
+              paragraphToRegion.set(nodeId, region.id);
+            }
+          }
 
-    const limits = PROVIDER_LIMITS[payload.mappingProvider];
-    if (limits && promptLength > limits.maxInputChars) {
-      console.warn(`[StepExecutor] Mapping prompt length ${promptLength} exceeds limit ${limits.maxInputChars} for ${payload.mappingProvider}`);
-      throw new Error(`INPUT_TOO_LONG: Prompt length ${promptLength} exceeds limit ${limits.maxInputChars} for ${payload.mappingProvider}`);
-    }
+          const paragraphToComponent = new Map();
+          for (const comp of substrate.topology.components || []) {
+            for (const nodeId of comp.nodeIds || []) {
+              paragraphToComponent.set(nodeId, comp.id);
+            }
+          }
 
-    return new Promise((resolve, reject) => {
-      this.orchestrator.executeParallelFanout(
-        mappingPrompt,
-        [payload.mappingProvider],
-        {
-          sessionId: context.sessionId,
-          useThinking: payload.useThinking,
-          providerMeta: step?.payload?.providerMeta,
-          onPartial: (providerId, chunk) => {
-            streamingManager.dispatchPartialDelta(
-              context.sessionId,
-              step.stepId,
-              providerId,
-              chunk.text,
-              "Mapping",
+          substrateGraph = {
+            nodes: (substrate.nodes || []).map((node) => ({
+              paragraphId: node.paragraphId,
+              modelIndex: node.modelIndex,
+              dominantStance: node.dominantStance,
+              contested: node.contested,
+              statementIds: Array.isArray(node.statementIds) ? [...node.statementIds] : [],
+              top1Sim: node.top1Sim,
+              avgTopKSim: node.avgTopKSim,
+              mutualDegree: node.mutualDegree,
+              strongDegree: node.strongDegree,
+              isolationScore: node.isolationScore,
+              componentId: paragraphToComponent.get(node.paragraphId) || null,
+              regionId: paragraphToRegion.get(node.paragraphId) || null,
+              x: coords[node.paragraphId]?.[0] ?? 0,
+              y: coords[node.paragraphId]?.[1] ?? 0,
+            })),
+            edges: (substrate.graphs?.mutual?.edges || []).map((e) => ({
+              source: e.source,
+              target: e.target,
+              similarity: e.similarity,
+              rank: e.rank,
+            })),
+            softThreshold: substrate.graphs?.strong?.softThreshold,
+          };
+        } else {
+          substrateGraph = null;
+        }
+      } catch (_) {
+        substrateGraph = null;
+      }
+
+      try {
+        const regions = Array.isArray(preSemanticInterpretation?.regionization?.regions)
+          ? preSemanticInterpretation.regionization.regions
+          : [];
+        if (substrate && regions.length > 0) {
+          enrichmentResult = enrichStatementsWithGeometry(
+            shadowResult.statements,
+            paragraphResult.paragraphs,
+            substrate,
+            regions
+          );
+          if (enrichmentResult?.unenrichedCount > 0) {
+            console.warn(
+              `[Enrichment] ${enrichmentResult.unenrichedCount}/${shadowResult.statements.length} statements could not be enriched`,
+              enrichmentResult.failures.slice(0, 5)
             );
-          },
-          onAllComplete: async (results, errors) => {
-            let finalResult = results.get(payload.mappingProvider);
-            const providerError = errors?.get?.(payload.mappingProvider);
+          }
+        } else {
+          enrichmentResult = null;
+        }
+      } catch (err) {
+        enrichmentResult = null;
+        console.warn('[Enrichment] Failed:', getErrorMessage(err));
+      }
 
-            if ((!finalResult || !finalResult.text) && providerError) {
-              const recovered = streamingManager.getRecoveredText(
-                context.sessionId, step.stepId, payload.mappingProvider
+      if (clusteringResult) {
+        const nonSingletons = clusteringResult.clusters.filter(c => c.paragraphIds.length > 1);
+        console.log(`[StepExecutor] Clustering results:`);
+        console.log(`  - Total clusters: ${clusteringResult.meta.totalClusters}`);
+        console.log(`  - Singletons: ${clusteringResult.meta.singletonCount}`);
+        console.log(`  - Multi-member: ${nonSingletons.length}`);
+        console.log(`  - Uncertain: ${clusteringResult.meta.uncertainCount}`);
+        console.log(`  - Compression: ${(clusteringResult.meta.compressionRatio * 100).toFixed(0)}%`);
+        console.log(
+          `  - Timing: embed ${clusteringResult.meta.embeddingTimeMs.toFixed(0)}ms, ` +
+          `cluster ${clusteringResult.meta.clusteringTimeMs.toFixed(0)}ms`
+        );
+
+        if (nonSingletons.length > 0) {
+          const largest = [...nonSingletons]
+            .sort((a, b) => b.paragraphIds.length - a.paragraphIds.length)
+            .slice(0, 3);
+          console.log(
+            `  - Largest clusters:`,
+            largest.map(c => `${c.id}: ${c.paragraphIds.length} paragraphs`)
+          );
+        }
+      }
+    } catch (clusteringError) {
+      // Per design: skip clustering entirely on failure, continue without
+      console.warn('[StepExecutor] Clustering failed, continuing without clusters:', getErrorMessage(clusteringError));
+      clusteringResult = null;
+    }
+  } else {
+    console.log('[StepExecutor] Skipping embeddings/geometry (no paragraphs)');
+  }
+
+  // 3. Build Prompt (LLM) - pass pre-computed paragraph projection and clustering
+  const mappingPrompt = buildSemanticMapperPrompt(
+    payload.originalPrompt,
+    paragraphResult.paragraphs,
+    preSemanticInterpretation?.hints || null
+  );
+
+  const promptLength = mappingPrompt.length;
+  console.log(`[StepExecutor] Semantic Mapper prompt length for ${payload.mappingProvider}: ${promptLength} chars`);
+
+  const limits = PROVIDER_LIMITS[payload.mappingProvider];
+  if (limits && promptLength > limits.maxInputChars) {
+    console.warn(`[StepExecutor] Mapping prompt length ${promptLength} exceeds limit ${limits.maxInputChars} for ${payload.mappingProvider}`);
+    throw new Error(`INPUT_TOO_LONG: Prompt length ${promptLength} exceeds limit ${limits.maxInputChars} for ${payload.mappingProvider}`);
+  }
+
+  return new Promise((resolve, reject) => {
+    this.orchestrator.executeParallelFanout(
+      mappingPrompt,
+      [payload.mappingProvider],
+      {
+        sessionId: context.sessionId,
+        useThinking: payload.useThinking,
+        providerMeta: step?.payload?.providerMeta,
+        onPartial: (providerId, chunk) => {
+          streamingManager.dispatchPartialDelta(
+            context.sessionId,
+            step.stepId,
+            providerId,
+            chunk.text,
+            "Mapping",
+          );
+        },
+        onAllComplete: async (results, errors) => {
+          let finalResult = results.get(payload.mappingProvider);
+          const providerError = errors?.get?.(payload.mappingProvider);
+
+          if ((!finalResult || !finalResult.text) && providerError) {
+            const recovered = streamingManager.getRecoveredText(
+              context.sessionId, step.stepId, payload.mappingProvider
+            );
+
+            if (recovered && recovered.trim().length > 0) {
+              finalResult = finalResult || { providerId: payload.mappingProvider, meta: {} };
+              finalResult.text = recovered;
+              finalResult.softError = finalResult.softError || {
+                message: providerError?.message || String(providerError),
+              };
+            }
+          }
+
+          let mapperArtifact = null;
+          let pipelineArtifacts = null;
+          const rawText = finalResult?.text || "";
+          let shadowDelta = null;
+          let topUnindexed = null;
+          let referencedIds = null;
+          let structuralValidation = null;
+
+          if (finalResult?.text) {
+            // 4. Parse (New Parser)
+            const parseResult = parseSemanticMapperOutput(rawText);
+
+            if (parseResult.success && parseResult.output) {
+              // 5. Assembly & Traversal (Mechanical)
+              const regions = Array.isArray(preSemanticInterpretation?.regionization?.regions)
+                ? preSemanticInterpretation.regionization.regions
+                : [];
+              const regionProfiles = Array.isArray(preSemanticInterpretation?.regionProfiles)
+                ? preSemanticInterpretation.regionProfiles
+                : [];
+
+              const unifiedEdges = Array.isArray(parseResult.output.edges) ? parseResult.output.edges : [];
+              const unifiedConditionals = Array.isArray(parseResult.output.conditionals) ? parseResult.output.conditionals : [];
+
+              const mapperClaimsForProvenance = (parseResult.output.claims || []).map((c) => ({
+                id: c.id,
+                label: c.label,
+                text: c.text,
+                supporters: Array.isArray(c.supporters) ? c.supporters : [],
+              }));
+
+              const enrichedClaims = await reconstructProvenance(
+                mapperClaimsForProvenance,
+                shadowResult.statements,
+                paragraphResult.paragraphs,
+                embeddingResult?.embeddings || new Map(),
+                regions,
+                regionProfiles,
+                citationOrder.length,
+                unifiedEdges
               );
 
-              if (recovered && recovered.trim().length > 0) {
-                finalResult = finalResult || { providerId: payload.mappingProvider, meta: {} };
-                finalResult.text = recovered;
-                finalResult.softError = finalResult.softError || {
-                  message: providerError?.message || String(providerError),
-                };
+              let completeness = null;
+              try {
+                if (substrate && Array.isArray(regions) && regions.length > 0) {
+                  const statementFates = buildStatementFates(shadowResult.statements, enrichedClaims);
+                  const unattendedRegions = findUnattendedRegions(
+                    substrate,
+                    paragraphResult.paragraphs,
+                    enrichedClaims,
+                    regions,
+                    shadowResult.statements
+                  );
+                  const completenessReport = buildCompletenessReport(
+                    statementFates,
+                    unattendedRegions,
+                    shadowResult.statements,
+                    regions.length
+                  );
+                  completeness = {
+                    report: completenessReport,
+                    statementFates: Object.fromEntries(statementFates),
+                    unattendedRegions,
+                  };
+                  console.log('[Reconciliation] Completeness:', {
+                    statementCoverage: `${(completenessReport.statements.coverageRatio * 100).toFixed(1)}%`,
+                    regionCoverage: `${(completenessReport.regions.coverageRatio * 100).toFixed(1)}%`,
+                    verdict: completenessReport.verdict.recommendation,
+                    estimatedMissedClaims: completenessReport.verdict.estimatedMissedClaims
+                  });
+                }
+              } catch (err) {
+                completeness = null;
+                console.warn('[Reconciliation] Failed:', getErrorMessage(err));
               }
-            }
 
-            let mapperArtifact = null;
-            let pipelineArtifacts = null;
-            const rawText = finalResult?.text || "";
-            let shadowDelta = null;
-            let topUnindexed = null;
-            let referencedIds = null;
-            let structuralValidation = null;
+              const claimOrder = new Map();
+              for (let i = 0; i < enrichedClaims.length; i++) {
+                const id = enrichedClaims[i]?.id;
+                if (id) claimOrder.set(id, i);
+              }
 
-            if (finalResult?.text) {
-              // 4. Parse (New Parser)
-              const parseResult = parseSemanticMapperOutput(rawText);
+              const conflictClaimIdSet = new Set();
+              const conflictAdj = new Map();
+              for (const e of unifiedEdges) {
+                if (!e || e.type !== 'conflict') continue;
+                const from = String(e.from || '').trim();
+                const to = String(e.to || '').trim();
+                if (!from || !to) continue;
 
-              if (parseResult.success && parseResult.output) {
-                // 5. Assembly & Traversal (Mechanical)
-                const regions = Array.isArray(preSemanticInterpretation?.regionization?.regions)
-                  ? preSemanticInterpretation.regionization.regions
-                  : [];
-                const regionProfiles = Array.isArray(preSemanticInterpretation?.regionProfiles)
-                  ? preSemanticInterpretation.regionProfiles
-                  : [];
+                conflictClaimIdSet.add(from);
+                conflictClaimIdSet.add(to);
 
-                const unifiedEdges = Array.isArray(parseResult.output.edges) ? parseResult.output.edges : [];
-                const unifiedConditionals = Array.isArray(parseResult.output.conditionals) ? parseResult.output.conditionals : [];
+                if (!conflictAdj.has(from)) conflictAdj.set(from, new Set());
+                if (!conflictAdj.has(to)) conflictAdj.set(to, new Set());
+                conflictAdj.get(from).add(to);
+                conflictAdj.get(to).add(from);
+              }
 
-                const mapperClaimsForProvenance = (parseResult.output.claims || []).map((c) => ({
-                  id: c.id,
-                  label: c.label,
-                  text: c.text,
-                  supporters: Array.isArray(c.supporters) ? c.supporters : [],
-                }));
+              const foundationClaimIds = [];
+              for (const c of enrichedClaims) {
+                if (!conflictClaimIdSet.has(c.id)) foundationClaimIds.push(c.id);
+              }
 
-                const enrichedClaims = await reconstructProvenance(
-                  mapperClaimsForProvenance,
-                  shadowResult.statements,
-                  paragraphResult.paragraphs,
-                  embeddingResult?.embeddings || new Map(),
-                  regions,
-                  regionProfiles,
-                  citationOrder.length,
-                  unifiedEdges
-                );
-
-                let completeness = null;
-                try {
-                  if (substrate && Array.isArray(regions) && regions.length > 0) {
-                    const statementFates = buildStatementFates(shadowResult.statements, enrichedClaims);
-                    const unattendedRegions = findUnattendedRegions(
-                      substrate,
-                      paragraphResult.paragraphs,
-                      enrichedClaims,
-                      regions,
-                      shadowResult.statements
-                    );
-                    const completenessReport = buildCompletenessReport(
-                      statementFates,
-                      unattendedRegions,
-                      shadowResult.statements,
-                      regions.length
-                    );
-                    completeness = {
-                      report: completenessReport,
-                      statementFates: Object.fromEntries(statementFates),
-                      unattendedRegions,
-                    };
-                    console.log('[Reconciliation] Completeness:', {
-                      statementCoverage: `${(completenessReport.statements.coverageRatio * 100).toFixed(1)}%`,
-                      regionCoverage: `${(completenessReport.regions.coverageRatio * 100).toFixed(1)}%`,
-                      verdict: completenessReport.verdict.recommendation,
-                      estimatedMissedClaims: completenessReport.verdict.estimatedMissedClaims
-                    });
+              const conflictComponents = [];
+              const visited = new Set();
+              for (const id of Array.from(conflictClaimIdSet)) {
+                if (visited.has(id)) continue;
+                const stack = [id];
+                const component = [];
+                visited.add(id);
+                while (stack.length > 0) {
+                  const cur = stack.pop();
+                  component.push(cur);
+                  const neighbors = conflictAdj.get(cur);
+                  if (!neighbors) continue;
+                  for (const n of Array.from(neighbors)) {
+                    if (visited.has(n)) continue;
+                    visited.add(n);
+                    stack.push(n);
                   }
-                } catch (err) {
-                  completeness = null;
-                  console.warn('[Reconciliation] Failed:', getErrorMessage(err));
                 }
+                component.sort((a, b) => (claimOrder.get(a) ?? 0) - (claimOrder.get(b) ?? 0));
+                conflictComponents.push(component);
+              }
 
-                const claimOrder = new Map();
-                for (let i = 0; i < enrichedClaims.length; i++) {
-                  const id = enrichedClaims[i]?.id;
-                  if (id) claimOrder.set(id, i);
+              conflictComponents.sort((a, b) => {
+                const amin = a.length > 0 ? (claimOrder.get(a[0]) ?? 0) : 0;
+                const bmin = b.length > 0 ? (claimOrder.get(b[0]) ?? 0) : 0;
+                return amin - bmin;
+              });
+
+              const tiers = [
+                { tierIndex: 0, claimIds: foundationClaimIds, gates: [] },
+                ...conflictComponents.map((claimIds, i) => ({ tierIndex: i + 1, claimIds, gates: [] })),
+              ];
+
+              const tierByClaimId = new Map();
+              for (const t of tiers) {
+                const ids = Array.isArray(t?.claimIds) ? t.claimIds : [];
+                for (const id of ids) {
+                  if (!tierByClaimId.has(id)) tierByClaimId.set(id, t.tierIndex);
                 }
+              }
 
-                const conflictClaimIdSet = new Set();
-                const conflictAdj = new Map();
-                for (const e of unifiedEdges) {
-                  if (!e || e.type !== 'conflict') continue;
+              const claimLabelById = new Map(
+                enrichedClaims.map((c) => [c.id, c.label]),
+              );
+
+              const enablesById = new Map();
+              const conflictsById = new Map();
+              const prerequisiteGatesByClaimId = new Map();
+
+              for (const e of unifiedEdges) {
+                if (!e) continue;
+                if (e.type === 'prerequisite') {
                   const from = String(e.from || '').trim();
                   const to = String(e.to || '').trim();
                   if (!from || !to) continue;
-
-                  conflictClaimIdSet.add(from);
-                  conflictClaimIdSet.add(to);
-
-                  if (!conflictAdj.has(from)) conflictAdj.set(from, new Set());
-                  if (!conflictAdj.has(to)) conflictAdj.set(to, new Set());
-                  conflictAdj.get(from).add(to);
-                  conflictAdj.get(to).add(from);
+                  if (!enablesById.has(from)) enablesById.set(from, new Set());
+                  enablesById.get(from).add(to);
+                  if (!prerequisiteGatesByClaimId.has(to)) prerequisiteGatesByClaimId.set(to, []);
+                  const fromLabel = claimLabelById.get(from) || from;
+                  prerequisiteGatesByClaimId.get(to).push({
+                    id: `prereq_${from}_${to}`,
+                    claimId: from,
+                    condition: 'prerequisite',
+                    question: `Do you have "${fromLabel}"?`,
+                    sourceStatementIds: [],
+                  });
+                } else if (e.type === 'conflict') {
+                  const from = String(e.from || '').trim();
+                  const to = String(e.to || '').trim();
+                  if (!from || !to) continue;
+                  if (!conflictsById.has(from)) conflictsById.set(from, []);
+                  const fromLabel = claimLabelById.get(from) || from;
+                  const toLabel = claimLabelById.get(to) || to;
+                  conflictsById.get(from).push({
+                    claimId: to,
+                    question: String(e.question || '').trim() || `${fromLabel} vs ${toLabel}`,
+                    sourceStatementIds: [],
+                  });
                 }
+              }
 
-                const foundationClaimIds = [];
-                for (const c of enrichedClaims) {
-                  if (!conflictClaimIdSet.has(c.id)) foundationClaimIds.push(c.id);
-                }
+              const serializedClaims = enrichedClaims.map((c) => {
+                const id = String(c?.id || '').trim();
+                const supporters = Array.isArray(c?.supporters) ? c.supporters : [];
+                const sourceStatementIds = Array.isArray(c?.sourceStatementIds)
+                  ? c.sourceStatementIds.map((s) => String(s)).filter(Boolean)
+                  : [];
 
-                const conflictComponents = [];
-                const visited = new Set();
-                for (const id of Array.from(conflictClaimIdSet)) {
-                  if (visited.has(id)) continue;
-                  const stack = [id];
-                  const component = [];
-                  visited.add(id);
-                  while (stack.length > 0) {
-                    const cur = stack.pop();
-                    component.push(cur);
-                    const neighbors = conflictAdj.get(cur);
-                    if (!neighbors) continue;
-                    for (const n of Array.from(neighbors)) {
-                      if (visited.has(n)) continue;
-                      visited.add(n);
-                      stack.push(n);
-                    }
-                  }
-                  component.sort((a, b) => (claimOrder.get(a) ?? 0) - (claimOrder.get(b) ?? 0));
-                  conflictComponents.push(component);
-                }
+                const tier = tierByClaimId.get(id) ?? 0;
+                const enables = enablesById.has(id) ? Array.from(enablesById.get(id)) : [];
+                const conflicts = conflictsById.has(id) ? conflictsById.get(id) : [];
+                const prerequisites = prerequisiteGatesByClaimId.has(id)
+                  ? prerequisiteGatesByClaimId.get(id)
+                  : [];
 
-                conflictComponents.sort((a, b) => {
-                  const amin = a.length > 0 ? (claimOrder.get(a[0]) ?? 0) : 0;
-                  const bmin = b.length > 0 ? (claimOrder.get(b[0]) ?? 0) : 0;
-                  return amin - bmin;
-                });
+                return {
+                  id,
+                  label: String(c?.label || id),
+                  stance: 'NEUTRAL',
+                  gates: {
+                    conditionals: [],
+                    prerequisites,
+                  },
+                  enables,
+                  conflicts,
+                  sourceStatementIds,
+                  supporterModels: supporters,
+                  supportRatio: typeof c?.supportRatio === 'number' ? c.supportRatio : 0,
+                  hasConditionalSignal: Boolean(c?.hasConditionalSignal),
+                  hasSequenceSignal: Boolean(c?.hasSequenceSignal),
+                  hasTensionSignal: Boolean(c?.hasTensionSignal),
+                  tier,
+                };
+              });
 
-                const tiers = [
-                  { tierIndex: 0, claimIds: foundationClaimIds, gates: [] },
-                  ...conflictComponents.map((claimIds, i) => ({ tierIndex: i + 1, claimIds, gates: [] })),
-                ];
+              const traversalGraph = {
+                claims: serializedClaims,
+                edges: unifiedEdges,
+                conditionals: unifiedConditionals,
+                tiers,
+                maxTier: tiers.length - 1,
+                roots: [],
+                tensions: [],
+                cycles: [],
+              };
 
-                const tierByClaimId = new Map();
-                for (const t of tiers) {
-                  const ids = Array.isArray(t?.claimIds) ? t.claimIds : [];
-                  for (const id of ids) {
-                    if (!tierByClaimId.has(id)) tierByClaimId.set(id, t.tierIndex);
-                  }
-                }
+              const forcingPoints = extractForcingPoints(traversalGraph).map((fp) => {
+                const options = Array.isArray(fp?.options)
+                  ? fp.options
+                    .map((o) => ({
+                      claimId: String(o?.claimId || '').trim(),
+                      label: String(o?.label || '').trim(),
+                    }))
+                    .filter((o) => o.claimId && o.label)
+                  : undefined;
 
-                const claimLabelById = new Map(
-                  enrichedClaims.map((c) => [c.id, c.label]),
+                return {
+                  id: String(fp?.id || '').trim(),
+                  type: fp?.type,
+                  tier: typeof fp?.tier === 'number' ? fp.tier : 0,
+                  question: String(fp?.question || '').trim(),
+                  condition: String(fp?.condition || '').trim(),
+                  ...(options ? { options } : {}),
+                  unlocks: [],
+                  prunes: [],
+                  blockedBy: Array.isArray(fp?.blockedByGateIds)
+                    ? fp.blockedByGateIds.map((g) => String(g)).filter(Boolean)
+                    : [],
+                  sourceStatementIds: Array.isArray(fp?.sourceStatementIds)
+                    ? fp.sourceStatementIds.map((s) => String(s)).filter(Boolean)
+                    : [],
+                };
+              });
+
+              try {
+                // Shadow Delta
+                referencedIds = new Set(
+                  enrichedClaims
+                    .map((c) => (Array.isArray(c?.sourceStatementIds) ? c.sourceStatementIds : []))
+                    .flat()
                 );
+                shadowDelta = computeShadowDelta(shadowResult, referencedIds, payload.originalPrompt);
+                topUnindexed = getTopUnreferenced(shadowDelta, 10);
 
-                const enablesById = new Map();
-                const conflictsById = new Map();
-                const prerequisiteGatesByClaimId = new Map();
+                const EDGE_SUPPORTS = 'supports';
+                const EDGE_PREREQUISITE = 'prerequisite';
+                const EDGE_CONFLICTS = 'conflicts';
+                const EDGE_TRADEOFF = 'tradeoff';
+
+                const mappedEdges = unifiedEdges
+                  .filter((e) => e && e.from && e.to && (e.type === 'prerequisite' || e.type === 'conflict'))
+                  .map((e) => {
+                    if (e.type === 'prerequisite') {
+                      return { from: e.from, to: e.to, type: EDGE_PREREQUISITE };
+                    }
+                    const q = typeof e.question === 'string' ? e.question.trim() : '';
+                    return {
+                      from: e.from,
+                      to: e.to,
+                      type: q ? EDGE_CONFLICTS : EDGE_TRADEOFF,
+                    };
+                  });
+
+                const derivedSupportEdges = [];
+                const supportKey = new Set();
 
                 for (const e of unifiedEdges) {
-                  if (!e) continue;
-                  if (e.type === 'prerequisite') {
-                    const from = String(e.from || '').trim();
-                    const to = String(e.to || '').trim();
-                    if (!from || !to) continue;
-                    if (!enablesById.has(from)) enablesById.set(from, new Set());
-                    enablesById.get(from).add(to);
-                    if (!prerequisiteGatesByClaimId.has(to)) prerequisiteGatesByClaimId.set(to, []);
-                    const fromLabel = claimLabelById.get(from) || from;
-                    prerequisiteGatesByClaimId.get(to).push({
-                      id: `prereq_${from}_${to}`,
-                      claimId: from,
-                      condition: 'prerequisite',
-                      question: `Do you have "${fromLabel}"?`,
-                      sourceStatementIds: [],
-                    });
-                  } else if (e.type === 'conflict') {
-                    const from = String(e.from || '').trim();
-                    const to = String(e.to || '').trim();
-                    if (!from || !to) continue;
-                    if (!conflictsById.has(from)) conflictsById.set(from, []);
-                    const fromLabel = claimLabelById.get(from) || from;
-                    const toLabel = claimLabelById.get(to) || to;
-                    conflictsById.get(from).push({
-                      claimId: to,
-                      question: String(e.question || '').trim() || `${fromLabel} vs ${toLabel}`,
-                      sourceStatementIds: [],
-                    });
+                  if (!e || e.type !== 'prerequisite') continue;
+                  const from = String(e.from || '').trim();
+                  const to = String(e.to || '').trim();
+                  if (!from || !to) continue;
+                  const key = `${from}::${to}::supports`;
+                  if (supportKey.has(key)) continue;
+                  supportKey.add(key);
+                  derivedSupportEdges.push({ from, to, type: EDGE_SUPPORTS });
+                }
+
+                for (const cond of unifiedConditionals) {
+                  const affected = Array.isArray(cond?.affectedClaims) ? cond.affectedClaims : [];
+                  for (let i = 0; i < affected.length; i++) {
+                    const a = String(affected[i] || '').trim();
+                    if (!a) continue;
+                    for (let j = i + 1; j < affected.length; j++) {
+                      const b = String(affected[j] || '').trim();
+                      if (!b || a === b) continue;
+                      const k1 = `${a}::${b}::supports`;
+                      if (!supportKey.has(k1)) {
+                        supportKey.add(k1);
+                        derivedSupportEdges.push({ from: a, to: b, type: EDGE_SUPPORTS });
+                      }
+                      const k2 = `${b}::${a}::supports`;
+                      if (!supportKey.has(k2)) {
+                        supportKey.add(k2);
+                        derivedSupportEdges.push({ from: b, to: a, type: EDGE_SUPPORTS });
+                      }
+                    }
                   }
                 }
 
-                const serializedClaims = enrichedClaims.map((c) => {
-                  const id = String(c?.id || '').trim();
-                  const supporters = Array.isArray(c?.supporters) ? c.supporters : [];
-                  const sourceStatementIds = Array.isArray(c?.sourceStatementIds)
-                    ? c.sourceStatementIds.map((s) => String(s)).filter(Boolean)
-                    : [];
+                const ghosts = null;
 
-                  const tier = tierByClaimId.get(id) ?? 0;
-                  const enables = enablesById.has(id) ? Array.from(enablesById.get(id)) : [];
-                  const conflicts = conflictsById.has(id) ? conflictsById.get(id) : [];
-                  const prerequisites = prerequisiteGatesByClaimId.has(id)
-                    ? prerequisiteGatesByClaimId.get(id)
-                    : [];
+                mapperArtifact = {
+                  id: `artifact-${Date.now()}`,
+                  query: payload.originalPrompt,
+                  turn: context.turn || 0,
+                  timestamp: new Date().toISOString(),
+                  model_count: citationOrder.length,
 
-                  return {
-                    id,
-                    label: String(c?.label || id),
-                    stance: 'NEUTRAL',
-                    gates: {
-                      conditionals: [],
-                      prerequisites,
-                    },
-                    enables,
-                    conflicts,
-                    sourceStatementIds,
-                    supporterModels: supporters,
-                    supportRatio: typeof c?.supportRatio === 'number' ? c.supportRatio : 0,
-                    hasConditionalSignal: Boolean(c?.hasConditionalSignal),
-                    hasSequenceSignal: Boolean(c?.hasSequenceSignal),
-                    hasTensionSignal: Boolean(c?.hasTensionSignal),
-                    tier,
-                  };
-                });
-
-                const traversalGraph = {
-                  claims: serializedClaims,
-                  edges: unifiedEdges,
+                  claims: enrichedClaims,
+                  edges: [...mappedEdges, ...derivedSupportEdges],
+                  ghosts,
+                  narrative: String(parseResult.narrative || '').trim(),
                   conditionals: unifiedConditionals,
-                  tiers,
-                  maxTier: tiers.length - 1,
-                  roots: [],
-                  tensions: [],
-                  cycles: [],
+
+                  // NEW DATA (not in V1)
+                  traversalGraph,
+                  forcingPoints,
+                  preSemantic: preSemanticInterpretation || null,
+                  ...(completeness ? { completeness } : {}),
+
+                  // SHADOW DATA
+                  shadow: {
+                    statements: shadowResult.statements,
+                    audit: shadowDelta.audit,
+                    topUnreferenced: Array.isArray(topUnindexed)
+                      ? topUnindexed.map((u) => u?.statement).filter(Boolean)
+                      : []
+                  },
+                  ...(paragraphResult?.meta ? { paragraphProjection: paragraphResult.meta } : {}),
+                  ...(paragraphClusteringSummary ? { paragraphClustering: paragraphClusteringSummary } : {}),
+                  ...(substrateSummary ? { substrate: substrateSummary } : {}),
                 };
-
-                const forcingPoints = extractForcingPoints(traversalGraph).map((fp) => {
-                  const options = Array.isArray(fp?.options)
-                    ? fp.options
-                        .map((o) => ({
-                          claimId: String(o?.claimId || '').trim(),
-                          label: String(o?.label || '').trim(),
-                        }))
-                        .filter((o) => o.claimId && o.label)
-                    : undefined;
-
-                  return {
-                    id: String(fp?.id || '').trim(),
-                    type: fp?.type,
-                    tier: typeof fp?.tier === 'number' ? fp.tier : 0,
-                    question: String(fp?.question || '').trim(),
-                    condition: String(fp?.condition || '').trim(),
-                    ...(options ? { options } : {}),
-                    unlocks: [],
-                    prunes: [],
-                    blockedBy: Array.isArray(fp?.blockedByGateIds)
-                      ? fp.blockedByGateIds.map((g) => String(g)).filter(Boolean)
-                      : [],
-                    sourceStatementIds: Array.isArray(fp?.sourceStatementIds)
-                      ? fp.sourceStatementIds.map((s) => String(s)).filter(Boolean)
-                      : [],
-                  };
-                });
 
                 try {
-                  // Shadow Delta
-                  referencedIds = new Set(
-                    enrichedClaims
-                      .map((c) => (Array.isArray(c?.sourceStatementIds) ? c.sourceStatementIds : []))
-                      .flat()
-                  );
-                  shadowDelta = computeShadowDelta(shadowResult, referencedIds, payload.originalPrompt);
-                  topUnindexed = getTopUnreferenced(shadowDelta, 10);
-
-                  const EDGE_SUPPORTS = 'supports';
-                  const EDGE_PREREQUISITE = 'prerequisite';
-                  const EDGE_CONFLICTS = 'conflicts';
-                  const EDGE_TRADEOFF = 'tradeoff';
-
-                  const mappedEdges = unifiedEdges
-                    .filter((e) => e && e.from && e.to && (e.type === 'prerequisite' || e.type === 'conflict'))
-                    .map((e) => {
-                      if (e.type === 'prerequisite') {
-                        return { from: e.from, to: e.to, type: EDGE_PREREQUISITE };
-                      }
-                      const q = typeof e.question === 'string' ? e.question.trim() : '';
-                      return {
-                        from: e.from,
-                        to: e.to,
-                        type: q ? EDGE_CONFLICTS : EDGE_TRADEOFF,
-                      };
-                    });
-                  
-                  const derivedSupportEdges = [];
-                  const supportKey = new Set();
-                  
-                  for (const e of unifiedEdges) {
-                    if (!e || e.type !== 'prerequisite') continue;
-                    const from = String(e.from || '').trim();
-                    const to = String(e.to || '').trim();
-                    if (!from || !to) continue;
-                    const key = `${from}::${to}::supports`;
-                    if (supportKey.has(key)) continue;
-                    supportKey.add(key);
-                    derivedSupportEdges.push({ from, to, type: EDGE_SUPPORTS });
+                  if (preSemanticInterpretation && mapperArtifact) {
+                    const { computeStructuralAnalysis } = await import('../PromptMethods');
+                    const { validateStructuralMapping } = await import('../../geometry/interpretation');
+                    const postSemantic = computeStructuralAnalysis(JSON.parse(JSON.stringify(mapperArtifact)));
+                    structuralValidation = validateStructuralMapping(preSemanticInterpretation, postSemantic);
                   }
-                  
-                  for (const cond of unifiedConditionals) {
-                    const affected = Array.isArray(cond?.affectedClaims) ? cond.affectedClaims : [];
-                    for (let i = 0; i < affected.length; i++) {
-                      const a = String(affected[i] || '').trim();
-                      if (!a) continue;
-                      for (let j = i + 1; j < affected.length; j++) {
-                        const b = String(affected[j] || '').trim();
-                        if (!b || a === b) continue;
-                        const k1 = `${a}::${b}::supports`;
-                        if (!supportKey.has(k1)) {
-                          supportKey.add(k1);
-                          derivedSupportEdges.push({ from: a, to: b, type: EDGE_SUPPORTS });
-                        }
-                        const k2 = `${b}::${a}::supports`;
-                        if (!supportKey.has(k2)) {
-                          supportKey.add(k2);
-                          derivedSupportEdges.push({ from: b, to: a, type: EDGE_SUPPORTS });
-                        }
-                      }
-                    }
-                  }
-
-                  const ghosts = null;
-
-                  mapperArtifact = {
-                    id: `artifact-${Date.now()}`,
-                    query: payload.originalPrompt,
-                    turn: context.turn || 0,
-                    timestamp: new Date().toISOString(),
-                    model_count: citationOrder.length,
-
-                    claims: enrichedClaims,
-                    edges: [...mappedEdges, ...derivedSupportEdges],
-                    ghosts,
-                    narrative: String(parseResult.narrative || '').trim(),
-                    conditionals: unifiedConditionals,
-
-                    // NEW DATA (not in V1)
-                    traversalGraph,
-                    forcingPoints,
-                    preSemantic: preSemanticInterpretation || null,
-                    ...(completeness ? { completeness } : {}),
-
-                    // SHADOW DATA
-                    shadow: {
-                      statements: shadowResult.statements,
-                      audit: shadowDelta.audit,
-                      topUnreferenced: Array.isArray(topUnindexed)
-                        ? topUnindexed.map((u) => u?.statement).filter(Boolean)
-                        : []
-                    },
-                    ...(paragraphResult?.meta ? { paragraphProjection: paragraphResult.meta } : {}),
-                    ...(paragraphClusteringSummary ? { paragraphClustering: paragraphClusteringSummary } : {}),
-                    ...(substrateSummary ? { substrate: substrateSummary } : {}),
-                  };
-
-                  try {
-                    if (preSemanticInterpretation && mapperArtifact) {
-                      const { computeStructuralAnalysis } = await import('../PromptMethods');
-                      const { validateStructuralMapping } = await import('../../geometry/interpretation');
-                      const postSemantic = computeStructuralAnalysis(JSON.parse(JSON.stringify(mapperArtifact)));
-                      structuralValidation = validateStructuralMapping(preSemanticInterpretation, postSemantic);
-                    }
-                  } catch (_) {
-                    structuralValidation = null;
-                  }
-
-                  console.log(`[StepExecutor] Generated mapper artifact with ${enrichedClaims.length} claims, ${mappedEdges.length} edges`);
-                } catch (err) {
-                  // processLogger.error or console.error with context
-                  console.error('[StepExecutor] Mapper artifact build failed:', err);
-                  console.debug('Context:', {
-                    originalPrompt: payload.originalPrompt,
-                    turn: context.turn,
-                    citationCount: citationOrder.length,
-                    error: getErrorMessage(err)
-                  });
-                  throw err; // Rethrow to handle consistently upstream
+                } catch (_) {
+                  structuralValidation = null;
                 }
 
-
-                // mapperArtifact was built from V2->V1 adapter above (v1Artifact) and has
-                // been augmented with traversalGraph, forcingPoints and shadow data.
-                // Remove legacy fallback that referenced undefined `legacyClaims`/`legacyEdges`.
-
-              } else {
-                console.warn("[StepExecutor] Semantic Mapper parsing failed:", parseResult.errors);
-                // Fallback? Or just fail? For now, we proceed with raw text but no artifact.
+                console.log(`[StepExecutor] Generated mapper artifact with ${enrichedClaims.length} claims, ${mappedEdges.length} edges`);
+              } catch (err) {
+                // processLogger.error or console.error with context
+                console.error('[StepExecutor] Mapper artifact build failed:', err);
+                console.debug('Context:', {
+                  originalPrompt: payload.originalPrompt,
+                  turn: context.turn,
+                  citationCount: citationOrder.length,
+                  error: getErrorMessage(err)
+                });
+                throw err; // Rethrow to handle consistently upstream
               }
 
-              try {
-                pipelineArtifacts = {
-                  shadow: {
-                    extraction: shadowResult || null,
-                    delta: shadowDelta || null,
-                    topUnreferenced: topUnindexed || null,
-                    referencedIds: referencedIds ? Array.from(referencedIds || []) : null,
-                  },
-                  enrichmentResult: enrichmentResult || null,
-                  paragraphProjection: paragraphResult || null,
-                  clustering: {
-                    result: clusteringResult
-                      ? {
-                        clusters: Array.isArray(clusteringResult.clusters) ? clusteringResult.clusters : [],
-                        meta: clusteringResult.meta || null,
-                      }
-                      : null,
-                    summary: paragraphClusteringSummary || null,
-                  },
-                  substrate: {
-                    summary: substrateSummary || null,
-                    degenerate: typeof substrateDegenerate === 'boolean' ? substrateDegenerate : undefined,
-                    degenerateReason: substrateDegenerateReason || null,
-                  },
-                  preSemantic: preSemanticInterpretation || null,
-                  validation: structuralValidation || null,
-                  prompts: {
-                    semanticMapperPrompt: mappingPrompt || "",
-                    rawMappingText: rawText || "",
-                  },
-                };
-              } catch (_) {
-                pipelineArtifacts = null;
-              }
 
-              try {
-                if (pipelineArtifacts) {
-                  context.pipelineArtifacts = pipelineArtifacts;
-                }
-              } catch (_) { }
+              // mapperArtifact was built from V2->V1 adapter above (v1Artifact) and has
+              // been augmented with traversalGraph, forcingPoints and shadow data.
+              // Remove legacy fallback that referenced undefined `legacyClaims`/`legacyEdges`.
 
-              // Process raw text for clean display
-              const processed = artifactProcessor.process(finalResult.text);
-              finalResult.text = processed.cleanText;
-              finalResult.artifacts = processed.artifacts;
-
-              streamingManager.dispatchPartialDelta(
-                context.sessionId,
-                step.stepId,
-                payload.mappingProvider,
-                finalResult.text,
-                "Mapping",
-                true,
-              );
-            }
-
-            if (!finalResult || !finalResult.text) {
-              if (providerError) {
-                reject(providerError);
-              } else {
-                reject(
-                  new Error(
-                    `Mapping provider ${payload.mappingProvider} returned empty response`,
-                  ),
-                );
-              }
-              return;
-            }
-
-            const citationSourceOrder = {};
-            citationOrder.forEach((pid, idx) => {
-              citationSourceOrder[idx + 1] = pid;
-            });
-
-            const finalResultWithMeta = {
-              ...finalResult,
-              meta: {
-                citationSourceOrder,
-                rawMappingText: rawText,
-                semanticMapperPrompt: mappingPrompt,
-              },
-            };
-
-            if (mapperArtifact) {
-              finalResultWithMeta.meta.mapperArtifact = mapperArtifact;
-            }
-            if (pipelineArtifacts) {
-              finalResultWithMeta.meta.pipelineArtifacts = pipelineArtifacts;
+            } else {
+              console.warn("[StepExecutor] Semantic Mapper parsing failed:", parseResult.errors);
+              // Fallback? Or just fail? For now, we proceed with raw text but no artifact.
             }
 
             try {
-              if (finalResultWithMeta?.meta) {
-                workflowContexts[payload.mappingProvider] =
-                  finalResultWithMeta.meta;
+              pipelineArtifacts = {
+                shadow: {
+                  extraction: shadowResult || null,
+                  delta: shadowDelta || null,
+                  topUnreferenced: topUnindexed || null,
+                  referencedIds: referencedIds ? Array.from(referencedIds || []) : null,
+                },
+                enrichmentResult: enrichmentResult || null,
+                paragraphProjection: paragraphResult || null,
+                clustering: {
+                  result: clusteringResult
+                    ? {
+                      clusters: Array.isArray(clusteringResult.clusters) ? clusteringResult.clusters : [],
+                      meta: clusteringResult.meta || null,
+                    }
+                    : null,
+                  summary: paragraphClusteringSummary || null,
+                },
+                substrate: {
+                  summary: substrateSummary || null,
+                  graph: substrateGraph,
+                  degenerate: typeof substrateDegenerate === 'boolean' ? substrateDegenerate : undefined,
+                  degenerateReason: substrateDegenerateReason || null,
+                },
+                preSemantic: preSemanticInterpretation || null,
+                validation: structuralValidation || null,
+                prompts: {
+                  semanticMapperPrompt: mappingPrompt || "",
+                  rawMappingText: rawText || "",
+                },
+                sourceData: indexedSourceData,
+              };
+            } catch (_) {
+              pipelineArtifacts = null;
+            }
+
+            try {
+              if (pipelineArtifacts) {
+                context.pipelineArtifacts = pipelineArtifacts;
               }
             } catch (_) { }
 
-            resolve({
-              providerId: payload.mappingProvider,
-              text: finalResultWithMeta.text,
-              status: "completed",
-              meta: finalResultWithMeta.meta || {},
-              artifacts: finalResult.artifacts || [],
-              mapperArtifact: mapperArtifact,
-              pipelineArtifacts: pipelineArtifacts,
-              ...(finalResult.softError ? { softError: finalResult.softError } : {}),
-            });
-          },
-        },
-      );
-    });
-  }
+            // Process raw text for clean display
+            const processed = artifactProcessor.process(finalResult.text);
+            finalResult.text = processed.cleanText;
+            finalResult.artifacts = processed.artifacts;
 
-  _mapStanceToType(stance) {
-    switch (stance) {
-      case 'prescriptive': return 'prescriptive';
-      case 'cautionary': return 'prescriptive'; // Warning is a type of prescription
-      case 'prerequisite': return 'conditional';
-      case 'dependent': return 'conditional';
-      case 'assertive': return 'factual';
-      case 'uncertain': return 'speculative';
-      default: return 'factual';
-    }
+            streamingManager.dispatchPartialDelta(
+              context.sessionId,
+              step.stepId,
+              payload.mappingProvider,
+              finalResult.text,
+              "Mapping",
+              true,
+            );
+          }
+
+          if (!finalResult || !finalResult.text) {
+            if (providerError) {
+              reject(providerError);
+            } else {
+              reject(
+                new Error(
+                  `Mapping provider ${payload.mappingProvider} returned empty response`,
+                ),
+              );
+            }
+            return;
+          }
+
+          const citationSourceOrder = {};
+          citationOrder.forEach((pid, idx) => {
+            citationSourceOrder[idx + 1] = pid;
+          });
+
+          const finalResultWithMeta = {
+            ...finalResult,
+            meta: {
+              citationSourceOrder,
+              rawMappingText: rawText,
+              semanticMapperPrompt: mappingPrompt,
+            },
+          };
+
+          if (mapperArtifact) {
+            finalResultWithMeta.meta.mapperArtifact = mapperArtifact;
+          }
+          if (pipelineArtifacts) {
+            finalResultWithMeta.meta.pipelineArtifacts = pipelineArtifacts;
+          }
+
+          try {
+            if (finalResultWithMeta?.meta) {
+              workflowContexts[payload.mappingProvider] =
+                finalResultWithMeta.meta;
+            }
+          } catch (_) { }
+
+          resolve({
+            providerId: payload.mappingProvider,
+            text: finalResultWithMeta.text,
+            status: "completed",
+            meta: finalResultWithMeta.meta || {},
+            artifacts: finalResult.artifacts || [],
+            mapperArtifact: mapperArtifact,
+            pipelineArtifacts: pipelineArtifacts,
+            ...(finalResult.softError ? { softError: finalResult.softError } : {}),
+          });
+        },
+      },
+    );
+  });
+}
+
+_mapStanceToType(stance) {
+  switch (stance) {
+    case 'prescriptive': return 'prescriptive';
+    case 'cautionary': return 'prescriptive'; // Warning is a type of prescription
+    case 'prerequisite': return 'conditional';
+    case 'dependent': return 'conditional';
+    case 'assertive': return 'factual';
+    case 'uncertain': return 'speculative';
+    default: return 'factual';
   }
+}
 
   // Refiner, Antagonist, Explore, Understand, Gauntlet implementations follow similar patterns
   // I'll condense them here assuming they use similar shared logic for resolving sources
 
   async _resolveSourceData(payload, context, previousResults, options) {
-    const { sessionManager } = options;
-    if (payload.sourceHistorical) {
-      // Historical source
-      const { turnId, responseType } = payload.sourceHistorical;
-      console.log(
-        `[StepExecutor] Resolving historical data from turn: ${turnId} `,
-      );
+  const { sessionManager } = options;
+  if (payload.sourceHistorical) {
+    // Historical source
+    const { turnId, responseType } = payload.sourceHistorical;
+    console.log(
+      `[StepExecutor] Resolving historical data from turn: ${turnId} `,
+    );
 
-      // Prefer adapter lookup
-      let aiTurn = null;
-      try {
-        const adapter = sessionManager?.adapter;
-        if (adapter?.isReady && adapter.isReady()) {
-          const turn = await adapter.get("turns", turnId);
-          if (turn && (turn.type === "ai" || turn.role === "assistant")) {
-            aiTurn = turn;
-          } else if (turn && turn.type === "user") {
-            try {
-              const sessionTurns = await adapter.getTurnsBySessionId(context.sessionId);
-              if (Array.isArray(sessionTurns)) {
-                const userIdx = sessionTurns.findIndex(t => t.id === turnId);
-                if (userIdx !== -1) {
-                  const next = sessionTurns[userIdx + 1];
-                  if (next && (next.type === "ai" || next.role === "assistant")) {
-                    aiTurn = next;
-                  }
+    // Prefer adapter lookup
+    let aiTurn = null;
+    try {
+      const adapter = sessionManager?.adapter;
+      if (adapter?.isReady && adapter.isReady()) {
+        const turn = await adapter.get("turns", turnId);
+        if (turn && (turn.type === "ai" || turn.role === "assistant")) {
+          aiTurn = turn;
+        } else if (turn && turn.type === "user") {
+          try {
+            const sessionTurns = await adapter.getTurnsBySessionId(context.sessionId);
+            if (Array.isArray(sessionTurns)) {
+              const userIdx = sessionTurns.findIndex(t => t.id === turnId);
+              if (userIdx !== -1) {
+                const next = sessionTurns[userIdx + 1];
+                if (next && (next.type === "ai" || next.role === "assistant")) {
+                  aiTurn = next;
                 }
               }
-            } catch (ignored) { }
-          }
+            }
+          } catch (ignored) { }
         }
-      } catch (e) {
-        console.warn("[StepExecutor] resolveSourceData adapter lookup failed:", e);
+      }
+    } catch (e) {
+      console.warn("[StepExecutor] resolveSourceData adapter lookup failed:", e);
+    }
+
+    if (!aiTurn) {
+      // Try text matching fallback if ID lookup failed (via adapter)
+      const fallbackText = context?.userMessage || "";
+      if (fallbackText && fallbackText.trim().length > 0 && sessionManager?.adapter?.isReady && sessionManager.adapter.isReady()) {
+        try {
+          const sessionTurns = await sessionManager.adapter.getTurnsBySessionId(context.sessionId);
+          if (Array.isArray(sessionTurns)) {
+            for (let i = 0; i < sessionTurns.length; i++) {
+              const t = sessionTurns[i];
+              if (t && t.type === "user" && String(t.text || "") === String(fallbackText)) {
+                const next = sessionTurns[i + 1];
+                if (next && next.type === "ai") {
+                  aiTurn = next;
+                  break;
+                }
+              }
+            }
+          }
+        } catch (e) {
+          throw new Error(`Could not find corresponding AI turn for ${turnId} (text fallback failed)`);
+        }
       }
 
       if (!aiTurn) {
-        // Try text matching fallback if ID lookup failed (via adapter)
-        const fallbackText = context?.userMessage || "";
-        if (fallbackText && fallbackText.trim().length > 0 && sessionManager?.adapter?.isReady && sessionManager.adapter.isReady()) {
-          try {
-            const sessionTurns = await sessionManager.adapter.getTurnsBySessionId(context.sessionId);
-            if (Array.isArray(sessionTurns)) {
-              for (let i = 0; i < sessionTurns.length; i++) {
-                const t = sessionTurns[i];
-                if (t && t.type === "user" && String(t.text || "") === String(fallbackText)) {
-                  const next = sessionTurns[i + 1];
-                  if (next && next.type === "ai") {
-                    aiTurn = next;
-                    break;
-                  }
-                }
-              }
+        console.warn(`[StepExecutor] Could not resolve AI turn for source ${turnId}`);
+        return [];
+      }
+    }
+
+    let sourceContainer;
+    switch (responseType) {
+      case "mapping": sourceContainer = aiTurn.mappingResponses || {}; break;
+      default: sourceContainer = aiTurn.batchResponses || {}; break;
+    }
+
+    const latestMap = new Map();
+    Object.keys(sourceContainer).forEach(pid => {
+      const versions = (sourceContainer[pid] || [])
+        .filter(r => r.status === "completed" && r.text?.trim())
+        .sort((a, b) => (b.responseIndex || 0) - (a.responseIndex || 0));
+
+      if (versions.length > 0) {
+        latestMap.set(pid, {
+          providerId: pid,
+          text: versions[0].text
+        });
+      }
+    });
+
+    let sourceArray = Array.from(latestMap.values());
+
+    // If embedded responses were not present, attempt provider_responses fallback (prefer indexed lookup)
+    if (
+      sourceArray.length === 0 &&
+      sessionManager?.adapter?.isReady &&
+      sessionManager.adapter.isReady()
+    ) {
+      try {
+        const responses = await sessionManager.adapter.getResponsesByTurnId(
+          aiTurn.id,
+        );
+
+        const respType = responseType || "batch";
+        const dbLatestMap = new Map();
+
+        (responses || [])
+          .filter(r => r?.responseType === respType && r.text?.trim())
+          .forEach(r => {
+            const existing = dbLatestMap.get(r.providerId);
+            if (!existing || (r.responseIndex || 0) >= (existing.responseIndex || 0)) {
+              dbLatestMap.set(r.providerId, r);
             }
-          } catch (e) {
-            throw new Error(`Could not find corresponding AI turn for ${turnId} (text fallback failed)`);
-          }
+          });
+
+        sourceArray = Array.from(dbLatestMap.values()).map(r => ({
+          providerId: r.providerId,
+          text: r.text
+        }));
+        if (sourceArray.length > 0) {
+          console.log(
+            "[StepExecutor] provider_responses fallback succeeded for historical sources",
+          );
         }
-
-        if (!aiTurn) {
-          console.warn(`[StepExecutor] Could not resolve AI turn for source ${turnId}`);
-          return [];
-        }
+      } catch (e) {
+        console.warn(
+          "[StepExecutor] provider_responses fallback failed for historical sources:",
+          e,
+        );
       }
+    }
 
-      let sourceContainer;
-      switch (responseType) {
-        case "mapping": sourceContainer = aiTurn.mappingResponses || {}; break;
-        default: sourceContainer = aiTurn.batchResponses || {}; break;
-      }
+    console.log(
+      `[StepExecutor] Found ${sourceArray.length} historical sources`,
+    );
+    return sourceArray;
 
-      const latestMap = new Map();
-      Object.keys(sourceContainer).forEach(pid => {
-        const versions = (sourceContainer[pid] || [])
-          .filter(r => r.status === "completed" && r.text?.trim())
-          .sort((a, b) => (b.responseIndex || 0) - (a.responseIndex || 0));
-
-        if (versions.length > 0) {
-          latestMap.set(pid, {
-            providerId: pid,
-            text: versions[0].text
+  } else if (payload.sourceStepIds) {
+    const sourceArray = [];
+    for (const stepId of payload.sourceStepIds) {
+      const stepResult = previousResults.get(stepId);
+      if (!stepResult || stepResult.status !== "completed") continue;
+      const { results } = stepResult.result;
+      Object.entries(results).forEach(([providerId, result]) => {
+        if (result.status === "completed" && result.text && result.text.trim().length > 0) {
+          sourceArray.push({
+            providerId: providerId,
+            text: result.text,
           });
         }
       });
-
-      let sourceArray = Array.from(latestMap.values());
-
-      // If embedded responses were not present, attempt provider_responses fallback (prefer indexed lookup)
-      if (
-        sourceArray.length === 0 &&
-        sessionManager?.adapter?.isReady &&
-        sessionManager.adapter.isReady()
-      ) {
-        try {
-          const responses = await sessionManager.adapter.getResponsesByTurnId(
-            aiTurn.id,
-          );
-
-          const respType = responseType || "batch";
-          const dbLatestMap = new Map();
-
-          (responses || [])
-            .filter(r => r?.responseType === respType && r.text?.trim())
-            .forEach(r => {
-              const existing = dbLatestMap.get(r.providerId);
-              if (!existing || (r.responseIndex || 0) >= (existing.responseIndex || 0)) {
-                dbLatestMap.set(r.providerId, r);
-              }
-            });
-
-          sourceArray = Array.from(dbLatestMap.values()).map(r => ({
-            providerId: r.providerId,
-            text: r.text
-          }));
-          if (sourceArray.length > 0) {
-            console.log(
-              "[StepExecutor] provider_responses fallback succeeded for historical sources",
-            );
-          }
-        } catch (e) {
-          console.warn(
-            "[StepExecutor] provider_responses fallback failed for historical sources:",
-            e,
-          );
-        }
-      }
-
-      console.log(
-        `[StepExecutor] Found ${sourceArray.length} historical sources`,
-      );
-      return sourceArray;
-
-    } else if (payload.sourceStepIds) {
-      const sourceArray = [];
-      for (const stepId of payload.sourceStepIds) {
-        const stepResult = previousResults.get(stepId);
-        if (!stepResult || stepResult.status !== "completed") continue;
-        const { results } = stepResult.result;
-        Object.entries(results).forEach(([providerId, result]) => {
-          if (result.status === "completed" && result.text && result.text.trim().length > 0) {
-            sourceArray.push({
-              providerId: providerId,
-              text: result.text,
-            });
-          }
-        });
-      }
-      return sourceArray;
     }
-    throw new Error("No valid source specified for step.");
+    return sourceArray;
   }
+  throw new Error("No valid source specified for step.");
+}
 
   async _executeGenericSingleStep(step, context, providerId, prompt, stepType, options, parseOutputFn) {
-    const { streamingManager, persistenceCoordinator, sessionManager } = options;
-    const { payload } = step;
+  const { streamingManager, persistenceCoordinator, sessionManager } = options;
+  const { payload } = step;
 
-    console.log(`[StepExecutor] ${stepType} prompt for ${providerId}: ${prompt.length} chars`);
+  console.log(`[StepExecutor] ${stepType} prompt for ${providerId}: ${prompt.length} chars`);
 
-    // 1. Check Limits
-    const limits = PROVIDER_LIMITS[providerId];
-    if (limits && prompt.length > limits.maxInputChars) {
-      console.warn(`[StepExecutor] ${stepType} prompt length ${prompt.length} exceeds limit ${limits.maxInputChars} for ${providerId}`);
-      throw new Error(`INPUT_TOO_LONG: Prompt length ${prompt.length} exceeds limit ${limits.maxInputChars} for ${providerId}`);
+  // 1. Check Limits
+  const limits = PROVIDER_LIMITS[providerId];
+  if (limits && prompt.length > limits.maxInputChars) {
+    console.warn(`[StepExecutor] ${stepType} prompt length ${prompt.length} exceeds limit ${limits.maxInputChars} for ${providerId}`);
+    throw new Error(`INPUT_TOO_LONG: Prompt length ${prompt.length} exceeds limit ${limits.maxInputChars} for ${providerId}`);
+  }
+
+  const resolveProviderContextsForPid = async (pid) => {
+    const role = options.contextRole;
+    const effectivePid = role ? `${pid}:${role}` : pid;
+    const explicit = payload?.providerContexts;
+
+    // If we have an explicit context for the scoped ID, use it
+    if (explicit && typeof explicit === "object" && explicit[effectivePid]) {
+      const entry = explicit[effectivePid];
+      const meta = (entry && typeof entry === "object" && "meta" in entry) ? entry.meta : entry;
+      const continueThread = (entry && typeof entry === "object" && "continueThread" in entry) ? entry.continueThread : true;
+      return { [pid]: { meta, continueThread } };
     }
 
-    const resolveProviderContextsForPid = async (pid) => {
-      const role = options.contextRole;
-      const effectivePid = role ? `${pid}:${role}` : pid;
-      const explicit = payload?.providerContexts;
+    // Fallback: check for the raw pid (legacy or default)
+    if (explicit && typeof explicit === "object" && explicit[pid]) {
+      const entry = explicit[pid];
+      const meta = (entry && typeof entry === "object" && "meta" in entry) ? entry.meta : entry;
+      const continueThread = (entry && typeof entry === "object" && "continueThread" in entry) ? entry.continueThread : true;
+      return { [pid]: { meta, continueThread } };
+    }
 
-      // If we have an explicit context for the scoped ID, use it
-      if (explicit && typeof explicit === "object" && explicit[effectivePid]) {
-        const entry = explicit[effectivePid];
-        const meta = (entry && typeof entry === "object" && "meta" in entry) ? entry.meta : entry;
-        const continueThread = (entry && typeof entry === "object" && "continueThread" in entry) ? entry.continueThread : true;
-        return { [pid]: { meta, continueThread } };
+    try {
+      if (!sessionManager?.getProviderContexts) return undefined;
+      // isolation: pass contextRole (e.g. "batch") to get only the scoped thread from DB
+      const ctxs = await sessionManager.getProviderContexts(context.sessionId, DEFAULT_THREAD, { contextRole: options.contextRole });
+      const meta = ctxs?.[pid]?.meta;
+      if (meta && typeof meta === "object" && Object.keys(meta).length > 0) {
+        return { [pid]: { meta, continueThread: true } };
       }
+    } catch (_) { }
 
-      // Fallback: check for the raw pid (legacy or default)
-      if (explicit && typeof explicit === "object" && explicit[pid]) {
-        const entry = explicit[pid];
-        const meta = (entry && typeof entry === "object" && "meta" in entry) ? entry.meta : entry;
-        const continueThread = (entry && typeof entry === "object" && "continueThread" in entry) ? entry.continueThread : true;
-        return { [pid]: { meta, continueThread } };
-      }
+    return undefined;
+  };
 
-      try {
-        if (!sessionManager?.getProviderContexts) return undefined;
-        // isolation: pass contextRole (e.g. "batch") to get only the scoped thread from DB
-        const ctxs = await sessionManager.getProviderContexts(context.sessionId, DEFAULT_THREAD, { contextRole: options.contextRole });
-        const meta = ctxs?.[pid]?.meta;
-        if (meta && typeof meta === "object" && Object.keys(meta).length > 0) {
-          return { [pid]: { meta, continueThread: true } };
-        }
-      } catch (_) { }
+  const runRequest = async (pid) => {
+    const providerContexts = await resolveProviderContextsForPid(pid);
 
-      return undefined;
-    };
+    return new Promise((resolve, reject) => {
+      this.orchestrator.executeParallelFanout(
+        prompt,
+        [pid],
+        {
+          sessionId: context.sessionId,
+          useThinking: options.useThinking || payload.useThinking || false,
+          providerContexts,
+          onPartial: (id, chunk) => {
+            streamingManager.dispatchPartialDelta(
+              context.sessionId,
+              step.stepId,
+              id,
+              chunk.text,
+              stepType
+            );
+          },
+          onAllComplete: (results, errors) => {
+            let finalResult = results.get(pid);
+            const providerError = errors?.get?.(pid);
 
-    const runRequest = async (pid) => {
-      const providerContexts = await resolveProviderContextsForPid(pid);
+            // 2. Partial Recovery
+            if ((!finalResult || !finalResult.text) && providerError) {
+              const recovered = streamingManager.getRecoveredText(
+                context.sessionId, step.stepId, pid
+              );
+              if (recovered && recovered.trim().length > 0) {
+                finalResult = finalResult || { providerId: pid, meta: {} };
+                finalResult.text = recovered;
+                finalResult.softError = finalResult.softError || {
+                  message: providerError?.message || String(providerError),
+                };
+              } else {
+                reject(providerError);
+                return;
+              }
+            }
 
-      return new Promise((resolve, reject) => {
-        this.orchestrator.executeParallelFanout(
-          prompt,
-          [pid],
-          {
-            sessionId: context.sessionId,
-            useThinking: options.useThinking || payload.useThinking || false,
-            providerContexts,
-            onPartial: (id, chunk) => {
+            if (finalResult?.text) {
+              // 3. Parse Output
+              let outputData = null;
+              try {
+                outputData = parseOutputFn(finalResult.text);
+                if (outputData && typeof outputData === "object") {
+                  outputData.providerId = pid;
+                  if (outputData.pipeline && typeof outputData.pipeline === "object") {
+                    outputData.pipeline.providerId = pid;
+                  }
+                }
+              } catch (parseErr) {
+                console.warn(`[StepExecutor] Output parsing failed for ${stepType}:`, parseErr);
+                // We continue with raw text if parsing fails, but mark it? 
+                // For now, allow specific parsers to handle robustness or throw.
+              }
+
+              // Prefer cleaned text from outputData if available
+              const canonicalText = (outputData && typeof outputData === "object" && (outputData.text || outputData.cleanedText)) || finalResult.text;
+
               streamingManager.dispatchPartialDelta(
                 context.sessionId,
                 step.stepId,
-                id,
-                chunk.text,
-                stepType
+                pid,
+                canonicalText,
+                stepType,
+                true
               );
-            },
-            onAllComplete: (results, errors) => {
-              let finalResult = results.get(pid);
-              const providerError = errors?.get?.(pid);
 
-              // 2. Partial Recovery
-              if ((!finalResult || !finalResult.text) && providerError) {
-                const recovered = streamingManager.getRecoveredText(
-                  context.sessionId, step.stepId, pid
-                );
-                if (recovered && recovered.trim().length > 0) {
-                  finalResult = finalResult || { providerId: pid, meta: {} };
-                  finalResult.text = recovered;
-                  finalResult.softError = finalResult.softError || {
-                    message: providerError?.message || String(providerError),
-                  };
-                } else {
-                  reject(providerError);
-                  return;
-                }
-              }
+              // 4. Persist Context
+              persistenceCoordinator.persistProviderContextsAsync(context.sessionId, {
+                [pid]: finalResult,
+              }, options.contextRole);
 
-              if (finalResult?.text) {
-                // 3. Parse Output
-                let outputData = null;
-                try {
-                  outputData = parseOutputFn(finalResult.text);
-                  if (outputData && typeof outputData === "object") {
-                    outputData.providerId = pid;
-                    if (outputData.pipeline && typeof outputData.pipeline === "object") {
-                      outputData.pipeline.providerId = pid;
-                    }
-                  }
-                } catch (parseErr) {
-                  console.warn(`[StepExecutor] Output parsing failed for ${stepType}:`, parseErr);
-                  // We continue with raw text if parsing fails, but mark it? 
-                  // For now, allow specific parsers to handle robustness or throw.
-                }
-
-                // Prefer cleaned text from outputData if available
-                const canonicalText = (outputData && typeof outputData === "object" && (outputData.text || outputData.cleanedText)) || finalResult.text;
-
-                streamingManager.dispatchPartialDelta(
-                  context.sessionId,
-                  step.stepId,
-                  pid,
-                  canonicalText,
-                  stepType,
-                  true
-                );
-
-                // 4. Persist Context
-                persistenceCoordinator.persistProviderContextsAsync(context.sessionId, {
-                  [pid]: finalResult,
-                }, options.contextRole);
-
-                resolve({
-                  providerId: pid,
-                  text: finalResult.text,
-                  status: "completed",
-                  meta: {
-                    ...finalResult.meta,
-                    ...(outputData ? { [`${stepType.toLowerCase()}Output`]: outputData } : {})
-                  },
-                  output: outputData, // Standardize output access
-                  ...(finalResult.softError ? { softError: finalResult.softError } : {}),
-                });
-              } else {
-                reject(new Error(`Empty response from ${stepType} provider`));
-              }
+              resolve({
+                providerId: pid,
+                text: finalResult.text,
+                status: "completed",
+                meta: {
+                  ...finalResult.meta,
+                  ...(outputData ? { [`${stepType.toLowerCase()}Output`]: outputData } : {})
+                },
+                output: outputData, // Standardize output access
+                ...(finalResult.softError ? { softError: finalResult.softError } : {}),
+              });
+            } else {
+              reject(new Error(`Empty response from ${stepType} provider`));
             }
-          }
-        );
-      });
-    };
-
-    // 5. Auth Fallback Wrapper
-    try {
-      return await runRequest(providerId);
-    } catch (error) {
-      if (isProviderAuthError(error)) {
-        console.warn(`[StepExecutor] ${stepType} failed with auth error for ${providerId}, attempting fallback...`);
-        const fallbackStrategy = errorHandler.fallbackStrategies.get('PROVIDER_AUTH_FAILED');
-        if (fallbackStrategy) {
-          try {
-            const fallbackProvider = await fallbackStrategy(
-              stepType.toLowerCase(),
-              { failedProviderId: providerId }
-            );
-            if (fallbackProvider) {
-              console.log(`[StepExecutor] Executing ${stepType} with fallback provider: ${fallbackProvider}`);
-              return await runRequest(fallbackProvider);
-            }
-          } catch (fallbackError) {
-            console.warn(`[StepExecutor] Fallback failed: `, fallbackError);
           }
         }
+      );
+    });
+  };
+
+  // 5. Auth Fallback Wrapper
+  try {
+    return await runRequest(providerId);
+  } catch (error) {
+    if (isProviderAuthError(error)) {
+      console.warn(`[StepExecutor] ${stepType} failed with auth error for ${providerId}, attempting fallback...`);
+      const fallbackStrategy = errorHandler.fallbackStrategies.get('PROVIDER_AUTH_FAILED');
+      if (fallbackStrategy) {
+        try {
+          const fallbackProvider = await fallbackStrategy(
+            stepType.toLowerCase(),
+            { failedProviderId: providerId }
+          );
+          if (fallbackProvider) {
+            console.log(`[StepExecutor] Executing ${stepType} with fallback provider: ${fallbackProvider}`);
+            return await runRequest(fallbackProvider);
+          }
+        } catch (fallbackError) {
+          console.warn(`[StepExecutor] Fallback failed: `, fallbackError);
+        }
       }
-      throw error;
     }
+    throw error;
   }
+}
 
   // Deprecated persona steps (Refiner, Antagonist, Understand, Gauntlet) have been removed.
   // Consolidated into executeSingularityStep.
 
   async executeSingularityStep(step, context, _previousResults, options) {
-    const payload = step.payload;
+  const payload = step.payload;
 
-    const mapperArtifact =
-      payload.mapperArtifact ||
-      (payload.mappingText
-        ? parseMapperArtifact(payload.mappingText)
-        : null);
+  const mapperArtifact =
+    payload.mapperArtifact ||
+    (payload.mappingText
+      ? parseMapperArtifact(payload.mappingText)
+      : null);
 
-    if (!mapperArtifact) {
-      throw new Error("Singularity mode requires a MapperArtifact.");
-    }
+  if (!mapperArtifact) {
+    throw new Error("Singularity mode requires a MapperArtifact.");
+  }
 
-    console.log('[StepExecutor] executeSingularityStep mapperArtifact:', {
-      hasArtifact: !!mapperArtifact,
-      claimCount: mapperArtifact?.claims?.length,
-      edgeCount: mapperArtifact?.edges?.length,
-      ghostCount: mapperArtifact?.ghosts?.length,
-      modelCount: mapperArtifact?.model_count,
-      query: mapperArtifact?.query?.slice(0, 50),
-    });
+  console.log('[StepExecutor] executeSingularityStep mapperArtifact:', {
+    hasArtifact: !!mapperArtifact,
+    claimCount: mapperArtifact?.claims?.length,
+    edgeCount: mapperArtifact?.edges?.length,
+    ghostCount: mapperArtifact?.ghosts?.length,
+    modelCount: mapperArtifact?.model_count,
+    query: mapperArtifact?.query?.slice(0, 50),
+  });
 
-    let ConciergeService;
+  let ConciergeService;
+  try {
+    const module = await import('../../ConciergeService/ConciergeService');
+    ConciergeService = module.ConciergeService;
+  } catch (e) {
+    console.warn("[StepExecutor] Failed to import ConciergeService:", e);
+    ConciergeService = null;
+  }
+
+  let singularityPrompt;
+  let analysis = null;
+
+  if (!ConciergeService) {
+    throw new Error("ConciergeService is not available. Cannot execute Singularity step.");
+  }
+
+  analysis = payload.structuralAnalysis || null;
+  if (!analysis) {
     try {
-      const module = await import('../../ConciergeService/ConciergeService');
-      ConciergeService = module.ConciergeService;
+      const { computeStructuralAnalysis } = await import('../PromptMethods');
+      analysis = computeStructuralAnalysis(mapperArtifact);
     } catch (e) {
-      console.warn("[StepExecutor] Failed to import ConciergeService:", e);
-      ConciergeService = null;
+      console.error("[StepExecutor] computeStructuralAnalysis failed:", e);
+      throw new Error(`Structural Analysis Failed: ${getErrorMessage(e)}`);
     }
+  }
 
-    let singularityPrompt;
-    let analysis = null;
 
-    if (!ConciergeService) {
-      throw new Error("ConciergeService is not available. Cannot execute Singularity step.");
+
+  // ══════════════════════════════════════════════════════════════════
+  // FEATURE 3: Rebuild historical prompts for recompute (Efficient Storage)
+  // ══════════════════════════════════════════════════════════════════
+
+  const promptSeed = options?.frozenSingularityPromptSeed || payload.conciergePromptSeed;
+  let evidenceSubstrate = null;
+  try {
+    const substrate = payload?.chewedSubstrate;
+    const outputs = substrate && typeof substrate === "object" ? substrate.outputs : null;
+    if (Array.isArray(outputs) && outputs.length > 0) {
+      const parts = [];
+      for (const out of outputs) {
+        const text = out && typeof out === "object" ? String(out.text || "") : "";
+        if (!text.trim()) continue;
+        parts.push(text.trim());
+      }
+
+      evidenceSubstrate = parts.length > 0 ? parts.join("\n\n") : null;
     }
+  } catch (_) {
+    evidenceSubstrate = null;
+  }
 
-    analysis = payload.structuralAnalysis || null;
-    if (!analysis) {
-      try {
-        const { computeStructuralAnalysis } = await import('../PromptMethods');
-        analysis = computeStructuralAnalysis(mapperArtifact);
-      } catch (e) {
-        console.error("[StepExecutor] computeStructuralAnalysis failed:", e);
-        throw new Error(`Structural Analysis Failed: ${getErrorMessage(e)}`);
+
+  if (options?.frozenSingularityPrompt) {
+    singularityPrompt = options.frozenSingularityPrompt;
+  } else if (payload.conciergePrompt && typeof payload.conciergePrompt === "string") {
+    singularityPrompt = payload.conciergePrompt;
+  } else if (ConciergeService.buildConciergePrompt) {
+    const userMessage = payload.originalPrompt;
+    const opts = promptSeed && typeof promptSeed === "object" ? { ...promptSeed } : {};
+    if (evidenceSubstrate) opts.evidenceSubstrate = evidenceSubstrate;
+    singularityPrompt = ConciergeService.buildConciergePrompt(userMessage, opts);
+  }
+
+  if (!singularityPrompt) {
+    throw new Error("Could not determine or build Singularity prompt.");
+  }
+
+  const parseSingularityOutput = (text) => {
+    const rawText = String(text || "");
+
+    let cleanedText = rawText;
+    let signal = null;
+
+    try {
+      if (ConciergeService && typeof ConciergeService.parseConciergeOutput === "function") {
+        const parsed = ConciergeService.parseConciergeOutput(rawText);
+        if (parsed) {
+          cleanedText = parsed.userResponse || cleanedText;
+          signal = parsed.signal || null;
+        }
+      }
+    } catch (_) { }
+
+    let leakageDetected = false;
+    let leakageViolations = [];
+
+    if (ConciergeService && ConciergeService.detectMachineryLeakage) {
+      const leakCheck = ConciergeService.detectMachineryLeakage(cleanedText);
+      leakageDetected = !!leakCheck.leaked;
+      leakageViolations = leakCheck.violations || [];
+      if (leakCheck.leaked) {
+        console.warn("[StepExecutor] Singularity response leaked machinery:", leakCheck.violations);
       }
     }
 
-
-
-    // ══════════════════════════════════════════════════════════════════
-    // FEATURE 3: Rebuild historical prompts for recompute (Efficient Storage)
-    // ══════════════════════════════════════════════════════════════════
-
-    const promptSeed = options?.frozenSingularityPromptSeed || payload.conciergePromptSeed;
-
-    if (options?.frozenSingularityPrompt) {
-      singularityPrompt = options.frozenSingularityPrompt;
-    } else if (payload.conciergePrompt && typeof payload.conciergePrompt === "string") {
-      singularityPrompt = payload.conciergePrompt;
-    } else if (ConciergeService.buildConciergePrompt) {
-      const userMessage = payload.originalPrompt;
-      singularityPrompt = ConciergeService.buildConciergePrompt(userMessage, analysis, promptSeed);
-    }
-
-    if (!singularityPrompt) {
-      throw new Error("Could not determine or build Singularity prompt.");
-    }
-
-    const parseSingularityOutput = (text) => {
-      const rawText = String(text || "");
-
-      let cleanedText = rawText;
-      let signal = null;
-
-      try {
-        if (ConciergeService && typeof ConciergeService.parseConciergeOutput === "function") {
-          const parsed = ConciergeService.parseConciergeOutput(rawText);
-          if (parsed) {
-            cleanedText = parsed.userResponse || cleanedText;
-            signal = parsed.signal || null;
-          }
-        }
-      } catch (_) { }
-
-      let leakageDetected = false;
-      let leakageViolations = [];
-
-      if (ConciergeService && ConciergeService.detectMachineryLeakage) {
-        const leakCheck = ConciergeService.detectMachineryLeakage(cleanedText);
-        leakageDetected = !!leakCheck.leaked;
-        leakageViolations = leakCheck.violations || [];
-        if (leakCheck.leaked) {
-          console.warn("[StepExecutor] Singularity response leaked machinery:", leakCheck.violations);
-        }
-      }
-
-      const pipeline = {
-        userMessage: payload.originalPrompt,
-        prompt: singularityPrompt,
-        structuralShape: analysis && analysis.shape ? {
-          primaryPattern: analysis.shape.primaryPattern,
-          confidence: analysis.shape.confidence,
-        } : null,
-        leakageDetected,
-        leakageViolations,
-        parsed: {
-          signal,
-          rawText,
-        },
-      };
-
-      return {
-        text: cleanedText,
-        providerId: payload.singularityProvider,
-        timestamp: Date.now(),
-        leakageDetected,
-        leakageViolations,
-        pipeline,
-        parsed: {
-          signal,
-          rawText,
-        },
-      };
+    const pipeline = {
+      userMessage: payload.originalPrompt,
+      prompt: singularityPrompt,
+      structuralShape: analysis && analysis.shape ? {
+        primaryPattern: analysis.shape.primaryPattern,
+        confidence: analysis.shape.confidence,
+      } : null,
+      leakageDetected,
+      leakageViolations,
+      parsed: {
+        signal,
+        rawText,
+      },
     };
 
-    return this._executeGenericSingleStep(
-      step, context, payload.singularityProvider, singularityPrompt, "Singularity", { ...options, contextRole: "singularity" },
-      parseSingularityOutput
-    );
-  }
+    return {
+      text: cleanedText,
+      providerId: payload.singularityProvider,
+      timestamp: Date.now(),
+      leakageDetected,
+      leakageViolations,
+      pipeline,
+      parsed: {
+        signal,
+        rawText,
+      },
+    };
+  };
+
+  return this._executeGenericSingleStep(
+    step, context, payload.singularityProvider, singularityPrompt, "Singularity", { ...options, contextRole: "singularity" },
+    parseSingularityOutput
+  );
+}
 
 }

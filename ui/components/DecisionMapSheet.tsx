@@ -14,6 +14,7 @@ import type { AiTurn, ProviderResponse } from "../types";
 import clsx from "clsx";
 import { CopyButton } from "./CopyButton";
 import { formatDecisionMapForMd, formatGraphForMd } from "../utils/copy-format-utils";
+import { ParagraphSpaceView } from "./ParagraphSpaceView";
 
 // ============================================================================
 // PARSING UTILITIES - Import from shared module (single source of truth)
@@ -821,7 +822,7 @@ export const DecisionMapSheet = React.memo(() => {
   const setSingularityProvider = useSetAtom(singularityProviderAtom);
   const setActiveSplitPanel = useSetAtom(activeSplitPanelAtom);
 
-  const [activeTab, setActiveTab] = useState<'graph' | 'narrative' | 'options' | 'pipeline' | 'debug' | 'concierge'>('graph');
+  const [activeTab, setActiveTab] = useState<'graph' | 'narrative' | 'options' | 'space' | 'pipeline' | 'debug' | 'concierge'>('graph');
   const [selectedNode, setSelectedNode] = useState<{ id: string; label: string; supporters: (string | number)[]; theme?: string } | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [dims, setDims] = useState<{ w: number; h: number }>({ w: window.innerWidth, h: 400 });
@@ -1325,6 +1326,7 @@ export const DecisionMapSheet = React.memo(() => {
     { key: 'graph' as const, label: 'Graph', activeClass: 'decision-tab-active-graph' },
     { key: 'narrative' as const, label: 'Narrative', activeClass: 'decision-tab-active-narrative' },
     { key: 'options' as const, label: 'Options', activeClass: 'decision-tab-active-options' },
+    { key: 'space' as const, label: 'Space', activeClass: 'decision-tab-active-options' },
     { key: 'pipeline' as const, label: 'Pipeline Artifacts', activeClass: 'decision-tab-active-options' },
     { key: 'debug' as const, label: '🔬 Structural Analysis Debug', activeClass: 'decision-tab-active-options' },
     { key: 'concierge' as const, label: 'Concierge Pipeline', activeClass: 'decision-tab-active-singularity' }
@@ -1543,6 +1545,23 @@ export const DecisionMapSheet = React.memo(() => {
                         <div className="text-text-muted text-sm">No graph topology available.</div>
                       )}
                     </div>
+                  </m.div>
+                )}
+
+                {activeTab === 'space' && (
+                  <m.div
+                    key="space"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    className="h-full overflow-hidden relative"
+                  >
+                    <ParagraphSpaceView
+                      graph={(resolvedPipelineArtifacts as any)?.substrate?.graph}
+                      paragraphProjection={(resolvedPipelineArtifacts as any)?.paragraphProjection}
+                      claims={(artifactForStructure as any)?.claims}
+                      shadowStatements={(resolvedPipelineArtifacts as any)?.shadow?.extraction?.statements}
+                    />
                   </m.div>
                 )}
 

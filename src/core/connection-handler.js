@@ -232,11 +232,7 @@ export class ConnectionHandler {
             await this._handleExecuteWorkflow(message);
             break;
           case 'RETRY_PROVIDERS':
-            if (this.workflowEngine && typeof this.workflowEngine.handleRetryRequest === 'function') {
-              await this.workflowEngine.handleRetryRequest(message);
-            } else {
-              console.warn('[ConnectionHandler] Retry requested but workflowEngine is not ready');
-            }
+            await this._handleRetryProviders(message);
             break;
 
           case "reconnect":
@@ -265,6 +261,35 @@ export class ConnectionHandler {
         this._sendError(message, error);
       }
     };
+  }
+
+  async _handleRetryProviders(message) {
+    const { sessionId, aiTurnId, providerIds, retryScope } = message || {};
+    if (!sessionId || !aiTurnId || !Array.isArray(providerIds) || providerIds.length === 0) {
+      console.warn("[ConnectionHandler] Invalid RETRY_PROVIDERS payload", message);
+      return;
+    }
+
+    const scope = retryScope === "mapping" ? "mapping" : "batch";
+
+    try {
+      if (this.workflowEngine && typeof this.workflowEngine.handleRetryRequest === "function") {
+        await this.workflowEngine.handleRetryRequest(message);
+      }
+    } catch (_) { }
+
+    for (const providerId of providerIds) {
+      if (!providerId || typeof providerId !== "string") continue;
+      await this._handleExecuteWorkflow({
+        payload: {
+          type: "recompute",
+          sessionId,
+          sourceTurnId: aiTurnId,
+          stepType: scope,
+          targetProvider: providerId,
+        },
+      });
+    }
   }
 
   /**
@@ -452,6 +477,13 @@ export class ConnectionHandler {
         resolvedContext,
       );
 
+      if (executeRequest.type === "recompute" && executeRequest.sourceTurnId) {
+        workflowRequest.context = {
+          ...(workflowRequest.context || {}),
+          canonicalAiTurnId: executeRequest.sourceTurnId,
+        };
+      }
+
       const firstPromptStep = Array.isArray(workflowRequest?.steps)
         ? workflowRequest.steps.find((s) => s && s.type === "prompt")
         : null;
@@ -577,6 +609,17 @@ export class ConnectionHandler {
    * - Applies ephemeral fallback when a locked provider is unavailable.
    */
   async _applyPreflightSmartDefaults(executeRequest) {
+    const requested = [
+      ...(executeRequest.providers || []),
+      executeRequest.mapper,
+      executeRequest.singularity,
+    ].filter(Boolean);
+
+    const wantsGrok = requested.some((pid) => String(pid).toLowerCase().startsWith("grok"));
+    if (wantsGrok) {
+      await authManager.verifyProvider("grok");
+    }
+
     // Use centralized AuthManager
     const authStatus = await authManager.getAuthStatus();
     const availableProviders = this.services.providerRegistry?.listProviders?.() || [];

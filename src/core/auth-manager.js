@@ -136,6 +136,7 @@ class AuthManager {
 
         // Grok uses anonymous sessions (no cookies) - verify on-demand via verifyProvider()
         status.grok = this._cookieStatus['grok'] ?? false;
+        console.log(`[AuthManager] grok: ${status.grok ? 'authenticated' : 'not authenticated'} (cached; cookie check skipped)`);
 
         // Update cache and storage
         this._cookieStatus = status;
@@ -340,12 +341,20 @@ class AuthManager {
      */
     async _verifyGrok() {
         try {
-            const response = await fetch('https://grok.com/c', {
+            const url = new URL('https://grok.com/c');
+            url.searchParams.set('__htos_verify', String(Date.now()));
+
+            const response = await fetch(url.toString(), {
                 method: 'GET',
                 credentials: 'include',
+                headers: {
+                    accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                },
+                cache: 'no-store',
                 signal: AbortSignal.timeout(5000),
             });
 
+            console.log('[AuthManager] Grok verify HTTP status:', response.status);
             if (!response.ok) {
                 return false;
             }
@@ -356,6 +365,12 @@ class AuthManager {
             const hasScripts = html.includes('/_next/static/chunks/');
             const hasVerificationToken = html.includes('grok-site-verification');
 
+            console.log('[AuthManager] Grok verify signals:', {
+                hasBaggage,
+                hasSentryTrace,
+                hasScripts,
+                hasVerificationToken,
+            });
             return hasBaggage && hasSentryTrace && hasScripts && hasVerificationToken;
         } catch (e) {
             const msg = e instanceof Error ? e.message : String(e);

@@ -43,9 +43,15 @@ function cubicBezierEased(t, x1, y1, x2, y2) {
   // Binary search to find u where bezier(u)[0] ≈ t
   let lo = 0.0;
   let hi = 1.0;
-  for (let i = 0; i < 80; i++) {
+  const targetPrecision = 0.0001;
+  const maxIterations = 80;
+  for (let i = 0; i < maxIterations; i++) {
     const mid = 0.5 * (lo + hi);
-    if (bezier(mid)[0] < t) {
+    const [x, _y] = bezier(mid);
+    if (Math.abs(x - t) < targetPrecision) {
+      break;
+    }
+    if (x < t) {
       lo = mid;
     } else {
       hi = mid;
@@ -59,25 +65,14 @@ function cubicBezierEased(t, x1, y1, x2, y2) {
  * Parse SVG path 'd' attribute into numeric arrays
  */
 function parseSvgPath(svg) {
-  // Skip "M X Y C" prefix (first 9 chars typically "M0 0 0 0 C")
-  const substr = svg.substring(9);
-  const parts = substr.split('C');
-  const out = [];
-
-  for (const part of parts) {
-    // Extract all numbers from this segment
-    const cleaned = part.replace(/[^\d]+/g, ' ').trim();
-    if (cleaned === '') {
-      out.push([0]);
-    } else {
-      const nums = cleaned
-        .split(/\s+/)
-        .filter((tok) => tok !== '')
-        .map((tok) => parseInt(tok, 10));
-      out.push(nums);
-    }
-  }
-  return out;
+  const text = String(svg || '');
+  const parts = text.split('C').slice(1);
+  if (parts.length === 0) return [[0]];
+  return parts.map((part) => {
+    const matches = part.match(/-?\d+/g) || [];
+    if (matches.length === 0) return [0];
+    return matches.map((m) => parseInt(m, 10));
+  });
 }
 
 /**
@@ -120,8 +115,16 @@ function toHex(num) {
  * Simulate CSS animation style at given time
  */
 function simulateStyle(values, c) {
+  if (!Array.isArray(values) || values.length < 8) {
+    throw new Error('Invalid Grok SVG signature values');
+  }
   const duration = 4096;
-  const currentTime = Math.round(c / 10.0) * 10;
+  const frameJitter = (Math.random() - 0.5) * 3.5;
+  let currentTime = Math.round((c + frameJitter) / 10.0) * 10;
+  if (Math.random() < 0.03) {
+    currentTime += 16.67;
+  }
+  currentTime = Math.max(0, Math.min(currentTime, duration));
   const t = currentTime / duration;
 
   // Control points from values[7:], alternating between param=0 and param=-1
@@ -291,7 +294,25 @@ export function between(haystack, start, end) {
  * Parse verification token and animation index from HTML
  */
 export function parseVerificationToken(html, metaName = 'grok-site-verification') {
-  const token = between(html, `"name":"${metaName}","content":"`, '"');
+  let token = between(html, `"name":"${metaName}","content":"`, '"');
+  if (!token) {
+    token = between(html, `<meta name="${metaName}" content="`, '"');
+  }
+  if (!token) {
+    const re = new RegExp(`<meta[^>]+name=["']${metaName}["'][^>]+content=["']([^"']+)["']`, 'i');
+    const m = html.match(re);
+    if (m && m[1]) token = m[1];
+  }
+  if (!token) {
+    const re = new RegExp(`"name":"${metaName}".{0,120}?"content":"([^"]+)"`);
+    const m = html.match(re);
+    if (m && m[1]) token = m[1];
+  }
+  if (!token) {
+    const re = new RegExp(`${metaName}.{0,180}?(?:content["']\\s*[:=]\\s*["'])([^"']+)`, 'i');
+    const m = html.match(re);
+    if (m && m[1]) token = m[1];
+  }
   if (!token) return [null, null];
   
   const decoded = base64ToBytes(token);
@@ -305,15 +326,81 @@ export function parseVerificationToken(html, metaName = 'grok-site-verification'
  * Extract SVG path data from HTML
  */
 export function parseSvgData(html, anim = 'loading-x-anim-0') {
-  const dValueRegex = /"d":"(M[^"]{200,})"/g;
+  const idxPart = typeof anim === 'string' ? anim.split('loading-x-anim-')[1] : undefined;
+  const animIndex = Number.isFinite(Number(idxPart)) ? parseInt(idxPart, 10) : 0;
+  const curvesSvg = _parseSvgFromCurves(html, animIndex);
+  if (curvesSvg) return curvesSvg;
+
   const allDValues = [];
-  let match;
-  while ((match = dValueRegex.exec(html)) !== null) {
-    allDValues.push(match[1]);
+  const patterns = [
+    /\"d\":\"(M[^"]{50,})\"/g,
+    /d="(M[^"]{50,})"/g,
+    /d:"(M[^"]{50,})"/g,
+    /d='(M[^']{50,})'/g,
+    /d:'(M[^']{50,})'/g,
+    /\\\"d\\\":\\\"(M[^\\\"]{50,})\\\"/g,
+  ];
+  for (const re of patterns) {
+    let match;
+    while ((match = re.exec(html)) !== null) {
+      allDValues.push(match[1]);
+    }
   }
-  
-  const animIndex = parseInt(anim.split('loading-x-anim-')[1], 10);
-  return allDValues[animIndex] || null;
+
+  const candidates = allDValues
+    .filter((d) => typeof d === 'string' && d.includes('C'))
+    .filter((d) => (d.match(/-?\d+/g) || []).length >= 40);
+
+  return candidates[animIndex] || candidates[0] || null;
+}
+
+function _parseSvgFromCurves(text, animIndex) {
+  const raw = String(text || '');
+  const startToken = raw.includes('\\"curves\\":') ? '\\"curves\\":' : '"curves":';
+  const startAt = raw.indexOf(startToken);
+  if (startAt === -1) return null;
+
+  const openIdx = raw.indexOf('[[', startAt);
+  if (openIdx === -1) return null;
+
+  let depth = 0;
+  let endIdx = -1;
+  for (let i = openIdx; i < raw.length; i++) {
+    const ch = raw[i];
+    if (ch === '[') depth++;
+    else if (ch === ']') depth--;
+    if (depth === 0) {
+      endIdx = i;
+      break;
+    }
+  }
+  if (endIdx === -1) return null;
+
+  const bracketed = raw.slice(openIdx, endIdx + 1);
+  const jsonText = bracketed.replace(/\\"/g, '"');
+
+  let curves;
+  try {
+    curves = JSON.parse(jsonText);
+  } catch (_) {
+    return null;
+  }
+
+  const curveSet = Array.isArray(curves) ? curves[animIndex] : null;
+  if (!Array.isArray(curveSet) || curveSet.length === 0) return null;
+
+  const segments = curveSet
+    .map((seg) => {
+      const color = Array.isArray(seg?.color) ? seg.color : null;
+      const bezier = Array.isArray(seg?.bezier) ? seg.bezier : null;
+      if (!color || color.length < 6 || !bezier || bezier.length < 4) return null;
+      const deg = Number.isFinite(Number(seg?.deg)) ? Number(seg.deg) : 0;
+      return ` ${color[0]},${color[1]} ${color[2]},${color[3]} ${color[4]},${color[5]} h ${deg} s ${bezier[0]},${bezier[1]} ${bezier[2]},${bezier[3]}`;
+    })
+    .filter(Boolean);
+
+  if (segments.length === 0) return null;
+  return `M 10,30 C${segments.join(' C')}`;
 }
 
 /**

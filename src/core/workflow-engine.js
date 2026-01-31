@@ -143,7 +143,7 @@ export class WorkflowEngine {
           try {
             const adapter = this.sessionManager.adapter;
             const pipelineError =
-              criticalMessage || persistMessage || 'Pipeline failed';
+              [criticalMessage, persistMessage].filter(Boolean).join(' | ') || 'Pipeline failed';
 
             if (typeof adapter.update === "function") {
               await adapter.update("turns", context.canonicalAiTurnId, (turn) => {
@@ -160,24 +160,41 @@ export class WorkflowEngine {
             } else {
               const maxAttempts = 3;
               for (let attempt = 0; attempt < maxAttempts; attempt++) {
-                const turn = await adapter.get("turns", context.canonicalAiTurnId);
-                if (!turn) break;
-                const updated = {
-                  ...turn,
-                  pipelineStatus: "error",
-                  meta: {
-                    ...(turn.meta || {}),
-                    pipelineError,
-                  },
-                };
+                if (attempt > 0) {
+                  // Exponential backoff: 50ms, 100ms, 200ms
+                  await new Promise(resolve => setTimeout(resolve, 50 * Math.pow(2, attempt - 1)));
+                }
+
                 try {
+                  const turn = await adapter.get("turns", context.canonicalAiTurnId);
+                  if (!turn) break;
+
+                  const updated = {
+                    ...turn,
+                    pipelineStatus: "error",
+                    meta: {
+                      ...(turn.meta || {}),
+                      pipelineError,
+                    },
+                  };
+
                   await adapter.put("turns", updated);
                   break;
                 } catch (retryError) {
+                  const isLast = attempt === maxAttempts - 1;
                   console.error(
                     `[WorkflowEngine] Failed to mark turn as errored (attempt ${attempt + 1}/${maxAttempts}):`,
                     retryError,
                   );
+
+                  if (isLast) {
+                    console.error(
+                      `[WorkflowEngine] CRITICAL: Could not mark turn ${context.canonicalAiTurnId} as errored after ${maxAttempts} attempts. Last error:`,
+                      retryError
+                    );
+                    // We don't throw here to avoid crashing the whole process loop if possible, 
+                    // but the error state is lost in persistence.
+                  }
                 }
               }
             }
@@ -210,6 +227,7 @@ export class WorkflowEngine {
     }
 
     const options = this._buildOptionsForStep(step.type);
+    options.isRecompute = resolvedContext?.type === "recompute";
 
     try {
       const result = await executor(step, context, stepResults, workflowContexts, resolvedContext, options);
@@ -268,7 +286,6 @@ export class WorkflowEngine {
   }
 
   async _persistStepResponse(step, context, result, resolvedContext) {
-    if (resolvedContext?.type === "recompute") return;
     if (step.type === 'prompt') return;
 
     const providerKey = this._providerKeys[step.type];

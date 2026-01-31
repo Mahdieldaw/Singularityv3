@@ -138,7 +138,9 @@ function normalizeConditionals(input: any): NormalizedConditional[] {
     const sourceStatementIds = Array.from(
       new Set([...(prev.sourceStatementIds || []), ...(next.sourceStatementIds || [])])
     );
-    const question = (prev.question && prev.question !== prev.id) ? prev.question : next.question;
+    const validPrevQuestion = prev.question && prev.question !== prev.id && !prev.question.startsWith('placeholder_');
+    const validNextQuestion = next.question && next.question !== next.id && !next.question.startsWith('placeholder_');
+    const question = validPrevQuestion ? prev.question : (validNextQuestion ? next.question : undefined);
     byId.set(next.id, {
       id: prev.id,
       question,
@@ -281,14 +283,6 @@ function normalizeTraversalGraph(input: any): {
 }
 
 function getEdgesFromGraph(graph: any): MapperEdge[] {
-  if (Array.isArray(graph?.edges)) {
-    const rawEdges = graph.edges.filter(Boolean);
-    const edges = rawEdges.filter(isValidMapperEdge);
-    if (edges.length !== rawEdges.length) {
-      console.warn(`[TraversalEngine] Dropped ${rawEdges.length - edges.length} invalid edges from graph.edges`);
-    }
-    return edges;
-  }
   return normalizeEdges(graph).edges;
 }
 

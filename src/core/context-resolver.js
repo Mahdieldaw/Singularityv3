@@ -140,9 +140,66 @@ export class ContextResolver {
         targetContext = turnContexts[targetProvider];
       }
 
-      const providerContextsAtSourceTurn = targetProvider && targetContext
-        ? { [targetProvider]: targetContext }
-        : {};
+      let normalizedTargetContext =
+        targetContext && typeof targetContext === "object" && "meta" in targetContext
+          ? targetContext.meta
+          : targetContext;
+
+      if (
+        targetProvider &&
+        (!normalizedTargetContext ||
+          typeof normalizedTargetContext !== "object" ||
+          !("conversationId" in normalizedTargetContext))
+      ) {
+        try {
+          const responses = await this._getProviderResponsesForTurn(sourceTurnId);
+          const candidates = Array.isArray(responses)
+            ? responses.filter(
+              (r) =>
+                r &&
+                r.providerId === targetProvider &&
+                r.responseType === "batch" &&
+                r.meta &&
+                typeof r.meta === "object",
+            )
+            : [];
+          candidates.sort((a, b) => {
+            const ai = (a.responseIndex ?? 0);
+            const bi = (b.responseIndex ?? 0);
+            if (bi !== ai) return bi - ai;
+            const at = (a.updatedAt ?? a.createdAt ?? 0);
+            const bt = (b.updatedAt ?? b.createdAt ?? 0);
+            return bt - at;
+          });
+          if (candidates[0]?.meta && typeof candidates[0].meta === "object") {
+            normalizedTargetContext = candidates[0].meta;
+          }
+        } catch (_) { }
+      }
+
+      if (
+        targetProvider &&
+        (!normalizedTargetContext ||
+          typeof normalizedTargetContext !== "object" ||
+          !("conversationId" in normalizedTargetContext))
+      ) {
+        try {
+          const sessionContexts = await this.sessionManager.getProviderContexts(
+            sessionId,
+            DEFAULT_THREAD,
+            { contextRole: "batch" },
+          );
+          const meta = sessionContexts?.[targetProvider]?.meta;
+          if (meta && typeof meta === "object" && "conversationId" in meta) {
+            normalizedTargetContext = meta;
+          }
+        } catch (_) { }
+      }
+
+      const providerContextsAtSourceTurn =
+        targetProvider && normalizedTargetContext
+          ? { [targetProvider]: normalizedTargetContext }
+          : {};
 
       // Prefer custom userMessage from request (targeted refinement), fallback to original turn text
       const sourceUserMessage = request.userMessage || await this._getUserMessageForTurn(sourceTurn);

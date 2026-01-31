@@ -270,6 +270,11 @@ export class GrokAdapter {
     }
 
     if (_isRetry) {
+      const extra = {};
+      if (error && typeof error === "object") {
+        if ("missing" in error) extra.missing = error.missing;
+        if ("status" in error) extra.status = error.status;
+      }
       return {
         providerId: this.id,
         ok: false,
@@ -279,6 +284,7 @@ export class GrokAdapter {
         meta: {
           error: error?.toString?.() || String(error),
           details: error?.details,
+          ...extra,
         },
       };
     }
@@ -302,6 +308,8 @@ export class GrokAdapter {
         meta: {
           error: 'no recovery',
           details: error?.details || error?.message,
+          ...(error && typeof error === "object" && "missing" in error ? { missing: error.missing } : {}),
+          ...(error && typeof error === "object" && "status" in error ? { status: error.status } : {}),
         },
       };
     } catch (handledError) {
@@ -315,6 +323,8 @@ export class GrokAdapter {
         meta: {
           error: normalizedHandledError.message,
           details: normalizedHandledError.details,
+          ...(handledError && typeof handledError === "object" && "missing" in handledError ? { missing: handledError.missing } : {}),
+          ...(handledError && typeof handledError === "object" && "status" in handledError ? { status: handledError.status } : {}),
         },
       };
     }
@@ -371,6 +381,11 @@ export class GrokAdapter {
     }
 
     if (_isRetry) {
+      const extra = {};
+      if (error && typeof error === "object") {
+        if ("missing" in error) extra.missing = error.missing;
+        if ("status" in error) extra.status = error.status;
+      }
       return {
         providerId: this.id,
         ok: false,
@@ -382,6 +397,7 @@ export class GrokAdapter {
           details: error?.details,
           conversationId: meta.conversationId,
           parentResponseId: meta.parentResponseId,
+          ...extra,
         },
       };
     }

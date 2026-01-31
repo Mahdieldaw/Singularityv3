@@ -1,0 +1,89 @@
+export * from './types';
+export { skeletonize } from './Skeletonizer';
+export { detectCarriers } from './CarrierDetector';
+export { triageStatements } from './TriageEngine';
+export { reconstructSubstrate, formatSubstrateForPrompt } from './SubstrateReconstructor';
+
+import type { ChewedSubstrate, NormalizedTraversalState, SkeletonizationInput } from './types';
+import { triageStatements } from './TriageEngine';
+import { reconstructSubstrate } from './SubstrateReconstructor';
+
+function requireArray(value: unknown, label: string): asserts value is unknown[] {
+  if (!Array.isArray(value)) throw new Error(`[Skeletonization] ${label} must be an array`);
+}
+
+export async function buildChewedSubstrate(input: SkeletonizationInput): Promise<ChewedSubstrate> {
+  if (!input || typeof input !== 'object') throw new Error('[Skeletonization] Input required');
+  requireArray(input.statements, 'statements');
+  requireArray(input.paragraphs, 'paragraphs');
+  requireArray(input.claims, 'claims');
+  requireArray(input.sourceData, 'sourceData');
+
+  const traversalState = normalizeTraversalState((input as unknown as { traversalState?: unknown }).traversalState);
+  const normalizedInput: SkeletonizationInput = { ...input, traversalState };
+
+  const prunedCount = Array.from(traversalState.claimStatuses.values()).filter(s => s === 'pruned').length;
+
+  if (prunedCount === 0) {
+    return createPassthroughSubstrate(normalizedInput);
+  }
+
+  const triageResult = await triageStatements(normalizedInput);
+  const embeddingTimeMs = triageResult.meta.processingTimeMs * 0.7;
+  return reconstructSubstrate(normalizedInput, triageResult, embeddingTimeMs);
+}
+
+export function normalizeTraversalState(state: unknown): NormalizedTraversalState {
+  if (!state || typeof state !== 'object') return { claimStatuses: new Map(), pathSteps: [] };
+  const s = state as Record<string, unknown>;
+
+  let claimStatuses: Map<string, 'active' | 'pruned'>;
+  const raw = s.claimStatuses;
+
+  if (raw instanceof Map) {
+    claimStatuses = raw as Map<string, 'active' | 'pruned'>;
+  } else if (raw && typeof raw === 'object') {
+    claimStatuses = new Map(
+      Object.entries(raw as Record<string, unknown>).map(([k, v]) => [
+        k,
+        v === 'pruned' ? 'pruned' : 'active',
+      ])
+    );
+  } else {
+    claimStatuses = new Map();
+  }
+
+  const pathSteps = Array.isArray(s.pathSteps)
+    ? (s.pathSteps as unknown[]).filter((p): p is string => typeof p === 'string')
+    : [];
+
+  return { claimStatuses, pathSteps };
+}
+
+function createPassthroughSubstrate(input: SkeletonizationInput): ChewedSubstrate {
+  return {
+    outputs: input.sourceData.map(source => ({
+      modelIndex: source.modelIndex,
+      providerId: source.providerId,
+      text: source.text,
+      paragraphs: [],
+      meta: {
+        originalCharCount: source.text.length,
+        finalCharCount: source.text.length,
+        protectedStatementCount: input.statements.length,
+        skeletonizedStatementCount: 0,
+        removedStatementCount: 0,
+      },
+    })),
+    summary: {
+      totalModels: input.sourceData.length,
+      survivingClaimCount: input.claims.length,
+      prunedClaimCount: 0,
+      protectedStatementCount: input.statements.length,
+      skeletonizedStatementCount: 0,
+      removedStatementCount: 0,
+    },
+    pathSteps: input.traversalState.pathSteps,
+    meta: { triageTimeMs: 0, reconstructionTimeMs: 0, embeddingTimeMs: 0, totalTimeMs: 0 },
+  };
+}
