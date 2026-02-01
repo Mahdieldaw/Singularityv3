@@ -8,6 +8,33 @@ import { CognitivePipelineHandler } from './execution/CognitivePipelineHandler';
 import { parseMapperArtifact } from '../../shared/parsing-utils';
 import { classifyError } from './error-classifier';
 
+function buildCognitiveArtifact(mapper, pipeline) {
+  if (!mapper && !pipeline) return null;
+  return {
+    shadow: {
+      statements: pipeline?.shadow?.extraction?.statements || mapper?.shadow?.statements || [],
+      paragraphs: pipeline?.paragraphProjection?.paragraphs || [],
+      audit: mapper?.shadow?.audit || {},
+      delta: pipeline?.shadow?.delta || null,
+    },
+    geometry: {
+      embeddingStatus: pipeline?.substrate ? "computed" : "failed",
+      substrate: pipeline?.substrate?.graph || { nodes: [], edges: [] },
+      preSemantic: pipeline?.preSemantic ? { hint: pipeline.preSemantic.lens?.shape || "sparse" } : undefined,
+    },
+    semantic: {
+      claims: mapper?.claims || [],
+      edges: mapper?.edges || [],
+      conditionals: mapper?.conditionals || [],
+      narrative: mapper?.narrative,
+    },
+    traversal: {
+      forcingPoints: mapper?.forcingPoints || [],
+      graph: mapper?.traversalGraph || { claims: [], tensions: [], tiers: [], maxTier: 0, roots: [], cycles: [] },
+    },
+  };
+}
+
 export class WorkflowEngine {
   /* _options: Reserved for future configuration or interface compatibility */
   constructor(orchestrator, sessionManager, port, _options = {}) {
@@ -286,7 +313,34 @@ export class WorkflowEngine {
   }
 
   async _persistStepResponse(step, context, result, resolvedContext) {
-    if (step.type === 'prompt') return;
+    if (step.type === 'prompt') {
+      const aiTurnId = context?.canonicalAiTurnId;
+      if (!aiTurnId) return;
+
+      const resultsObj = result?.results || {};
+      const entries = Object.entries(resultsObj);
+      if (entries.length === 0) return;
+
+      await Promise.all(entries.map(async ([providerId, r]) => {
+        if (!providerId) return;
+        try {
+          await this.persistenceCoordinator.upsertProviderResponse(
+            context.sessionId,
+            aiTurnId,
+            String(providerId),
+            "batch",
+            0,
+            {
+              text: r?.text || "",
+              status: r?.status || "completed",
+              meta: r?.meta || {},
+            },
+          );
+        } catch (_) { }
+      }));
+
+      return;
+    }
 
     const providerKey = this._providerKeys[step.type];
     if (!providerKey) return;
@@ -445,6 +499,32 @@ export class WorkflowEngine {
       stepResults
     );
 
+    const batchPhase = Object.keys(result.batchOutputs || {}).length > 0
+      ? {
+        responses: Object.fromEntries(
+          Object.entries(result.batchOutputs).map(([pid, data]) => [
+            pid,
+            {
+              text: data.text || "",
+              modelIndex: data.meta?.modelIndex ?? 0,
+              status: data.status || "completed",
+              meta: data.meta,
+            },
+          ])
+        ),
+      }
+      : undefined;
+
+    const cognitiveArtifact = buildCognitiveArtifact(context?.mapperArtifact, context?.pipelineArtifacts);
+    const mappingPhase = cognitiveArtifact ? { artifact: cognitiveArtifact } : undefined;
+    const singularityPhase = context?.singularityOutput
+      ? {
+        prompt: context.singularityOutput.prompt || "",
+        output: context.singularityOutput.output || context.singularityOutput.text || "",
+        traversalState: context.traversalState,
+      }
+      : undefined;
+
     const persistRequest = {
       type: resolvedContext?.type || "unknown",
       sessionId: context.sessionId,
@@ -455,6 +535,9 @@ export class WorkflowEngine {
       singularityOutput: context?.singularityOutput,
       storedAnalysis: context?.storedAnalysis,
       runId: context?.runId || request?.context?.runId,
+      batch: batchPhase,
+      mapping: mappingPhase,
+      singularity: singularityPhase,
     };
     if (resolvedContext?.type === "recompute") {
       persistRequest.sourceTurnId = resolvedContext.sourceTurnId;

@@ -658,12 +658,8 @@ export class ErrorHandler {
 
       NETWORK_ERROR: {
         name: "Network Recovery",
-        execute: async (_error, context) => {
-          return await this.retryWithBackoff(
-            context.operation as OperationFn,
-            context,
-            "STANDARD",
-          );
+        execute: async (error, _context) => {
+          throw error;
         },
       },
 

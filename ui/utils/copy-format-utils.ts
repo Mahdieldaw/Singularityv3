@@ -279,6 +279,10 @@ export function formatSessionForMarkdown(fullSession: { title: string, turns: Tu
             let singularityText = aiTurn.singularityOutput?.text || null;
             let singularityProviderId = aiTurn.singularityOutput?.providerId;
 
+            if (!singularityText && (aiTurn as any)?.singularity?.output) {
+                singularityText = String((aiTurn as any).singularity.output || "");
+            }
+
             if (!singularityText && aiTurn.singularityResponses) {
                 const keys = Object.keys(aiTurn.singularityResponses);
                 if (keys.length > 0) {
@@ -299,6 +303,16 @@ export function formatSessionForMarkdown(fullSession: { title: string, turns: Tu
                     return Array.isArray(arr) && arr.some(r => r.text);
                 });
             }
+            const mappingArtifact = (aiTurn as any)?.mapping?.artifact || null;
+            if (!decisionMap && mappingArtifact?.semantic) {
+                decisionMap = {
+                    narrative: mappingArtifact.semantic.narrative,
+                    claims: mappingArtifact.semantic.claims || [],
+                    edges: mappingArtifact.semantic.edges || [],
+                    topology: null
+                };
+            }
+
             if (targetMapPid && mapResponses[targetMapPid]) {
                 const resps = mapResponses[targetMapPid];
                 const latest = Array.isArray(resps) ? resps[resps.length - 1] : resps;
@@ -322,7 +336,24 @@ export function formatSessionForMarkdown(fullSession: { title: string, turns: Tu
 
             // Batch Responses (flatten to single latest)
             const batchResponses: Record<string, ProviderResponse> = {};
-            Object.entries(aiTurn.batchResponses || {}).forEach(([pid, val]) => {
+            const effectiveBatchResponses = aiTurn.batchResponses && Object.keys(aiTurn.batchResponses).length > 0
+                ? aiTurn.batchResponses
+                : ((aiTurn as any)?.batch?.responses
+                    ? Object.fromEntries(
+                        Object.entries((aiTurn as any).batch.responses).map(([providerId, response]) => [
+                            providerId,
+                            [{
+                                providerId: providerId as any,
+                                text: (response as any)?.text || "",
+                                status: (response as any)?.status || "completed",
+                                createdAt: (aiTurn as any).createdAt || Date.now(),
+                                updatedAt: (aiTurn as any).createdAt || Date.now(),
+                                meta: (response as any)?.meta ? { ...(response as any).meta, modelIndex: (response as any).modelIndex } : { modelIndex: (response as any).modelIndex },
+                            }],
+                        ]),
+                    )
+                    : {});
+            Object.entries(effectiveBatchResponses || {}).forEach(([pid, val]) => {
                 const arr = Array.isArray(val) ? val : [val];
                 const latest = arr[arr.length - 1]; // ProviderResponse
                 if (latest) {

@@ -918,6 +918,15 @@ export const DecisionMapSheet = React.memo(() => {
     return t && (t as any).type === 'ai' ? (t as AiTurn) : null;
   }, [openState, turnGetter]);
 
+  useEffect(() => {
+    console.log('🔬 Phase persistence:', {
+      turnId: aiTurn?.id,
+      batch: !!aiTurn?.batch,
+      mapping: !!aiTurn?.mapping,
+      singularity: !!aiTurn?.singularity,
+    });
+  }, [aiTurn?.id, aiTurn?.batch, aiTurn?.mapping, aiTurn?.singularity]);
+
   const singularityState = useSingularityOutput(aiTurn?.id || null);
 
   const userMessage = useMemo(() => {
@@ -1020,9 +1029,29 @@ export const DecisionMapSheet = React.memo(() => {
     return adaptGraphTopology(graphTopology);
   }, [parsedMapping, graphTopology]);
 
+  const mappingArtifact = (aiTurn as any)?.mapping?.artifact || null;
+
+  const derivedMapperArtifact = useMemo(() => {
+    if (!mappingArtifact) return null;
+    return {
+      claims: mappingArtifact.semantic?.claims || [],
+      edges: mappingArtifact.semantic?.edges || [],
+      conditionals: mappingArtifact.semantic?.conditionals || [],
+      narrative: mappingArtifact.semantic?.narrative,
+      traversalGraph: mappingArtifact.traversal?.graph || null,
+      forcingPoints: mappingArtifact.traversal?.forcingPoints || null,
+      shadow: {
+        statements: mappingArtifact.shadow?.statements || [],
+        audit: mappingArtifact.shadow?.audit || {},
+        topUnreferenced: [],
+      },
+    };
+  }, [mappingArtifact]);
+
   const artifactForStructure = useMemo(() => {
     const artifact =
-      (aiTurn as any)?.mapperArtifact ||
+      aiTurn?.mapping?.artifact ||
+      derivedMapperArtifact ||
       (parsedMapping as any)?.artifact ||
       (graphData.claims.length > 0 || graphData.edges.length > 0
         ? {
@@ -1035,7 +1064,7 @@ export const DecisionMapSheet = React.memo(() => {
 
     if (!artifact || !Array.isArray((artifact as any).claims) || (artifact as any).claims.length === 0) return null;
     return artifact;
-  }, [aiTurn, parsedMapping, graphData, latestMapping]);
+  }, [aiTurn, derivedMapperArtifact, parsedMapping, graphData, latestMapping]);
 
   useEffect(() => {
     if (activeTab !== 'debug' && activeTab !== 'concierge') return;
@@ -1214,14 +1243,15 @@ export const DecisionMapSheet = React.memo(() => {
   }, []);
 
   const resolvedPipelineArtifacts = useMemo(() => {
-    const fromTurn = (aiTurn as any)?.pipelineArtifacts || null;
+    const fromTurn = aiTurn?.mapping?.artifact || null;
     const fromMeta = (latestMapping?.meta as any)?.pipelineArtifacts || null;
     return fromTurn || fromMeta || null;
   }, [aiTurn, latestMapping?.meta]);
 
   const pipelineStages = useMemo(() => {
     const mapperArtifact =
-      (aiTurn as any)?.mapperArtifact ||
+      aiTurn?.mapping?.artifact ||
+      derivedMapperArtifact ||
       (parsedMapping as any)?.artifact ||
       (graphData.claims.length > 0 || graphData.edges.length > 0
         ? {
@@ -1274,7 +1304,7 @@ export const DecisionMapSheet = React.memo(() => {
       { key: 'singularity_output', label: 'Singularity Output', kind: 'json' as const, value: singularityOutput, group: 'Singularity', disabled: !hasValue(singularityOutput, 'json') },
       { key: 'singularity_pipeline', label: 'Singularity Pipeline', kind: 'json' as const, value: (singularityOutput as any)?.pipeline || null, group: 'Singularity', disabled: !hasValue((singularityOutput as any)?.pipeline || null, 'json') },
     ];
-  }, [aiTurn, parsedMapping, graphData, latestMapping, singularityState.output, semanticMapperPrompt, rawMappingText, resolvedPipelineArtifacts]);
+  }, [aiTurn, derivedMapperArtifact, parsedMapping, graphData, latestMapping, singularityState.output, semanticMapperPrompt, rawMappingText, resolvedPipelineArtifacts]);
 
   const pipelineStageGroups = useMemo(() => {
     const groups: Array<{ label: string; stages: typeof pipelineStages }> = [];

@@ -172,6 +172,7 @@ export class GrokSessionApi {
     this._anim = '';
     this._svgData = '';
     this._numbers = [];
+    this._xsidCacheTime = 0;
     
     this._debug = false;
   }
@@ -681,20 +682,42 @@ export class GrokSessionApi {
 
   async _fetchXsidNumbers() {
     const scriptUrl = `https://grok.com/_next/${this._xsidScript}`;
+    const hasCacheTime = Number.isFinite(this._xsidCacheTime) && this._xsidCacheTime > 0;
+    const cacheAge = hasCacheTime ? Date.now() - this._xsidCacheTime : 0;
+
+    const validate = (numbers) => {
+      const ok =
+        Array.isArray(numbers) &&
+        numbers.length === 4 &&
+        numbers.every((n) => Number.isFinite(n) && Math.floor(n) === n && n >= 0 && n <= 255);
+      if (!ok) {
+        throw new Error(`Grok xValues format invalid: ${JSON.stringify(numbers)}`);
+      }
+      return numbers;
+    };
 
     // Check cache
-    if (XSID_CACHE.has(scriptUrl)) {
-      return XSID_CACHE.get(scriptUrl);
+    if (XSID_CACHE.has(scriptUrl) && (!hasCacheTime || cacheAge <= 3600 * 1000)) {
+      const cached = validate(XSID_CACHE.get(scriptUrl));
+      if (!hasCacheTime) this._xsidCacheTime = Date.now();
+      return cached;
+    }
+    if (XSID_CACHE.has(scriptUrl) && cacheAge > 3600 * 1000) {
+      console.warn('[GrokSession] cache stale, re-fetching', { cacheAgeMs: cacheAge, scriptUrl });
     }
 
     try {
       const res = await this.fetch(scriptUrl, { credentials: 'include' });
       const content = await res.text();
-      const numbers = parseXValues(content);
+      const numbers = validate(parseXValues(content));
+      this._xsidCacheTime = Date.now();
       
       // Don't mutate the const Map, just return
       return numbers;
     } catch (e) {
+      if (e instanceof Error && e.message.startsWith('Grok xValues format invalid')) {
+        throw e;
+      }
       this._log('xsid script fetch failed:', e);
       return [0, 0, 0, 0];
     }

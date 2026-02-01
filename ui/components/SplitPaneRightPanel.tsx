@@ -1,4 +1,4 @@
-import React, { Suspense } from "react";
+import React, { Suspense, useEffect, useRef } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
 import { activeSplitPanelAtom, currentSessionIdAtom } from "../state/atoms";
 import { safeLazy } from "../utils/safeLazy";
@@ -10,6 +10,15 @@ export const SplitPaneRightPanel = React.memo(() => {
     const panelState = useAtomValue(activeSplitPanelAtom);
     const setActivePanel = useSetAtom(activeSplitPanelAtom);
     const sessionId = useAtomValue(currentSessionIdAtom);
+    const lastSessionIdRef = useRef<string | null>(sessionId);
+
+    useEffect(() => {
+        const prev = lastSessionIdRef.current;
+        lastSessionIdRef.current = sessionId;
+        if (prev !== sessionId && panelState) {
+            setActivePanel(null);
+        }
+    }, [sessionId, panelState, setActivePanel]);
 
     if (!panelState) return null;
 

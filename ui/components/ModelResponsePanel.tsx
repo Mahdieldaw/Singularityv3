@@ -72,7 +72,6 @@ export const ModelResponsePanel: React.FC<ModelResponsePanelProps> = React.memo(
     const workflowProgress = useAtomValue(workflowProgressForTurnFamily(shownTurnId));
     const providerErrors = useAtomValue(providerErrorsForTurnFamily(shownTurnId));
 
-
     // Actions hook
     const { handleRetryProvider, handleBranchContinue, handleToggleTarget, activeTarget } =
         useProviderActions(sessionId, shownTurnId);

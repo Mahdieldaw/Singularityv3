@@ -6,6 +6,33 @@ import { authManager } from './auth-manager.js';
 import { DEFAULT_THREAD } from '../../shared/messaging.js';
 // Note: ContextResolver is now available via services; we don't import it directly here
 
+function buildCognitiveArtifact(mapper, pipeline) {
+  if (!mapper && !pipeline) return null;
+  return {
+    shadow: {
+      statements: pipeline?.shadow?.extraction?.statements || mapper?.shadow?.statements || [],
+      paragraphs: pipeline?.paragraphProjection?.paragraphs || [],
+      audit: mapper?.shadow?.audit || {},
+      delta: pipeline?.shadow?.delta || null,
+    },
+    geometry: {
+      embeddingStatus: pipeline?.substrate ? "computed" : "failed",
+      substrate: pipeline?.substrate?.graph || { nodes: [], edges: [] },
+      preSemantic: pipeline?.preSemantic ? { hint: pipeline.preSemantic.lens?.shape || "sparse" } : undefined,
+    },
+    semantic: {
+      claims: mapper?.claims || [],
+      edges: mapper?.edges || [],
+      conditionals: mapper?.conditionals || [],
+      narrative: mapper?.narrative,
+    },
+    traversal: {
+      forcingPoints: mapper?.forcingPoints || [],
+      graph: mapper?.traversalGraph || { claims: [], tensions: [], tiers: [], maxTier: 0, roots: [], cycles: [] },
+    },
+  };
+}
+
 /**
  * ConnectionHandler
  *
@@ -112,7 +139,6 @@ export class ConnectionHandler {
       const resps = await adapter.getResponsesByTurnId(aiTurnId);
       const buckets = {
         batchResponses: {},
-        mappingResponses: {},
         singularityResponses: {},
       };
       for (const r of resps || []) {
@@ -128,8 +154,6 @@ export class ConnectionHandler {
         };
         if (r.responseType === "batch") {
           (buckets.batchResponses[r.providerId] ||= []).push(entry);
-        } else if (r.responseType === "mapping") {
-          (buckets.mappingResponses[r.providerId] ||= []).push(entry);
         } else if (r.responseType === "singularity") {
           (buckets.singularityResponses[r.providerId] ||= []).push(entry);
         }
@@ -154,9 +178,42 @@ export class ConnectionHandler {
       // Require at least some responses to finalize
       const hasAny =
         Object.keys(buckets.batchResponses).length > 0 ||
-        Object.keys(buckets.mappingResponses).length > 0 ||
-        Object.keys(buckets.singularityResponses).length > 0;
+        Object.keys(buckets.singularityResponses).length > 0 ||
+        !!aiTurn.batch ||
+        !!aiTurn.mapping ||
+        !!aiTurn.singularity;
       if (!hasAny) return;
+
+      const batchPhase = Object.keys(buckets.batchResponses || {}).length > 0
+        ? {
+          responses: Object.fromEntries(
+            Object.entries(buckets.batchResponses).map(([pid, arr]) => {
+              const last = Array.isArray(arr) && arr.length > 0 ? arr[arr.length - 1] : arr;
+              return [
+                pid,
+                {
+                  text: last?.text || "",
+                  modelIndex: last?.meta?.modelIndex ?? 0,
+                  status: last?.status || "completed",
+                  meta: last?.meta,
+                },
+              ];
+            }),
+          ),
+        }
+        : undefined;
+
+      const singularityPhase = inferredSingularityOutput
+        ? {
+          prompt: inferredSingularityOutput.prompt || "",
+          output: inferredSingularityOutput.output || inferredSingularityOutput.text || "",
+          traversalState: aiTurn.traversalState,
+        }
+        : undefined;
+
+      const finalBatch = aiTurn.batch || batchPhase;
+      const finalMapping = aiTurn.mapping;
+      const finalSingularity = aiTurn.singularity || singularityPhase;
 
       this.port?.postMessage({
         type: "TURN_FINALIZED",
@@ -186,13 +243,10 @@ export class ConnectionHandler {
             sessionId,
             threadId: aiTurn.threadId || DEFAULT_THREAD,
             createdAt: aiTurn.createdAt || Date.now(),
-            batchResponses: buckets.batchResponses,
-            mappingResponses: buckets.mappingResponses,
-            singularityResponses: buckets.singularityResponses,
+            ...(finalBatch ? { batch: finalBatch } : {}),
+            ...(finalMapping ? { mapping: finalMapping } : {}),
+            ...(finalSingularity ? { singularity: finalSingularity } : {}),
             meta: aiTurn.meta || {},
-            mapperArtifact: aiTurn.mapperArtifact,
-            pipelineArtifacts: aiTurn.pipelineArtifacts,
-            singularityOutput: inferredSingularityOutput,
             pipelineStatus: aiTurn.pipelineStatus,
           },
         },
@@ -614,11 +668,6 @@ export class ConnectionHandler {
       executeRequest.mapper,
       executeRequest.singularity,
     ].filter(Boolean);
-
-    const wantsGrok = requested.some((pid) => String(pid).toLowerCase().startsWith("grok"));
-    if (wantsGrok) {
-      await authManager.verifyProvider("grok");
-    }
 
     // Use centralized AuthManager
     const authStatus = await authManager.getAuthStatus();

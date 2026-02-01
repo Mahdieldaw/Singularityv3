@@ -67,7 +67,25 @@ export function useRoundActions() {
       }
 
       // ✅ Validate we have enough source data for mapping
-      const outputsFromBatch = Object.values(ai.batchResponses || {})
+      const batchResponses = ai.batchResponses && Object.keys(ai.batchResponses).length > 0
+        ? ai.batchResponses
+        : (ai.batch?.responses
+          ? Object.fromEntries(
+            Object.entries(ai.batch.responses).map(([providerId, response]) => [
+              providerId,
+              [{
+                providerId: providerId as ProviderKey,
+                text: response?.text || "",
+                status: response?.status || "completed",
+                createdAt: ai.createdAt ?? Date.now(),
+                updatedAt: ai.createdAt ?? Date.now(),
+                meta: response?.meta ? { ...response.meta, modelIndex: response.modelIndex } : { modelIndex: response?.modelIndex },
+              }],
+            ]),
+          )
+          : {});
+
+      const outputsFromBatch = Object.values(batchResponses || {})
         .flat()
         .filter(
           (response: ProviderResponse) => response.status === "completed" && response.text?.trim(),

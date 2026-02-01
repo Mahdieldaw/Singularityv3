@@ -265,6 +265,7 @@ export function useChat() {
           const providers = round.providers || {};
           const mappingRaw = round.mappingResponses || {};
           const singularityRaw = round.singularityResponses || {};
+
           const hasAnyResponseData =
             Object.keys(providers).length > 0 ||
             Object.keys(mappingRaw).length > 0 ||
@@ -276,26 +277,30 @@ export function useChat() {
 
           if (hasAnyResponseData || hasAnyCognitiveData) {
             // Transform providers object to batchResponses (arrays per provider)
-            const batchResponses: Record<string, ProviderResponse[]> = {};
-            Object.entries(providers).forEach(
-              ([providerId, data]: [string, any]) => {
-                const arr: ProviderResponse[] = Array.isArray(data)
-                  ? (data as ProviderResponse[])
-                  : [
-                    {
-                      providerId: providerId as ProviderKey,
-                      text: (data?.text as string) || "",
-                      status: "completed",
-                      createdAt:
-                        round.completedAt || round.createdAt || Date.now(),
-                      updatedAt:
-                        round.completedAt || round.createdAt || Date.now(),
-                      meta: data?.meta || {},
+            const batchResponses: Record<string, ProviderResponse[]> | undefined =
+              Object.keys(providers).length > 0
+                ? Object.fromEntries(
+                  Object.entries(providers).map(
+                    ([providerId, data]: [string, any]) => {
+                      const arr: ProviderResponse[] = Array.isArray(data)
+                        ? (data as ProviderResponse[])
+                        : [
+                          {
+                            providerId: providerId as ProviderKey,
+                            text: (data?.text as string) || "",
+                            status: "completed",
+                            createdAt:
+                              round.completedAt || round.createdAt || Date.now(),
+                            updatedAt:
+                              round.completedAt || round.createdAt || Date.now(),
+                            meta: data?.meta || {},
+                          },
+                        ];
+                      return [providerId, arr];
                     },
-                  ];
-                batchResponses[providerId] = arr;
-              },
-            );
+                  ),
+                )
+                : undefined;
 
             // Normalize mapping/other responses to arrays
             const normalizeResponseMap = (
@@ -346,7 +351,11 @@ export function useChat() {
               sessionId: fullSession.sessionId,
               threadId: DEFAULT_THREAD,
               createdAt: round.completedAt || round.createdAt || Date.now(),
-              batchResponses,
+              ...(batchResponses ? { batchResponses } : {}),
+
+              ...(round.batch ? { batch: round.batch } : {}),
+              ...(round.mapping ? { mapping: round.mapping } : {}),
+              ...(round.singularity ? { singularity: round.singularity } : {}),
 
               mappingResponses: normalizeResponseMap(mappingRaw),
               singularityResponses: normalizeResponseMap(singularityRaw),

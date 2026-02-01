@@ -221,7 +221,7 @@ export const TraversalGraphView: React.FC<TraversalGraphViewProps> = ({
                 providerId: singularityProvider || undefined,
                 isTraversalContinuation: true,
                 traversalState: {
-                  claimStatuses: Object.fromEntries(state.claimStatuses),
+                  claimStatuses: Object.fromEntries(state.claimStatuses ?? new Map()),
                 },
               }
             });

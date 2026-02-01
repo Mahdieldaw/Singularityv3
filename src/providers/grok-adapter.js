@@ -12,6 +12,7 @@ import {
   errorHandler,
   isProviderAuthError,
   isRateLimitError,
+  isNetworkError,
   createProviderAuthError,
   normalizeError,
 } from '../utils/ErrorHandler';
@@ -269,6 +270,20 @@ export class GrokAdapter {
       };
     }
 
+    if (isNetworkError(error) || error?.type === 'network' || error?.code === 'NETWORK_ERROR') {
+      return {
+        providerId: this.id,
+        ok: false,
+        text: aggregatedText || null,
+        errorCode: 'NETWORK_ERROR',
+        latencyMs: Date.now() - startTime,
+        meta: {
+          error: error?.toString?.() || String(error),
+          details: error?.details,
+        },
+      };
+    }
+
     if (_isRetry) {
       const extra = {};
       if (error && typeof error === "object") {
@@ -374,6 +389,22 @@ export class GrokAdapter {
         meta: {
           error: authError.toString(),
           details: authError.details,
+          conversationId: meta.conversationId,
+          parentResponseId: meta.parentResponseId,
+        },
+      };
+    }
+
+    if (isNetworkError(error) || error?.type === 'network' || error?.code === 'NETWORK_ERROR') {
+      return {
+        providerId: this.id,
+        ok: false,
+        text: aggregatedText || null,
+        errorCode: 'NETWORK_ERROR',
+        latencyMs: Date.now() - startTime,
+        meta: {
+          error: error?.toString?.() || String(error),
+          details: error?.details,
           conversationId: meta.conversationId,
           parentResponseId: meta.parentResponseId,
         },

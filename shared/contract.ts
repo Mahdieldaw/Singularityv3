@@ -1297,6 +1297,44 @@ export interface PipelineArtifacts {
   } | null;
 }
 
+export interface CognitiveArtifact {
+  shadow: {
+    statements: PipelineShadowStatement[];
+    paragraphs: PipelineShadowParagraph[];
+    audit: ShadowAudit;
+    delta: PipelineShadowDeltaResult | null;
+  };
+  geometry: {
+    embeddingStatus: "computed" | "failed";
+    substrate: PipelineSubstrateGraph;
+    preSemantic?: { hint: string };
+  };
+  semantic: {
+    claims: Claim[];
+    edges: Edge[];
+    conditionals: ConditionalPruner[];
+    narrative?: string;
+  };
+  traversal: {
+    forcingPoints: ForcingPoint[];
+    graph: SerializedTraversalGraph;
+  };
+}
+
+export interface BatchPhase {
+  responses: Record<string, { text: string; modelIndex: number; status: string; meta?: any }>;
+}
+
+export interface MappingPhase {
+  artifact: CognitiveArtifact;
+}
+
+export interface SingularityPhase {
+  prompt: string;
+  output: string;
+  traversalState?: { answers: Record<string, any>; pathSteps: string[] };
+}
+
 export interface MapperArtifact extends MapperOutput {
   id?: string;
   query?: string;
@@ -1722,6 +1760,10 @@ export interface AiTurn {
   mappingResponses: Record<string, ProviderResponse[]>;
   exploreResponses?: Record<string, ProviderResponse[]>;
   singularityResponses?: Record<string, ProviderResponse[]>;
+
+  batch?: BatchPhase;
+  mapping?: MappingPhase;
+  singularity?: SingularityPhase;
 
   // Cognitive Pipeline Artifacts (Computed)
   mapperArtifact?: MapperArtifact;

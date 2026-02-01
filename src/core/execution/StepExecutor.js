@@ -173,11 +173,12 @@ export class StepExecutor {
           } catch (_) { }
         },
         onProviderComplete: (providerId, resultWrapper) => {
-          try {
-            const entry = providerStatuses.find((s) => s.providerId === providerId);
-            if (resultWrapper && resultWrapper.status === "rejected") {
-              const err = resultWrapper.reason;
-              const classified = classifyError(err);
+          const entry = providerStatuses.find((s) => s.providerId === providerId);
+
+          if (resultWrapper && resultWrapper.status === "rejected") {
+            const err = resultWrapper.reason;
+            const classified = classifyError(err);
+            try {
               if (!completedProviders.has(providerId)) {
                 completedProviders.add(providerId);
                 this.healthTracker.recordFailure(providerId, err);
@@ -190,19 +191,21 @@ export class StepExecutor {
               entry.error = classified;
             }
 
-            streamingManager.port.postMessage({
-              type: 'WORKFLOW_PROGRESS',
-              sessionId: context.sessionId,
-              aiTurnId: context.canonicalAiTurnId || 'unknown',
-              phase: 'batch',
-              providerStatuses,
-              completedCount: providerStatuses.filter((p) => p.status === 'completed').length,
-              totalCount: providers.length,
-            });
+            try {
+              streamingManager.port.postMessage({
+                type: 'WORKFLOW_PROGRESS',
+                sessionId: context.sessionId,
+                aiTurnId: context.canonicalAiTurnId || 'unknown',
+                phase: 'batch',
+                providerStatuses,
+                completedCount: providerStatuses.filter((p) => p.status === 'completed').length,
+                totalCount: providers.length,
+              });
+            } catch (_) { }
             return;
           }
 
-            try {
+          try {
             if (!completedProviders.has(providerId)) {
               completedProviders.add(providerId);
               this.healthTracker.recordSuccess(providerId);
@@ -214,17 +217,18 @@ export class StepExecutor {
             entry.progress = 100;
             if (entry.error) delete entry.error;
 
-            streamingManager.port.postMessage({
-              type: 'WORKFLOW_PROGRESS',
-              sessionId: context.sessionId,
-              aiTurnId: context.canonicalAiTurnId || 'unknown',
-              phase: 'batch',
-              providerStatuses,
-              completedCount: providerStatuses.filter((p) => p.status === 'completed').length,
-              totalCount: providers.length,
-            });
+            try {
+              streamingManager.port.postMessage({
+                type: 'WORKFLOW_PROGRESS',
+                sessionId: context.sessionId,
+                aiTurnId: context.canonicalAiTurnId || 'unknown',
+                phase: 'batch',
+                providerStatuses,
+                completedCount: providerStatuses.filter((p) => p.status === 'completed').length,
+                totalCount: providers.length,
+              });
+            } catch (_) { }
           }
-        } catch(_) { }
       },
         onError: (error) => {
           try {
@@ -652,7 +656,7 @@ export class StepExecutor {
               x: coords[node.paragraphId]?.[0] ?? 0,
               y: coords[node.paragraphId]?.[1] ?? 0,
             })),
-            edges: (substrate.graphs?.mutual?.edges || []).map((e) => ({
+            edges: (substrate.graphs?.knn?.edges || []).map((e) => ({
               source: e.source,
               target: e.target,
               similarity: e.similarity,
@@ -1351,7 +1355,8 @@ _mapStanceToType(stance) {
             }
           }
         } catch (e) {
-          throw new Error(`Could not find corresponding AI turn for ${turnId} (text fallback failed)`);
+          console.warn(`[StepExecutor] Could not find corresponding AI turn for ${turnId} (text fallback failed):`, e);
+          aiTurn = null;
         }
       }
 

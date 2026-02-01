@@ -99,8 +99,9 @@ export interface UserTurn {
  * Represents a turn from the AI, containing all provider responses.
  * This extends the contract AiTurn with UI-specific properties.
  */
-export interface AiTurn extends Omit<ContractAiTurn, "type"> {
+export interface AiTurn extends Omit<ContractAiTurn, "type" | "batchResponses"> {
   type: "ai";
+  batchResponses?: Record<string, ProviderResponse[]>;
   // UI-only fields for efficient dependency tracking in React hooks
   batchVersion?: number;
   mappingVersion?: number;
@@ -166,4 +167,3 @@ export interface FullSessionPayload {
 }
 
 export type { GraphNode, GraphEdge, GraphTopology, Claim, Edge } from "../../shared/contract";
-

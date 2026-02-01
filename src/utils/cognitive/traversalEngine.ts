@@ -140,7 +140,7 @@ function normalizeConditionals(input: any): NormalizedConditional[] {
     );
     const validPrevQuestion = prev.question && prev.question !== prev.id && !prev.question.startsWith('placeholder_');
     const validNextQuestion = next.question && next.question !== next.id && !next.question.startsWith('placeholder_');
-    const question = validPrevQuestion ? prev.question : (validNextQuestion ? next.question : undefined);
+    const question = validPrevQuestion ? prev.question : (validNextQuestion ? next.question : next.id);
     byId.set(next.id, {
       id: prev.id,
       question,

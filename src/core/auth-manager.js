@@ -134,9 +134,8 @@ class AuthManager {
             }
         }));
 
-        // Grok uses anonymous sessions (no cookies) - verify on-demand via verifyProvider()
-        status.grok = this._cookieStatus['grok'] ?? false;
-        console.log(`[AuthManager] grok: ${status.grok ? 'authenticated' : 'not authenticated'} (cached; cookie check skipped)`);
+        status.grok = true;
+        console.log(`[AuthManager] grok: ${status.grok ? 'authenticated' : 'not authenticated'} (forced true; cookie check skipped)`);
 
         // Update cache and storage
         this._cookieStatus = status;
@@ -179,7 +178,7 @@ class AuthManager {
                     valid = await this._verifyQwen();
                     break;
                 case 'grok':
-                    valid = await this._verifyGrok();
+                    valid = true;
                     break;
                 default:
                     // Unknown provider, fall back to cookie check

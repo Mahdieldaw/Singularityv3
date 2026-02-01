@@ -9,6 +9,7 @@ import { authManager } from '../core/auth-manager.js';
 import {
   errorHandler,
   isProviderAuthError,
+  isNetworkError,
   createProviderAuthError,
   getErrorMessage,
   normalizeError
@@ -228,6 +229,20 @@ export class ChatGPTAdapter {
         };
       }
 
+      if (isNetworkError(error) || error?.type === 'network' || error?.code === 'NETWORK_ERROR') {
+        return {
+          providerId: this.id,
+          ok: false,
+          text: aggregated || null,
+          errorCode: 'NETWORK_ERROR',
+          latencyMs: Date.now() - startTime,
+          meta: {
+            error: error?.toString?.() || String(error),
+            details: error?.details,
+          },
+        };
+      }
+
       // Avoid infinite recursion on retries
       if (_isRetry) {
         const normalized = normalizeError(error);
@@ -393,6 +408,22 @@ export class ChatGPTAdapter {
           meta: {
             error: normalized.message,
             details: normalized.details,
+            conversationId: conversationIdIn,
+            parentMessageId: parentMessageIdIn,
+          },
+        };
+      }
+
+      if (isNetworkError(error) || error?.type === 'network' || error?.code === 'NETWORK_ERROR') {
+        return {
+          providerId: this.id,
+          ok: false,
+          text: aggregated || null,
+          errorCode: 'NETWORK_ERROR',
+          latencyMs: Date.now() - startTime,
+          meta: {
+            error: error?.toString?.() || String(error),
+            details: error?.details,
             conversationId: conversationIdIn,
             parentMessageId: parentMessageIdIn,
           },

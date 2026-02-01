@@ -1,5 +1,32 @@
 import { DEFAULT_THREAD } from '../../../shared/messaging.js';
 
+function buildCognitiveArtifact(mapper, pipeline) {
+  if (!mapper && !pipeline) return null;
+  return {
+    shadow: {
+      statements: pipeline?.shadow?.extraction?.statements || mapper?.shadow?.statements || [],
+      paragraphs: pipeline?.paragraphProjection?.paragraphs || [],
+      audit: mapper?.shadow?.audit || {},
+      delta: pipeline?.shadow?.delta || null,
+    },
+    geometry: {
+      embeddingStatus: pipeline?.substrate ? "computed" : "failed",
+      substrate: pipeline?.substrate?.graph || { nodes: [], edges: [] },
+      preSemantic: pipeline?.preSemantic ? { hint: pipeline.preSemantic.lens?.shape || "sparse" } : undefined,
+    },
+    semantic: {
+      claims: mapper?.claims || [],
+      edges: mapper?.edges || [],
+      conditionals: mapper?.conditionals || [],
+      narrative: mapper?.narrative,
+    },
+    traversal: {
+      forcingPoints: mapper?.forcingPoints || [],
+      graph: mapper?.traversalGraph || { claims: [], tensions: [], tiers: [], maxTier: 0, roots: [], cycles: [] },
+    },
+  };
+}
+
 export class TurnEmitter {
   constructor(port) {
     this.port = port;
@@ -61,7 +88,8 @@ export class TurnEmitter {
         if (value.status === "completed") {
           const result = value.result;
           switch (step.type) {
-            case "prompt": {
+            case "prompt":
+            case "batch": {
               const resultsObj = result?.results || {};
               Object.entries(resultsObj).forEach(([providerId, r]) => {
                 batchResponses[providerId] = [{
@@ -113,7 +141,8 @@ export class TurnEmitter {
         if (value.status === "failed") {
           const errorText = value.error || "Unknown error";
           switch (step.type) {
-            case "prompt": {
+            case "prompt":
+            case "batch": {
               const providers = step?.payload?.providers || [];
               (providers || []).forEach((providerId) => {
                 batchResponses[providerId] = [{
@@ -171,6 +200,59 @@ export class TurnEmitter {
         return;
       }
 
+      const batchPhase = Object.keys(batchResponses).length > 0
+        ? {
+          responses: Object.fromEntries(
+            Object.entries(batchResponses).map(([pid, arr]) => {
+              const last = Array.isArray(arr) ? arr[arr.length - 1] : arr;
+              return [
+                pid,
+                {
+                  text: last?.text || "",
+                  modelIndex: last?.meta?.modelIndex ?? 0,
+                  status: last?.status || "completed",
+                  meta: last?.meta,
+                },
+              ];
+            })
+          ),
+        }
+        : undefined;
+
+      let effectiveMapperArtifact = context?.mapperArtifact || null;
+      let effectivePipelineArtifacts = context?.pipelineArtifacts || null;
+      if (!effectiveMapperArtifact || !effectivePipelineArtifacts) {
+        try {
+          const mapperKey = primaryMapper || Object.keys(mappingResponses || {})[0];
+          const arr = mapperKey ? mappingResponses[mapperKey] : null;
+          const last = Array.isArray(arr) && arr.length > 0 ? arr[arr.length - 1] : null;
+          if (!effectiveMapperArtifact && last?.meta?.mapperArtifact) {
+            effectiveMapperArtifact = last.meta.mapperArtifact;
+          }
+          if (!effectivePipelineArtifacts && last?.meta?.pipelineArtifacts) {
+            effectivePipelineArtifacts = last.meta.pipelineArtifacts;
+          }
+        } catch (_) { }
+      }
+      const cognitiveArtifact = buildCognitiveArtifact(effectiveMapperArtifact, effectivePipelineArtifacts);
+      const mappingPhase = cognitiveArtifact ? { artifact: cognitiveArtifact } : undefined;
+      let inferredSingularityOutput = context?.singularityOutput;
+      if (!inferredSingularityOutput) {
+        try {
+          const firstProviderId = Object.keys(singularityResponses || {})[0];
+          const arr = firstProviderId ? singularityResponses[firstProviderId] : null;
+          const last = Array.isArray(arr) && arr.length > 0 ? arr[arr.length - 1] : null;
+          if (last?.meta?.singularityOutput) inferredSingularityOutput = last.meta.singularityOutput;
+        } catch (_) { }
+      }
+      const singularityPhase = inferredSingularityOutput
+        ? {
+          prompt: inferredSingularityOutput.prompt || "",
+          output: inferredSingularityOutput.output || inferredSingularityOutput.text || "",
+          traversalState: context.traversalState,
+        }
+        : undefined;
+
       const aiTurn = {
         id: aiTurnId,
         type: "ai",
@@ -179,9 +261,9 @@ export class TurnEmitter {
         threadId: DEFAULT_THREAD,
         createdAt: timestamp,
         pipelineStatus: context?.pipelineStatus || "complete",
-        batchResponses,
-        mappingResponses,
-        singularityResponses,
+        ...(batchPhase ? { batch: batchPhase } : {}),
+        ...(mappingPhase ? { mapping: mappingPhase } : {}),
+        ...(singularityPhase ? { singularity: singularityPhase } : {}),
         meta: {
           mapper: primaryMapper,
           requestedFeatures: {
@@ -190,10 +272,6 @@ export class TurnEmitter {
           },
           ...(context?.workflowControl ? { workflowControl: context.workflowControl } : {}),
         },
-        // Cognitive artifacts
-        mapperArtifact: context?.mapperArtifact || undefined,
-        pipelineArtifacts: context?.pipelineArtifacts || undefined,
-        singularityOutput: context?.singularityOutput || undefined,
       };
 
       console.log("[TurnEmitter] Emitting TURN_FINALIZED", {

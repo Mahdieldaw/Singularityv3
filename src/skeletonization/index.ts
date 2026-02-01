@@ -5,6 +5,7 @@ export { triageStatements } from './TriageEngine';
 export { reconstructSubstrate, formatSubstrateForPrompt } from './SubstrateReconstructor';
 
 import type { ChewedSubstrate, NormalizedTraversalState, SkeletonizationInput } from './types';
+import type { AiTurn } from '../../shared/contract';
 import { triageStatements } from './TriageEngine';
 import { reconstructSubstrate } from './SubstrateReconstructor';
 
@@ -31,6 +32,17 @@ export async function buildChewedSubstrate(input: SkeletonizationInput): Promise
   const triageResult = await triageStatements(normalizedInput);
   const embeddingTimeMs = triageResult.meta.processingTimeMs * 0.7;
   return reconstructSubstrate(normalizedInput, triageResult, embeddingTimeMs);
+}
+
+export function getSourceData(turn: AiTurn | null | undefined, pipelineArtifacts: any): SkeletonizationInput['sourceData'] {
+  if (turn?.batch?.responses) {
+    return Object.entries(turn.batch.responses).map(([providerId, response]) => ({
+      providerId,
+      modelIndex: typeof response?.modelIndex === 'number' ? response.modelIndex : 0,
+      text: response?.text || '',
+    }));
+  }
+  return pipelineArtifacts?.sourceData || [];
 }
 
 export function normalizeTraversalState(state: unknown): NormalizedTraversalState {

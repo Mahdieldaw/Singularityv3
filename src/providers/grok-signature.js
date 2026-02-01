@@ -181,11 +181,52 @@ function simulateStyle(values, c) {
   return { color, transform };
 }
 
+function _isValidByte(n) {
+  return Number.isFinite(n) && n >= 0 && n <= 255 && Math.floor(n) === n;
+}
+
+function _summarizeNumbers(arr, limit = 16) {
+  if (!Array.isArray(arr)) return null;
+  const nums = arr.filter((x) => typeof x === 'number' && Number.isFinite(x));
+  if (nums.length === 0) return { count: 0, min: null, max: null, sample: [] };
+  let min = nums[0];
+  let max = nums[0];
+  for (const n of nums) {
+    if (n < min) min = n;
+    if (n > max) max = n;
+  }
+  return { count: nums.length, min, max, sample: nums.slice(0, limit) };
+}
+
+function _validateSignatureValues(values) {
+  if (!Array.isArray(values) || values.length < 11) {
+    return { ok: false, reason: 'values_missing_or_too_short' };
+  }
+  for (let i = 0; i <= 10; i++) {
+    const v = values[i];
+    if (!_isValidByte(v)) {
+      return { ok: false, reason: `invalid_byte_at_${i}`, value: v };
+    }
+  }
+  return { ok: true };
+}
+
 /**
  * Extract signature data from verification token and SVG
  */
 function extractSignatureData(verificationBytes, svg, xValues) {
   const arr = Array.from(verificationBytes);
+  if (
+    !Array.isArray(xValues) ||
+    xValues.length < 4 ||
+    xValues.some((i) => !Number.isFinite(i) || i < 0 || Math.floor(i) !== i || i >= arr.length)
+  ) {
+    console.warn('[GrokSignature] Invalid xValues for verification token', {
+      xValues,
+      tokenLen: arr.length,
+    });
+    throw new Error('Invalid Grok xsid indices');
+  }
   const idx = arr[xValues[0]] % 16;
   const c =
     (arr[xValues[1]] % 16) *
@@ -193,7 +234,22 @@ function extractSignatureData(verificationBytes, svg, xValues) {
     (arr[xValues[3]] % 16);
 
   const svgParts = parseSvgPath(svg);
+  if (idx < 0 || idx >= svgParts.length) {
+    throw new Error(`Grok animation index out of bounds: idx=${idx}, parts=${svgParts.length}`);
+  }
   const vals = svgParts[idx];
+  const validation = _validateSignatureValues(vals);
+  if (!validation.ok) {
+    console.warn('[GrokSignature] SVG signature value format changed or invalid', {
+      reason: validation.reason,
+      idx,
+      valsLen: Array.isArray(vals) ? vals.length : 0,
+      valsSummary: _summarizeNumbers(vals),
+      svgLen: typeof svg === 'string' ? svg.length : 0,
+      svgHasC: typeof svg === 'string' ? svg.includes('C') : false,
+    });
+    throw new Error('Invalid Grok SVG signature values');
+  }
   const style = simulateStyle(vals, c);
 
   // Concatenate color and transform, extract numbers, convert to hex

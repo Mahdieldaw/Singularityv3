@@ -272,6 +272,13 @@ export function usePortMessageHandler(enabled: boolean = true) {
             hasAiData: !!turn?.ai,
             aiHasUserTurnId: !!turn?.ai?.userTurnId,
           });
+          console.log('🔬 TURN_FINALIZED payload:', {
+            hasBatch: !!turn?.ai?.batch,
+            hasMapping: !!turn?.ai?.mapping,
+            hasSingularity: !!turn?.ai?.singularity,
+            legacyBatch: !!turn?.ai?.batchResponses,
+            legacyMapping: !!turn?.ai?.mapperArtifact,
+          });
 
           // Flush any pending streaming data first
           streamingBufferRef.current?.flushImmediate?.();
@@ -295,48 +302,44 @@ export function usePortMessageHandler(enabled: boolean = true) {
                 // Fallback: if the AI turn wasn't created (should be rare), add it directly
                 // Normalize batchResponses to arrays if needed
                 const incoming = turn.ai as any;
-                const normalizedBatch = Object.fromEntries(
-                  Object.entries(incoming.batchResponses || {}).map(([pid, val]: [string, any]) => [
-                    pid,
-                    Array.isArray(val) ? (val as any[]) : [val],
-                  ]),
-                );
-                draft.set(aiTurnId, { ...(turn.ai as AiTurn), batchResponses: normalizedBatch } as AiTurn);
+                const normalizedBatch = incoming?.batchResponses
+                  ? Object.fromEntries(
+                    Object.entries(incoming.batchResponses).map(([pid, val]: [string, any]) => [
+                      pid,
+                      Array.isArray(val) ? (val as any[]) : [val],
+                    ]),
+                  )
+                  : (incoming?.batch?.responses
+                    ? Object.fromEntries(
+                      Object.entries(incoming.batch.responses).map(([pid, val]: [string, any]) => [
+                        pid,
+                        [{
+                          providerId: pid,
+                          text: val?.text || "",
+                          status: val?.status || "completed",
+                          createdAt: incoming?.createdAt || Date.now(),
+                          updatedAt: incoming?.createdAt || Date.now(),
+                          meta: val?.meta ? { ...val.meta, modelIndex: val.modelIndex } : { modelIndex: val?.modelIndex },
+                        }],
+                      ]),
+                    )
+                    : undefined);
+                const hasBatch = normalizedBatch && Object.keys(normalizedBatch).length > 0;
+                draft.set(aiTurnId, { ...(turn.ai as AiTurn), ...(hasBatch ? { batchResponses: normalizedBatch } : {}) } as AiTurn);
               } else {
                 const mergedAi: AiTurn = {
                   ...existingAi,
                   ...(turn.ai as AiTurn),
                   type: "ai",
                   userTurnId: turn.user?.id || existingAi.userTurnId,
-                  // Merge responses: preserve existing data while accepting backend updates
-                  // This is important for recompute scenarios where only some responses change
-                  batchResponses: (() => {
-                    const incoming = (turn.ai as any)?.batchResponses || {};
-                    const normalizedIncoming = Object.fromEntries(
-                      Object.entries(incoming).map(([pid, val]: [string, any]) => [
-                        pid,
-                        Array.isArray(val) ? (val as any[]) : [val],
-                      ]),
-                    );
-                    return {
-                      ...(existingAi.batchResponses || {}),
-                      ...normalizedIncoming,
-                    } as any;
-                  })(),
-
-                  mappingResponses: {
-                    ...(existingAi.mappingResponses || {}),
-                    ...((turn.ai as AiTurn)?.mappingResponses || {}),
-                  },
-                  singularityResponses: {
-                    ...(existingAi.singularityResponses || {}),
-                    ...((turn.ai as AiTurn)?.singularityResponses || {}),
-                  },
                   meta: {
                     ...(existingAi.meta || {}),
                     ...((turn.ai as AiTurn)?.meta || {}),
                     isOptimistic: false,
                   },
+                  batch: (turn.ai as any)?.batch || existingAi.batch,
+                  mapping: (turn.ai as any)?.mapping || existingAi.mapping,
+                  singularity: (turn.ai as any)?.singularity || existingAi.singularity,
                 };
                 draft.set(aiTurnId, mergedAi);
               }
@@ -910,7 +913,6 @@ export function usePortMessageHandler(enabled: boolean = true) {
                 threadId: DEFAULT_THREAD,
                 userTurnId: "unknown",
                 createdAt: now,
-                batchResponses: {},
                 mappingResponses: {},
                 singularityResponses: {},
                 meta: { isOptimistic: false },

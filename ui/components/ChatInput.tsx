@@ -18,6 +18,7 @@ import {
   batchAutoRunEnabledAtom,
   turnIdsAtom,
   turnsMapAtom,
+  activeSplitPanelAtom,
 } from "../state/atoms";
 import { useChat } from "../hooks/chat/useChat";
 import api from "../services/extension-api";
@@ -62,6 +63,7 @@ const ChatInput = ({
   const setActiveRecomputeState = useSetAtom(activeRecomputeStateAtom);
   const [singularityProvider, setSingularityProvider] = useAtom(singularityProviderAtom);
   const [batchAutoRunEnabled, setBatchAutoRunEnabled] = useAtom(batchAutoRunEnabledAtom);
+  const closeSplitPanel = useSetAtom(activeSplitPanelAtom);
 
   const setToast = useSetAtom(toastAtom);
 
@@ -185,6 +187,7 @@ const ChatInput = ({
       setToast({ id: Date.now(), message: `Input too long for ${limitingProvider} (${inputLength.toLocaleString()} / ${maxLength.toLocaleString()})`, type: "error" });
       return;
     }
+    closeSplitPanel(null);
     if (isContinuationMode) {
       onContinuation(trimmed);
     } else {

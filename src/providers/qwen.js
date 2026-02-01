@@ -223,8 +223,14 @@ export class QwenSessionApi {
 
         break; // Success or non-500 error
       } catch (e) {
-        // Network error - surface as network Qwen error
         const msg = e instanceof Error ? e.message : String(e);
+        if (msg.includes("Failed to fetch") && retryCount < MAX_RETRIES - 1) {
+          retryCount++;
+          const delay = 500 * Math.pow(2, retryCount);
+          console.warn(`[QwenProvider] Network error, retrying (${retryCount}/${MAX_RETRIES}) in ${delay}ms...`);
+          await new Promise(r => setTimeout(r, delay));
+          continue;
+        }
         this._throw("network", `Conversation POST failed: ${msg}`);
       }
     }

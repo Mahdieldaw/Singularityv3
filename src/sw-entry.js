@@ -38,7 +38,6 @@ import { persistenceMonitor } from "./core/PersistenceMonitor.js";
 
 // Global Services Registry
 import { ServiceRegistry } from "./core/service-registry.js";
-import { parseUnifiedMapperOutput } from '../shared/parsing-utils.js';
 
 const services = /** @type {import("./core/service-registry.js").ServiceRegistry} */ (
   /** @type {unknown} */ (ServiceRegistry.getInstance())
@@ -784,15 +783,6 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
           let turns = await sm.adapter.getTurnsBySessionId(sessionId);
           turns = Array.isArray(turns) ? turns.sort((a, b) => (a.sequence ?? a.createdAt) - (b.sequence ?? b.createdAt)) : [];
 
-          const providerResponses = await sm.adapter.getResponsesBySessionId(sessionId);
-          const responsesByAi = new Map();
-          for (const r of providerResponses || []) {
-            if (r && r.aiTurnId) {
-              if (!responsesByAi.has(r.aiTurnId)) responsesByAi.set(r.aiTurnId, []);
-              responsesByAi.get(r.aiTurnId).push(r);
-            }
-          }
-
           const rounds = [];
           for (let i = 0; i < turns.length; i++) {
             const user = turns[i];
@@ -810,127 +800,6 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
                 : (allAi.find(t => !t.meta?.isHistoricalRerun && t.sequence !== -1) || allAi[0]);
             primaryAi = defaultPrimary;
 
-            const responses = (responsesByAi.get(primaryAi.id) || []).sort((a, b) => (a.responseIndex ?? 0) - (b.responseIndex ?? 0));
-            const providers = {}, mappingResponses = {}, singularityResponses = {};
-
-            for (const r of responses) {
-              const base = { providerId: r.providerId, text: r.text || "", status: r.status || "completed", meta: r.meta || {}, createdAt: r.createdAt || 0, updatedAt: r.updatedAt || 0 };
-              if (r.responseType === "batch") (providers[r.providerId] ||= []).push(base);
-              else if (r.responseType === "mapping") (mappingResponses[r.providerId] ||= []).push(base);
-              else if (r.responseType === "singularity") (singularityResponses[r.providerId] ||= []).push(base);
-            }
-
-            const hasUsableMapperArtifact = (artifact) => {
-              if (!artifact || typeof artifact !== "object") return false;
-              const claims = artifact.claims;
-              const edges = artifact.edges;
-              const hasTraversalGraph = !!artifact.traversalGraph;
-              const hasForcingPoints = Array.isArray(artifact.forcingPoints) && artifact.forcingPoints.length > 0;
-              if (hasTraversalGraph || hasForcingPoints) return true;
-              if (!Array.isArray(claims) || !Array.isArray(edges)) return false;
-              if (claims.length === 0 && edges.length === 0) return false;
-              return true;
-            };
-
-            const pickRawMappingText = (resp) => {
-              const meta = resp?.meta || {};
-              const fromMeta = typeof meta.rawMappingText === "string" ? meta.rawMappingText : "";
-              const fromText = typeof resp?.text === "string" ? resp.text : "";
-              if (fromMeta && fromMeta.length >= fromText.length) return fromMeta;
-              return fromText;
-            };
-
-            const getLatestMappingResponseAcrossAi = () => {
-              const mappingResps = [];
-              for (const ai of allAi) {
-                const rs = responsesByAi.get(ai.id) || [];
-                for (const r of rs) {
-                  if (r && r.responseType === "mapping") mappingResps.push(r);
-                }
-              }
-              mappingResps.sort((a, b) => (a.updatedAt || a.createdAt || 0) - (b.updatedAt || b.createdAt || 0));
-              return mappingResps.length ? mappingResps[mappingResps.length - 1] : null;
-            };
-
-            const getPipelineArtifactsFromMappingMeta = () => {
-              for (const ai of allAi) {
-                const rs = responsesByAi.get(ai.id) || [];
-                for (const r of rs) {
-                  if (r && r.responseType === "mapping" && r.meta?.pipelineArtifacts) return r.meta.pipelineArtifacts;
-                }
-              }
-              return null;
-            };
-
-            const getSingularityOutputFromMeta = () => {
-              for (const ai of allAi) {
-                const rs = responsesByAi.get(ai.id) || [];
-                for (const r of rs) {
-                  if (r && r.responseType === "singularity" && r.meta?.singularityOutput) return r.meta.singularityOutput;
-                }
-              }
-              return null;
-            };
-
-            let hydratedMapperArtifact = null;
-            for (const candidate of [primaryAi, ...allAi]) {
-              if (candidate && hasUsableMapperArtifact(candidate.mapperArtifact)) {
-                hydratedMapperArtifact = candidate.mapperArtifact;
-                break;
-              }
-            }
-            if (!hasUsableMapperArtifact(hydratedMapperArtifact)) {
-              try {
-                const latestMappingResp = getLatestMappingResponseAcrossAi();
-                const rawText = pickRawMappingText(latestMappingResp);
-                if (rawText && rawText.trim().length > 0) {
-                  const parsed = parseUnifiedMapperOutput(rawText);
-                  hydratedMapperArtifact =
-                    parsed?.artifact ||
-                    (parsed?.map
-                      ? {
-                        ...parsed.map,
-                        query: primaryAi?.meta?.originalPrompt || "",
-                        turn: 0,
-                        timestamp: new Date().toISOString(),
-                        model_count: 0,
-
-                      }
-                      : null);
-                }
-              } catch (_) { }
-            }
-
-            // Extract singularity output from response meta if available
-            let extractedSingularityOutput = null;
-            for (const candidate of [primaryAi, ...allAi]) {
-              if (candidate?.singularityOutput) {
-                extractedSingularityOutput = candidate.singularityOutput;
-                break;
-              }
-            }
-
-            // Check responses for singularity output if not on turn record
-            if (!extractedSingularityOutput) extractedSingularityOutput = getSingularityOutputFromMeta();
-
-            // Extract pipelineArtifacts from turn record, falling back to mapping response meta
-            let extractedPipelineArtifacts = null;
-            for (const candidate of [primaryAi, ...allAi]) {
-              if (candidate?.pipelineArtifacts) {
-                extractedPipelineArtifacts = candidate.pipelineArtifacts;
-                break;
-              }
-            }
-            if (!extractedPipelineArtifacts) extractedPipelineArtifacts = getPipelineArtifactsFromMappingMeta();
-
-            // Avoid sending heavy/unsafe data to UI history payload
-            if (extractedPipelineArtifacts && typeof extractedPipelineArtifacts === "object") {
-              if ("sourceData" in extractedPipelineArtifacts) {
-                const { sourceData: _omit, ...rest } = extractedPipelineArtifacts;
-                extractedPipelineArtifacts = rest;
-              }
-            }
-
             let pipelineStatus =
               typeof primaryAi?.pipelineStatus === "string"
                 ? primaryAi.pipelineStatus
@@ -938,27 +807,12 @@ async function handleUnifiedMessage(message, _sender, sendResponse) {
                   ? primaryAi.meta.pipelineStatus
                   : undefined);
 
-            if (!pipelineStatus) {
-              for (const candidate of allAi) {
-                if (typeof candidate?.pipelineStatus === "string") {
-                  pipelineStatus = candidate.pipelineStatus;
-                  break;
-                }
-                if (typeof candidate?.meta?.pipelineStatus === "string") {
-                  pipelineStatus = candidate.meta.pipelineStatus;
-                  break;
-                }
-              }
-            }
-
             rounds.push({
               userTurnId: user.id, aiTurnId: primaryAi.id,
               user: { id: user.id, text: user.text || user.content || "", createdAt: user.createdAt || 0 },
-              providers, mappingResponses, singularityResponses,
-              // Include cognitive pipeline data for proper restoration
-              mapperArtifact: hydratedMapperArtifact,
-              singularityOutput: extractedSingularityOutput,
-              pipelineArtifacts: extractedPipelineArtifacts,
+              ...(primaryAi?.batch ? { batch: primaryAi.batch } : {}),
+              ...(primaryAi?.mapping ? { mapping: primaryAi.mapping } : {}),
+              ...(primaryAi?.singularity ? { singularity: primaryAi.singularity } : {}),
               ...(pipelineStatus ? { pipelineStatus } : {}),
               createdAt: user.createdAt || 0, completedAt: primaryAi.updatedAt || 0
             });
@@ -1239,6 +1093,20 @@ chrome.runtime.onConnect.addListener(async (port) => {
 
 chrome.action?.onClicked.addListener(async () => {
   const url = chrome.runtime.getURL("ui/index.html");
+  try {
+    const urlPatterns = [url, `${url}*`];
+    const existing = await chrome.tabs.query({ url: urlPatterns });
+    const tab = Array.isArray(existing) && existing.length > 0 ? existing[0] : null;
+    if (tab && typeof tab.id === "number") {
+      if (typeof tab.windowId === "number") {
+        try {
+          await chrome.windows.update(tab.windowId, { focused: true });
+        } catch (_) { }
+      }
+      await chrome.tabs.update(tab.id, { active: true });
+      return;
+    }
+  } catch (_) { }
   await chrome.tabs.create({ url });
 });
 

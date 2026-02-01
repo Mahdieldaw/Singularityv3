@@ -7,6 +7,7 @@ export class CognitivePipelineHandler {
     this.port = port;
     this.persistenceCoordinator = persistenceCoordinator;
     this.sessionManager = sessionManager;
+    this._inflightContinuations = new Map();
   }
 
   /**
@@ -648,17 +649,24 @@ export class CognitivePipelineHandler {
 
       const pipelineArtifacts = aiTurn.pipelineArtifacts;
       let chewedSubstrate = null;
-      if (payload?.isTraversalContinuation && payload?.traversalState && pipelineArtifacts?.sourceData) {
+      if (payload?.isTraversalContinuation && payload?.traversalState) {
         try {
-          const { buildChewedSubstrate, normalizeTraversalState } = await import('../../skeletonization');
-          chewedSubstrate = await buildChewedSubstrate({
-            statements: mapperArtifact.shadow?.statements || [],
-            paragraphs: pipelineArtifacts.paragraphProjection?.paragraphs || [],
-            claims: mapperArtifact.claims || [],
-            traversalState: normalizeTraversalState(payload.traversalState),
-            sourceData: pipelineArtifacts.sourceData,
-          });
-        } catch (_) {
+          const { buildChewedSubstrate, normalizeTraversalState, getSourceData } = await import('../../skeletonization');
+          const sourceData = getSourceData(aiTurn, pipelineArtifacts);
+          if (Array.isArray(sourceData) && sourceData.length > 0) {
+            chewedSubstrate = await buildChewedSubstrate({
+              statements: mapperArtifact.shadow?.statements || [],
+              paragraphs: pipelineArtifacts.paragraphProjection?.paragraphs || [],
+              claims: mapperArtifact.claims || [],
+              traversalState: normalizeTraversalState(payload.traversalState),
+              sourceData,
+            });
+          }
+        } catch (e) {
+          console.warn(
+            `[CognitiveHandler] Failed to build chewedSubstrate for traversal continuation (aiTurnId=${aiTurnId}, sessionId=${effectiveSessionId}):`,
+            e,
+          );
           chewedSubstrate = null;
         }
       }
@@ -668,6 +676,14 @@ export class CognitivePipelineHandler {
         aiTurn.meta?.mapper ||
         "gemini";
 
+      const inflightKey = `${effectiveSessionId}:${aiTurnId}:${preferredProvider || 'default'}`;
+      if (this._inflightContinuations.has(inflightKey)) {
+        console.log(`[CognitiveHandler] Duplicate blocked: ${inflightKey}`);
+        return;
+      }
+      this._inflightContinuations.set(inflightKey, Date.now());
+
+      try {
       const context = {
         sessionId: effectiveSessionId,
         canonicalAiTurnId: aiTurnId,
@@ -819,9 +835,9 @@ export class CognitivePipelineHandler {
             sessionId: effectiveSessionId,
             threadId: aiTurn.threadId || DEFAULT_THREAD,
             createdAt: aiTurn.createdAt || Date.now(),
-            batchResponses: buckets.batchResponses,
-            mappingResponses: buckets.mappingResponses,
-            singularityResponses: buckets.singularityResponses,
+            ...(Object.keys(buckets.batchResponses).length > 0 ? { batchResponses: buckets.batchResponses } : {}),
+            ...(Object.keys(buckets.mappingResponses).length > 0 ? { mappingResponses: buckets.mappingResponses } : {}),
+            ...(Object.keys(buckets.singularityResponses).length > 0 ? { singularityResponses: buckets.singularityResponses } : {}),
             meta: aiTurn.meta || {},
             mapperArtifact: finalAiTurn?.mapperArtifact,
             pipelineArtifacts: finalAiTurn?.pipelineArtifacts,
@@ -830,6 +846,10 @@ export class CognitivePipelineHandler {
           },
         },
       });
+
+      } finally {
+        this._inflightContinuations.delete(inflightKey);
+      }
 
     } catch (error) {
       console.error(`[CognitiveHandler] Orchestration failed:`, error);

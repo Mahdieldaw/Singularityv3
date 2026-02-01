@@ -11,14 +11,14 @@ export class PersistenceCoordinator {
   persistProviderContextsAsync(sessionId, updates, contextRole = null) {
     try {
       // Defer to next tick to ensure prompt/mapping resolution proceeds immediately
-      setTimeout(() => {
+      setTimeout(async () => {
         try {
-          this.sessionManager.updateProviderContextsBatch(
+          await this.sessionManager.updateProviderContextsBatch(
             sessionId,
             updates,
             { contextRole },
           );
-          this.sessionManager.saveSession(sessionId);
+          await this.sessionManager.saveSession(sessionId);
         } catch (e) {
           console.warn("[PersistenceCoordinator] Deferred persistence failed:", e);
         }
@@ -40,7 +40,7 @@ export class PersistenceCoordinator {
 
       if (value.status === "completed") {
         const result = value.result;
-        if (step.type === "prompt") {
+        if (step.type === "prompt" || step.type === "batch") {
           const resultsObj = result && result.results ? result.results : {};
           Object.entries(resultsObj).forEach(([providerId, r]) => {
             out.batchOutputs[providerId] = {
@@ -78,7 +78,7 @@ export class PersistenceCoordinator {
 
       if (value.status === "failed") {
         const errorText = value.error || "Unknown error";
-        if (step.type === "prompt") {
+        if (step.type === "prompt" || step.type === "batch") {
           const providers = step?.payload?.providers || [];
           (providers || []).forEach((providerId) => {
             out.batchOutputs[providerId] = {

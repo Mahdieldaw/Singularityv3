@@ -26,9 +26,10 @@ export function detectCarriers(input: CarrierDetectionInput): CarrierDetectionRe
     protectedStatementIds,
     statementEmbeddings,
     claimEmbeddings,
-    thresholds = DEFAULT_THRESHOLDS,
+    thresholds: providedThresholds,
   } = input;
 
+  const thresholds = { ...DEFAULT_THRESHOLDS, ...(providedThresholds || {}) };
   const claimEmbedding = claimEmbeddings.get(prunedClaim.id);
   const sourceEmbedding = statementEmbeddings.get(sourceStatementId);
 

@@ -382,17 +382,13 @@ export class SessionManager {
         }
 
         const providerContexts = this._extractContextsFromResult(result);
-        const mapperArtifact = request?.mapperArtifact
-          ? this._safeArtifact(request.mapperArtifact)
-          : undefined;
-        const pipelineArtifacts = request?.pipelineArtifacts
-          ? this._toJsonSafe(request.pipelineArtifacts)
-          : undefined;
         const storedAnalysis = request?.storedAnalysis
           ? this._toJsonSafe(request.storedAnalysis)
           : undefined;
-        const singularityOutput = request?.singularityOutput
-          ? this._toJsonSafe(request.singularityOutput)
+        const batch = request?.batch ? this._toJsonSafe(request.batch) : undefined;
+        const mapping = request?.mapping ? this._toJsonSafe(request.mapping) : undefined;
+        const singularity = request?.singularity
+          ? this._toJsonSafe(request.singularity)
           : undefined;
 
         const updatedAi: Record<string, unknown> = {
@@ -406,13 +402,19 @@ export class SessionManager {
           batchResponseCount: this.countResponses(result.batchOutputs),
           mappingResponseCount: this.countResponses(result.mappingOutputs),
           singularityResponseCount: this.countResponses(result.singularityOutputs),
-          ...(mapperArtifact !== undefined ? { mapperArtifact } : {}),
-          ...(pipelineArtifacts !== undefined ? { pipelineArtifacts } : {}),
           ...(storedAnalysis !== undefined ? { storedAnalysis } : {}),
-          ...(singularityOutput !== undefined ? { singularityOutput } : {}),
+          ...(batch !== undefined ? { batch } : {}),
+          ...(mapping !== undefined ? { mapping } : {}),
+          ...(singularity !== undefined ? { singularity } : {}),
           lastContextSummary: contextSummary,
           ...(pipelineStatus ? { pipelineStatus } : {}),
         };
+        console.log('🔬 Phase persistence:', {
+          turnId: updatedAi?.id,
+          batch: !!(updatedAi as any)?.batch,
+          mapping: !!(updatedAi as any)?.mapping,
+          singularity: !!(updatedAi as any)?.singularity,
+        });
         await adapter.put("turns", updatedAi);
 
         await this._persistProviderResponses(sessionId, aiTurnId, result, now, runId ?? null);
@@ -504,17 +506,13 @@ export class SessionManager {
 
     // 4) AI turn with contexts
     const providerContexts = this._extractContextsFromResult(result);
-    const mapperArtifact = request?.mapperArtifact
-      ? this._safeArtifact(request.mapperArtifact)
-      : undefined;
-    const pipelineArtifacts = request?.pipelineArtifacts
-      ? this._toJsonSafe(request.pipelineArtifacts)
-      : undefined;
     const storedAnalysis = request?.storedAnalysis
       ? this._toJsonSafe(request.storedAnalysis)
       : undefined;
-    const singularityOutput = request?.singularityOutput
-      ? this._toJsonSafe(request.singularityOutput)
+    const batch = request?.batch ? this._toJsonSafe(request.batch) : undefined;
+    const mapping = request?.mapping ? this._toJsonSafe(request.mapping) : undefined;
+    const singularity = request?.singularity
+      ? this._toJsonSafe(request.singularity)
       : undefined;
     const aiTurnRecord: Record<string, unknown> = {
       id: aiTurnId,
@@ -531,14 +529,20 @@ export class SessionManager {
       batchResponseCount: this.countResponses(result.batchOutputs),
       mappingResponseCount: this.countResponses(result.mappingOutputs),
       singularityResponseCount: this.countResponses(result.singularityOutputs),
-      ...(mapperArtifact !== undefined ? { mapperArtifact } : {}),
-      ...(pipelineArtifacts !== undefined ? { pipelineArtifacts } : {}),
       ...(storedAnalysis !== undefined ? { storedAnalysis } : {}),
-      ...(singularityOutput !== undefined ? { singularityOutput } : {}),
+      ...(batch !== undefined ? { batch } : {}),
+      ...(mapping !== undefined ? { mapping } : {}),
+      ...(singularity !== undefined ? { singularity } : {}),
       lastContextSummary: contextSummary,
       meta: await this._attachRunIdMeta(aiTurnId),
       ...(pipelineStatus ? { pipelineStatus } : {}),
     };
+    console.log('🔬 Phase persistence:', {
+      turnId: aiTurnRecord?.id,
+      batch: !!(aiTurnRecord as any)?.batch,
+      mapping: !!(aiTurnRecord as any)?.mapping,
+      singularity: !!(aiTurnRecord as any)?.singularity,
+    });
     await adapter.put("turns", aiTurnRecord);
 
     // 5) Provider responses
@@ -599,17 +603,13 @@ export class SessionManager {
         } catch (_) { }
 
         const newContexts = this._extractContextsFromResult(result);
-        const mapperArtifact = request?.mapperArtifact
-          ? this._safeArtifact(request.mapperArtifact)
-          : undefined;
-        const pipelineArtifacts = request?.pipelineArtifacts
-          ? this._toJsonSafe(request.pipelineArtifacts)
-          : undefined;
         const storedAnalysis = request?.storedAnalysis
           ? this._toJsonSafe(request.storedAnalysis)
           : undefined;
-        const singularityOutput = request?.singularityOutput
-          ? this._toJsonSafe(request.singularityOutput)
+        const batch = request?.batch ? this._toJsonSafe(request.batch) : undefined;
+        const mapping = request?.mapping ? this._toJsonSafe(request.mapping) : undefined;
+        const singularity = request?.singularity
+          ? this._toJsonSafe(request.singularity)
           : undefined;
 
         const updatedAi: Record<string, unknown> = {
@@ -623,10 +623,10 @@ export class SessionManager {
           batchResponseCount: this.countResponses(result.batchOutputs),
           mappingResponseCount: this.countResponses(result.mappingOutputs),
           singularityResponseCount: this.countResponses(result.singularityOutputs),
-          ...(mapperArtifact !== undefined ? { mapperArtifact } : {}),
-          ...(pipelineArtifacts !== undefined ? { pipelineArtifacts } : {}),
           ...(storedAnalysis !== undefined ? { storedAnalysis } : {}),
-          ...(singularityOutput !== undefined ? { singularityOutput } : {}),
+          ...(batch !== undefined ? { batch } : {}),
+          ...(mapping !== undefined ? { mapping } : {}),
+          ...(singularity !== undefined ? { singularity } : {}),
           lastContextSummary: contextSummary,
           ...(pipelineStatus ? { pipelineStatus } : {}),
         };
@@ -704,17 +704,13 @@ export class SessionManager {
     };
 
     // 3) AI turn
-    const mapperArtifact = request?.mapperArtifact
-      ? this._safeArtifact(request.mapperArtifact)
-      : undefined;
-    const pipelineArtifacts = request?.pipelineArtifacts
-      ? this._toJsonSafe(request.pipelineArtifacts)
-      : undefined;
     const storedAnalysis = request?.storedAnalysis
       ? this._toJsonSafe(request.storedAnalysis)
       : undefined;
-    const singularityOutput = request?.singularityOutput
-      ? this._toJsonSafe(request.singularityOutput)
+    const batch = request?.batch ? this._toJsonSafe(request.batch) : undefined;
+    const mapping = request?.mapping ? this._toJsonSafe(request.mapping) : undefined;
+    const singularity = request?.singularity
+      ? this._toJsonSafe(request.singularity)
       : undefined;
     const aiTurnRecord: Record<string, unknown> = {
       id: aiTurnId,
@@ -731,10 +727,10 @@ export class SessionManager {
       batchResponseCount: this.countResponses(result.batchOutputs),
       mappingResponseCount: this.countResponses(result.mappingOutputs),
       singularityResponseCount: this.countResponses(result.singularityOutputs),
-      ...(mapperArtifact !== undefined ? { mapperArtifact } : {}),
-      ...(pipelineArtifacts !== undefined ? { pipelineArtifacts } : {}),
       ...(storedAnalysis !== undefined ? { storedAnalysis } : {}),
-      ...(singularityOutput !== undefined ? { singularityOutput } : {}),
+      ...(batch !== undefined ? { batch } : {}),
+      ...(mapping !== undefined ? { mapping } : {}),
+      ...(singularity !== undefined ? { singularity } : {}),
       lastContextSummary: contextSummary,
       meta: await this._attachRunIdMeta(aiTurnId),
       ...(pipelineStatus ? { pipelineStatus } : {}),
@@ -1170,12 +1166,9 @@ export class SessionManager {
         const runId = inflight["runId"];
         if (typeof runId === "string" && runId) return { runId };
       }
-      const runId = inflight["runId"];
-      if (typeof runId === "string" && runId) return { runId };
+    } catch (err) {
+      getSessionLogger().error("[SessionManager] _attachRunIdMeta failed", err);
     }
-    } catch(err) {
-    getSessionLogger().error("[SessionManager] _attachRunIdMeta failed", err);
-  }
     return {};
   }
 
@@ -1571,6 +1564,7 @@ try {
     "[SessionManager] Failed to batch update provider contexts:",
     error,
   );
+  throw error;
 }
   }
 
@@ -1668,8 +1662,6 @@ _buildContextSummary(_result: PersistenceResult, request: PersistRequest): strin
   async persistContextBridge(sessionId: string, turnId: string, bridge: Record<string, unknown>): Promise < void> {
   try {
     if(!this.adapter) return;
-    const record = { ...bridge, sessionId, createdAt: Date.now() };
-    await this.adapter.put("context_bridges", record, turnId);
     const record = { ...bridge, sessionId, createdAt: Date.now() };
     await this.adapter.put("context_bridges", record, turnId);
   } catch(err) {

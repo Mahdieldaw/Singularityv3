@@ -183,6 +183,20 @@ export class ClaudeAdapter {
         };
       }
 
+      if (isNetworkError(error) || error?.type === 'network' || error?.code === 'NETWORK_ERROR') {
+        return {
+          providerId: this.id,
+          ok: false,
+          text: aggregatedText || null,
+          errorCode: 'NETWORK_ERROR',
+          latencyMs: Date.now() - startTime,
+          meta: {
+            error: error?.toString?.() || String(error),
+            details: error?.details,
+          },
+        };
+      }
+
       // Let error handler deal with other errors with a real retry operation
       try {
         const recovery = await errorHandler.handleProviderError(error, this.id, {
@@ -331,6 +345,21 @@ export class ClaudeAdapter {
           ok: false,
           text: aggregatedText || null,
           errorCode: (error && (error.code || error.type)) || "unknown",
+          latencyMs: Date.now() - startTime,
+          meta: {
+            error: error?.toString?.() || String(error),
+            details: error?.details,
+            chatId: providerContext?.chatId,
+          },
+        };
+      }
+
+      if (isNetworkError(error) || error?.type === 'network' || error?.code === 'NETWORK_ERROR') {
+        return {
+          providerId: this.id,
+          ok: false,
+          text: aggregatedText || null,
+          errorCode: 'NETWORK_ERROR',
           latencyMs: Date.now() - startTime,
           meta: {
             error: error?.toString?.() || String(error),

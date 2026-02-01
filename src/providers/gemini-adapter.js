@@ -8,6 +8,7 @@ import { authManager } from '../core/auth-manager.js';
 import {
   errorHandler,
   isProviderAuthError,
+  isNetworkError,
   createProviderAuthError,
   normalizeError
 } from '../utils/ErrorHandler';
@@ -132,6 +133,20 @@ export class GeminiAdapter {
           meta: {
             error: authError.toString(),
             details: authError.details,
+          },
+        };
+      }
+
+      if (isNetworkError(error) || error?.type === 'network' || error?.code === 'NETWORK_ERROR') {
+        return {
+          providerId: this.id,
+          ok: false,
+          text: null,
+          errorCode: 'NETWORK_ERROR',
+          latencyMs: Date.now() - startTime,
+          meta: {
+            error: error?.toString?.() || String(error),
+            details: error?.details,
           },
         };
       }
@@ -290,6 +305,21 @@ export class GeminiAdapter {
           ok: false,
           text: null,
           errorCode: (error && (error.code || error.type)) || "unknown",
+          latencyMs: Date.now() - startTime,
+          meta: {
+            error: error?.toString?.() || String(error),
+            details: error?.details,
+            cursor: providerContext?.cursor ?? providerContext?.meta?.cursor,
+          },
+        };
+      }
+
+      if (isNetworkError(error) || error?.type === 'network' || error?.code === 'NETWORK_ERROR') {
+        return {
+          providerId: this.id,
+          ok: false,
+          text: null,
+          errorCode: 'NETWORK_ERROR',
           latencyMs: Date.now() - startTime,
           meta: {
             error: error?.toString?.() || String(error),

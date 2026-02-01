@@ -67,13 +67,13 @@ export function useClipActions() {
           setTurnsMap((draft) => {
             const turn = draft.get(aiTurnId) as AiTurn | undefined;
             if (!turn || turn.type !== "ai") return;
-            turn.batchResponses = (turn.batchResponses || {}) as any;
-            if (!turn.batchResponses[providerId]) {
+            const batchResponses = ((turn.batchResponses ||= {}) as any);
+            if (!batchResponses[providerId]) {
               const initialStatus: "streaming" | "pending" =
                 PRIMARY_STREAMING_PROVIDER_IDS.includes(providerId)
                   ? "streaming"
                   : "pending";
-              (turn.batchResponses as any)[providerId] = [
+              batchResponses[providerId] = [
                 {
                   providerId,
                   text: "",

@@ -13,6 +13,30 @@ import type {
   HistorySessionSummary,
 } from "../types";
 
+const getBatchResponses = (aiTurn: AiTurn): Record<string, ProviderResponse[]> => {
+  const phaseResponses = aiTurn.batch?.responses;
+  if (phaseResponses && Object.keys(phaseResponses).length > 0) {
+    const createdAt = aiTurn.createdAt ?? 0;
+    return Object.fromEntries(
+      Object.entries(phaseResponses).map(([providerId, response]) => [
+        providerId,
+        [
+          {
+            providerId: providerId as any,
+            text: response?.text || "",
+            status: response?.status || "completed",
+            createdAt,
+            updatedAt: createdAt,
+            meta: response?.meta ? { ...response.meta, modelIndex: response.modelIndex } : { modelIndex: response?.modelIndex },
+          } as ProviderResponse,
+        ],
+      ]),
+    );
+  }
+  if (aiTurn.batchResponses && Object.keys(aiTurn.batchResponses).length > 0) return aiTurn.batchResponses;
+  return {};
+};
+
 // =============================================================================
 // ATOMIC STATE PRIMITIVES (Map + ID index)
 // =============================================================================
@@ -46,9 +70,10 @@ export const providerResponsesForTurnAtom = atom(
       const turn = get(turnsMapAtom).get(turnId);
       if (!turn || turn.type !== "ai") return {};
       const aiTurn = turn as AiTurn;
+      const batchResponses = getBatchResponses(aiTurn);
       const out: Record<string, ProviderResponse> = {};
       // Flatten arrays for batch responses: take latest per provider
-      Object.entries(aiTurn.batchResponses || {}).forEach(([pid, val]: [string, any]) => {
+      Object.entries(batchResponses || {}).forEach(([pid, val]: [string, any]) => {
         const arr = Array.isArray(val) ? val : [val];
         if (arr.length > 0) out[pid] = arr[arr.length - 1] as ProviderResponse;
       });
@@ -72,7 +97,7 @@ export const providerResponseArrayFamily = atomFamily(
 
       const aiTurn = turn as AiTurn;
 
-      const responses = aiTurn.batchResponses?.[providerId];
+      const responses = getBatchResponses(aiTurn)?.[providerId];
 
       // Always return array, normalize if needed
       if (!responses) return [];
@@ -111,7 +136,7 @@ export const providerIdsForTurnFamily = atomFamily(
       if (!turn || turn.type !== "ai") return [];
 
       const aiTurn = turn as AiTurn;
-      return Object.keys(aiTurn.batchResponses || {});
+      return Object.keys(getBatchResponses(aiTurn) || {});
     }),
   (a, b) => a === b
 );

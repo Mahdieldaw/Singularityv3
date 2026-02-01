@@ -7,6 +7,7 @@ import { authManager } from '../core/auth-manager.js';
 import {
   errorHandler,
   isProviderAuthError,
+  isNetworkError,
   createProviderAuthError,
   normalizeError
 } from '../utils/ErrorHandler';
@@ -90,6 +91,21 @@ export class QwenAdapter {
           meta: {
             error: authError.toString(),
             details: authError.details,
+            ...meta,
+          },
+        };
+      }
+
+      if (isNetworkError(error) || error?.type === 'network' || error?.code === 'NETWORK_ERROR') {
+        return {
+          providerId: this.id,
+          ok: false,
+          text: aggregatedText || null,
+          errorCode: 'NETWORK_ERROR',
+          latencyMs: Date.now() - startTime,
+          meta: {
+            error: error?.toString?.() || String(error),
+            details: error?.details,
             ...meta,
           },
         };
@@ -221,6 +237,21 @@ export class QwenAdapter {
           meta: {
             error: authError.toString(),
             details: authError.details,
+            ...meta,
+          },
+        };
+      }
+
+      if (isNetworkError(error) || error?.type === 'network' || error?.code === 'NETWORK_ERROR') {
+        return {
+          providerId: this.id,
+          ok: false,
+          text: aggregatedText || null,
+          errorCode: 'NETWORK_ERROR',
+          latencyMs: Date.now() - startTime,
+          meta: {
+            error: error?.toString?.() || String(error),
+            details: error?.details,
             ...meta,
           },
         };

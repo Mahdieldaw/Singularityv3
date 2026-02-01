@@ -32,6 +32,24 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
 }) => {
     const [viewOverride, setViewOverride] = useState<null | 'traverse' | 'response'>(null);
     const { runSingularity } = useSingularityMode(aiTurn.id);
+    const mappingArtifact = (aiTurn as any)?.mapping?.artifact || null;
+    const effectiveMapperArtifact = useMemo(() => {
+        if (aiTurn.mapperArtifact) return aiTurn.mapperArtifact;
+        if (!mappingArtifact) return undefined;
+        return {
+            claims: mappingArtifact.semantic?.claims || [],
+            edges: mappingArtifact.semantic?.edges || [],
+            conditionals: mappingArtifact.semantic?.conditionals || [],
+            narrative: mappingArtifact.semantic?.narrative,
+            traversalGraph: mappingArtifact.traversal?.graph || null,
+            forcingPoints: mappingArtifact.traversal?.forcingPoints || null,
+            shadow: {
+                statements: mappingArtifact.shadow?.statements || [],
+                audit: mappingArtifact.shadow?.audit || {},
+                topUnreferenced: [],
+            },
+        } as MapperArtifact;
+    }, [aiTurn.mapperArtifact, mappingArtifact]);
 
     // Derived transition state
     const isTransitioning = singularityState.isLoading;
@@ -101,22 +119,22 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
 
     // Compute structural analysis
     const structuralAnalysis = useMemo(() => {
-        if (!aiTurn.mapperArtifact) return undefined;
+        if (!effectiveMapperArtifact) return undefined;
         try {
-            return computeStructuralAnalysis(aiTurn.mapperArtifact as MapperArtifact);
+            return computeStructuralAnalysis(effectiveMapperArtifact as MapperArtifact);
         } catch (e) {
             return undefined;
         }
-    }, [aiTurn.mapperArtifact]);
+    }, [effectiveMapperArtifact]);
 
     const problemStructure = useMemo(() => {
-        if (!aiTurn.mapperArtifact) return undefined;
+        if (!effectiveMapperArtifact) return undefined;
         try {
-            return computeProblemStructureFromArtifact(aiTurn.mapperArtifact as MapperArtifact);
+            return computeProblemStructureFromArtifact(effectiveMapperArtifact as MapperArtifact);
         } catch {
             return undefined;
         }
-    }, [aiTurn.mapperArtifact]);
+    }, [effectiveMapperArtifact]);
 
     if (aiTurn.pipelineStatus === 'error') {
         const pipelineError = (aiTurn.meta as any)?.pipelineError;
@@ -146,7 +164,7 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
     }
 
     const isAwaitingTraversal = aiTurn.pipelineStatus === 'awaiting_traversal';
-    const hasTraversalGraph = !!aiTurn.mapperArtifact?.traversalGraph && !!effectiveSessionId;
+    const hasTraversalGraph = !!effectiveMapperArtifact?.traversalGraph && !!effectiveSessionId;
     const isPipelineComplete = !aiTurn.pipelineStatus || aiTurn.pipelineStatus === 'complete';
     const isRoundActive = streamingState.isLoading || isAwaitingTraversal;
 
@@ -264,7 +282,7 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
                                     </div>
                                     <StructureGlyph
                                         pattern={problemStructure.primary}
-                                        claimCount={aiTurn.mapperArtifact?.claims?.length || 0}
+                                        claimCount={effectiveMapperArtifact?.claims?.length || 0}
                                         width={320}
                                         height={140}
                                     />
