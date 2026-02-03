@@ -175,6 +175,23 @@ export class SessionManager {
     return this._toJsonSafe(artifact, { maxDepth: 20, maxStringLength: 250000 });
   }
 
+  _safePhasePayload(value: unknown): unknown {
+    return this._toJsonSafe(value);
+  }
+
+  _extractArtifacts(request: PersistRequest): {
+    batch?: unknown;
+    mapping?: unknown;
+    singularity?: unknown;
+  } {
+    const batch = request?.batch ? this._toJsonSafe(request.batch) : undefined;
+    const mapping = request?.mapping ? this._toJsonSafe(request.mapping) : undefined;
+    const singularity = request?.singularity
+      ? this._toJsonSafe(request.singularity)
+      : undefined;
+    return { batch, mapping, singularity };
+  }
+
   _toJsonSafe(
     value: unknown,
     opts: JsonSafeOpts = {},
@@ -385,11 +402,7 @@ export class SessionManager {
         const storedAnalysis = request?.storedAnalysis
           ? this._toJsonSafe(request.storedAnalysis)
           : undefined;
-        const batch = request?.batch ? this._toJsonSafe(request.batch) : undefined;
-        const mapping = request?.mapping ? this._toJsonSafe(request.mapping) : undefined;
-        const singularity = request?.singularity
-          ? this._toJsonSafe(request.singularity)
-          : undefined;
+        const { batch, mapping, singularity } = this._extractArtifacts(request);
 
         const updatedAi: Record<string, unknown> = {
           ...existingAi,
@@ -507,12 +520,12 @@ export class SessionManager {
     // 4) AI turn with contexts
     const providerContexts = this._extractContextsFromResult(result);
     const storedAnalysis = request?.storedAnalysis
-      ? this._toJsonSafe(request.storedAnalysis)
+      ? this._safePhasePayload(request.storedAnalysis)
       : undefined;
-    const batch = request?.batch ? this._toJsonSafe(request.batch) : undefined;
-    const mapping = request?.mapping ? this._toJsonSafe(request.mapping) : undefined;
+    const batch = request?.batch ? this._safePhasePayload(request.batch) : undefined;
+    const mapping = request?.mapping ? this._safePhasePayload(request.mapping) : undefined;
     const singularity = request?.singularity
-      ? this._toJsonSafe(request.singularity)
+      ? this._safePhasePayload(request.singularity)
       : undefined;
     const aiTurnRecord: Record<string, unknown> = {
       id: aiTurnId,
@@ -707,11 +720,7 @@ export class SessionManager {
     const storedAnalysis = request?.storedAnalysis
       ? this._toJsonSafe(request.storedAnalysis)
       : undefined;
-    const batch = request?.batch ? this._toJsonSafe(request.batch) : undefined;
-    const mapping = request?.mapping ? this._toJsonSafe(request.mapping) : undefined;
-    const singularity = request?.singularity
-      ? this._toJsonSafe(request.singularity)
-      : undefined;
+    const { batch, mapping, singularity } = this._extractArtifacts(request);
     const aiTurnRecord: Record<string, unknown> = {
       id: aiTurnId,
       type: "ai",

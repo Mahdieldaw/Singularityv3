@@ -1,4 +1,5 @@
-import { AiTurn, GraphTopology, ProviderResponse, UserTurn, TurnMessage, isUserTurn, isAiTurn, ParsedTheme, Claim, Edge } from "../types";
+import { AiTurn, GraphTopology, ProviderResponse, UserTurn, isUserTurn, isAiTurn, Claim, Edge } from "../../shared/contract";
+import { TurnMessage, ParsedTheme } from "../types";
 import { LLM_PROVIDERS_CONFIG } from "../constants";
 import { getProviderName } from "./provider-helpers";
 import { parseUnifiedMapperOutput } from "../../shared/parsing-utils";
@@ -33,95 +34,95 @@ export function formatAnalysisContextForMd(analysis: any, providerName: string =
 }
 
 export function buildThemesFromClaims(claims: any[]): ParsedTheme[] {
-  if (!Array.isArray(claims) || claims.length === 0) return [];
+    if (!Array.isArray(claims) || claims.length === 0) return [];
 
-  const themesByName = new Map<string, ParsedTheme>();
+    const themesByName = new Map<string, ParsedTheme>();
 
-  const getThemeNameForClaim = (claim: any): string => {
-    switch (claim.type) {
-      case 'factual': return 'Facts';
-      case 'prescriptive': return 'Recommendations';
-      case 'conditional': return 'Conditions';
-      case 'contested': return 'Contested';
-      case 'speculative': return 'Possibilities';
-      default: return 'Positions';
+    const getThemeNameForClaim = (claim: any): string => {
+        switch (claim.type) {
+            case 'factual': return 'Facts';
+            case 'prescriptive': return 'Recommendations';
+            case 'conditional': return 'Conditions';
+            case 'contested': return 'Contested';
+            case 'speculative': return 'Possibilities';
+            default: return 'Positions';
+        }
+    };
+
+    for (const claim of claims) {
+        if (!claim) continue;
+        const themeName = getThemeNameForClaim(claim);
+        if (!themesByName.has(themeName)) {
+            themesByName.set(themeName, { name: themeName, options: [] });
+        }
+        const theme = themesByName.get(themeName)!;
+
+        const rawId = claim.id != null ? String(claim.id) : '';
+        const cleanId = rawId.replace(/^claim_?/i, "").trim();
+        const formattedId = cleanId ? `#${cleanId}` : "";
+        const rawLabel = typeof claim.label === 'string' ? claim.label : '';
+
+        const titleParts: string[] = [];
+        if (formattedId) titleParts.push(formattedId);
+        if (rawLabel.trim()) titleParts.push(rawLabel.trim());
+        const title = titleParts.length > 0 ? titleParts.join(' ') : 'Claim';
+
+        const description = typeof claim.text === 'string' ? claim.text : '';
+        const supporters = Array.isArray(claim.supporters) ? claim.supporters : [];
+
+        theme.options.push({
+            title,
+            description,
+            citations: supporters,
+        });
     }
-  };
 
-  for (const claim of claims) {
-    if (!claim) continue;
-    const themeName = getThemeNameForClaim(claim);
-    if (!themesByName.has(themeName)) {
-      themesByName.set(themeName, { name: themeName, options: [] });
-    }
-    const theme = themesByName.get(themeName)!;
-
-    const rawId = claim.id != null ? String(claim.id) : '';
-    const cleanId = rawId.replace(/^claim_?/i, "").trim();
-    const formattedId = cleanId ? `#${cleanId}` : "";
-    const rawLabel = typeof claim.label === 'string' ? claim.label : '';
-
-    const titleParts: string[] = [];
-    if (formattedId) titleParts.push(formattedId);
-    if (rawLabel.trim()) titleParts.push(rawLabel.trim());
-    const title = titleParts.length > 0 ? titleParts.join(' ') : 'Claim';
-
-    const description = typeof claim.text === 'string' ? claim.text : '';
-    const supporters = Array.isArray(claim.supporters) ? claim.supporters : [];
-
-    theme.options.push({
-      title,
-      description,
-      citations: supporters,
-    });
-  }
-
-  return Array.from(themesByName.values());
+    return Array.from(themesByName.values());
 }
 
 export function formatClaimsAsText(claims: Claim[], edges: Edge[]): string {
     const lines: string[] = ['#### Positions\n'];
-    
+
     for (const claim of claims) {
-      // Title
-      lines.push(`**${claim.label}**`);
-      
-      // Description
-      lines.push(claim.text);
-      
-      // Relationships (inline, no hierarchy language)
-      const challenges = claim.challenges 
-        ? claims.find(c => c.id === claim.challenges)?.label
-        : null;
-      
-      if (challenges) {
-        lines.push(`↳ *Challenges: ${challenges}*`);
-      }
-      
-      const dependsOn = edges
-        .filter(e => e.to === claim.id && e.type === 'prerequisite')
-        .map(e => claims.find(c => c.id === e.from)?.label)
-        .filter(Boolean);
-      
-      if (dependsOn.length > 0) {
-        lines.push(`↳ *Depends on: ${dependsOn.join(', ')}*`);
-      }
-      
-      const conflictsWith = edges
-        .filter(e => e.type === 'conflicts' && (e.from === claim.id || e.to === claim.id))
-        .map(e => {
-          const otherId = e.from === claim.id ? e.to : e.from;
-          return claims.find(c => c.id === otherId)?.label;
-        })
-        .filter(Boolean);
-      
-      if (conflictsWith.length > 0) {
-        lines.push(`↳ *Conflicts with: ${conflictsWith.join(', ')}*`);
-      }
-      
-      lines.push(''); // blank line between claims
+        // Title
+        lines.push(`**${claim.label}**`);
+
+        // Description
+        lines.push(claim.text);
+
+        // Relationships (inline, no hierarchy language)
+        const challenges = claim.challenges
+            ? claims.find(c => c.id === claim.challenges)?.label
+            : null;
+
+        if (challenges) {
+            lines.push(`↳ *Challenges: ${challenges}*`);
+        }
+
+        const dependsOn = edges
+            .filter(e => e.to === claim.id && e.type === 'prerequisite')
+            .map(e => claims.find(c => c.id === e.from)?.label)
+            .filter(Boolean);
+
+        if (dependsOn.length > 0) {
+            lines.push(`↳ *Depends on: ${dependsOn.join(', ')}*`);
+        }
+
+        const conflictsWith = edges
+            .filter(e => e.type === 'conflicts' && (e.from === claim.id || e.to === claim.id))
+            .map(e => {
+                const otherId = e.from === claim.id ? e.to : e.from;
+                return claims.find(c => c.id === otherId)?.label;
+            })
+            .filter(Boolean);
+
+        if (conflictsWith.length > 0) {
+            lines.push(`↳ *Conflicts with: ${conflictsWith.join(', ')}*`);
+        }
+
+        lines.push(''); // blank line between claims
     }
-    
+
     return lines.join('\n');
 }
 
@@ -279,8 +280,9 @@ export function formatSessionForMarkdown(fullSession: { title: string, turns: Tu
             let singularityText = aiTurn.singularityOutput?.text || null;
             let singularityProviderId = aiTurn.singularityOutput?.providerId;
 
-            if (!singularityText && (aiTurn as any)?.singularity?.output) {
-                singularityText = String((aiTurn as any).singularity.output || "");
+            if (!singularityText) {
+                const val = (aiTurn as any)?.singularity?.output;
+                singularityText = val !== null && val !== undefined ? String(val) : "";
             }
 
             if (!singularityText && aiTurn.singularityResponses) {
@@ -333,26 +335,35 @@ export function formatSessionForMarkdown(fullSession: { title: string, turns: Tu
                     };
                 }
             }
+            const normalizeBatchResponses = (aiTurn: AiTurn): Record<string, ProviderResponse[]> => {
+                if (aiTurn.batchResponses && Object.keys(aiTurn.batchResponses).length > 0) {
+                    return aiTurn.batchResponses;
+                }
 
+                const legacyResponses = (aiTurn as any)?.batch?.responses;
+                if (!legacyResponses) return {};
+
+                return Object.fromEntries(
+                    Object.entries(legacyResponses).map(([providerId, response]) => [
+                        providerId,
+                        [{
+                            providerId: providerId as any,
+                            text: (response as any)?.text || "",
+                            status: (response as any)?.status || "completed",
+                            createdAt: (aiTurn as any).createdAt || Date.now(),
+                            updatedAt: (aiTurn as any).createdAt || Date.now(),
+                            meta: {
+                                ...(response as any)?.meta,
+                                modelIndex: (response as any)?.modelIndex,
+                            },
+                        }],
+                    ])
+                );
+            };
             // Batch Responses (flatten to single latest)
-            const batchResponses: Record<string, ProviderResponse> = {};
-            const effectiveBatchResponses = aiTurn.batchResponses && Object.keys(aiTurn.batchResponses).length > 0
-                ? aiTurn.batchResponses
-                : ((aiTurn as any)?.batch?.responses
-                    ? Object.fromEntries(
-                        Object.entries((aiTurn as any).batch.responses).map(([providerId, response]) => [
-                            providerId,
-                            [{
-                                providerId: providerId as any,
-                                text: (response as any)?.text || "",
-                                status: (response as any)?.status || "completed",
-                                createdAt: (aiTurn as any).createdAt || Date.now(),
-                                updatedAt: (aiTurn as any).createdAt || Date.now(),
-                                meta: (response as any)?.meta ? { ...(response as any).meta, modelIndex: (response as any).modelIndex } : { modelIndex: (response as any).modelIndex },
-                            }],
-                        ]),
-                    )
-                    : {});
+const batchResponses: Record<string, ProviderResponse> = {};
+
+            const effectiveBatchResponses = normalizeBatchResponses(aiTurn);
             Object.entries(effectiveBatchResponses || {}).forEach(([pid, val]) => {
                 const arr = Array.isArray(val) ? val : [val];
                 const latest = arr[arr.length - 1]; // ProviderResponse

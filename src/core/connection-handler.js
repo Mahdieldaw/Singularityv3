@@ -215,6 +215,16 @@ export class ConnectionHandler {
       const finalMapping = aiTurn.mapping;
       const finalSingularity = aiTurn.singularity || singularityPhase;
 
+      console.log('🚨 ConnectionHandler TURN_FINALIZED:', {
+        hasBatchPhase: !!finalBatch,
+        hasMappingPhase: !!finalMapping,
+        hasSingularityPhase: !!finalSingularity,
+        batchResponseCount: Object.keys(buckets.batchResponses || {}).length,
+        mappingResponseCount: Object.keys(buckets.mappingResponses || {}).length,
+        contextHasMapperArtifact: !!aiTurn?.mapperArtifact,
+        contextHasPipelineArtifacts: !!aiTurn?.pipelineArtifacts,
+      });
+
       this.port?.postMessage({
         type: "TURN_FINALIZED",
         sessionId: sessionId,
@@ -663,11 +673,7 @@ export class ConnectionHandler {
    * - Applies ephemeral fallback when a locked provider is unavailable.
    */
   async _applyPreflightSmartDefaults(executeRequest) {
-    const requested = [
-      ...(executeRequest.providers || []),
-      executeRequest.mapper,
-      executeRequest.singularity,
-    ].filter(Boolean);
+
 
     // Use centralized AuthManager
     const authStatus = await authManager.getAuthStatus();

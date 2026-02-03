@@ -1,5 +1,6 @@
 // ui/utils/turn-helpers.ts - ALIGNED VERSION
-import type { AiTurn, ProviderResponse, UserTurn, ProviderKey } from "../types";
+import type { ProviderResponse, UserTurn, ProviderKey } from "../../shared/contract";
+import type { AiTurnWithUI } from "../types";
 import { PRIMARY_STREAMING_PROVIDER_IDS } from "../constants";
 import { DEFAULT_THREAD } from "../../shared/messaging";
 
@@ -28,14 +29,12 @@ export function createOptimisticAiTurn(
   aiTurnId: string,
   userTurn: UserTurn,
   activeProviders: ProviderKey[],
-  shouldUseMapping: boolean,
-  shouldUseSingularity: boolean,
   mappingProvider?: string,
   singularityProvider?: string,
   timestamp?: number,
   explicitUserTurnId?: string,
   requestedFeatures?: { mapping: boolean; singularity: boolean },
-): AiTurn {
+): AiTurnWithUI {
   const now = timestamp || Date.now();
 
   const pendingBatch = activeProviders.length
@@ -52,6 +51,7 @@ export function createOptimisticAiTurn(
           },
         ]),
       ),
+      timestamp: now,
     }
     : undefined;
 
@@ -64,6 +64,7 @@ export function createOptimisticAiTurn(
     sessionId: userTurn.sessionId,
     threadId: DEFAULT_THREAD,
     userTurnId: effectiveUserTurnId,
+    mappingResponses: {},
     ...(pendingBatch ? { batch: pendingBatch } : {}),
     meta: {
       isOptimistic: true,
@@ -76,8 +77,8 @@ export function createOptimisticAiTurn(
 }
 
 
-export function applyStreamingUpdates(
-  aiTurn: AiTurn,
+export function applyStreamingTurnUpdate(
+  aiTurn: AiTurnWithUI,
   updates: Array<{
     providerId: string;
     text: string;
@@ -91,17 +92,19 @@ export function applyStreamingUpdates(
 ) {
   updates.forEach(({ providerId, text: delta, status, responseType, isReplace }) => {
     if (responseType === "batch") {
-      if (!aiTurn.batch) aiTurn.batch = { responses: {} };
-      const existing = aiTurn.batch.responses[providerId];
+      if (!aiTurn.batch) aiTurn.batch = { responses: {}, timestamp: Date.now() };
+      const batch = aiTurn.batch;
+      const existing = batch.responses[providerId];
       const nextText = isReplace
         ? delta
         : `${existing?.text || ""}${delta}`;
-      aiTurn.batch.responses[providerId] = {
+      batch.responses[providerId] = {
         text: nextText,
         modelIndex: existing?.modelIndex ?? 0,
         status,
         meta: existing?.meta,
       };
+      batch.timestamp = Date.now();
       aiTurn.batchVersion = (aiTurn.batchVersion ?? 0) + 1;
     } else if (responseType === "singularity") {
       const existing = aiTurn.singularity;
@@ -112,6 +115,7 @@ export function applyStreamingUpdates(
         prompt: existing?.prompt || "",
         output: nextText,
         traversalState: existing?.traversalState,
+        timestamp: Date.now(),
       };
       aiTurn.singularityVersion = (aiTurn.singularityVersion ?? 0) + 1;
     }
@@ -125,10 +129,9 @@ export function applyStreamingUpdates(
 export function normalizeBackendRoundsToTurns(
   rawTurns: any[],
   sessionId: string,
-  providerContexts?: Record<string, any>
-): Array<UserTurn | AiTurn> {
+): Array<UserTurn | AiTurnWithUI> {
   if (!rawTurns) return [];
-  const normalized: Array<UserTurn | AiTurn> = [];
+  const normalized: Array<UserTurn | AiTurnWithUI> = [];
 
   rawTurns.forEach((round: any) => {
     if (!round) return;
@@ -141,6 +144,7 @@ export function normalizeBackendRoundsToTurns(
         text: round.user.text,
         createdAt: round.user.createdAt || round.createdAt || Date.now(),
         sessionId: sessionId,
+        threadId: DEFAULT_THREAD,
       };
       normalized.push(userTurn);
     }
@@ -149,16 +153,27 @@ export function normalizeBackendRoundsToTurns(
     const hasPhases = !!round.batch || !!round.mapping || !!round.singularity;
 
     if (hasPhases) {
-      const aiTurn: AiTurn = {
+      const fallbackTimestamp = round.completedAt || round.createdAt || Date.now();
+      const batch = round.batch
+        ? { ...round.batch, timestamp: round.batch?.timestamp ?? fallbackTimestamp }
+        : undefined;
+      const mapping = round.mapping
+        ? { ...round.mapping, timestamp: round.mapping?.timestamp ?? fallbackTimestamp }
+        : undefined;
+      const singularity = round.singularity
+        ? { ...round.singularity, timestamp: round.singularity?.timestamp ?? fallbackTimestamp }
+        : undefined;
+      const aiTurn: AiTurnWithUI = {
         type: "ai",
         id: round.aiTurnId || `ai-${round.completedAt || Date.now()}`,
         userTurnId: round.userTurnId,
         sessionId: sessionId,
         threadId: DEFAULT_THREAD,
         createdAt: round.completedAt || round.createdAt || Date.now(),
-        ...(round.batch ? { batch: round.batch } : {}),
-        ...(round.mapping ? { mapping: round.mapping } : {}),
-        ...(round.singularity ? { singularity: round.singularity } : {}),
+        mappingResponses: {},
+        ...(batch ? { batch } : {}),
+        ...(mapping ? { mapping } : {}),
+        ...(singularity ? { singularity } : {}),
         pipelineStatus: round.pipelineStatus || undefined,
         meta: round.meta || {},
       };

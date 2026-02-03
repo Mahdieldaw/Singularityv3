@@ -6,10 +6,21 @@ interface Props {
   paragraphProjection?: PipelineParagraphProjectionResult | null | undefined;
   claims: Claim[] | null | undefined;
   shadowStatements: PipelineShadowStatement[] | null | undefined;
-  citationSourceOrder?: Record<string | number, string>;
 }
 
 const MODEL_COLORS = ["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#06b6d4", "#ec4899", "#84cc16"];
+const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
+const quantile = (values: number[], q: number) => {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const idx = (sorted.length - 1) * clamp01(q);
+  const lo = Math.floor(idx);
+  const hi = Math.ceil(idx);
+  if (lo === hi) return sorted[lo];
+  const t = idx - lo;
+  return sorted[lo] * (1 - t) + sorted[hi] * t;
+};
+const distortionColor = (t: number) => `hsl(${Math.round(220 - 220 * clamp01(t))} 85% 55%)`;
 
 export function ParagraphSpaceView({ graph, paragraphProjection, claims, shadowStatements }: Props) {
   const [showEdges, setShowEdges] = useState(true);
@@ -17,19 +28,6 @@ export function ParagraphSpaceView({ graph, paragraphProjection, claims, shadowS
   const [hoveredClaimId, setHoveredClaimId] = useState<string | null>(null);
   const [colorByDistortion, setColorByDistortion] = useState(false);
   const [isolatedModelIndex, setIsolatedModelIndex] = useState<number | null>(null);
-
-  const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
-  const quantile = (values: number[], q: number) => {
-    if (values.length === 0) return 0;
-    const sorted = [...values].sort((a, b) => a - b);
-    const idx = (sorted.length - 1) * clamp01(q);
-    const lo = Math.floor(idx);
-    const hi = Math.ceil(idx);
-    if (lo === hi) return sorted[lo];
-    const t = idx - lo;
-    return sorted[lo] * (1 - t) + sorted[hi] * t;
-  };
-  const distortionColor = (t: number) => `hsl(${Math.round(220 - 220 * clamp01(t))} 85% 55%)`;
 
   const statementToParagraphId = useMemo(() => {
     const map = new Map<string, string>();

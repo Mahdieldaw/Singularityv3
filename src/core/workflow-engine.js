@@ -18,7 +18,7 @@ function buildCognitiveArtifact(mapper, pipeline) {
       delta: pipeline?.shadow?.delta || null,
     },
     geometry: {
-      embeddingStatus: pipeline?.substrate ? "computed" : "failed",
+      embeddingStatus: pipeline?.substrate ? "computed" : (pipeline ? "failed" : "none"),
       substrate: pipeline?.substrate?.graph || { nodes: [], edges: [] },
       preSemantic: pipeline?.preSemantic ? { hint: pipeline.preSemantic.lens?.shape || "sparse" } : undefined,
     },
@@ -260,6 +260,16 @@ export class WorkflowEngine {
       const result = await executor(step, context, stepResults, workflowContexts, resolvedContext, options);
 
       stepResults.set(step.stepId, { status: "completed", result });
+
+      if (step.type?.includes('mapping')) {
+        console.log('🚨 MAPPING RESULT STRUCTURE:', {
+          resultKeys: Object.keys(result || {}),
+          hasMapperArtifact: !!result?.mapperArtifact,
+          hasMetaMapperArtifact: !!result?.meta?.mapperArtifact,
+          claimsAtRoot: result?.mapperArtifact?.claims?.length,
+          claimsInMeta: result?.meta?.mapperArtifact?.claims?.length,
+        });
+      }
       this._emitStepUpdate(step, context, result, resolvedContext, "completed");
 
       if (step.type === 'prompt' && result?.results) {
@@ -270,11 +280,17 @@ export class WorkflowEngine {
         });
       }
 
+      console.log('🚨 STEP CHECK:', {
+        stepType: step.type,
+        hasMapperArtifact: !!result?.mapperArtifact
+      });
       if (step.type === 'mapping' && result?.mapperArtifact) {
         context.mapperArtifact = result.mapperArtifact;
+        console.log('🚨 ASSIGNED mapperArtifact to context:', !!context.mapperArtifact);
       }
       if (step.type === 'mapping' && result?.pipelineArtifacts) {
         context.pipelineArtifacts = result.pipelineArtifacts;
+        console.log('🚨 ASSIGNED pipelineArtifacts to context:', !!context.pipelineArtifacts);
       }
 
       await this._persistStepResponse(step, context, result, resolvedContext);
@@ -336,7 +352,9 @@ export class WorkflowEngine {
               meta: r?.meta || {},
             },
           );
-        } catch (_) { }
+        } catch (err) {
+          console.warn(`[WorkflowEngine] Failed to persist prompt response for provider ${providerId}:`, err);
+        }
       }));
 
       return;
@@ -525,14 +543,16 @@ export class WorkflowEngine {
       }
       : undefined;
 
+    console.log('🚨 PRE-FINALIZE CHECK:', {
+      contextBatch: !!context?.batch,
+      batchPhase: !!batchPhase,
+      batchResponseCount: Object.keys(batchPhase?.responses || {}).length,
+    });
+
     const persistRequest = {
       type: resolvedContext?.type || "unknown",
       sessionId: context.sessionId,
       userMessage: this.currentUserMessage,
-      // ✅ CRITICAL: Ensure cognitive artifacts are persisted
-      mapperArtifact: context?.mapperArtifact,
-      pipelineArtifacts: context?.pipelineArtifacts,
-      singularityOutput: context?.singularityOutput,
       storedAnalysis: context?.storedAnalysis,
       runId: context?.runId || request?.context?.runId,
       batch: batchPhase,

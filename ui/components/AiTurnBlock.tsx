@@ -1,6 +1,6 @@
 // ui/components/AiTurnBlock.tsx - FIXED ALIGNMENT
 import React from "react";
-import { AiTurn } from "../types";
+import type { AiTurn } from "../../shared/contract";
 import { useSingularityOutput } from "../hooks/useSingularityOutput";
 
 

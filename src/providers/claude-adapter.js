@@ -146,7 +146,7 @@ export class ClaudeAdapter {
                 },
               };
             }
-          } catch (_) {}
+          } catch (_) { }
         }
       }
       if (isProviderAuthError(error)) {
@@ -183,7 +183,7 @@ export class ClaudeAdapter {
         };
       }
 
-      if (isNetworkError(error) || error?.type === 'network' || error?.code === 'NETWORK_ERROR') {
+      if (isNetworkError(error)) {
         return {
           providerId: this.id,
           ok: false,
@@ -315,7 +315,7 @@ export class ClaudeAdapter {
                 },
               };
             }
-          } catch (_) {}
+          } catch (_) { }
         }
       }
       if (isProviderAuthError(error)) {
@@ -354,7 +354,9 @@ export class ClaudeAdapter {
         };
       }
 
-      if (isNetworkError(error) || error?.type === 'network' || error?.code === 'NETWORK_ERROR') {
+      if (isNetworkError(error)) {
+        const errMeta = providerContext?.meta || providerContext || {};
+        const chatId = providerContext?.chatId ?? errMeta?.chatId ?? providerContext?.threadUrl ?? errMeta?.threadUrl;
         return {
           providerId: this.id,
           ok: false,
@@ -364,7 +366,7 @@ export class ClaudeAdapter {
           meta: {
             error: error?.toString?.() || String(error),
             details: error?.details,
-            chatId: providerContext?.chatId,
+            chatId,
           },
         };
       }

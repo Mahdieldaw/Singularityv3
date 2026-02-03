@@ -111,8 +111,21 @@ export interface ConditionalPruner {
   affectedClaims: string[];
 }
 
+export type Determinant =
+  | {
+    type: 'intrinsic';
+    trigger: string;
+    claims: string[];
+  }
+  | {
+    type: 'extrinsic';
+    trigger: string;
+    claims: string[];
+  };
+
 export interface UnifiedMapperOutput {
   claims: MapperClaim[];
+  determinants?: Determinant[];
   edges: MapperEdge[];
   conditionals: ConditionalPruner[];
 }
@@ -708,9 +721,40 @@ export interface ParsedMapperOutput extends MapperOutput {
   artifact?: MapperArtifact | null;
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// TRAVERSAL LAYER TYPES (Interactive Decision Graph)
-// ═══════════════════════════════════════════════════════════════════════════
+export interface MapperArtifact extends MapperOutput {
+  id?: string;
+  query?: string;
+  turn?: number;
+  timestamp?: string;
+  model_count?: number;
+  modelCount?: number;
+
+  problemStructure?: ProblemStructure;
+  fullAnalysis?: StructuralAnalysis;
+  narrative?: string;
+  anchors?: Array<{ label: string; id: string; position: number }>;
+
+  // Traversal Layer (Interactive Decision Graph)
+  traversalGraph?: SerializedTraversalGraph;
+  forcingPoints?: ForcingPoint[];
+  conditionals?: ConditionalPruner[];
+  preSemantic?: PreSemanticInterpretation | null;
+
+  shadow?: {
+    statements: ShadowStatement[];
+    audit: ShadowAudit;
+    topUnreferenced: ShadowStatement[];
+  };
+
+  paragraphProjection?: ParagraphProjectionMeta;
+  paragraphClustering?: ParagraphClusteringSummary;
+  substrate?: GeometricSubstrateSummary;
+  completeness?: {
+    report: CompletenessReport;
+    statementFates: Record<string, StatementFate>;
+    unattendedRegions: UnattendedRegion[];
+  };
+}
 
 export interface TraversalGate {
   id: string;
@@ -1307,7 +1351,7 @@ export interface CognitiveArtifact {
   geometry: {
     embeddingStatus: "computed" | "failed";
     substrate: PipelineSubstrateGraph;
-    preSemantic?: { hint: string };
+    preSemantic?: PreSemanticInterpretation | null;
   };
   semantic: {
     claims: Claim[];
@@ -1321,57 +1365,104 @@ export interface CognitiveArtifact {
   };
 }
 
+/**
+ * Canonical domain-level UserTurn and Session (single source of truth)
+ */
+export interface UserTurn {
+  id: string;
+  type: "user";
+  sessionId: string | null;
+  threadId: string;
+  text: string;
+  createdAt: number;
+  updatedAt?: number;
+  userId?: string | null;
+  meta?: Record<string, any> | null;
+}
+
+export interface Session {
+  id: string;
+  title?: string;
+  createdAt: number;
+  lastActivity: number;
+  defaultThreadId?: string | null;
+  activeThreadId?: string | null;
+  turnCount?: number;
+  isActive?: boolean;
+  lastTurnId?: string | null;
+  lastStructuralTurnId?: string | null;
+  updatedAt?: number;
+  userId?: string | null;
+  provider?: string | null;
+  metadata?: Record<string, any> | null;
+}
+
+// Phase types (canonical shapes)
 export interface BatchPhase {
-  responses: Record<string, { text: string; modelIndex: number; status: string; meta?: any }>;
+  responses: Record<string, {
+    text: string;
+    status?: string;
+    modelIndex?: number;
+    meta?: any;
+  }>;
+  timestamp: number;
 }
 
 export interface MappingPhase {
-  artifact: CognitiveArtifact;
+  artifact: CognitiveArtifact | any; // Use CognitiveArtifact when available; tolerate partial shapes
+  timestamp: number;
 }
 
 export interface SingularityPhase {
-  prompt: string;
+  prompt?: string;
   output: string;
-  traversalState?: { answers: Record<string, any>; pathSteps: string[] };
+  traversalState?: any;
+  timestamp: number;
 }
 
-export interface MapperArtifact extends MapperOutput {
-  id?: string;
-  query?: string;
-  turn?: number;
-  timestamp?: string;
-  model_count?: number;
-  modelCount?: number;
+// Canonical AiTurn (domain model). Preserve legacy fields as optional with migration notes.
+export interface AiTurn {
+  id: string;
+  type: "ai";
+  userTurnId: string;
+  sessionId: string | null;
+  threadId: string;
+  createdAt: number;
+  isComplete?: boolean;
 
-  problemStructure?: ProblemStructure;
-  fullAnalysis?: StructuralAnalysis;
-  narrative?: string;
-  anchors?: Array<{ label: string; id: string; position: number }>;
+  // Phase data (NEW - canonical)
+  batch?: BatchPhase;
+  mapping?: MappingPhase;
+  singularity?: SingularityPhase;
 
-  // Traversal Layer (Interactive Decision Graph)
-  traversalGraph?: SerializedTraversalGraph;
-  forcingPoints?: ForcingPoint[];
-  conditionals?: ConditionalPruner[];
-  preSemantic?: PreSemanticInterpretation | null;
+  // Cognitive Pipeline Artifacts (Computed) — keep nullable to allow partial artifacts
+  mapperArtifact?: MapperArtifact | null; // Legacy - will be removed after migration
+  pipelineArtifacts?: PipelineArtifacts | null; // Legacy - will be removed after migration
+  singularityOutput?: SingularityOutput | null; // Legacy - will be removed after migration
 
-  shadow?: {
-    statements: ShadowStatement[];
-    audit: ShadowAudit;
-    topUnreferenced: ShadowStatement[];
-  };
+  pipelineStatus?: PipelineStatus;
 
-  paragraphProjection?: ParagraphProjectionMeta;
-  paragraphClustering?: ParagraphClusteringSummary;
-  substrate?: GeometricSubstrateSummary;
-  completeness?: {
-    report: CompletenessReport;
-    statementFates: Record<string, StatementFate>;
-    unattendedRegions: UnattendedRegion[];
-  };
+  meta?: {
+    mapper?: string;
+    requestedFeatures?: {
+      mapping?: boolean;
+      singularity?: boolean;
+    };
+    branchPointTurnId?: string;
+    replacesId?: string;
+    isHistoricalRerun?: boolean;
+    isOptimistic?: boolean;
+    [key: string]: any;
+  } | null;
+
+  // Legacy collections - will be removed after migration. Keep optional for backward compatibility.
+  batchResponses?: Record<string, ProviderResponse[]>; // Legacy
+  mappingResponses?: Record<string, ProviderResponse[]>; // Legacy
+  singularityResponses?: Record<string, ProviderResponse[]>; // Legacy
+
+  storedAnalysis?: StructuralAnalysis | null; // Legacy - serialized analysis
+  providerContexts?: Record<string, any> | null; // Legacy - provider contexts
 }
-
-
-
 
 // ============================================================================
 // SECTION 1: WORKFLOW PRIMITIVES (UI -> BACKEND)
@@ -1551,10 +1642,18 @@ export type PersistRequest = {
   partial?: boolean;
   pipelineStatus?: PipelineStatus;
   runId?: string | null;
-  mapperArtifact?: MapperArtifact;
-  pipelineArtifacts?: PipelineArtifacts;
-  storedAnalysis?: StructuralAnalysis;
-  singularityOutput?: SingularityOutput;
+
+  // Phase fields
+  batch?: BatchPhase;
+  mapping?: MappingPhase;
+  singularity?: SingularityPhase;
+
+  // Legacy / compatibility fields
+  mapperArtifact?: MapperArtifact; // Legacy - serialized business artifact
+  pipelineArtifacts?: PipelineArtifacts; // Legacy
+  storedAnalysis?: StructuralAnalysis; // Legacy
+  singularityOutput?: SingularityOutput; // Legacy
+
   understandOutput?: { short_answer?: string } | null;
   gauntletOutput?: { the_answer?: { statement?: string } } | null;
   sourceTurnId?: string;
@@ -1744,40 +1843,6 @@ export interface ProviderResponse {
     synthesizer?: string;
     mapper?: string;
     [key: string]: any; // Keep index signature for genuinely unknown provider metadata, but we've explicitly typed the known ones.
-  };
-}
-
-export interface AiTurn {
-  id: string;
-  type: "ai";
-  sessionId: string | null;
-  threadId: string;
-  userTurnId: string;
-  createdAt: number;
-  isComplete?: boolean;
-  // Arrays for all response buckets for uniform handling
-  batchResponses: Record<string, ProviderResponse[]>;
-  mappingResponses: Record<string, ProviderResponse[]>;
-  exploreResponses?: Record<string, ProviderResponse[]>;
-  singularityResponses?: Record<string, ProviderResponse[]>;
-
-  batch?: BatchPhase;
-  mapping?: MappingPhase;
-  singularity?: SingularityPhase;
-
-  // Cognitive Pipeline Artifacts (Computed)
-  mapperArtifact?: MapperArtifact;
-  pipelineArtifacts?: PipelineArtifacts;
-  singularityOutput?: SingularityOutput;
-
-  pipelineStatus?: PipelineStatus; // NEW: Pipeline Pause State
-
-  meta?: {
-    branchPointTurnId?: string;
-    replacesId?: string;
-    isHistoricalRerun?: boolean;
-    synthForUserTurnId?: string;
-    [key: string]: any;
   };
 }
 

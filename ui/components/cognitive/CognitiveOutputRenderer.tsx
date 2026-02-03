@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { AiTurn } from '../../types';
+import { AiTurn } from '../../../shared/contract';
 import { useSingularityMode } from '../../hooks/cognitive/useCognitiveMode';
 import SingularityOutputView from './SingularityOutputView';
 import { SingularityOutputState } from '../../hooks/useSingularityOutput';
@@ -32,7 +32,7 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
 }) => {
     const [viewOverride, setViewOverride] = useState<null | 'traverse' | 'response'>(null);
     const { runSingularity } = useSingularityMode(aiTurn.id);
-    const mappingArtifact = (aiTurn as any)?.mapping?.artifact || null;
+    const mappingArtifact = aiTurn.mapping?.artifact || null;
     const effectiveMapperArtifact = useMemo(() => {
         if (aiTurn.mapperArtifact) return aiTurn.mapperArtifact;
         if (!mappingArtifact) return undefined;
@@ -46,7 +46,7 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
             shadow: {
                 statements: mappingArtifact.shadow?.statements || [],
                 audit: mappingArtifact.shadow?.audit || {},
-                topUnreferenced: [],
+                topUnreferenced: mappingArtifact.shadow?.topUnreferenced ?? [],
             },
         } as MapperArtifact;
     }, [aiTurn.mapperArtifact, mappingArtifact]);
@@ -269,7 +269,7 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
                 {isPipelineComplete && structuralAnalysis && (
                     <div className="space-y-4 animate-in fade-in slide-in-from-top-2 duration-500">
                         <MetricsRibbon
-                            artifact={aiTurn.mapperArtifact}
+                            artifact={effectiveMapperArtifact}
                             analysis={structuralAnalysis}
                             problemStructure={problemStructure}
                         />
@@ -322,10 +322,10 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
             ) : currentView === 'traverse' && canShowTraversal ? (
                 <div className="animate-in fade-in duration-500">
                     <TraversalGraphView
-                        traversalGraph={aiTurn.mapperArtifact!.traversalGraph!}
-                        conditionals={aiTurn.mapperArtifact!.conditionals || []}
-                        claims={aiTurn.mapperArtifact!.claims || []}
-                        originalQuery={aiTurn.mapperArtifact!.query || ''}
+                        traversalGraph={effectiveMapperArtifact!.traversalGraph!}
+                        conditionals={effectiveMapperArtifact!.conditionals || []}
+                        claims={effectiveMapperArtifact!.claims || []}
+                        originalQuery={effectiveMapperArtifact!.query || ''}
                         sessionId={effectiveSessionId!}
                         aiTurnId={aiTurn.id}
                         pipelineStatus={aiTurn.pipelineStatus}

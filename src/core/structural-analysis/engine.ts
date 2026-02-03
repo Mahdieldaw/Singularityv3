@@ -1,5 +1,6 @@
 import {
     MapperArtifact,
+    CognitiveArtifact,
     ProblemStructure,
     EnrichedClaim,
     StructuralAnalysis,
@@ -156,12 +157,22 @@ const applyComputedRoles = (
     });
 };
 
-export const computeStructuralAnalysis = (artifact: MapperArtifact): StructuralAnalysis => {
-    const rawClaims = Array.isArray(artifact?.claims) ? artifact.claims : [];
-    const edges = Array.isArray(artifact?.edges) ? artifact.edges : [];
-    const ghosts = Array.isArray(artifact?.ghosts) ? artifact.ghosts.filter(Boolean).map(String) : [];
-    const landscape = computeLandscapeMetrics(artifact);
-    const conditionals = Array.isArray(artifact?.conditionals) ? artifact.conditionals : [];
+export const computeStructuralAnalysis = (artifact: MapperArtifact | CognitiveArtifact): StructuralAnalysis => {
+    const semantic = (artifact as any)?.semantic;
+    const analysisArtifact: MapperArtifact = Array.isArray((artifact as any)?.claims)
+        ? (artifact as MapperArtifact)
+        : {
+            claims: Array.isArray(semantic?.claims) ? semantic.claims : [],
+            edges: Array.isArray(semantic?.edges) ? semantic.edges : [],
+            conditionals: Array.isArray(semantic?.conditionals) ? semantic.conditionals : [],
+            narrative: semantic?.narrative,
+        };
+
+    const rawClaims = Array.isArray(analysisArtifact?.claims) ? analysisArtifact.claims : [];
+    const edges = Array.isArray(analysisArtifact?.edges) ? analysisArtifact.edges : [];
+    const ghosts = Array.isArray(analysisArtifact?.ghosts) ? analysisArtifact.ghosts.filter(Boolean).map(String) : [];
+    const landscape = computeLandscapeMetrics(analysisArtifact);
+    const conditionals = Array.isArray(analysisArtifact?.conditionals) ? analysisArtifact.conditionals : [];
     const claimsWithDerivedRoles = applyComputedRoles(rawClaims, edges, conditionals, landscape.modelCount);
     const claimIds = claimsWithDerivedRoles.map(c => c.id);
     const claimsWithRatios = claimsWithDerivedRoles.map((c) =>
@@ -282,7 +293,7 @@ export const computeStructuralAnalysis = (artifact: MapperArtifact): StructuralA
     return analysis;
 };
 
-export const computeProblemStructureFromArtifact = (artifact: MapperArtifact): ProblemStructure => {
+export const computeProblemStructureFromArtifact = (artifact: MapperArtifact | CognitiveArtifact): ProblemStructure => {
     return computeStructuralAnalysis(artifact).shape;
 };
 

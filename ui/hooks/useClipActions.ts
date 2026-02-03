@@ -2,7 +2,7 @@ import { useCallback } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
 import { turnsMapAtom, alertTextAtom, mappingProviderAtom, singularityProviderAtom } from "../state/atoms";
 import { useRoundActions } from "./chat/useRoundActions";
-import type { AiTurn } from "../types";
+import type { AiTurnWithUI } from "../types";
 import { PRIMARY_STREAMING_PROVIDER_IDS } from "../constants";
 
 export function useClipActions() {
@@ -20,7 +20,7 @@ export function useClipActions() {
       providerId: string,
     ) => {
       try {
-        const aiTurn = turnsMap.get(aiTurnId) as AiTurn | undefined;
+    const aiTurn = turnsMap.get(aiTurnId) as AiTurnWithUI | undefined;
         if (!aiTurn || aiTurn.type !== "ai") {
           setAlertText("Cannot find AI turn. Please try again.");
           return;
@@ -65,9 +65,18 @@ export function useClipActions() {
         // batch response so the batch count increases and the model shows up in the batch area.
         if (!aiTurn.batchResponses || !aiTurn.batchResponses[providerId]) {
           setTurnsMap((draft) => {
-            const turn = draft.get(aiTurnId) as AiTurn | undefined;
+            const turn = draft.get(aiTurnId) as AiTurnWithUI | undefined;
             if (!turn || turn.type !== "ai") return;
-            const batchResponses = ((turn.batchResponses ||= {}) as any);
+            type BatchResponse = {
+              providerId: string;
+              text: string;
+              status: string;
+              createdAt: number;
+              updatedAt: number;
+              meta?: any;
+            };
+            const batchResponses: Record<string, BatchResponse[]> =
+              (turn.batchResponses ||= {}) as Record<string, BatchResponse[]>;
             if (!batchResponses[providerId]) {
               const initialStatus: "streaming" | "pending" =
                 PRIMARY_STREAMING_PROVIDER_IDS.includes(providerId)
@@ -80,8 +89,8 @@ export function useClipActions() {
                   status: initialStatus,
                   createdAt: Date.now(),
                   updatedAt: Date.now(),
-                },
-              ] as any;
+                } as BatchResponse,
+              ];
             }
           });
         }

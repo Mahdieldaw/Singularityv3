@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { LLM_PROVIDERS_CONFIG } from '../../constants';
-import { AiTurn } from '../../types';
+import { AiTurn } from '../../../shared/contract';
 import MarkdownDisplay from '../MarkdownDisplay';
 import { ShadowAuditView } from './ShadowAuditView';
 import { SingularityOutputState } from '../../hooks/useSingularityOutput';

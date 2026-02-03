@@ -32,7 +32,7 @@ describe('ConciergeService', () => {
         expect(prompt).toContain('Step 1');
     });
 
-    it('should reject legacy semantic mapper edges field', () => {
+    it('should accept missing determinants and edges', () => {
         const raw = JSON.stringify({
             claims: [
                 {
@@ -44,16 +44,15 @@ describe('ConciergeService', () => {
                     challenges: null,
                 },
             ],
-            edges: { sequence: [], tension: [] },
-            conditionals: [],
         });
 
         const result = parseSemanticMapperOutput(raw);
-        expect(result.success).toBe(false);
-        expect(result.errors?.some(e => e.field === 'edges')).toBe(true);
+        expect(result.success).toBe(true);
+        expect(Array.isArray(result.output?.edges) ? result.output?.edges.length : null).toBe(0);
+        expect(Array.isArray(result.output?.conditionals) ? result.output?.conditionals.length : null).toBe(0);
     });
 
-    it('should accept semantic mapper conflicts without questions', () => {
+    it('should accept intrinsic determinants without questions', () => {
         const raw = JSON.stringify({
             claims: [{
                 id: 'c_0',
@@ -63,12 +62,11 @@ describe('ConciergeService', () => {
                 role: 'anchor',
                 challenges: null,
             }],
-            edges: [{
-                from: 'c_0',
-                to: 'c_1',
-                type: 'conflict',
+            determinants: [{
+                type: 'intrinsic',
+                trigger: 'incompatible goals',
+                claims: ['c_0', 'c_1'],
             }],
-            conditionals: [],
         });
 
         const result = parseSemanticMapperOutput(raw);
@@ -76,10 +74,10 @@ describe('ConciergeService', () => {
         expect(result.output?.edges?.length).toBe(1);
         const e0 = result.output?.edges?.[0];
         expect(e0?.type).toBe('conflict');
-        expect(((e0 as any)?.question ?? null)).toBeNull();
+        expect(((e0 as any)?.question ?? null)).toBe('incompatible goals');
     });
 
-    it('should accept semantic mapper V2 conflicts with questions', () => {
+    it('should accept intrinsic determinants with questions', () => {
         const raw = JSON.stringify({
             claims: [{
                 id: 'c_0',
@@ -96,13 +94,11 @@ describe('ConciergeService', () => {
                 role: 'anchor',
                 challenges: null,
             }],
-            edges: [{
-                from: 'c_0',
-                to: 'c_1',
-                type: 'conflict',
-                question: 'Which matters more: speed or flexibility?',
+            determinants: [{
+                type: 'intrinsic',
+                trigger: 'Which matters more: speed or flexibility?',
+                claims: ['c_0', 'c_1'],
             }],
-            conditionals: [],
         });
 
         const result = parseSemanticMapperOutput(raw);

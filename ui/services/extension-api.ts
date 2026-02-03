@@ -103,9 +103,14 @@ class ExtensionAPI {
       return this.port;
     }
 
-    if (this.portHealthManager && this.portMessageHandler) {
+    if (this.portHealthManager) {
+      if (this.port && !force) {
+        await this.portHealthManager.waitForReady();
+        return this.port;
+      }
+
       this.port = this.portHealthManager.connect(
-        this.portMessageHandler,
+        (msg) => this.portMessageHandler?.(msg),
         () => {
           console.log("[ExtensionAPI] Port disconnected via callback");
           this.port = null;

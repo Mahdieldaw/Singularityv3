@@ -230,6 +230,8 @@ export class ChatGPTAdapter {
       }
 
       if (isNetworkError(error) || error?.type === 'network' || error?.code === 'NETWORK_ERROR') {
+        const conversationIdOut = conversationId || req.meta?.conversationId;
+        const parentMessageIdOut = lastMessageId || req.meta?.parentMessageId || req.meta?.messageId;
         return {
           providerId: this.id,
           ok: false,
@@ -239,6 +241,8 @@ export class ChatGPTAdapter {
           meta: {
             error: error?.toString?.() || String(error),
             details: error?.details,
+            conversationId: conversationIdOut || undefined,
+            parentMessageId: parentMessageIdOut || undefined,
           },
         };
       }

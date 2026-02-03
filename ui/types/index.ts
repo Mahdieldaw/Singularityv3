@@ -4,37 +4,19 @@
  * UI-LAYER TYPES
  *
  * This file serves as the single source of truth for all UI type definitions.
- * It imports types from the shared contract and persistence layers, then re-exports
- * them along with UI-specific types to create a unified type system.
+ * It re-exports domain types from shared/contract and storage records from persistence.
  */
 
 // Import types from shared contract (runtime types)
-import type {
-  ProviderKey,
-  ProviderResponse as ContractProviderResponse,
-  AiTurn as ContractAiTurn,
-} from "../../shared/contract";
-import {
-  isUserTurn as isUserTurnContract,
-  isAiTurn as isAiTurnContract,
-} from "../../shared/contract";
-
-
+import type { AiTurn, UserTurn } from "../../shared/contract";
 
 // =============================================================================
 // RE-EXPORTED TYPES FROM SHARED CONTRACT
 // =============================================================================
 
-export type { ProviderKey, PortMessage } from "../../shared/contract";
+export type { AiTurn, UserTurn } from "../../shared/contract";
 
-// Provider response type (unified from contract)
-export type ProviderResponse = ContractProviderResponse;
-export type ProviderResponseStatus = ProviderResponse["status"];
-
-// =============================================================================
-// RE-EXPORTED TYPES FROM PERSISTENCE LAYER
-// =============================================================================
-
+// Persistence records re-export
 export type {
   SessionRecord,
   ThreadRecord,
@@ -44,31 +26,33 @@ export type {
   ProviderResponseRecord,
 } from "../../src/persistence/types";
 
-// =============================================================================
-// UI-SPECIFIC TYPES
-// =============================================================================
+// UI-specific extensions (minimal)
+export interface AiTurnWithUI extends AiTurn {
+  ui?: {
+    isExpanded?: boolean;
+    batchVersion?: number;
+    mappingVersion?: number;
+    singularityVersion?: number;
+  };
+  batchVersion?: number;
+  mappingVersion?: number;
+  singularityVersion?: number;
+}
 
-/** The current high-level step of the UI, controlling what major controls are shown. */
-export type AppStep =
-  | "initial"
-  | "cognitive"
-  | "complete";
+export type TurnMessage = UserTurn | AiTurnWithUI;
 
-/** The UI's finite state for core user interactions. */
 export type UiPhase = "idle" | "streaming" | "awaiting_action";
 
-/** Defines the primary view mode of the application. */
+export type AppStep = "initial" | "cognitive";
 
-/** Defines the properties for rendering a supported LLM provider in the UI. */
 export interface LLMProvider {
-  id: ProviderKey | string;
+  id: string;
   name: string;
-  hostnames: string[];
-  color: string;
-  logoBgClass: string;
-  icon?: any;
-  logoSrc?: string;
+  color?: string;
+  logoBgClass?: string;
+  hostnames?: string[];
   emoji?: string;
+  logoSrc?: string;
 }
 
 export interface ParsedOption {
@@ -82,42 +66,8 @@ export interface ParsedTheme {
   options: ParsedOption[];
 }
 
-// =============================================================================
-// UNIFIED TURN TYPES (UI-ADAPTED FROM CONTRACT)
-// =============================================================================
-
-/** Represents a turn initiated by the user. */
-export interface UserTurn {
-  type: "user";
-  id: string;
-  text: string;
-  createdAt: number;
-  sessionId: string | null;
-}
-
-/**
- * Represents a turn from the AI, containing all provider responses.
- * This extends the contract AiTurn with UI-specific properties.
- */
-export interface AiTurn extends Omit<ContractAiTurn, "type" | "batchResponses"> {
-  type: "ai";
-  batchResponses?: Record<string, ProviderResponse[]>;
-  // UI-only fields for efficient dependency tracking in React hooks
-  batchVersion?: number;
-  mappingVersion?: number;
-  singularityVersion?: number;
-}
-
-/** The union type for any message in the chat timeline. This is the main type for the `messages` state array. */
-export type TurnMessage = UserTurn | AiTurn;
-
-/** Type guard to check if a turn is a UserTurn. */
-export const isUserTurn = (turn: TurnMessage): turn is UserTurn =>
-  isUserTurnContract(turn as any);
-
-/** Type guard to check if a turn is an AiTurn. */
-export const isAiTurn = (turn: TurnMessage): turn is AiTurn =>
-  isAiTurnContract(turn as any);
+// Helper type guards re-exported from contract
+export { isUserTurn as isUserTurnContract, isAiTurn as isAiTurnContract } from "../../shared/contract";
 
 // =============================================================================
 // HISTORY & SESSION LOADING

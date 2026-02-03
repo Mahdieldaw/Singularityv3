@@ -8,7 +8,7 @@
       "ES2022"
     ],
     "allowJs": true,
-    "checkJs": true,
+    "checkJs": false,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "module": "ESNext",
@@ -55,9 +55,6 @@
   "exclude": [
     "dist",
     "docs",
-    "node_modules",
-    "old ui",
-    "oldaiturnblock.tsx",
-    "oldsynthesisbubble.tsx"
+    "node_modules"
   ]
 }

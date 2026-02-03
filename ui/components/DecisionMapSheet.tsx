@@ -10,7 +10,8 @@ import MarkdownDisplay from "./MarkdownDisplay";
 import { LLM_PROVIDERS_CONFIG } from "../constants";
 import { getLatestResponse, normalizeResponseArray } from "../utils/turn-helpers";
 import { getProviderColor, getProviderConfig } from "../utils/provider-helpers";
-import type { AiTurn, ProviderResponse } from "../types";
+import type { ProviderResponse } from "../../shared/contract";
+import type { AiTurnWithUI } from "../types";
 import clsx from "clsx";
 import { CopyButton } from "./CopyButton";
 import { formatDecisionMapForMd, formatGraphForMd } from "../utils/copy-format-utils";
@@ -647,7 +648,7 @@ const DetailView: React.FC<DetailViewProps> = ({ node, narrativeExcerpt, citatio
 // ============================================================================
 
 interface MapperSelectorProps {
-  aiTurn: AiTurn;
+  aiTurn: AiTurnWithUI;
   activeProviderId?: string;
 }
 
@@ -721,7 +722,7 @@ const MapperSelector: React.FC<MapperSelectorProps> = ({ aiTurn, activeProviderI
   );
 };
 
-const SingularitySelector: React.FC<{ aiTurn: AiTurn, activeProviderId?: string, onSelect: (pid: string) => void }> = ({ aiTurn, activeProviderId, onSelect }) => {
+const SingularitySelector: React.FC<{ aiTurn: AiTurnWithUI, activeProviderId?: string, onSelect: (pid: string) => void }> = ({ aiTurn, activeProviderId, onSelect }) => {
   const [isOpen, setIsOpen] = useState(false);
   const { handleClipClick } = useClipActions();
   const authStatus = useAtomValue(providerAuthStatusAtom);
@@ -912,10 +913,10 @@ export const DecisionMapSheet = React.memo(() => {
     };
   }, [openState, sheetHeightRatio]);
 
-  const aiTurn: AiTurn | null = useMemo(() => {
+  const aiTurn: AiTurnWithUI | null = useMemo(() => {
     const tid = openState?.turnId;
     const t = tid ? turnGetter(tid) : undefined;
-    return t && (t as any).type === 'ai' ? (t as AiTurn) : null;
+    return t && (t as any).type === 'ai' ? (t as AiTurnWithUI) : null;
   }, [openState, turnGetter]);
 
   useEffect(() => {
@@ -1048,6 +1049,14 @@ export const DecisionMapSheet = React.memo(() => {
     };
   }, [mappingArtifact]);
 
+  const semanticClaims = useMemo(() => {
+    const semantic = mappingArtifact?.semantic;
+    if (Array.isArray(semantic?.claims)) return semantic?.claims;
+    if (derivedMapperArtifact?.claims) return derivedMapperArtifact.claims;
+    if (Array.isArray((parsedMapping as any)?.claims)) return (parsedMapping as any)?.claims;
+    return graphData.claims.length > 0 ? graphData.claims : [];
+  }, [mappingArtifact, derivedMapperArtifact, parsedMapping, graphData]);
+
   const artifactForStructure = useMemo(() => {
     const artifact =
       aiTurn?.mapping?.artifact ||
@@ -1062,7 +1071,10 @@ export const DecisionMapSheet = React.memo(() => {
         }
         : null);
 
-    if (!artifact || !Array.isArray((artifact as any).claims) || (artifact as any).claims.length === 0) return null;
+    const flatClaims = (artifact as any)?.claims;
+    const nestedClaims = (artifact as any)?.semantic?.claims;
+    const claims = Array.isArray(flatClaims) ? flatClaims : Array.isArray(nestedClaims) ? nestedClaims : null;
+    if (!artifact || !claims || claims.length === 0) return null;
     return artifact;
   }, [aiTurn, derivedMapperArtifact, parsedMapping, graphData, latestMapping]);
 
@@ -1115,13 +1127,13 @@ export const DecisionMapSheet = React.memo(() => {
   }, [artifactForStructure]);
 
   const claimThemes = useMemo(() => {
-    if (!artifactForStructure || !Array.isArray((artifactForStructure as any).claims)) return [];
-    return buildThemesFromClaims((artifactForStructure as any).claims);
-  }, [artifactForStructure]);
+    if (!semanticClaims || semanticClaims.length === 0) return [];
+    return buildThemesFromClaims(semanticClaims as any);
+  }, [semanticClaims]);
 
   const mappingText = useMemo(() => {
-    return parsedMapping.narrative || '';
-  }, [parsedMapping.narrative]);
+    return mappingArtifact?.semantic?.narrative || parsedMapping.narrative || '';
+  }, [mappingArtifact?.semantic?.narrative, parsedMapping.narrative]);
 
   const optionsText = useMemo(() => {
     const meta: any = latestMapping?.meta || null;
@@ -1243,14 +1255,13 @@ export const DecisionMapSheet = React.memo(() => {
   }, []);
 
   const resolvedPipelineArtifacts = useMemo(() => {
-    const fromTurn = aiTurn?.mapping?.artifact || null;
+    const fromTurn = (aiTurn as any)?.pipelineArtifacts || null;
     const fromMeta = (latestMapping?.meta as any)?.pipelineArtifacts || null;
     return fromTurn || fromMeta || null;
   }, [aiTurn, latestMapping?.meta]);
 
   const pipelineStages = useMemo(() => {
     const mapperArtifact =
-      aiTurn?.mapping?.artifact ||
       derivedMapperArtifact ||
       (parsedMapping as any)?.artifact ||
       (graphData.claims.length > 0 || graphData.edges.length > 0
@@ -1271,6 +1282,7 @@ export const DecisionMapSheet = React.memo(() => {
     };
 
     const p = resolvedPipelineArtifacts as any;
+    const substrate = mappingArtifact?.geometry?.substrate || null;
 
     return [
       { key: 'pipeline_shadow_extraction', label: 'Shadow Extraction', kind: 'json' as const, value: p?.shadow?.extraction ?? null, group: 'Shadow', disabled: !hasValue(p?.shadow?.extraction, 'json') },
@@ -1284,8 +1296,8 @@ export const DecisionMapSheet = React.memo(() => {
       { key: 'pipeline_clustering_result', label: 'Clustering Result', kind: 'json' as const, value: p?.clustering?.result ?? null, group: 'Clustering', disabled: !hasValue(p?.clustering?.result, 'json') },
       { key: 'pipeline_clustering_summary', label: 'Clustering Summary', kind: 'json' as const, value: p?.clustering?.summary ?? null, group: 'Clustering', disabled: !hasValue(p?.clustering?.summary, 'json') },
 
-      { key: 'pipeline_substrate_summary', label: 'Substrate Summary', kind: 'json' as const, value: p?.substrate?.summary ?? null, group: 'Substrate', disabled: !hasValue(p?.substrate?.summary, 'json') },
-      { key: 'pipeline_substrate_degeneracy', label: 'Substrate Degeneracy', kind: 'json' as const, value: p?.substrate ?? null, group: 'Substrate', disabled: !hasValue(p?.substrate, 'json') },
+      { key: 'pipeline_substrate_summary', label: 'Substrate Summary', kind: 'json' as const, value: substrate ?? null, group: 'Substrate', disabled: !hasValue(substrate, 'json') },
+      { key: 'pipeline_substrate_degeneracy', label: 'Substrate Degeneracy', kind: 'json' as const, value: substrate ?? null, group: 'Substrate', disabled: !hasValue(substrate, 'json') },
 
       { key: 'pipeline_presemantic', label: 'Pre-Semantic Interpretation', kind: 'json' as const, value: p?.preSemantic ?? null, group: 'Interpretation', disabled: !hasValue(p?.preSemantic, 'json') },
       { key: 'pipeline_validation', label: 'Structural Validation', kind: 'json' as const, value: p?.validation ?? null, group: 'Validation', disabled: !hasValue(p?.validation, 'json') },
@@ -1294,17 +1306,17 @@ export const DecisionMapSheet = React.memo(() => {
       { key: 'pipeline_raw_mapping_text', label: 'Raw Mapping Text', kind: 'text' as const, value: p?.prompts?.rawMappingText || rawMappingText || '', group: 'Prompts', disabled: !hasValue(p?.prompts?.rawMappingText || rawMappingText || '', 'text') },
 
       { key: 'mapper_artifact', label: 'Mapper Artifact', kind: 'json' as const, value: mapperArtifact, group: 'Mapper', disabled: !hasValue(mapperArtifact, 'json') },
-      { key: 'mapper_problem_structure', label: 'Problem Structure', kind: 'json' as const, value: (mapperArtifact as any)?.problemStructure || null, group: 'Mapper', disabled: !hasValue((mapperArtifact as any)?.problemStructure || null, 'json') },
+      { key: 'mapper_problem_structure', label: 'Problem Structure', kind: 'json' as const, value: problemStructure || null, group: 'Mapper', disabled: !hasValue(problemStructure || null, 'json') },
       { key: 'mapper_completeness', label: 'Completeness', kind: 'json' as const, value: (mapperArtifact as any)?.completeness || null, group: 'Mapper', disabled: !hasValue((mapperArtifact as any)?.completeness || null, 'json') },
       { key: 'mapper_conditionals', label: 'Conditionals', kind: 'json' as const, value: (mapperArtifact as any)?.conditionals || null, group: 'Mapper', disabled: !hasValue((mapperArtifact as any)?.conditionals || null, 'json') },
-      { key: 'mapper_full_analysis', label: 'Full Structural Analysis', kind: 'json' as const, value: (mapperArtifact as any)?.fullAnalysis || null, group: 'Mapper', disabled: !hasValue((mapperArtifact as any)?.fullAnalysis || null, 'json') },
-      { key: 'traversal_graph', label: 'Traversal Graph', kind: 'json' as const, value: (mapperArtifact as any)?.traversalGraph || null, group: 'Mapper', disabled: !hasValue((mapperArtifact as any)?.traversalGraph || null, 'json') },
-      { key: 'forcing_points', label: 'Forcing Points', kind: 'json' as const, value: (mapperArtifact as any)?.forcingPoints || null, group: 'Mapper', disabled: !hasValue((mapperArtifact as any)?.forcingPoints || null, 'json') },
+      { key: 'mapper_full_analysis', label: 'Full Structural Analysis', kind: 'json' as const, value: structuralAnalysis || null, group: 'Mapper', disabled: !hasValue(structuralAnalysis || null, 'json') },
+      { key: 'traversal_graph', label: 'Traversal Graph', kind: 'json' as const, value: mappingArtifact?.traversal?.graph || (mapperArtifact as any)?.traversalGraph || null, group: 'Mapper', disabled: !hasValue(mappingArtifact?.traversal?.graph || (mapperArtifact as any)?.traversalGraph || null, 'json') },
+      { key: 'forcing_points', label: 'Forcing Points', kind: 'json' as const, value: mappingArtifact?.traversal?.forcingPoints || (mapperArtifact as any)?.forcingPoints || null, group: 'Mapper', disabled: !hasValue(mappingArtifact?.traversal?.forcingPoints || (mapperArtifact as any)?.forcingPoints || null, 'json') },
 
       { key: 'singularity_output', label: 'Singularity Output', kind: 'json' as const, value: singularityOutput, group: 'Singularity', disabled: !hasValue(singularityOutput, 'json') },
       { key: 'singularity_pipeline', label: 'Singularity Pipeline', kind: 'json' as const, value: (singularityOutput as any)?.pipeline || null, group: 'Singularity', disabled: !hasValue((singularityOutput as any)?.pipeline || null, 'json') },
     ];
-  }, [aiTurn, derivedMapperArtifact, parsedMapping, graphData, latestMapping, singularityState.output, semanticMapperPrompt, rawMappingText, resolvedPipelineArtifacts]);
+  }, [aiTurn, derivedMapperArtifact, parsedMapping, graphData, latestMapping, singularityState.output, semanticMapperPrompt, rawMappingText, resolvedPipelineArtifacts, mappingArtifact, problemStructure, structuralAnalysis]);
 
   const pipelineStageGroups = useMemo(() => {
     const groups: Array<{ label: string; stages: typeof pipelineStages }> = [];
@@ -1587,9 +1599,9 @@ export const DecisionMapSheet = React.memo(() => {
                     className="h-full overflow-hidden relative"
                   >
                     <ParagraphSpaceView
-                      graph={(resolvedPipelineArtifacts as any)?.substrate?.graph}
+                      graph={mappingArtifact?.geometry?.substrate || null}
                       paragraphProjection={(resolvedPipelineArtifacts as any)?.paragraphProjection}
-                      claims={(artifactForStructure as any)?.claims}
+                      claims={semanticClaims as any}
                       shadowStatements={(resolvedPipelineArtifacts as any)?.shadow?.extraction?.statements}
                     />
                   </m.div>
@@ -1692,10 +1704,10 @@ export const DecisionMapSheet = React.memo(() => {
                           analysis={structuralAnalysis}
                           semanticMapperPrompt={semanticMapperPrompt}
                           rawMappingText={rawMappingText}
-                          completeness={(aiTurn as any)?.mapperArtifact?.completeness || (parsedMapping as any)?.artifact?.completeness || null}
+                          completeness={(parsedMapping as any)?.artifact?.completeness || null}
                           enrichmentResult={(resolvedPipelineArtifacts as any)?.enrichmentResult || null}
-                          traversalGraph={(aiTurn as any)?.mapperArtifact?.traversalGraph || (parsedMapping as any)?.artifact?.traversalGraph || null}
-                          forcingPoints={(aiTurn as any)?.mapperArtifact?.forcingPoints || (parsedMapping as any)?.artifact?.forcingPoints || null}
+                          traversalGraph={mappingArtifact?.traversal?.graph || (parsedMapping as any)?.artifact?.traversalGraph || null}
+                          forcingPoints={mappingArtifact?.traversal?.forcingPoints || (parsedMapping as any)?.artifact?.forcingPoints || null}
                         />
                       </Suspense>
                     )}

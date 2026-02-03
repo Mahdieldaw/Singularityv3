@@ -20,8 +20,9 @@ import { PRIMARY_STREAMING_PROVIDER_IDS } from "../../constants";
 import type {
   ProviderKey,
   PrimitiveWorkflowRequest,
+  ProviderResponse,
 } from "../../../shared/contract";
-import type { TurnMessage, AiTurn, ProviderResponse } from "../../types";
+import type { TurnMessage, AiTurnWithUI } from "../../types";
 
 export function useRoundActions() {
   const turnsMap = useAtomValue(turnsMapAtom);
@@ -60,7 +61,7 @@ export function useRoundActions() {
     async (aiTurnId: string, providerIdOverride?: string) => {
       if (!currentSessionId) return;
 
-      const ai = turnsMap.get(aiTurnId) as AiTurn | undefined;
+      const ai = turnsMap.get(aiTurnId) as AiTurnWithUI | undefined;
       if (!ai || ai.type !== "ai") {
         console.warn(`[RoundActions] AI turn ${aiTurnId} not found`);
         return;
@@ -79,13 +80,18 @@ export function useRoundActions() {
                 status: response?.status || "completed",
                 createdAt: ai.createdAt ?? Date.now(),
                 updatedAt: ai.createdAt ?? Date.now(),
-                meta: response?.meta ? { ...response.meta, modelIndex: response.modelIndex } : { modelIndex: response?.modelIndex },
+                meta: response?.meta
+                  ? {
+                    ...response.meta,
+                    ...(response.modelIndex !== undefined ? { modelIndex: response.modelIndex } : {}),
+                  }
+                  : (response?.modelIndex !== undefined ? { modelIndex: response.modelIndex } : {}),
               }],
             ]),
           )
           : {});
 
-      const outputsFromBatch = Object.values(batchResponses || {})
+      const outputsFromBatch = Object.values(batchResponses)
         .flat()
         .filter(
           (response: ProviderResponse) => response.status === "completed" && response.text?.trim(),
@@ -137,7 +143,7 @@ export function useRoundActions() {
       setTurnsMap((draft: Map<string, TurnMessage>) => {
         const existing = draft.get(ai.id);
         if (!existing || existing.type !== "ai") return;
-        const aiTurn = existing as AiTurn;
+        const aiTurn = existing as AiTurnWithUI;
         const prev = aiTurn.mappingResponses || {};
         const next: Record<string, ProviderResponse[]> = { ...prev };
 
@@ -196,7 +202,7 @@ export function useRoundActions() {
 
         // Revert optimistic state to error
         setTurnsMap((draft) => {
-          const turn = draft.get(ai.id) as AiTurn | undefined;
+          const turn = draft.get(ai.id) as AiTurnWithUI | undefined;
           if (!turn || turn.type !== "ai" || !turn.mappingResponses) return;
           const arr = turn.mappingResponses[effectiveMappingProvider];
           if (Array.isArray(arr) && arr.length > 0) {
@@ -234,7 +240,7 @@ export function useRoundActions() {
     async (aiTurnId: string, providerIdOverride?: string) => {
       if (!currentSessionId) return;
 
-      const ai = turnsMap.get(aiTurnId) as AiTurn | undefined;
+      const ai = turnsMap.get(aiTurnId) as AiTurnWithUI | undefined;
       if (!ai || ai.type !== "ai") {
         console.warn(`[RoundActions] AI turn ${aiTurnId} not found`);
         return;
@@ -246,7 +252,7 @@ export function useRoundActions() {
       setTurnsMap((draft: Map<string, TurnMessage>) => {
         const existing = draft.get(ai.id);
         if (!existing || existing.type !== "ai") return;
-        const aiTurn = existing as AiTurn;
+        const aiTurn = existing as AiTurnWithUI;
 
         const prev = aiTurn.singularityResponses || {};
         const next: Record<string, ProviderResponse[]> = { ...prev };
@@ -293,7 +299,7 @@ export function useRoundActions() {
         setAlertText("Singularity request failed. Please try again.");
 
         setTurnsMap((draft) => {
-          const turn = draft.get(ai.id) as AiTurn | undefined;
+          const turn = draft.get(ai.id) as AiTurnWithUI | undefined;
           if (!turn || turn.type !== "ai" || !turn.singularityResponses) return;
           const arr = turn.singularityResponses[effectiveProviderId];
           if (Array.isArray(arr) && arr.length > 0) {

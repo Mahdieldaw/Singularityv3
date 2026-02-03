@@ -34,12 +34,24 @@ export async function buildChewedSubstrate(input: SkeletonizationInput): Promise
   return reconstructSubstrate(normalizedInput, triageResult, embeddingTimeMs);
 }
 
-export function getSourceData(turn: AiTurn | null | undefined, pipelineArtifacts: any): SkeletonizationInput['sourceData'] {
+interface PipelineArtifacts {
+  sourceData?: SkeletonizationInput['sourceData'];
+}
+
+interface BatchResponse {
+  modelIndex?: number;
+  text?: string;
+}
+
+export function getSourceData(
+  turn: AiTurn | null | undefined,
+  pipelineArtifacts: PipelineArtifacts | null | undefined
+): SkeletonizationInput['sourceData'] {
   if (turn?.batch?.responses) {
-    return Object.entries(turn.batch.responses).map(([providerId, response]) => ({
+    return Object.entries(turn.batch.responses as Record<string, BatchResponse>).map(([providerId, response]) => ({
       providerId,
       modelIndex: typeof response?.modelIndex === 'number' ? response.modelIndex : 0,
-      text: response?.text || '',
+      text: response?.text ?? '',
     }));
   }
   return pipelineArtifacts?.sourceData || [];

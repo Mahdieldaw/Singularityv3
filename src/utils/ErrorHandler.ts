@@ -656,13 +656,6 @@ export class ErrorHandler {
         },
       },
 
-      NETWORK_ERROR: {
-        name: "Network Recovery",
-        execute: async (error, _context) => {
-          throw error;
-        },
-      },
-
       TIMEOUT: {
         name: "Timeout Recovery",
         execute: async (_error, context) => {

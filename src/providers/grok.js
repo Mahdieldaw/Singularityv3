@@ -9,12 +9,12 @@
  */
 
 import { generateKeys, signChallenge, bytesToHex, hexToBytes } from './grok-crypto.js';
-import { 
-  generateSign, 
-  between, 
-  parseVerificationToken, 
-  parseSvgData, 
-  parseXValues 
+import {
+  generateSign,
+  between,
+  parseVerificationToken,
+  parseSvgData,
+  parseXValues
 } from './grok-signature.js';
 import { ProviderDNRGate } from "../core/dnr-utils.js";
 
@@ -26,9 +26,9 @@ export const GrokModels = {
   'grok-3-auto': { modelMode: 'MODEL_MODE_AUTO', mode: 'auto' },
   'grok-3-fast': { modelMode: 'MODEL_MODE_FAST', mode: 'fast' },
   'grok-4': { modelMode: 'MODEL_MODE_EXPERT', mode: 'expert' },
-  'grok-4-mini-thinking-tahoe': { 
-    modelMode: 'MODEL_MODE_GROK_4_MINI_THINKING', 
-    mode: 'grok-4-mini-thinking' 
+  'grok-4-mini-thinking-tahoe': {
+    modelMode: 'MODEL_MODE_GROK_4_MINI_THINKING',
+    mode: 'grok-4-mini-thinking'
   },
 };
 
@@ -156,7 +156,7 @@ export class GrokSessionApi {
     this.model = model;
     this.modelMode = GrokModels[model]?.modelMode || 'MODEL_MODE_AUTO';
     this.mode = GrokModels[model]?.mode || 'auto';
-    
+
     // Session state
     this._keys = null;
     this._cRun = 0;
@@ -173,7 +173,7 @@ export class GrokSessionApi {
     this._svgData = '';
     this._numbers = [];
     this._xsidCacheTime = 0;
-    
+
     this._debug = false;
   }
 
@@ -191,9 +191,9 @@ export class GrokSessionApi {
    * @param {Function} onChunk - Streaming callback
    * @returns {Promise<Object>} Response with text, stream_response, images, extra_data
    */
-  async ask(message, options = /** @type {{ signal?: AbortSignal; extraData?: any }} */ ({}), onChunk = () => {}) {
+  async ask(message, options = /** @type {{ signal?: AbortSignal; extraData?: any }} */ ({}), onChunk = () => { }) {
     const { signal, extraData } = options;
-    
+
     try {
       try {
         await ProviderDNRGate.ensureProviderDnrPrereqs("grok");
@@ -287,10 +287,10 @@ export class GrokSessionApi {
 
     // Build conversation request
     const headers = this._buildConversationHeaders(xsid);
-    const body = extraData 
+    const body = extraData
       ? this._buildContinuationBody(message, extraData)
       : this._buildNewConversationBody(message);
-    
+
     const endpoint = extraData
       ? `https://grok.com/rest/app-chat/conversations/${extraData.conversationId}/responses`
       : 'https://grok.com/rest/app-chat/conversations/new';
@@ -696,22 +696,27 @@ export class GrokSessionApi {
       return numbers;
     };
 
+    const stale = XSID_CACHE.has(scriptUrl) ? validate(XSID_CACHE.get(scriptUrl)) : null;
+
     // Check cache
-    if (XSID_CACHE.has(scriptUrl) && (!hasCacheTime || cacheAge <= 3600 * 1000)) {
-      const cached = validate(XSID_CACHE.get(scriptUrl));
+    if (stale && (!hasCacheTime || cacheAge <= 3600 * 1000)) {
       if (!hasCacheTime) this._xsidCacheTime = Date.now();
-      return cached;
+      return stale;
     }
-    if (XSID_CACHE.has(scriptUrl) && cacheAge > 3600 * 1000) {
+    if (stale && cacheAge > 3600 * 1000) {
       console.warn('[GrokSession] cache stale, re-fetching', { cacheAgeMs: cacheAge, scriptUrl });
     }
 
     try {
       const res = await this.fetch(scriptUrl, { credentials: 'include' });
+      if (!res.ok) {
+        this._log('xsid script fetch returned', res.status);
+        return stale || [0, 0, 0, 0];
+      }
       const content = await res.text();
       const numbers = validate(parseXValues(content));
       this._xsidCacheTime = Date.now();
-      
+
       // Don't mutate the const Map, just return
       return numbers;
     } catch (e) {
@@ -719,7 +724,7 @@ export class GrokSessionApi {
         throw e;
       }
       this._log('xsid script fetch failed:', e);
-      return [0, 0, 0, 0];
+      return stale || [0, 0, 0, 0];
     }
   }
 

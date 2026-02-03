@@ -1156,6 +1156,9 @@ export function parseSemanticMapperOutput(
     }
 
     const claims = Array.isArray((parsedMap as any).claims) ? (parsedMap as any).claims : null;
+    const determinants = Array.isArray((parsedMap as any).determinants)
+        ? (parsedMap as any).determinants
+        : null;
     const edges = Array.isArray((parsedMap as any).edges) ? (parsedMap as any).edges : null;
     const conditionals = Array.isArray((parsedMap as any).conditionals)
         ? (parsedMap as any).conditionals
@@ -1165,9 +1168,8 @@ export function parseSemanticMapperOutput(
         errors.push({ field: 'claims', issue: 'Missing or invalid claims array' });
         return { success: false, errors };
     }
-    if (!edges) {
-        errors.push({ field: 'edges', issue: 'Missing or invalid edges array' });
-        return { success: false, errors };
+    if (!determinants && !edges) {
+        warnings.push('No determinants or edges present; proceeding with empty relationships');
     }
 
     const narrativeFromMap = typeof (parsedMap as any).narrative === 'string' ? String((parsedMap as any).narrative) : '';
@@ -1198,49 +1200,142 @@ export function parseSemanticMapperOutput(
 
         const supporters = (c as any).supporters;
         if (!Array.isArray(supporters) || supporters.some((s: any) => typeof s !== 'number')) {
-            errors.push({ field: `${ctx}.supporters`, issue: 'supporters must be number[]' });
+            (c as any).supporters = [];
+            warnings.push(`${ctx}.supporters is invalid; defaulting to []`);
         }
     }
 
-    for (let i = 0; i < edges.length; i++) {
-        const e = edges[i];
-        const ctx = `edges[${i}]`;
+    let finalEdges = edges || [];
+    let finalConditionals = conditionals || [];
 
+    if (determinants) {
+        const derivedEdges: any[] = [];
+        const derivedConditionals: any[] = [];
+
+        for (let i = 0; i < determinants.length; i++) {
+            const d = determinants[i];
+            const ctx = `determinants[${i}]`;
+
+            if (!d || typeof d !== 'object') {
+                errors.push({ field: ctx, issue: 'Determinant must be an object' });
+                continue;
+            }
+
+            const type = String((d as any).type || '').trim();
+            const trigger = String((d as any).trigger || '').trim();
+            const rawClaims = Array.isArray((d as any).claims) ? (d as any).claims : [];
+            const claimIds = rawClaims.map((c: any) => String(c || '').trim()).filter(Boolean);
+
+            if (type !== 'intrinsic' && type !== 'extrinsic') {
+                warnings.push(`${ctx}.type is invalid; skipping`);
+                continue;
+            }
+            if (!trigger) {
+                warnings.push(`${ctx}.trigger is empty; skipping`);
+                continue;
+            }
+            if (claimIds.length === 0) {
+                warnings.push(`${ctx}.claims is empty; skipping`);
+                continue;
+            }
+
+            if (type === 'intrinsic') {
+                if (claimIds.length < 2) {
+                    warnings.push(`${ctx}.claims has <2 items; no conflict edges derived`);
+                    continue;
+                }
+                for (let a = 0; a < claimIds.length; a++) {
+                    for (let b = a + 1; b < claimIds.length; b++) {
+                        derivedEdges.push({
+                            from: claimIds[a],
+                            to: claimIds[b],
+                            type: 'conflict',
+                            question: trigger,
+                        });
+                    }
+                }
+            }
+
+            if (type === 'extrinsic') {
+                const id = String((d as any).id || `det_ext_${i + 1}`).trim();
+                derivedConditionals.push({
+                    id,
+                    question: trigger,
+                    affectedClaims: claimIds,
+                });
+            }
+        }
+
+        finalEdges = [...finalEdges, ...derivedEdges];
+        finalConditionals = [...finalConditionals, ...derivedConditionals];
+    }
+
+    const sanitizedEdges: any[] = [];
+    for (let i = 0; i < finalEdges.length; i++) {
+        const e = finalEdges[i];
+        const ctx = `edges[${i}]`;
         if (!e || typeof e !== 'object') {
-            errors.push({ field: ctx, issue: 'Edge must be an object' });
+            warnings.push(`${ctx} is not an object; dropped`);
             continue;
         }
 
         const from = String((e as any).from || '').trim();
         const to = String((e as any).to || '').trim();
         const type = String((e as any).type || '').trim();
+        const q = typeof (e as any).question === 'string' ? String((e as any).question).trim() : '';
 
-        if (!from) errors.push({ field: `${ctx}.from`, issue: 'Missing from' });
-        if (!to) errors.push({ field: `${ctx}.to`, issue: 'Missing to' });
-        if (type !== 'prerequisite' && type !== 'conflict') {
-            errors.push({ field: `${ctx}.type`, issue: 'type must be "prerequisite" or "conflict"' });
+        if (!from || !to) {
+            warnings.push(`${ctx} missing from/to; dropped`);
+            continue;
         }
+
+        if (type === 'prerequisite') {
+            sanitizedEdges.push({ from, to, type: 'prerequisite' });
+            continue;
+        }
+
+        if (type === 'conflict' || type === 'conflicts') {
+            sanitizedEdges.push({ from, to, type: 'conflict', ...(q ? { question: q } : { question: null }) });
+            continue;
+        }
+
+        if (type === 'tradeoff') {
+            sanitizedEdges.push({ from, to, type: 'conflict', question: null });
+            continue;
+        }
+
+        if (type === 'supports') {
+            warnings.push(`${ctx}.type is "supports"; dropped (supports are derived later)`);
+            continue;
+        }
+
+        warnings.push(`${ctx}.type is unsupported ("${type}"); dropped`);
     }
+    finalEdges = sanitizedEdges;
 
-    for (let i = 0; i < conditionals.length; i++) {
-        const c = conditionals[i];
+    const sanitizedConditionals: any[] = [];
+    for (let i = 0; i < finalConditionals.length; i++) {
+        const c = finalConditionals[i];
         const ctx = `conditionals[${i}]`;
-
         if (!c || typeof c !== 'object') {
-            errors.push({ field: ctx, issue: 'Conditional must be an object' });
+            warnings.push(`${ctx} is not an object; dropped`);
             continue;
         }
 
         const id = String((c as any).id || '').trim();
         const question = String((c as any).question || '').trim();
-        const affectedClaims = (c as any).affectedClaims;
+        const affectedClaims = Array.isArray((c as any).affectedClaims)
+            ? (c as any).affectedClaims.map((x: any) => String(x || '').trim()).filter(Boolean)
+            : [];
 
-        if (!id) errors.push({ field: `${ctx}.id`, issue: 'Missing id' });
-        if (!question) errors.push({ field: `${ctx}.question`, issue: 'Missing question' });
-        if (!Array.isArray(affectedClaims) || affectedClaims.some((x: any) => typeof x !== 'string' || x.trim().length === 0)) {
-            errors.push({ field: `${ctx}.affectedClaims`, issue: 'affectedClaims must be string[]' });
+        if (!id || !question || affectedClaims.length === 0) {
+            warnings.push(`${ctx} is missing id/question/affectedClaims; dropped`);
+            continue;
         }
+
+        sanitizedConditionals.push({ id, question, affectedClaims });
     }
+    finalConditionals = sanitizedConditionals;
 
     if (errors.length === 0) {
         for (const id of claimIds) {
@@ -1263,8 +1358,9 @@ export function parseSemanticMapperOutput(
         success: true,
         output: {
             claims,
-            edges,
-            conditionals,
+            ...(determinants ? { determinants } : {}),
+            edges: finalEdges,
+            conditionals: finalConditionals,
         },
         narrative,
         warnings: warnings.length > 0 ? warnings : undefined,

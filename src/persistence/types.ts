@@ -82,17 +82,31 @@ export interface AiTurnRecord extends BaseTurnRecord {
     branchPointTurnId?: string;
     replacesId?: string;
     isHistoricalRerun?: boolean;
-  };
-  batchResponseCount: number;
-  mappingResponseCount: number;
-  singularityResponseCount: number;
-  providerContexts?: Record<string, any>;
-  mapperArtifact?: any;
-  pipelineArtifacts?: any;
-  singularityOutput?: any;
-  storedAnalysis?: any;
+  } | object | string;
+
+  // Serialized phase data (stored as JSON blobs)
+  batch?: object | string;
+  mapping?: object | string;
+  singularity?: object | string;
+
+  // Legacy serialized data (will be removed after migration)
+  mapperArtifact?: object | string;
+  pipelineArtifacts?: object | string;
+  singularityOutput?: object | string;
+  storedAnalysis?: object | string;
+
+  // Storage metadata
   lastContextSummary?: string;
   pipelineStatus?: string;
+
+  // Denormalized counts (OPTIONAL - for query optimization only)
+  batchResponseCount?: number;
+  mappingResponseCount?: number;
+  singularityResponseCount?: number;
+
+  // Foreign keys (NOT embedded objects)
+  providerResponseIds?: string[];
+  providerContextIds?: string[];
 }
 
 export type TurnRecord = UserTurnRecord | AiTurnRecord;

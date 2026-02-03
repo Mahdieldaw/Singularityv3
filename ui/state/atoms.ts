@@ -6,12 +6,11 @@ import { atomWithStorage, atomFamily } from "jotai/utils";
 // Import UI types and constants
 import type {
   TurnMessage,
-  AiTurn,
-  ProviderResponse,
   UiPhase,
   AppStep,
   HistorySessionSummary,
 } from "../types";
+import type { AiTurn, ProviderResponse } from "../../shared/contract";
 
 const getBatchResponses = (aiTurn: AiTurn): Record<string, ProviderResponse[]> => {
   const phaseResponses = aiTurn.batch?.responses;
@@ -22,7 +21,7 @@ const getBatchResponses = (aiTurn: AiTurn): Record<string, ProviderResponse[]> =
         providerId,
         [
           {
-            providerId: providerId as any,
+            providerId,
             text: response?.text || "",
             status: response?.status || "completed",
             createdAt,
@@ -33,7 +32,24 @@ const getBatchResponses = (aiTurn: AiTurn): Record<string, ProviderResponse[]> =
       ]),
     );
   }
-  if (aiTurn.batchResponses && Object.keys(aiTurn.batchResponses).length > 0) return aiTurn.batchResponses;
+  if (aiTurn.batchResponses && Object.keys(aiTurn.batchResponses).length > 0) {
+    const createdAt = aiTurn.createdAt ?? 0;
+    return Object.fromEntries(
+      Object.entries(aiTurn.batchResponses).map(([providerId, data]) => {
+        const arr = Array.isArray(data) ? data : [data];
+        return [
+          providerId,
+          arr.map((item) => ({
+            ...item,
+            providerId,
+            createdAt: item?.createdAt ?? createdAt,
+            updatedAt: item?.updatedAt ?? item?.createdAt ?? createdAt,
+            meta: item?.meta ? { ...item.meta, modelIndex: item?.meta?.modelIndex ?? (item as any)?.modelIndex } : { modelIndex: (item as any)?.modelIndex },
+          } as ProviderResponse)),
+        ];
+      }),
+    );
+  }
   return {};
 };
 
@@ -97,7 +113,8 @@ export const providerResponseArrayFamily = atomFamily(
 
       const aiTurn = turn as AiTurn;
 
-      const responses = getBatchResponses(aiTurn)?.[providerId];
+      const responses = getBatchResponses(aiTurn)[providerId];
+
 
       // Always return array, normalize if needed
       if (!responses) return [];
@@ -545,4 +562,4 @@ export const hasAutoOpenedPaneAtom = atom<string | null>(null);
 
 
 
- 
+

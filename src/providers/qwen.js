@@ -224,7 +224,11 @@ export class QwenSessionApi {
         break; // Success or non-500 error
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
-        if (msg.includes("Failed to fetch") && retryCount < MAX_RETRIES - 1) {
+        const isNetworkError = (e instanceof TypeError) ||
+          msg.includes("Failed to fetch") ||
+          msg.includes("NetworkError") ||
+          msg.includes("Network request failed");
+        if (isNetworkError && retryCount < MAX_RETRIES - 1) {
           retryCount++;
           const delay = 500 * Math.pow(2, retryCount);
           console.warn(`[QwenProvider] Network error, retrying (${retryCount}/${MAX_RETRIES}) in ${delay}ms...`);

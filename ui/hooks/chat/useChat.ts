@@ -24,6 +24,9 @@ import {
 import type {
   ProviderKey,
   PrimitiveWorkflowRequest,
+  UserTurn,
+  AiTurn,
+  ProviderResponse,
 } from "../../../shared/contract";
 import { DEFAULT_THREAD } from "../../../shared/messaging";
 import { LLM_PROVIDERS_CONFIG } from "../../constants";
@@ -33,9 +36,6 @@ import type {
   HistorySessionSummary,
   FullSessionPayload,
   TurnMessage,
-  UserTurn,
-  AiTurn,
-  ProviderResponse,
 } from "../../types";
 
 export function useChat() {
@@ -86,6 +86,7 @@ export function useChat() {
         text: prompt,
         createdAt: ts,
         sessionId: currentSessionId || null,
+        threadId: DEFAULT_THREAD,
       };
 
       // Write user turn to Map + IDs
@@ -256,6 +257,7 @@ export function useChat() {
               text: round.user.text,
               createdAt: round.user.createdAt || round.createdAt || Date.now(),
               sessionId: fullSession.sessionId,
+              threadId: DEFAULT_THREAD,
             };
             newIds.push(userTurn.id);
             newMap.set(userTurn.id, userTurn);
@@ -276,30 +278,49 @@ export function useChat() {
             typeof round.pipelineStatus === "string";
 
           if (hasAnyResponseData || hasAnyCognitiveData) {
-            // Transform providers object to batchResponses (arrays per provider)
+            const normalizeProviderResponse = (
+              resp: any,
+              providerId: string,
+            ): ProviderResponse => {
+              const createdAt =
+                typeof resp?.createdAt === "number"
+                  ? resp.createdAt
+                  : round.completedAt || round.createdAt || Date.now();
+              const updatedAt =
+                typeof resp?.updatedAt === "number" ? resp.updatedAt : createdAt;
+              return {
+                providerId: (resp?.providerId as ProviderKey) || (providerId as ProviderKey),
+                text: typeof resp?.text === "string" ? resp.text : "",
+                status: resp?.status || "completed",
+                createdAt,
+                updatedAt,
+                meta: resp?.meta || {},
+                ...(resp?.artifacts ? { artifacts: resp.artifacts } : {}),
+              } as ProviderResponse;
+            };
+
+            const normalizeProviderResponses = (
+              data: any,
+              providerId: string,
+            ): ProviderResponse[] => {
+              if (Array.isArray(data)) {
+                return data.map((resp) =>
+                  normalizeProviderResponse(resp ?? {}, providerId),
+                );
+              }
+              return [normalizeProviderResponse(data ?? {}, providerId)];
+            };
+
             const batchResponses: Record<string, ProviderResponse[]> | undefined =
               Object.keys(providers).length > 0
-                ? Object.fromEntries(
+                ? (Object.fromEntries(
                   Object.entries(providers).map(
-                    ([providerId, data]: [string, any]) => {
-                      const arr: ProviderResponse[] = Array.isArray(data)
-                        ? (data as ProviderResponse[])
-                        : [
-                          {
-                            providerId: providerId as ProviderKey,
-                            text: (data?.text as string) || "",
-                            status: "completed",
-                            createdAt:
-                              round.completedAt || round.createdAt || Date.now(),
-                            updatedAt:
-                              round.completedAt || round.createdAt || Date.now(),
-                            meta: data?.meta || {},
-                          },
-                        ];
-                      return [providerId, arr];
-                    },
+                    ([providerId, data]): [string, ProviderResponse[]] => [
+                      providerId,
+                      normalizeProviderResponses(data, providerId),
+                    ],
                   ),
-                )
+                ) as Record<string, ProviderResponse[]>)
                 : undefined;
 
             // Normalize mapping/other responses to arrays

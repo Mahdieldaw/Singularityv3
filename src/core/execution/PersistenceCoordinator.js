@@ -9,21 +9,19 @@ export class PersistenceCoordinator {
    * without blocking the workflow's resolution path.
    */
   persistProviderContextsAsync(sessionId, updates, contextRole = null) {
-    try {
-      // Defer to next tick to ensure prompt/mapping resolution proceeds immediately
-      setTimeout(async () => {
-        try {
-          await this.sessionManager.updateProviderContextsBatch(
-            sessionId,
-            updates,
-            { contextRole },
-          );
-          await this.sessionManager.saveSession(sessionId);
-        } catch (e) {
-          console.warn("[PersistenceCoordinator] Deferred persistence failed:", e);
-        }
-      }, 0);
-    } catch (_) { }
+    // Defer to next tick to ensure prompt/mapping resolution proceeds immediately
+    setTimeout(async () => {
+      try {
+        await this.sessionManager.updateProviderContextsBatch(
+          sessionId,
+          updates,
+          { contextRole },
+        );
+        await this.sessionManager.saveSession(sessionId);
+      } catch (e) {
+        console.warn("[PersistenceCoordinator] Deferred persistence failed:", e);
+      }
+    }, 0);
   }
 
   buildPersistenceResultFromStepResults(steps, stepResults) {
@@ -80,7 +78,7 @@ export class PersistenceCoordinator {
         const errorText = value.error || "Unknown error";
         if (step.type === "prompt" || step.type === "batch") {
           const providers = step?.payload?.providers || [];
-          (providers || []).forEach((providerId) => {
+          providers.forEach((providerId) => {
             out.batchOutputs[providerId] = {
               text: "",
               status: "error",

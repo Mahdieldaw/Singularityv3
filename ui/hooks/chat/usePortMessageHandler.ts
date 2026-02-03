@@ -25,12 +25,13 @@ import {
 import { activeRecomputeStateAtom, lastStreamingProviderAtom } from "../../state/atoms";
 import { StreamingBuffer } from "../../utils/streamingBuffer";
 import {
-  applyStreamingUpdates,
+  applyStreamingTurnUpdate,
   createOptimisticAiTurn,
 } from "../../utils/turn-helpers";
 import { normalizeProviderId } from "../../utils/provider-id-mapper";
 import api from "../../services/extension-api";
-import type { TurnMessage, UserTurn, AiTurn, ProviderKey } from "../../types";
+import type { TurnMessage, UserTurn, AiTurnWithUI } from "../../types";
+import type { ProviderKey } from "../../../shared/contract";
 import { LLM_PROVIDERS_CONFIG } from "../../constants";
 import { DEFAULT_THREAD } from "../../../shared/messaging";
 
@@ -212,8 +213,6 @@ export function usePortMessageHandler(enabled: boolean = true) {
               aiTurnId,
               ensuredUser,
               activeProviders,
-              !!mappingEnabled && !!effectiveMappingProvider,
-              false, // singularity not auto-triggered on creation usually
               effectiveMappingProvider || undefined,
               undefined,
               Date.now(),
@@ -254,6 +253,15 @@ export function usePortMessageHandler(enabled: boolean = true) {
             sessionId: msgSessionId,
           } = message;
 
+          console.log('🚨 TURN_FINALIZED received in UI:', {
+            aiTurnId: turn?.ai?.id,
+            hasBatch: !!turn?.ai?.batch,
+            hasMapping: !!turn?.ai?.mapping,
+            hasSingularity: !!turn?.ai?.singularity,
+            mappingArtifactClaims: turn?.ai?.mapping?.artifact?.semantic?.claims?.length,
+            hasMapperArtifact: !!(turn?.ai as any)?.mapperArtifact,
+          });
+
           // Adopt sessionId on finalization to ensure coherence
           if (msgSessionId) {
             if (
@@ -272,13 +280,13 @@ export function usePortMessageHandler(enabled: boolean = true) {
             hasAiData: !!turn?.ai,
             aiHasUserTurnId: !!turn?.ai?.userTurnId,
           });
-          console.log('🔬 TURN_FINALIZED payload:', {
-            hasBatch: !!turn?.ai?.batch,
-            hasMapping: !!turn?.ai?.mapping,
-            hasSingularity: !!turn?.ai?.singularity,
-            legacyBatch: !!turn?.ai?.batchResponses,
-            legacyMapping: !!turn?.ai?.mapperArtifact,
-          });
+          if (PORT_DEBUG_UI) {
+            console.log("🔬 TURN_FINALIZED payload:", {
+              hasBatch: !!turn?.ai?.batch,
+              hasMapping: !!turn?.ai?.mapping,
+              hasSingularity: !!turn?.ai?.singularity,
+            });
+          }
 
           // Flush any pending streaming data first
           streamingBufferRef.current?.flushImmediate?.();
@@ -297,49 +305,54 @@ export function usePortMessageHandler(enabled: boolean = true) {
             }
 
             if (turn?.ai) {
-              const existingAi = draft.get(aiTurnId) as AiTurn | undefined;
+              const existingAi = draft.get(aiTurnId) as AiTurnWithUI | undefined;
+              const incoming = turn.ai as any;
+
+              console.log('🚨 TURN_FINALIZED OVERWRITE CHECK:', {
+                existingBatch: !!(existingAi as any)?.batch,
+                existingBatchProviders: Object.keys((existingAi as any)?.batch?.responses || {}),
+                incomingBatch: !!incoming?.batch,
+                incomingBatchProviders: Object.keys(incoming?.batch?.responses || {}),
+              });
+
+              const normalizedBatch = incoming?.batch?.responses
+                ? Object.fromEntries(
+                  Object.entries(incoming.batch.responses).map(([pid, val]: [string, any]) => [
+                    pid,
+                    {
+                      text: val?.text || "",
+                      modelIndex: val?.modelIndex ?? val?.meta?.modelIndex ?? 0,
+                      status: val?.status || "completed",
+                      meta: val?.meta,
+                    },
+                  ]),
+                )
+                : undefined;
+              const hasBatch = normalizedBatch && Object.keys(normalizedBatch).length > 0;
               if (!existingAi) {
                 // Fallback: if the AI turn wasn't created (should be rare), add it directly
-                // Normalize batchResponses to arrays if needed
-                const incoming = turn.ai as any;
-                const normalizedBatch = incoming?.batchResponses
-                  ? Object.fromEntries(
-                    Object.entries(incoming.batchResponses).map(([pid, val]: [string, any]) => [
-                      pid,
-                      Array.isArray(val) ? (val as any[]) : [val],
-                    ]),
-                  )
-                  : (incoming?.batch?.responses
-                    ? Object.fromEntries(
-                      Object.entries(incoming.batch.responses).map(([pid, val]: [string, any]) => [
-                        pid,
-                        [{
-                          providerId: pid,
-                          text: val?.text || "",
-                          status: val?.status || "completed",
-                          createdAt: incoming?.createdAt || Date.now(),
-                          updatedAt: incoming?.createdAt || Date.now(),
-                          meta: val?.meta ? { ...val.meta, modelIndex: val.modelIndex } : { modelIndex: val?.modelIndex },
-                        }],
-                      ]),
-                    )
-                    : undefined);
-                const hasBatch = normalizedBatch && Object.keys(normalizedBatch).length > 0;
-                draft.set(aiTurnId, { ...(turn.ai as AiTurn), ...(hasBatch ? { batchResponses: normalizedBatch } : {}) } as AiTurn);
+                draft.set(aiTurnId, {
+                  ...(turn.ai as AiTurnWithUI),
+                  ...(hasBatch ? { batch: { responses: normalizedBatch, timestamp: Date.now() } } : {}),
+                  ...(incoming?.mapping ? { mapping: incoming.mapping } : {}),
+                  ...(incoming?.singularity ? { singularity: incoming.singularity } : {}),
+                } as AiTurnWithUI);
               } else {
-                const mergedAi: AiTurn = {
+                const mergedAi: AiTurnWithUI = {
                   ...existingAi,
-                  ...(turn.ai as AiTurn),
+                  ...(turn.ai as AiTurnWithUI),
                   type: "ai",
                   userTurnId: turn.user?.id || existingAi.userTurnId,
                   meta: {
                     ...(existingAi.meta || {}),
-                    ...((turn.ai as AiTurn)?.meta || {}),
+                    ...((turn.ai as AiTurnWithUI)?.meta || {}),
                     isOptimistic: false,
                   },
-                  batch: (turn.ai as any)?.batch || existingAi.batch,
-                  mapping: (turn.ai as any)?.mapping || existingAi.mapping,
-                  singularity: (turn.ai as any)?.singularity || existingAi.singularity,
+                  batch: hasBatch
+                    ? { responses: normalizedBatch, timestamp: Date.now() }
+                    : existingAi.batch,
+                  mapping: incoming?.mapping || existingAi.mapping,
+                  singularity: incoming?.singularity || existingAi.singularity,
                 };
                 draft.set(aiTurnId, mergedAi);
               }
@@ -369,8 +382,10 @@ export function usePortMessageHandler(enabled: boolean = true) {
           // Finalization UI state updates
           setIsLoading(false);
           setUiPhase("awaiting_action");
-          // Clear active AI turn only after finalization (not in WORKFLOW_COMPLETE)
-          setActiveAiTurnId(null);
+          const isAwaitingTraversal =
+            String((turn as any)?.ai?.pipelineStatus || "") ===
+            "awaiting_traversal";
+          setActiveAiTurnId(isAwaitingTraversal ? aiTurnId : null);
           setLastActivityAt(Date.now());
 
           // Reset streaming UX state flags on finalization
@@ -450,10 +465,10 @@ export function usePortMessageHandler(enabled: boolean = true) {
               setTurnsMap((draft: Map<string, TurnMessage>) => {
                 const existing = draft.get(activeId);
                 if (!existing || existing.type !== "ai") return;
-                const aiTurn = existing as AiTurn;
+                const aiTurn = existing as AiTurnWithUI;
 
                 // Apply batched updates
-                applyStreamingUpdates(aiTurn, updates);
+                applyStreamingTurnUpdate(aiTurn, updates);
 
                 // CRITICAL: ensure the Map entry is observed as changed
                 draft.set(activeId, { ...aiTurn });
@@ -538,7 +553,7 @@ export function usePortMessageHandler(enabled: boolean = true) {
                 setTurnsMap((draft: Map<string, TurnMessage>) => {
                   const existing = draft.get(targetId);
                   if (!existing || existing.type !== "ai") return;
-                  const aiTurn = existing as AiTurn;
+                  const aiTurn = existing as AiTurnWithUI;
 
                   // Helper to safely update/append response
                   const updateResponseList = (
@@ -674,7 +689,7 @@ export function usePortMessageHandler(enabled: boolean = true) {
                   setTurnsMap((draft: Map<string, TurnMessage>) => {
                     const existing = draft.get(targetId);
                     if (!existing || existing.type !== "ai") return;
-                    const aiTurn = existing as AiTurn;
+                    const aiTurn = existing as AiTurnWithUI;
                     const errText =
                       typeof error === "string" ? error : result?.text || "";
                     const now = Date.now();
@@ -906,7 +921,7 @@ export function usePortMessageHandler(enabled: boolean = true) {
             const existing = draft.get(aiTurnId);
             if (!existing) {
               const now = Date.now();
-              const baseTurn: AiTurn = {
+              const baseTurn: AiTurnWithUI = {
                 type: "ai",
                 id: aiTurnId,
                 sessionId: msgSessionId ?? currentSessionId ?? null,
@@ -926,7 +941,7 @@ export function usePortMessageHandler(enabled: boolean = true) {
               return;
             }
             if (existing.type !== "ai") return;
-            const aiTurn = existing as AiTurn;
+            const aiTurn = existing as AiTurnWithUI;
 
             // Update with cognitive artifacts
             draft.set(aiTurnId, {

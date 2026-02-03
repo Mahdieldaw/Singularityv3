@@ -9,18 +9,18 @@ export function skeletonize(text: string): string {
   try {
     const doc = nlp(trimmed);
 
-    doc.match('#Verb').remove();
-    doc.match('#Adverb').remove();
-    doc.match('#Adjective').remove();
-    doc.match('#Conjunction').remove();
-    doc.match('#Preposition').remove();
-    doc.match('#Determiner').remove();
-    doc.match('#Pronoun').remove();
-    doc.match('#Modal').remove();
-    doc.match('#Auxiliary').remove();
-    doc.match('#Copula').remove();
-    doc.match('#Negative').remove();
-    doc.match('#QuestionWord').remove();
+    doc.remove('#Verb');
+    doc.remove('#Adverb');
+    doc.remove('#Adjective');
+    doc.remove('#Conjunction');
+    doc.remove('#Preposition');
+    doc.remove('#Determiner');
+    doc.remove('#Pronoun');
+    doc.remove('#Modal');
+    doc.remove('#Auxiliary');
+    doc.remove('#Copula');
+    doc.remove('#Negative');
+    doc.remove('#QuestionWord');
 
     let skeleton = doc.text('normal');
     skeleton = skeleton.replace(/\s+/g, ' ').trim();

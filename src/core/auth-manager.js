@@ -134,8 +134,7 @@ class AuthManager {
             }
         }));
 
-        status.grok = true;
-        console.log(`[AuthManager] grok: ${status.grok ? 'authenticated' : 'not authenticated'} (forced true; cookie check skipped)`);
+        // TODO(HTOS-2317): Grok cookie auth check disabled due to unstable cookie name; see https://github.com/HTOS/htos/issues/2317
 
         // Update cache and storage
         this._cookieStatus = status;
@@ -178,7 +177,7 @@ class AuthManager {
                     valid = await this._verifyQwen();
                     break;
                 case 'grok':
-                    valid = true;
+
                     break;
                 default:
                     // Unknown provider, fall back to cookie check
@@ -338,45 +337,7 @@ class AuthManager {
      * Success: 200 + HTML contains baggage + sentry-trace meta tags and Next.js chunks
      * Failure: 403 = blocked, or missing meta tags = site changed/broken
      */
-    async _verifyGrok() {
-        try {
-            const url = new URL('https://grok.com/c');
-            url.searchParams.set('__htos_verify', String(Date.now()));
 
-            const response = await fetch(url.toString(), {
-                method: 'GET',
-                credentials: 'include',
-                headers: {
-                    accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                },
-                cache: 'no-store',
-                signal: AbortSignal.timeout(5000),
-            });
-
-            console.log('[AuthManager] Grok verify HTTP status:', response.status);
-            if (!response.ok) {
-                return false;
-            }
-
-            const html = await response.text();
-            const hasBaggage = html.includes('<meta name="baggage" content="');
-            const hasSentryTrace = html.includes('<meta name="sentry-trace" content="');
-            const hasScripts = html.includes('/_next/static/chunks/');
-            const hasVerificationToken = html.includes('grok-site-verification');
-
-            console.log('[AuthManager] Grok verify signals:', {
-                hasBaggage,
-                hasSentryTrace,
-                hasScripts,
-                hasVerificationToken,
-            });
-            return hasBaggage && hasSentryTrace && hasScripts && hasVerificationToken;
-        } catch (e) {
-            const msg = e instanceof Error ? e.message : String(e);
-            console.warn('[AuthManager] Grok verification failed:', msg);
-            return false;
-        }
-    }
 
     /**
      * Real-time cookie change detection
