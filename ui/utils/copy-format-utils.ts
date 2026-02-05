@@ -281,13 +281,10 @@ export function formatSessionForMarkdown(fullSession: { title: string, turns: Tu
             let singularityProviderId = (aiTurn.meta as any)?.singularity || null;
 
             if (!singularityText) {
+                // If not found in simple output, check if it's an object (though usually handled above)
                 const val = (aiTurn as any)?.singularity?.output;
-                if (typeof val === 'string') {
-                    singularityText = val;
-                } else if (val && typeof val === 'object') {
+                if (val && typeof val === 'object') {
                     singularityText = val.text || val.content || JSON.stringify(val);
-                } else {
-                    singularityText = val !== null && val !== undefined ? String(val) : "";
                 }
             }
 

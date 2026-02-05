@@ -89,7 +89,7 @@ export class StreamingManager {
           `Divergence detected for ${providerId}: commonPrefix=${prefixLen}/${prev.length}`,
         );
         this.streamStates.set(key, { ...existingState, text: fullText });
-        return { text: fullText.slice(prefixLen), isReplace: false };
+        return { text: fullText, isReplace: true };
       }
     }
 

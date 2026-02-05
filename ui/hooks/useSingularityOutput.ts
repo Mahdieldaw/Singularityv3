@@ -48,19 +48,26 @@ export function useSingularityOutput(aiTurnId: string | null, forcedProviderId?:
 
         if (aiTurn.singularity?.output) {
             const providerId = pinnedProviderId || singularityProviderFromMeta;
+            // Handle leakage fields if they exist on the singularity object (checked as any or if interface supports it)
+            const singObj = aiTurn.singularity as any;
+
             const output: SingularityOutput = {
                 text: aiTurn.singularity.output,
                 providerId: providerId || 'singularity',
                 timestamp: aiTurn.singularity.timestamp || Date.now(),
-            } as any;
+                leakageDetected: singObj.leakageDetected || false,
+                leakageViolations: singObj.leakageViolations || [],
+            };
 
             return {
                 output,
-                isLoading: false,
-                isError: false,
+                // If we have output, we are generally not loading, unless a status field says so
+                isLoading: singObj.status === 'streaming' || singObj.status === 'pending',
+                isError: singObj.status === 'error',
                 providerId: providerId,
                 requestedProviderId: pinnedProviderId,
                 rawText: aiTurn.singularity.output,
+                error: singObj.error || null,
                 setPinnedProvider,
             };
         }

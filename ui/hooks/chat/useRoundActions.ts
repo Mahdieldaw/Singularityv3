@@ -156,6 +156,7 @@ export function useRoundActions() {
           if (!turn || turn.type !== "ai") return;
           turn.mapping = undefined;
           turn.mappingVersion = (turn.mappingVersion ?? 0) + 1;
+          draft.set(ai.id, { ...turn });
         });
 
         setIsLoading(false);
@@ -241,6 +242,7 @@ export function useRoundActions() {
             timestamp: Date.now(),
           };
           turn.singularityVersion = (turn.singularityVersion ?? 0) + 1;
+          draft.set(ai.id, turn);
         });
       } finally {
         setIsLoading(false);
