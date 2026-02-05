@@ -277,18 +277,25 @@ export function formatSessionForMarkdown(fullSession: { title: string, turns: Tu
             }
 
             // Extract Singularity Text
-            let singularityText = aiTurn.singularityOutput?.text || null;
-            let singularityProviderId = aiTurn.singularityOutput?.providerId;
+            let singularityText = aiTurn.singularity?.output || null;
+            let singularityProviderId = (aiTurn.meta as any)?.singularity || null;
 
             if (!singularityText) {
                 const val = (aiTurn as any)?.singularity?.output;
-                singularityText = val !== null && val !== undefined ? String(val) : "";
+                if (typeof val === 'string') {
+                    singularityText = val;
+                } else if (val && typeof val === 'object') {
+                    singularityText = val.text || val.content || JSON.stringify(val);
+                } else {
+                    singularityText = val !== null && val !== undefined ? String(val) : "";
+                }
             }
 
-            if (!singularityText && aiTurn.singularityResponses) {
-                const keys = Object.keys(aiTurn.singularityResponses);
+            const legacySingularityResponses = (aiTurn as any)?.singularityResponses;
+            if (!singularityText && legacySingularityResponses) {
+                const keys = Object.keys(legacySingularityResponses);
                 if (keys.length > 0) {
-                    const latest = aiTurn.singularityResponses[keys[keys.length - 1]];
+                    const latest = legacySingularityResponses[keys[keys.length - 1]];
                     const resp = Array.isArray(latest) ? latest[latest.length - 1] : latest;
                     singularityText = resp?.text || null;
                     singularityProviderId = keys[keys.length - 1];
@@ -297,7 +304,7 @@ export function formatSessionForMarkdown(fullSession: { title: string, turns: Tu
 
             // Decision Map
             const mapPid = (aiTurn.meta as any)?.mapper;
-            const mapResponses = aiTurn.mappingResponses || {};
+            const mapResponses = (aiTurn as any)?.mappingResponses || {};
             let targetMapPid = mapPid;
             if (!targetMapPid) {
                 targetMapPid = Object.keys(mapResponses).find(pid => {
@@ -336,8 +343,25 @@ export function formatSessionForMarkdown(fullSession: { title: string, turns: Tu
                 }
             }
             const normalizeBatchResponses = (aiTurn: AiTurn): Record<string, ProviderResponse[]> => {
-                if (aiTurn.batchResponses && Object.keys(aiTurn.batchResponses).length > 0) {
-                    return aiTurn.batchResponses;
+                const phaseResponses = aiTurn.batch?.responses;
+                if (phaseResponses && Object.keys(phaseResponses).length > 0) {
+                    const createdAt = (aiTurn as any).createdAt || Date.now();
+                    return Object.fromEntries(
+                        Object.entries(phaseResponses).map(([providerId, response]) => [
+                            providerId,
+                            [{
+                                providerId: providerId as any,
+                                text: (response as any)?.text || "",
+                                status: (response as any)?.status || "completed",
+                                createdAt,
+                                updatedAt: createdAt,
+                                meta: {
+                                    ...(response as any)?.meta,
+                                    modelIndex: (response as any)?.modelIndex,
+                                },
+                            }],
+                        ]),
+                    );
                 }
 
                 const legacyResponses = (aiTurn as any)?.batch?.responses;
@@ -361,7 +385,7 @@ export function formatSessionForMarkdown(fullSession: { title: string, turns: Tu
                 );
             };
             // Batch Responses (flatten to single latest)
-const batchResponses: Record<string, ProviderResponse> = {};
+            const batchResponses: Record<string, ProviderResponse> = {};
 
             const effectiveBatchResponses = normalizeBatchResponses(aiTurn);
             Object.entries(effectiveBatchResponses || {}).forEach(([pid, val]) => {
@@ -463,10 +487,24 @@ export function sanitizeSessionForExport(
         if (isAiTurn(turn)) {
             // 1. Extract Singularity Analysis
             let analysis: { providerId: string; output: any; type: string } | undefined;
-            if (turn.singularityOutput) {
+            const singularityProviderId = (() => {
+                const legacy = (turn as any)?.singularityOutput?.providerId;
+                if (legacy) return legacy;
+                const keys = Object.keys((turn as any)?.singularityResponses || {});
+                if (keys.length > 0) return keys[keys.length - 1];
+                return 'singularity';
+            })();
+
+            if ((turn as any)?.singularity?.output) {
                 analysis = {
-                    providerId: turn.singularityOutput.providerId,
-                    output: turn.singularityOutput,
+                    providerId: singularityProviderId,
+                    output: (turn as any).singularity,
+                    type: 'singularity'
+                };
+            } else if ((turn as any)?.singularityOutput) {
+                analysis = {
+                    providerId: (turn as any).singularityOutput?.['providerId'] || singularityProviderId,
+                    output: (turn as any).singularityOutput,
                     type: 'singularity'
                 };
             }
@@ -474,7 +512,7 @@ export function sanitizeSessionForExport(
             // 2. Extract Decision Map (Mapping)
             let decisionMap: SanitizedAiTurn['decisionMap'] | undefined;
             const mapPid = (turn.meta as any)?.mapper;
-            const mapResponses = turn.mappingResponses || {};
+            const mapResponses = (turn as any).mappingResponses || {};
 
             let targetMapPid = mapPid;
             if (!targetMapPid) {
@@ -500,7 +538,7 @@ export function sanitizeSessionForExport(
 
             // 3. Batch Outputs
             const councilMemberOutputs: SanitizedAiTurn['councilMemberOutputs'] = [];
-            const batchResponses = turn.batchResponses || {};
+            const batchResponses = (turn as any).batchResponses || {};
             Object.entries(batchResponses).forEach(([pid, val]) => {
                 const arr = Array.isArray(val) ? val : [val];
                 const latest = arr[arr.length - 1]; // ProviderResponse
@@ -589,4 +627,3 @@ export function sanitizeSessionForExport(
 
     return exportObj;
 }
-

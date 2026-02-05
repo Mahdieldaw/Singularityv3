@@ -14,8 +14,9 @@ interface TraversalGraphViewProps {
   conditionals?: any[];
   claims: Claim[];
   originalQuery: string;
-  sessionId: string;
   aiTurnId: string;
+  completedTraversalState?: unknown;
+  sessionId: string;
   pipelineStatus?: string | null;
   hasReceivedSingularityResponse?: boolean;
   onComplete?: () => void;
@@ -28,6 +29,7 @@ export const TraversalGraphView: React.FC<TraversalGraphViewProps> = ({
   originalQuery,
   sessionId,
   aiTurnId,
+  completedTraversalState,
   pipelineStatus,
   hasReceivedSingularityResponse,
   onComplete
@@ -71,12 +73,48 @@ export const TraversalGraphView: React.FC<TraversalGraphViewProps> = ({
     }
   };
 
+  const coerceTraversalState = (raw: any): TraversalState | null => {
+    if (!raw) return null;
+    try {
+      const claimStatusesRaw = raw?.claimStatuses;
+      const claimStatuses =
+        claimStatusesRaw instanceof Map
+          ? (claimStatusesRaw as Map<string, ClaimStatus>)
+          : Array.isArray(claimStatusesRaw)
+            ? new Map<string, ClaimStatus>(claimStatusesRaw as any)
+            : claimStatusesRaw && typeof claimStatusesRaw === 'object'
+              ? new Map<string, ClaimStatus>(
+                Object.entries(claimStatusesRaw as Record<string, unknown>).map(([k, v]) => [
+                  k,
+                  v === 'pruned' ? 'pruned' : 'active',
+                ])
+              )
+              : new Map<string, ClaimStatus>();
+
+      const resolutionsRaw = raw?.resolutions;
+      const resolutions =
+        resolutionsRaw instanceof Map
+          ? (resolutionsRaw as Map<string, Resolution>)
+          : Array.isArray(resolutionsRaw)
+            ? new Map<string, Resolution>(resolutionsRaw as any)
+            : new Map<string, Resolution>();
+
+      const pathSteps = Array.isArray(raw?.pathSteps) ? raw.pathSteps : [];
+
+      return { claimStatuses, resolutions, pathSteps };
+    } catch {
+      return null;
+    }
+  };
+
   const hydrationTurnIdRef = React.useRef<string | null>(null);
   const hydratedOverrideRef = React.useRef<TraversalState | null>(null);
 
   if (hydrationTurnIdRef.current !== aiTurnId) {
     hydrationTurnIdRef.current = aiTurnId;
-    hydratedOverrideRef.current = deserializeTraversalState(traversalStateByTurn?.[aiTurnId]);
+    hydratedOverrideRef.current =
+      coerceTraversalState(completedTraversalState) ??
+      deserializeTraversalState(traversalStateByTurn?.[aiTurnId]);
   }
 
   const {
@@ -149,6 +187,10 @@ export const TraversalGraphView: React.FC<TraversalGraphViewProps> = ({
         await new Promise<void>((resolve, reject) => {
           let acked = false;
           let isDone = false;
+          const attemptStartedAt = Date.now();
+          let lastActivityAt = attemptStartedAt;
+          const ACK_TIMEOUT_MS = 20000;
+          const IDLE_TIMEOUT_MS = 180000;
 
           const finish = (fn: () => void) => {
             if (isDone) return;
@@ -157,14 +199,48 @@ export const TraversalGraphView: React.FC<TraversalGraphViewProps> = ({
             fn();
           };
 
+          const bumpActivity = () => {
+            lastActivityAt = Date.now();
+            try {
+              if (ackTimeoutId) clearTimeout(ackTimeoutId);
+            } catch (_) { }
+            acked = true;
+            try {
+              if (completionTimeoutId) clearTimeout(completionTimeoutId);
+            } catch (_) { }
+            completionTimeoutId = setTimeout(() => {
+              finish(() => reject(new Error('Submission timed out. Please try again.')));
+            }, IDLE_TIMEOUT_MS);
+          };
+
+          const parseStepTimestamp = (stepId: string) => {
+            const m = String(stepId || '').match(/-(\d+)$/);
+            if (!m) return null;
+            const ts = Number(m[1]);
+            return Number.isFinite(ts) ? ts : null;
+          };
+
           messageListener = (msg: any) => {
             if (!msg || typeof msg !== 'object') return;
 
+            if (msg.type === 'CHEWED_SUBSTRATE_DEBUG' && msg.aiTurnId === aiTurnId) {
+              console.log('[ChewedSubstrate]', msg);
+              return;
+            }
+
+            if (msg.type === 'PARTIAL_RESULT' && msg.sessionId === sessionId) {
+              const stepId = String(msg.stepId || '');
+              if (stepId.startsWith('singularity-')) {
+                const ts = parseStepTimestamp(stepId);
+                if (ts && ts + 2000 >= attemptStartedAt) {
+                  bumpActivity();
+                }
+              }
+              return;
+            }
+
             if (msg.type === 'CONTINUATION_ACK' && msg.aiTurnId === aiTurnId) {
-              acked = true;
-              try {
-                if (ackTimeoutId) clearTimeout(ackTimeoutId);
-              } catch (_) { }
+              bumpActivity();
               return;
             }
 
@@ -180,6 +256,8 @@ export const TraversalGraphView: React.FC<TraversalGraphViewProps> = ({
             const isRelevantStep =
               stepId.startsWith('singularity-') || stepId === 'continue-singularity-error';
             if (!isRelevantStep) return;
+
+            bumpActivity();
 
             if (msg.status === 'completed') {
               finish(() => resolve());
@@ -205,11 +283,14 @@ export const TraversalGraphView: React.FC<TraversalGraphViewProps> = ({
             if (isDone) return;
             if (acked) return;
             finish(() => reject(new Error('No ACK received. Please try again.')));
-          }, 10000);
+          }, ACK_TIMEOUT_MS);
 
           completionTimeoutId = setTimeout(() => {
+            if (isDone) return;
+            const idleMs = Date.now() - lastActivityAt;
+            if (idleMs < IDLE_TIMEOUT_MS) return;
             finish(() => reject(new Error('Submission timed out. Please try again.')));
-          }, 30000);
+          }, IDLE_TIMEOUT_MS);
 
           try {
             port!.postMessage({
@@ -241,7 +322,13 @@ export const TraversalGraphView: React.FC<TraversalGraphViewProps> = ({
           setSubmissionError(error instanceof Error ? error.message : String(error));
           return;
         }
-        await new Promise((r) => setTimeout(r, Math.pow(2, attempt) * 1000));
+        const msg = error instanceof Error ? error.message : String(error);
+        const shouldRetryImmediately =
+          msg === 'Port disconnected' ||
+          msg === 'No ACK received. Please try again.';
+        if (!shouldRetryImmediately) {
+          await new Promise((r) => setTimeout(r, Math.pow(2, attempt) * 1000));
+        }
       }
     }
   };

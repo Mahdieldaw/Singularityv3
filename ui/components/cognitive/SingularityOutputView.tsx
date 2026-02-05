@@ -60,21 +60,14 @@ const SingularityOutputView: React.FC<SingularityOutputViewProps> = ({
     const effectiveIsLoading = singularityState.isLoading || !!isLoading;
     const hasRenderableText = !!String(output?.text || "").trim();
 
-    const isUsableResponse = (resp: any) => {
-        return resp && (resp.status === 'completed' || (resp.text && resp.text.trim().length > 0));
-    };
-
-
-
     const currentProviderName = output?.providerId
         ? LLM_PROVIDERS_CONFIG.find(p => p.id === output.providerId)?.name || output.providerId
         : "Concierge";
 
     // Unified Handler
     const handleProviderSelect = (pid: string) => {
-        const responses = aiTurn.singularityResponses?.[pid] || [];
-        const latest = responses[responses.length - 1];
-        const hasUsableResponse = isUsableResponse(latest);
+        const isCurrentProvider = pid === String((aiTurn.meta as any)?.singularity || "");
+        const hasUsableResponse = isCurrentProvider && !!aiTurn.singularity?.output?.trim();
 
         if (hasUsableResponse) {
             singularityState.setPinnedProvider(pid);
@@ -113,10 +106,10 @@ const SingularityOutputView: React.FC<SingularityOutputViewProps> = ({
                             <div className="max-h-64 overflow-y-auto custom-scrollbar">
                                 {LLM_PROVIDERS_CONFIG.map((provider) => {
                                     const isCurrent = output?.providerId === provider.id;
-                                    const responses = aiTurn.singularityResponses?.[provider.id] || [];
-                                    const latest = responses[responses.length - 1];
                                     // Only show green dot if we have usable content
-                                    const hasResponse = isUsableResponse(latest);
+                                    const hasResponse =
+                                        String((aiTurn.meta as any)?.singularity || "") === String(provider.id) &&
+                                        !!aiTurn.singularity?.output?.trim();
 
                                     return (
                                         <button
@@ -264,7 +257,7 @@ const SingularityOutputView: React.FC<SingularityOutputViewProps> = ({
             )}
 
             {/* Shadow Audit (Debug) */}
-            <ShadowAuditView analysis={aiTurn.mapperArtifact?.fullAnalysis} />
+            <ShadowAuditView analysis={null} />
         </div>
     );
 };

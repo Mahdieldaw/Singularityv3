@@ -6,34 +6,8 @@ import { PersistenceCoordinator } from './execution/PersistenceCoordinator';
 import { TurnEmitter } from './execution/TurnEmitter';
 import { CognitivePipelineHandler } from './execution/CognitivePipelineHandler';
 import { parseMapperArtifact } from '../../shared/parsing-utils';
+import { buildCognitiveArtifact } from '../../shared/cognitive-artifact';
 import { classifyError } from './error-classifier';
-
-function buildCognitiveArtifact(mapper, pipeline) {
-  if (!mapper && !pipeline) return null;
-  return {
-    shadow: {
-      statements: pipeline?.shadow?.extraction?.statements || mapper?.shadow?.statements || [],
-      paragraphs: pipeline?.paragraphProjection?.paragraphs || [],
-      audit: mapper?.shadow?.audit || {},
-      delta: pipeline?.shadow?.delta || null,
-    },
-    geometry: {
-      embeddingStatus: pipeline?.substrate ? "computed" : (pipeline ? "failed" : "none"),
-      substrate: pipeline?.substrate?.graph || { nodes: [], edges: [] },
-      preSemantic: pipeline?.preSemantic ? { hint: pipeline.preSemantic.lens?.shape || "sparse" } : undefined,
-    },
-    semantic: {
-      claims: mapper?.claims || [],
-      edges: mapper?.edges || [],
-      conditionals: mapper?.conditionals || [],
-      narrative: mapper?.narrative,
-    },
-    traversal: {
-      forcingPoints: mapper?.forcingPoints || [],
-      graph: mapper?.traversalGraph || { claims: [], tensions: [], tiers: [], maxTier: 0, roots: [], cycles: [] },
-    },
-  };
-}
 
 export class WorkflowEngine {
   /* _options: Reserved for future configuration or interface compatibility */
@@ -264,6 +238,7 @@ export class WorkflowEngine {
       if (step.type?.includes('mapping')) {
         console.log('🚨 MAPPING RESULT STRUCTURE:', {
           resultKeys: Object.keys(result || {}),
+          hasMappingArtifact: !!result?.mapping?.artifact,
           hasMapperArtifact: !!result?.mapperArtifact,
           hasMetaMapperArtifact: !!result?.meta?.mapperArtifact,
           claimsAtRoot: result?.mapperArtifact?.claims?.length,
@@ -282,15 +257,21 @@ export class WorkflowEngine {
 
       console.log('🚨 STEP CHECK:', {
         stepType: step.type,
-        hasMapperArtifact: !!result?.mapperArtifact
+        hasMappingArtifact: !!result?.mapping?.artifact,
+        hasMapperArtifact: !!result?.mapperArtifact,
       });
-      if (step.type === 'mapping' && result?.mapperArtifact) {
-        context.mapperArtifact = result.mapperArtifact;
-        console.log('🚨 ASSIGNED mapperArtifact to context:', !!context.mapperArtifact);
-      }
-      if (step.type === 'mapping' && result?.pipelineArtifacts) {
-        context.pipelineArtifacts = result.pipelineArtifacts;
-        console.log('🚨 ASSIGNED pipelineArtifacts to context:', !!context.pipelineArtifacts);
+      if (step.type === 'mapping') {
+        const mappingArtifact = result?.mapping?.artifact;
+        if (mappingArtifact) {
+          context.mappingArtifact = mappingArtifact;
+        } else {
+          const mapperArtifact = result?.mapperArtifact;
+          const pipelineArtifacts = result?.pipelineArtifacts;
+          if (mapperArtifact || pipelineArtifacts) {
+            context.mappingArtifact = buildCognitiveArtifact(mapperArtifact, pipelineArtifacts);
+          }
+        }
+        console.log('🚨 ASSIGNED mappingArtifact to context:', !!context.mappingArtifact);
       }
 
       await this._persistStepResponse(step, context, result, resolvedContext);
@@ -482,7 +463,7 @@ export class WorkflowEngine {
   }
 
   _hydrateV1Artifacts(context, resolvedContext) {
-    if (!context.mapperArtifact) {
+    if (!context.mappingArtifact) {
       try {
         const previousOutputs = resolvedContext?.providerContexts || {};
         const v1MappingText = Object.values(previousOutputs)
@@ -490,7 +471,8 @@ export class WorkflowEngine {
           .find(text => text.includes("<mapping_output>") || text.includes("<decision_map>"));
 
         if (v1MappingText) {
-          context.mapperArtifact = parseMapperArtifact(v1MappingText);
+          const mapperArtifact = parseMapperArtifact(v1MappingText);
+          context.mappingArtifact = buildCognitiveArtifact(mapperArtifact, null);
         }
       } catch (err) {
         console.warn("[WorkflowEngine] Cross-version hydration failed:", err);
@@ -533,12 +515,14 @@ export class WorkflowEngine {
       }
       : undefined;
 
-    const cognitiveArtifact = buildCognitiveArtifact(context?.mapperArtifact, context?.pipelineArtifacts);
+    const cognitiveArtifact =
+      context?.mappingArtifact || buildCognitiveArtifact(context?.mapperArtifact, context?.pipelineArtifacts);
     const mappingPhase = cognitiveArtifact ? { artifact: cognitiveArtifact } : undefined;
-    const singularityPhase = context?.singularityOutput
+    const singularity = context?.singularityData || context?.singularityOutput;
+    const singularityPhase = singularity
       ? {
-        prompt: context.singularityOutput.prompt || "",
-        output: context.singularityOutput.output || context.singularityOutput.text || "",
+        prompt: singularity?.prompt || "",
+        output: singularity?.output || singularity?.text || "",
         traversalState: context.traversalState,
       }
       : undefined;
@@ -656,4 +640,3 @@ export class WorkflowEngine {
     );
   }
 }
-

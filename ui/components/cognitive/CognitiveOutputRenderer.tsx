@@ -6,14 +6,13 @@ import { SingularityOutputState } from '../../hooks/useSingularityOutput';
 import { CouncilOrbs } from '../CouncilOrbs';
 import { LLM_PROVIDERS_CONFIG } from '../../constants';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { selectedModelsAtom, workflowProgressForTurnFamily, activeSplitPanelAtom, currentSessionIdAtom, turnStreamingStateFamily, isDecisionMapOpenAtom, providerErrorsForTurnFamily } from '../../state/atoms';
+import { selectedModelsAtom, workflowProgressForTurnFamily, activeSplitPanelAtom, currentSessionIdAtom, turnStreamingStateFamily, isDecisionMapOpenAtom } from '../../state/atoms';
 import { MetricsRibbon } from './MetricsRibbon';
 import StructureGlyph from '../StructureGlyph';
 import { computeProblemStructureFromArtifact, computeStructuralAnalysis } from '../../../src/core/PromptMethods';
 import { MapperArtifact } from '../../../shared/contract';
 import { TraversalGraphView } from '../traversal/TraversalGraphView';
 import { PipelineErrorBanner } from '../PipelineErrorBanner';
-import { useProviderActions } from '../../hooks/providers/useProviderActions';
 
 interface CognitiveOutputRendererProps {
     aiTurn: AiTurn;
@@ -34,7 +33,6 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
     const { runSingularity } = useSingularityMode(aiTurn.id);
     const mappingArtifact = aiTurn.mapping?.artifact || null;
     const effectiveMapperArtifact = useMemo(() => {
-        if (aiTurn.mapperArtifact) return aiTurn.mapperArtifact;
         if (!mappingArtifact) return undefined;
         return {
             claims: mappingArtifact.semantic?.claims || [],
@@ -49,7 +47,7 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
                 topUnreferenced: mappingArtifact.shadow?.topUnreferenced ?? [],
             },
         } as MapperArtifact;
-    }, [aiTurn.mapperArtifact, mappingArtifact]);
+    }, [mappingArtifact]);
 
     // Derived transition state
     const isTransitioning = singularityState.isLoading;
@@ -70,8 +68,6 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
     const setDecisionMapOpen = useSetAtom(isDecisionMapOpenAtom);
     const currentSessionId = useAtomValue(currentSessionIdAtom);
     const effectiveSessionId = currentSessionId || aiTurn.sessionId;
-    const providerErrors = useAtomValue(providerErrorsForTurnFamily(aiTurn.id));
-    const { handleRetryProvider } = useProviderActions(effectiveSessionId || undefined, aiTurn.id);
 
     const hasSingularityText = useMemo(() => {
         return String(singularityState.output?.text || "").trim().length > 0;
@@ -81,13 +77,12 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
 
     const mapperProviderId = useMemo(() => {
         if (aiTurn.meta?.mapper) return String(aiTurn.meta.mapper);
-        const keys = Object.keys(aiTurn.mappingResponses || {});
-        return keys.length > 0 ? String(keys[0]) : null;
-    }, [aiTurn.meta?.mapper, aiTurn.mappingResponses]);
+        return null;
+    }, [aiTurn.meta?.mapper]);
 
     // Visible providers for orbs
     const visibleProviderIds = useMemo(() => {
-        const keys = Object.keys(aiTurn?.batchResponses || {});
+        const keys = Object.keys(aiTurn?.batch?.responses || {});
         if (keys.length > 0) return keys;
         return LLM_PROVIDERS_CONFIG.filter(p => !!selectedModels?.[p.id]).map(p => p.id);
     }, [aiTurn, selectedModels]);
@@ -103,10 +98,8 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
     const orbVoiceProviderId = useMemo(() => {
         const fromMeta = mapperProviderId ? String(mapperProviderId) : null;
         if (fromMeta) return fromMeta;
-        const fromMapping = Object.keys(aiTurn.mappingResponses || {})[0];
-        if (fromMapping) return String(fromMapping);
         return orbProviderIds[0] ? String(orbProviderIds[0]) : null;
-    }, [mapperProviderId, aiTurn.mappingResponses, orbProviderIds]);
+    }, [mapperProviderId, orbProviderIds]);
 
     const isWorkflowSettled = useMemo(() => {
         const states = Object.values(workflowProgress || {});
@@ -179,37 +172,7 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
         return 'loading';
     }, [isAwaitingTraversal, canShowTraversal, viewOverride, canShowResponse]);
 
-    const mappingFailure = useMemo(() => {
-        if (!mapperProviderId) return null;
-        const raw = (aiTurn.mappingResponses as any)?.[mapperProviderId];
-        const arr = Array.isArray(raw) ? raw : (raw ? [raw] : []);
-        const latest = arr.length > 0 ? arr[arr.length - 1] : null;
-        if (!latest) return null;
-        const status = String(latest.status || '');
-        const isError = status === 'error' || status === 'failed' || status === 'skipped';
-        if (!isError) return null;
-
-        const metaError = (latest.meta as any)?.error;
-        const metaRetryable = (latest.meta as any)?.retryable;
-        const metaRequiresReauth = (latest.meta as any)?.requiresReauth;
-        const classifiedError: any = (providerErrors as any)?.[mapperProviderId];
-        const errorMessage =
-            typeof metaError === 'string'
-                ? metaError
-                : (metaError?.message || classifiedError?.message || "Mapping failed.");
-        const requiresReauth = !!(metaError?.requiresReauth ?? metaRequiresReauth ?? classifiedError?.requiresReauth);
-        const retryable =
-            typeof metaError?.retryable === "boolean"
-                ? metaError.retryable
-                : (typeof metaRetryable === "boolean" ? metaRetryable : (typeof classifiedError?.retryable === "boolean" ? classifiedError.retryable : undefined));
-
-        return {
-            providerId: String(mapperProviderId),
-            errorMessage,
-            requiresReauth,
-            retryable,
-        };
-    }, [aiTurn.mappingResponses, mapperProviderId, providerErrors]);
+    const mappingFailure = null;
 
 
     return (
@@ -300,17 +263,7 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
 
             {/* === MAIN CONTENT AREA === */}
             {mappingFailure && currentView !== 'traverse' && (
-                <div className="mb-6">
-                    <PipelineErrorBanner
-                        type="mapping"
-                        failedProviderId={mappingFailure.providerId}
-                        onRetry={(pid) => handleRetryProvider(pid, "mapping")}
-                        errorMessage={mappingFailure.errorMessage}
-                        requiresReauth={mappingFailure.requiresReauth}
-                        retryable={mappingFailure.retryable}
-                        onContinue={() => setViewOverride('response')}
-                    />
-                </div>
+                <div className="mb-6" />
             )}
             {currentView === 'response' ? (
                 <SingularityOutputView
@@ -326,8 +279,9 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
                         conditionals={effectiveMapperArtifact!.conditionals || []}
                         claims={effectiveMapperArtifact!.claims || []}
                         originalQuery={effectiveMapperArtifact!.query || ''}
-                        sessionId={effectiveSessionId!}
                         aiTurnId={aiTurn.id}
+                        completedTraversalState={aiTurn.singularity?.traversalState}
+                        sessionId={effectiveSessionId!}
                         pipelineStatus={aiTurn.pipelineStatus}
                         hasReceivedSingularityResponse={hasSingularityText}
                         onComplete={() => setViewOverride('response')}

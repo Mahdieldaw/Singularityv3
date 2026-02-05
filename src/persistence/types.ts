@@ -89,12 +89,6 @@ export interface AiTurnRecord extends BaseTurnRecord {
   mapping?: object | string;
   singularity?: object | string;
 
-  // Legacy serialized data (will be removed after migration)
-  mapperArtifact?: object | string;
-  pipelineArtifacts?: object | string;
-  singularityOutput?: object | string;
-  storedAnalysis?: object | string;
-
   // Storage metadata
   lastContextSummary?: string;
   pipelineStatus?: string;

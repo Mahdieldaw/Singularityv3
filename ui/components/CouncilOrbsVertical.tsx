@@ -41,7 +41,7 @@ export const CouncilOrbsVertical: React.FC<CouncilOrbsVerticalProps> = React.mem
     const contributingIds = useMemo(() => {
         if (!turn || turn.type !== 'ai') return [];
         const aiTurn = turn as unknown as AiTurn; // Safe cast since we checked type === 'ai'
-        const batchKeys = Object.keys(aiTurn.batchResponses || {});
+        const batchKeys = Object.keys(aiTurn.batch?.responses || {});
         const mapperKey = aiTurn.meta?.mapper;
         return Array.from(new Set([
             ...batchKeys,

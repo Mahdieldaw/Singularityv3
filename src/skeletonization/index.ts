@@ -47,13 +47,38 @@ export function getSourceData(
   turn: AiTurn | null | undefined,
   pipelineArtifacts: PipelineArtifacts | null | undefined
 ): SkeletonizationInput['sourceData'] {
-  if (turn?.batch?.responses) {
-    return Object.entries(turn.batch.responses as Record<string, BatchResponse>).map(([providerId, response]) => ({
-      providerId,
-      modelIndex: typeof response?.modelIndex === 'number' ? response.modelIndex : 0,
-      text: response?.text ?? '',
-    }));
+  const batchResponses =
+    ((turn as any)?.batch?.responses as unknown) ??
+    ((turn as any)?.batchResponses as unknown);
+
+  if (batchResponses && typeof batchResponses === 'object') {
+    const out: SkeletonizationInput['sourceData'] = [];
+    let fallbackIndex = 0;
+
+    for (const [providerId, responses] of Object.entries(batchResponses as Record<string, unknown>)) {
+      const responseArray = Array.isArray(responses) ? responses : [responses];
+
+      for (let i = 0; i < responseArray.length; i++) {
+        const r = responseArray[i] as BatchResponse | null | undefined;
+        if (!r) continue;
+
+        const text = r?.text ?? '';
+        if (!text.trim()) {
+          console.warn(`[getSourceData] Empty text for provider ${providerId}`);
+          continue;
+        }
+
+        out.push({
+          providerId,
+          modelIndex: typeof r?.modelIndex === 'number' ? r.modelIndex : fallbackIndex++,
+          text,
+        });
+      }
+    }
+
+    if (out.length > 0) return out;
   }
+
   return pipelineArtifacts?.sourceData || [];
 }
 

@@ -269,6 +269,11 @@ export class GeminiSessionApi {
       let nullSpamWindowStart = Date.now();
       let nullSpamCount = 0;
 
+      const COLD_START_RETRY_DELAY_MS = 10000;
+      let coldStartSeenAt = 0;
+      const hasMeaningfulTextNow = () =>
+        !!(u && typeof u.text === "string" && u.text.trim().length > 0);
+
       const looksLikeNullSpamPayload = (t) => {
         if (!Array.isArray(t) || t.length < 10) return false;
         let nonNullCount = 0;
@@ -333,6 +338,15 @@ export class GeminiSessionApi {
                 continue;
               }
               if (!L) continue;
+
+              if (!coldStartSeenAt) {
+                try {
+                  const hasColdEvent = Array.isArray(L) && L.some((entry) =>
+                    Array.isArray(entry) && entry[0] === "e" && entry[1] === 4,
+                  );
+                  if (hasColdEvent) coldStartSeenAt = Date.now();
+                } catch (_) { }
+              }
 
               parsedLines.push(L);
 
@@ -409,6 +423,16 @@ export class GeminiSessionApi {
                   this._throw("zombieStream", "Gemini stream stalling (timeout): no meaningful progress");
                 }
               }
+
+              if (coldStartSeenAt && !hasMeaningfulTextNow()) {
+                const now = Date.now();
+                if (now - coldStartSeenAt >= COLD_START_RETRY_DELAY_MS) {
+                  abortWith("coldStart", {
+                    delayMs: COLD_START_RETRY_DELAY_MS,
+                    elapsedMs: now - coldStartSeenAt,
+                  });
+                }
+              }
             }
           }
         } finally {
@@ -436,6 +460,18 @@ export class GeminiSessionApi {
     } catch (e) {
       if (this.isOwnError(e)) throw e;
       const hint = Object(abortHint);
+      if (hint.type === "coldStart") {
+        const MAX_COLD_START_RETRIES = 3;
+        if (coldStartRetries >= MAX_COLD_START_RETRIES) {
+          this._throw("unknown", `Max cold start retries (${MAX_COLD_START_RETRIES}) exceeded`);
+        }
+        return this.ask(
+          prompt,
+          { token: null, cursor, model, signal },
+          false,
+          coldStartRetries + 1,
+        );
+      }
       if (hint.type) this._throw(hint.type, hint.details);
       this._throw("failedToReadResponse", { step: "data", error: e });
     }
@@ -451,7 +487,9 @@ export class GeminiSessionApi {
       )
     );
 
-    if (hasColdStartSignature) {
+    const hasMeaningfulText = !!(u && typeof u.text === "string" && u.text.trim().length > 0);
+
+    if (hasColdStartSignature && !hasMeaningfulText) {
       const MAX_COLD_START_RETRIES = 3;
 
       if (coldStartRetries >= MAX_COLD_START_RETRIES) {
@@ -461,9 +499,6 @@ export class GeminiSessionApi {
       console.warn(
         `[Gemini] Cold start detected: [["e",4,...]] - retrying (attempt ${coldStartRetries + 1}/${MAX_COLD_START_RETRIES})`
       );
-
-      // Wait 500ms-2s for backend to stabilize
-      await new Promise(resolve => setTimeout(resolve, 500 + Math.random() * 1500));
 
       // Retry with fresh token and incremented cold-start counter
       return this.ask(

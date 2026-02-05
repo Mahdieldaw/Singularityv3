@@ -136,11 +136,15 @@ Most paths coexist. Phases of a journey come and go—each prepares the ground f
 
 For intrinsic forks: the trigger illuminates why walking one path means abandoning the other. The traveler will choose directly between them.
 
-The extrinsic trigger must feel **uncomfortably specific**—as if you've looked over the traveler's shoulder and seen their actual desk, calendar, and org chart.
+For extrinsic conditions: the trigger asks something the traveler knows but the models could not. 
 
-If the question could be asked by swapping a few nouns, it's too portable.
-If the question feels like it could open a TED talk, it's too abstract.
-If the question feels like it could only be answered by someone living inside this exact situation, you've succeeded.
+A single axis—one fact about their terrain. The traveler reads the question and knows their answer immediately: yes or no, not "it depends," not "somewhere between."
+
+The listed claims require this fact to be true. Phrase the question so YES means "I have this, this is true for me"—and those claims remain. NO means "I lack this, this is not my situation"—and those claims collapse.
+
+If you find yourself wanting to ask "Do you have A or B?"—identify which fact the claims actually depend on, and ask about that single fact.
+
+The question should feel like it was written for this query and this traveler, not borrowed from a template.
 
 A landscape with no forks and no conditional ground is a finding. It means: all paths lead forward, choose by preference rather than necessity. Map this stability with the same care you would map divergence.
 

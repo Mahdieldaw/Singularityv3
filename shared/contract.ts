@@ -1435,11 +1435,6 @@ export interface AiTurn {
   mapping?: MappingPhase;
   singularity?: SingularityPhase;
 
-  // Cognitive Pipeline Artifacts (Computed) — keep nullable to allow partial artifacts
-  mapperArtifact?: MapperArtifact | null; // Legacy - will be removed after migration
-  pipelineArtifacts?: PipelineArtifacts | null; // Legacy - will be removed after migration
-  singularityOutput?: SingularityOutput | null; // Legacy - will be removed after migration
-
   pipelineStatus?: PipelineStatus;
 
   meta?: {
@@ -1454,14 +1449,6 @@ export interface AiTurn {
     isOptimistic?: boolean;
     [key: string]: any;
   } | null;
-
-  // Legacy collections - will be removed after migration. Keep optional for backward compatibility.
-  batchResponses?: Record<string, ProviderResponse[]>; // Legacy
-  mappingResponses?: Record<string, ProviderResponse[]>; // Legacy
-  singularityResponses?: Record<string, ProviderResponse[]>; // Legacy
-
-  storedAnalysis?: StructuralAnalysis | null; // Legacy - serialized analysis
-  providerContexts?: Record<string, any> | null; // Legacy - provider contexts
 }
 
 // ============================================================================

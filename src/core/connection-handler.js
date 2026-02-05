@@ -4,34 +4,8 @@ import { WorkflowEngine } from "./workflow-engine.js";
 import { runPreflight, createAuthErrorMessage } from './preflight-validator.js';
 import { authManager } from './auth-manager.js';
 import { DEFAULT_THREAD } from '../../shared/messaging.js';
+import { buildCognitiveArtifact } from '../../shared/cognitive-artifact';
 // Note: ContextResolver is now available via services; we don't import it directly here
-
-function buildCognitiveArtifact(mapper, pipeline) {
-  if (!mapper && !pipeline) return null;
-  return {
-    shadow: {
-      statements: pipeline?.shadow?.extraction?.statements || mapper?.shadow?.statements || [],
-      paragraphs: pipeline?.paragraphProjection?.paragraphs || [],
-      audit: mapper?.shadow?.audit || {},
-      delta: pipeline?.shadow?.delta || null,
-    },
-    geometry: {
-      embeddingStatus: pipeline?.substrate ? "computed" : "failed",
-      substrate: pipeline?.substrate?.graph || { nodes: [], edges: [] },
-      preSemantic: pipeline?.preSemantic ? { hint: pipeline.preSemantic.lens?.shape || "sparse" } : undefined,
-    },
-    semantic: {
-      claims: mapper?.claims || [],
-      edges: mapper?.edges || [],
-      conditionals: mapper?.conditionals || [],
-      narrative: mapper?.narrative,
-    },
-    traversal: {
-      forcingPoints: mapper?.forcingPoints || [],
-      graph: mapper?.traversalGraph || { claims: [], tensions: [], tiers: [], maxTier: 0, roots: [], cycles: [] },
-    },
-  };
-}
 
 /**
  * ConnectionHandler
@@ -48,13 +22,20 @@ function buildCognitiveArtifact(mapper, pipeline) {
  */
 
 export class ConnectionHandler {
-  constructor(port, services) {
+  constructor(port, servicesOrProvider) {
     this.port = port;
-    this.services = services; // { orchestrator, sessionManager, compiler }
+    this.services = null;
+    this._servicesProvider = null;
+    if (typeof servicesOrProvider === "function") {
+      this._servicesProvider = servicesOrProvider;
+    } else {
+      this.services = servicesOrProvider;
+    }
     this.workflowEngine = null;
     this.messageHandler = null;
     this.isInitialized = false;
-    this.lifecycleManager = services.lifecycleManager;
+    this.lifecycleManager = null;
+    this.backendInitPromise = null;
   }
 
   /**
@@ -68,13 +49,6 @@ export class ConnectionHandler {
   async init() {
     if (this.isInitialized) return;
 
-    // Create WorkflowEngine for this connection
-    this.workflowEngine = new WorkflowEngine(
-      this.services.orchestrator,
-      this.services.sessionManager,
-      this.port,
-    );
-
     // Create message handler bound to this instance
     this.messageHandler = this._createMessageHandler();
 
@@ -87,8 +61,47 @@ export class ConnectionHandler {
     this.isInitialized = true;
     console.log("[ConnectionHandler] Initialized for port:", this.port.name);
 
-    // Signal that handler is ready
-    this.port.postMessage({ type: "HANDLER_READY" });
+    // Signal that handler is ready to receive/queue messages
+    try {
+      this.port.postMessage({ type: "HANDLER_READY" });
+    } catch (_) { }
+
+    void this._ensureBackendReady().catch((error) => {
+      try {
+        this.port?.postMessage({
+          type: "INITIALIZATION_FAILED",
+          error: error?.message || String(error),
+        });
+      } catch (_) { }
+    });
+  }
+
+  async _ensureBackendReady() {
+    if (this.workflowEngine && this.services) return;
+    if (this.backendInitPromise) return this.backendInitPromise;
+
+    this.backendInitPromise = (async () => {
+      if (!this.services) {
+        if (!this._servicesProvider) throw new Error("Services provider not configured");
+        this.services = await this._servicesProvider();
+      }
+
+      if (!this.services) throw new Error("Services unavailable");
+      if (!this.port) throw new Error("Port closed during initialization");
+
+      this.lifecycleManager = this.services.lifecycleManager || null;
+
+      this.workflowEngine = new WorkflowEngine(
+        this.services.orchestrator,
+        this.services.sessionManager,
+        this.port,
+      );
+    })().catch((e) => {
+      this.backendInitPromise = null;
+      throw e;
+    });
+
+    return this.backendInitPromise;
   }
 
   /**
@@ -215,15 +228,7 @@ export class ConnectionHandler {
       const finalMapping = aiTurn.mapping;
       const finalSingularity = aiTurn.singularity || singularityPhase;
 
-      console.log('🚨 ConnectionHandler TURN_FINALIZED:', {
-        hasBatchPhase: !!finalBatch,
-        hasMappingPhase: !!finalMapping,
-        hasSingularityPhase: !!finalSingularity,
-        batchResponseCount: Object.keys(buckets.batchResponses || {}).length,
-        mappingResponseCount: Object.keys(buckets.mappingResponses || {}).length,
-        contextHasMapperArtifact: !!aiTurn?.mapperArtifact,
-        contextHasPipelineArtifacts: !!aiTurn?.pipelineArtifacts,
-      });
+
 
       this.port?.postMessage({
         type: "TURN_FINALIZED",
@@ -280,6 +285,10 @@ export class ConnectionHandler {
           timestamp: Date.now(),
         });
         return;
+      }
+
+      if (message.type !== "reconnect") {
+        await this._ensureBackendReady();
       }
 
       try {
@@ -730,7 +739,7 @@ export class ConnectionHandler {
    * Handle abort message
    */
   async _handleAbort(message) {
-    if (message.sessionId && this.services.orchestrator) {
+    if (message.sessionId && this.services?.orchestrator) {
       this.services.orchestrator._abortRequest(message.sessionId);
     }
   }
@@ -768,6 +777,8 @@ export class ConnectionHandler {
     this.messageHandler = null;
     this.port = null;
     this.services = null;
+    this._servicesProvider = null;
+    this.backendInitPromise = null;
     this.lifecycleManager = null;
     this.isInitialized = false;
   }

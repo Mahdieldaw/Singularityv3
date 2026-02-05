@@ -2,6 +2,7 @@ import { DEFAULT_THREAD } from '../../../shared/messaging.js';
 import { ArtifactProcessor } from '../../../shared/artifact-processor';
 import { PROVIDER_LIMITS } from '../../../shared/provider-limits';
 import { parseMapperArtifact } from '../../../shared/parsing-utils';
+import { buildCognitiveArtifact } from '../../../shared/cognitive-artifact';
 import { classifyError } from '../error-classifier';
 import {
   errorHandler,
@@ -1211,12 +1212,6 @@ export class StepExecutor {
                 pipelineArtifacts = null;
               }
 
-              try {
-                if (pipelineArtifacts) {
-                  context.pipelineArtifacts = pipelineArtifacts;
-                }
-              } catch (_) { }
-
               // Process raw text for clean display
               const processed = artifactProcessor.process(finalResult.text);
               finalResult.text = processed.cleanText;
@@ -1259,12 +1254,10 @@ export class StepExecutor {
               },
             };
 
-            if (mapperArtifact) {
-              finalResultWithMeta.meta.mapperArtifact = mapperArtifact;
-            }
-            if (pipelineArtifacts) {
-              finalResultWithMeta.meta.pipelineArtifacts = pipelineArtifacts;
-            }
+            if (mapperArtifact) context.mapperArtifact = mapperArtifact;
+            if (pipelineArtifacts) context.pipelineArtifacts = pipelineArtifacts;
+
+            const cognitiveArtifact = buildCognitiveArtifact(mapperArtifact, pipelineArtifacts);
 
             try {
               if (finalResultWithMeta?.meta) {
@@ -1279,8 +1272,7 @@ export class StepExecutor {
               status: "completed",
               meta: finalResultWithMeta.meta || {},
               artifacts: finalResult.artifacts || [],
-              mapperArtifact: mapperArtifact,
-              pipelineArtifacts: pipelineArtifacts,
+              ...(cognitiveArtifact ? { mapping: { artifact: cognitiveArtifact } } : {}),
               ...(finalResult.softError ? { softError: finalResult.softError } : {}),
             });
           },
@@ -1687,16 +1679,27 @@ export class StepExecutor {
     let evidenceSubstrate = null;
     try {
       const substrate = payload?.chewedSubstrate;
-      const outputs = substrate && typeof substrate === "object" ? substrate.outputs : null;
-      if (Array.isArray(outputs) && outputs.length > 0) {
-        const parts = [];
-        for (const out of outputs) {
-          const text = out && typeof out === "object" ? String(out.text || "") : "";
-          if (!text.trim()) continue;
-          parts.push(text.trim());
-        }
+      if (substrate && typeof substrate === "object") {
+        try {
+          const { formatSubstrateForPrompt } = await import('../../skeletonization');
+          if (typeof formatSubstrateForPrompt === 'function') {
+            const formatted = String(formatSubstrateForPrompt(substrate) || '').trim();
+            if (formatted) evidenceSubstrate = formatted;
+          }
+        } catch (_) { }
 
-        evidenceSubstrate = parts.length > 0 ? parts.join("\n\n") : null;
+        if (!evidenceSubstrate) {
+          const outputs = substrate && typeof substrate === "object" ? substrate.outputs : null;
+          if (Array.isArray(outputs) && outputs.length > 0) {
+            const parts = [];
+            for (const out of outputs) {
+              const text = out && typeof out === "object" ? String(out.text || "") : "";
+              if (!text.trim()) continue;
+              parts.push(text.trim());
+            }
+            evidenceSubstrate = parts.length > 0 ? parts.join("\n\n") : null;
+          }
+        }
       }
     } catch (_) {
       evidenceSubstrate = null;

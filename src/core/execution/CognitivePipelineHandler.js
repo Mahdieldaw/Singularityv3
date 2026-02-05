@@ -1,33 +1,7 @@
 import { parseMapperArtifact } from '../../../shared/parsing-utils';
 import { extractUserMessage } from '../context-utils.js';
 import { DEFAULT_THREAD } from '../../../shared/messaging.js';
-
-function buildCognitiveArtifact(mapper, pipeline) {
-  if (!mapper && !pipeline) return null;
-  return {
-    shadow: {
-      statements: pipeline?.shadow?.extraction?.statements || mapper?.shadow?.statements || [],
-      paragraphs: pipeline?.paragraphProjection?.paragraphs || [],
-      audit: mapper?.shadow?.audit || {},
-      delta: pipeline?.shadow?.delta || null,
-    },
-    geometry: {
-      embeddingStatus: pipeline?.substrate ? "computed" : (pipeline ? "failed" : "none"),
-      substrate: pipeline?.substrate?.graph || { nodes: [], edges: [] },
-      preSemantic: pipeline?.preSemantic ? { hint: pipeline.preSemantic.lens?.shape || "sparse" } : undefined,
-    },
-    semantic: {
-      claims: mapper?.claims || [],
-      edges: mapper?.edges || [],
-      conditionals: mapper?.conditionals || [],
-      narrative: mapper?.narrative,
-    },
-    traversal: {
-      forcingPoints: mapper?.forcingPoints || [],
-      graph: mapper?.traversalGraph || { claims: [], tensions: [], tiers: [], maxTier: 0, roots: [], cycles: [] },
-    },
-  };
-}
+import { buildCognitiveArtifact } from '../../../shared/cognitive-artifact';
 
 export class CognitivePipelineHandler {
   constructor(port, persistenceCoordinator, sessionManager) {
@@ -44,14 +18,23 @@ export class CognitivePipelineHandler {
   async orchestrateSingularityPhase(request, context, steps, stepResults, _resolvedContext, currentUserMessage, stepExecutor, streamingManager) {
     try {
       const mappingResult = Array.from(stepResults.entries()).find(([_, v]) =>
-        v.status === "completed" && v.result?.mapperArtifact,
+        v.status === "completed" && (v.result?.mapping?.artifact || v.result?.mapperArtifact),
       )?.[1]?.result;
 
       const userMessageForSingularity =
         context?.userMessage || currentUserMessage || "";
 
-      // 1. Resolve mapperArtifact (from current results, context, or request payload)
-      let mapperArtifact = mappingResult?.mapperArtifact || context?.mapperArtifact || request?.payload?.mapperArtifact || null;
+      const mappingArtifact =
+        mappingResult?.mapping?.artifact ||
+        context?.mappingArtifact ||
+        request?.payload?.mapping?.artifact ||
+        null;
+
+      let mapperArtifact =
+        mappingResult?.mapperArtifact ||
+        context?.mapperArtifact ||
+        request?.payload?.mapperArtifact ||
+        null;
 
       if (!mapperArtifact) {
         console.warn("[CognitiveHandler] No mapperArtifact found in results or context.");
@@ -61,13 +44,18 @@ export class CognitivePipelineHandler {
       }
 
       // ✅ Populate context so WorkflowEngine/TurnEmitter can see it
-      context.mapperArtifact = mapperArtifact;
+      context.mappingArtifact = buildCognitiveArtifact(
+        mapperArtifact,
+        context?.pipelineArtifacts || mappingResult?.pipelineArtifacts,
+      );
 
       // ══════════════════════════════════════════════════════════════════
       // TRAVERSAL GATING CHECK (Pipeline Pause)
       // ══════════════════════════════════════════════════════════════════
-      const hasTraversal = !!mapperArtifact.traversalGraph;
-      const hasForcingPoints = Array.isArray(mapperArtifact.forcingPoints) && mapperArtifact.forcingPoints.length > 0;
+      const hasTraversal = !!(mapperArtifact?.traversalGraph || mappingArtifact?.traversal?.graph);
+      const hasForcingPoints =
+        (Array.isArray(mapperArtifact?.forcingPoints) && mapperArtifact.forcingPoints.length > 0) ||
+        (Array.isArray(mappingArtifact?.traversal?.forcingPoints) && mappingArtifact.traversal.forcingPoints.length > 0);
       const isTraversalContinuation = request?.isTraversalContinuation || context?.isTraversalContinuation;
 
       if (hasTraversal && hasForcingPoints && !isTraversalContinuation) {
@@ -116,30 +104,26 @@ export class CognitivePipelineHandler {
               : undefined;
           } catch (_) { }
 
-          const safeMapperArtifact =
+          const pipelineArtifacts = context?.pipelineArtifacts || mappingResult?.pipelineArtifacts;
+          const cognitiveArtifact = buildCognitiveArtifact(mapperArtifact, pipelineArtifacts);
+          const safeCognitiveArtifact =
             this.sessionManager && typeof this.sessionManager._safeArtifact === "function"
-              ? this.sessionManager._safeArtifact(mapperArtifact)
-              : mapperArtifact;
+              ? this.sessionManager._safeArtifact(cognitiveArtifact)
+              : cognitiveArtifact;
           const currentAiTurn = await this.sessionManager.adapter.get("turns", aiTurnId);
           if (currentAiTurn) {
             currentAiTurn.pipelineStatus = 'awaiting_traversal';
-            currentAiTurn.mapperArtifact = safeMapperArtifact;
-            if (context?.pipelineArtifacts || mappingResult?.pipelineArtifacts) {
-              currentAiTurn.pipelineArtifacts = context?.pipelineArtifacts || mappingResult?.pipelineArtifacts;
-            }
             if (!currentAiTurn.batch && batchPhase) {
               currentAiTurn.batch = batchPhase;
             }
-            const cognitiveArtifact = buildCognitiveArtifact(safeMapperArtifact, currentAiTurn.pipelineArtifacts);
-            if (cognitiveArtifact) {
-              currentAiTurn.mapping = { artifact: cognitiveArtifact };
+            if (safeCognitiveArtifact) {
+              currentAiTurn.mapping = { artifact: safeCognitiveArtifact };
             }
             await this.sessionManager.adapter.put("turns", currentAiTurn);
           }
 
           // Safe fallback object for messaging, handling case where currentAiTurn is null
-          const fallbackPipelineArtifacts = context?.pipelineArtifacts || mappingResult?.pipelineArtifacts;
-          const fallbackCognitiveArtifact = buildCognitiveArtifact(safeMapperArtifact, fallbackPipelineArtifacts);
+          const fallbackCognitiveArtifact = safeCognitiveArtifact;
           const aiTurnForMessage = currentAiTurn
             ? { ...currentAiTurn, pipelineStatus: 'awaiting_traversal' }
             : {
@@ -160,7 +144,7 @@ export class CognitivePipelineHandler {
             type: "MAPPER_ARTIFACT_READY",
             sessionId: context.sessionId,
             aiTurnId: context.canonicalAiTurnId,
-            artifact: safeMapperArtifact,
+            artifact: safeCognitiveArtifact,
             singularityOutput: null,
             singularityProvider: null,
             pipelineStatus: 'awaiting_traversal'
@@ -570,7 +554,7 @@ export class CognitivePipelineHandler {
                 pipeline: singularityResult?.output?.pipeline || null,
               };
 
-              context.singularityOutput = singularityOutput;
+              context.singularityData = singularityOutput;
 
               try {
                 // ══════════════════════════════════════════════════════════════════
@@ -644,7 +628,12 @@ export class CognitivePipelineHandler {
         type: "MAPPER_ARTIFACT_READY",
         sessionId: context.sessionId,
         aiTurnId: context.canonicalAiTurnId,
-        artifact: mapperArtifact,
+        artifact: (() => {
+          const cognitiveArtifact = buildCognitiveArtifact(mapperArtifact, context?.pipelineArtifacts);
+          return this.sessionManager && typeof this.sessionManager._safeArtifact === "function"
+            ? this.sessionManager._safeArtifact(cognitiveArtifact)
+            : cognitiveArtifact;
+        })(),
         singularityOutput,
         singularityProvider: singularityOutput?.providerId || singularityProviderId,
       });
@@ -695,6 +684,18 @@ export class CognitivePipelineHandler {
       this._inflightContinuations.set(inflightKey, Date.now());
 
       try {
+        try {
+          this.port.postMessage({
+            type: 'CHEWED_SUBSTRATE_DEBUG',
+            sessionId: effectiveSessionId,
+            aiTurnId,
+            stage: 'continue_request_received',
+            isTraversalContinuation: !!payload?.isTraversalContinuation,
+            hasTraversalState: !!payload?.traversalState,
+            pipelineStatus: aiTurn?.pipelineStatus || null,
+          });
+        } catch (_) { }
+
         if (payload?.isTraversalContinuation) {
           if (aiTurn.pipelineStatus !== 'awaiting_traversal') {
             try {
@@ -747,26 +748,105 @@ export class CognitivePipelineHandler {
         throw new Error(`MapperArtifact missing for turn ${aiTurnId}.`);
       }
 
-      const pipelineArtifacts = aiTurn.pipelineArtifacts;
+      const mappingArtifact = aiTurn.mapping?.artifact || null;
+      const pipelineArtifacts =
+        aiTurn.pipelineArtifacts ||
+        (mappingArtifact
+          ? {
+            paragraphProjection: {
+              paragraphs: mappingArtifact.shadow?.paragraphs || [],
+            },
+            shadow: {
+              extraction: {
+                statements: mappingArtifact.shadow?.statements || [],
+              },
+            },
+          }
+          : null);
       let chewedSubstrate = null;
       if (payload?.isTraversalContinuation && payload?.traversalState) {
         try {
           const { buildChewedSubstrate, normalizeTraversalState, getSourceData } = await import('../../skeletonization');
-          const sourceData = getSourceData(aiTurn, pipelineArtifacts);
+          const sourceDataFromResponses = (priorResponses || [])
+            .filter((r) => r && r.responseType === "batch" && r.providerId && r.text?.trim())
+            .map((r, idx) => ({
+              providerId: r.providerId,
+              modelIndex: typeof r.responseIndex === 'number'
+                ? r.responseIndex
+                : (typeof r?.meta?.modelIndex === 'number' ? r.meta.modelIndex : idx),
+              text: r.text,
+            }));
+
+          console.log('[Skeletonization] Source data from DB:', {
+            count: sourceDataFromResponses.length,
+            providers: sourceDataFromResponses.map(s => s.providerId),
+            hasText: sourceDataFromResponses.map(s => !!s.text?.trim()),
+          });
+
+          const sourceData = sourceDataFromResponses.length > 0
+            ? sourceDataFromResponses
+            : getSourceData(aiTurn, pipelineArtifacts);
+
           if (Array.isArray(sourceData) && sourceData.length > 0) {
             chewedSubstrate = await buildChewedSubstrate({
-              statements: mapperArtifact.shadow?.statements || [],
-              paragraphs: pipelineArtifacts.paragraphProjection?.paragraphs || [],
-              claims: mapperArtifact.claims || [],
+              statements: mappingArtifact?.shadow?.statements || mapperArtifact.shadow?.statements || [],
+              paragraphs: mappingArtifact?.shadow?.paragraphs || pipelineArtifacts?.paragraphProjection?.paragraphs || [],
+              claims: mappingArtifact?.semantic?.claims || mapperArtifact.claims || [],
               traversalState: normalizeTraversalState(payload.traversalState),
               sourceData,
             });
+
+            console.log('🍖 Chewed substrate built:', {
+              hasSubstrate: !!chewedSubstrate,
+              outputsCount: chewedSubstrate?.outputs?.length,
+              nonEmptyOutputsCount: Array.isArray(chewedSubstrate?.outputs)
+                ? chewedSubstrate.outputs.reduce((acc, o) => acc + (String(o?.text || '').trim() ? 1 : 0), 0)
+                : 0,
+              protectedCount: chewedSubstrate?.summary?.protectedStatementCount,
+              skeletonizedCount: chewedSubstrate?.summary?.skeletonizedStatementCount,
+              removedCount: chewedSubstrate?.summary?.removedStatementCount
+            });
+
+            try {
+              this.port.postMessage({
+                type: 'CHEWED_SUBSTRATE_DEBUG',
+                sessionId: effectiveSessionId,
+                aiTurnId,
+                stage: 'chewed_substrate_built',
+                hasSubstrate: !!chewedSubstrate,
+                outputsCount: chewedSubstrate?.outputs?.length,
+                nonEmptyOutputsCount: Array.isArray(chewedSubstrate?.outputs)
+                  ? chewedSubstrate.outputs.reduce((acc, o) => acc + (String(o?.text || '').trim() ? 1 : 0), 0)
+                  : 0,
+                protectedCount: chewedSubstrate?.summary?.protectedStatementCount,
+                skeletonizedCount: chewedSubstrate?.summary?.skeletonizedStatementCount,
+                removedCount: chewedSubstrate?.summary?.removedStatementCount,
+              });
+            } catch (_) { }
+          } else {
+            console.warn('🍖 No source data available for chewed substrate');
+
+            try {
+              this.port.postMessage({
+                type: 'CHEWED_SUBSTRATE_DEBUG',
+                sessionId: effectiveSessionId,
+                aiTurnId,
+                stage: 'no_source_data',
+              });
+            } catch (_) { }
           }
         } catch (e) {
-          console.warn(
-            `[CognitiveHandler] Failed to build chewedSubstrate for traversal continuation (aiTurnId=${aiTurnId}, sessionId=${effectiveSessionId}):`,
-            e,
-          );
+          console.error('[CognitiveHandler] Failed to build chewedSubstrate:', e);
+
+          try {
+            this.port.postMessage({
+              type: 'CHEWED_SUBSTRATE_DEBUG',
+              sessionId: effectiveSessionId,
+              aiTurnId,
+              stage: 'chewed_substrate_error',
+              error: String(e?.message || e),
+            });
+          } catch (_) { }
           chewedSubstrate = null;
         }
       }
@@ -933,14 +1013,17 @@ export class CognitivePipelineHandler {
           timestamp: Date.now(),
         }
         : undefined;
-      const cognitiveArtifact = buildCognitiveArtifact(finalAiTurn?.mapperArtifact, finalAiTurn?.pipelineArtifacts);
-      const mappingPhase = cognitiveArtifact ? { artifact: cognitiveArtifact, timestamp: Date.now() } : undefined;
+      const cognitiveArtifact =
+        finalAiTurn?.mapping?.artifact ||
+        buildCognitiveArtifact(finalAiTurn?.mapperArtifact, finalAiTurn?.pipelineArtifacts);
+      const mappingPhase = cognitiveArtifact
+        ? { artifact: cognitiveArtifact, timestamp: Date.now() }
+        : undefined;
 
       try {
         const t = finalAiTurn;
         if (t) {
           if (mappingPhase) t.mapping = mappingPhase;
-          if (singularityOutput) t.singularityOutput = singularityOutput;
           if (singularityPhase) t.singularity = singularityPhase;
           if (batchPhase && !t.batch) t.batch = batchPhase;
           await adapter.put("turns", t);

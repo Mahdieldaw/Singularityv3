@@ -16,11 +16,9 @@ import {
   alertTextAtom,
 } from "../../state/atoms";
 import api from "../../services/extension-api";
-import { PRIMARY_STREAMING_PROVIDER_IDS } from "../../constants";
 import type {
   ProviderKey,
   PrimitiveWorkflowRequest,
-  ProviderResponse,
 } from "../../../shared/contract";
 import type { TurnMessage, AiTurnWithUI } from "../../types";
 
@@ -67,47 +65,14 @@ export function useRoundActions() {
         return;
       }
 
-      // ✅ Validate we have enough source data for mapping
-      const batchResponses = ai.batchResponses && Object.keys(ai.batchResponses).length > 0
-        ? ai.batchResponses
-        : (ai.batch?.responses
-          ? Object.fromEntries(
-            Object.entries(ai.batch.responses).map(([providerId, response]) => [
-              providerId,
-              [{
-                providerId: providerId as ProviderKey,
-                text: response?.text || "",
-                status: response?.status || "completed",
-                createdAt: ai.createdAt ?? Date.now(),
-                updatedAt: ai.createdAt ?? Date.now(),
-                meta: response?.meta
-                  ? {
-                    ...response.meta,
-                    ...(response.modelIndex !== undefined ? { modelIndex: response.modelIndex } : {}),
-                  }
-                  : (response?.modelIndex !== undefined ? { modelIndex: response.modelIndex } : {}),
-              }],
-            ]),
+      const outputsFromBatch = ai.batch?.responses
+        ? Object.values(ai.batch.responses)
+          .filter(
+            (response) => response?.status === "completed" && response.text?.trim(),
           )
-          : {});
+        : [];
 
-      const outputsFromBatch = Object.values(batchResponses)
-        .flat()
-        .filter(
-          (response: ProviderResponse) => response.status === "completed" && response.text?.trim(),
-        );
-
-
-
-
-      const hasCompletedMapping = ai?.mappingResponses
-        ? Object.values(ai.mappingResponses).some((resp) => {
-          const responses = Array.isArray(resp) ? resp : [resp];
-          return responses.some(
-            (r) => r.status === "completed" && r.text?.trim(),
-          );
-        })
-        : false;
+      const hasCompletedMapping = !!ai.mapping?.artifact;
 
       const enoughOutputs =
         outputsFromBatch.length >= 2 ||
@@ -144,29 +109,14 @@ export function useRoundActions() {
         const existing = draft.get(ai.id);
         if (!existing || existing.type !== "ai") return;
         const aiTurn = existing as AiTurnWithUI;
-        const prev = aiTurn.mappingResponses || {};
-        const next: Record<string, ProviderResponse[]> = { ...prev };
 
-        const arr = Array.isArray(next[effectiveMappingProvider])
-          ? [...next[effectiveMappingProvider]]
-          : [];
-
-        const initialStatus: "streaming" | "pending" =
-          PRIMARY_STREAMING_PROVIDER_IDS.includes(effectiveMappingProvider)
-            ? "streaming"
-            : "pending";
-
-        arr.push({
-          providerId: effectiveMappingProvider as ProviderKey,
-          text: "",
-          status: initialStatus,
-          createdAt: Date.now(),
-        });
-        next[effectiveMappingProvider] = arr;
-        aiTurn.mappingResponses = next;
-        aiTurn.mappingVersion = (aiTurn.mappingVersion ?? 0) + 1;
+        aiTurn.mapping = {
+          artifact: aiTurn.mapping?.artifact ?? null,
+          timestamp: Date.now(),
+        };
         draft.set(ai.id, { ...aiTurn });
       });
+
 
       // ✅ Set loading state
       setActiveAiTurnId(ai.id);
@@ -203,15 +153,9 @@ export function useRoundActions() {
         // Revert optimistic state to error
         setTurnsMap((draft) => {
           const turn = draft.get(ai.id) as AiTurnWithUI | undefined;
-          if (!turn || turn.type !== "ai" || !turn.mappingResponses) return;
-          const arr = turn.mappingResponses[effectiveMappingProvider];
-          if (Array.isArray(arr) && arr.length > 0) {
-            const last = arr[arr.length - 1];
-            if (last.status === "streaming" || last.status === "pending") {
-              last.status = "error";
-              last.text = "Request failed";
-            }
-          }
+          if (!turn || turn.type !== "ai") return;
+          turn.mapping = undefined;
+          turn.mappingVersion = (turn.mappingVersion ?? 0) + 1;
         });
 
         setIsLoading(false);
@@ -254,22 +198,12 @@ export function useRoundActions() {
         if (!existing || existing.type !== "ai") return;
         const aiTurn = existing as AiTurnWithUI;
 
-        const prev = aiTurn.singularityResponses || {};
-        const next: Record<string, ProviderResponse[]> = { ...prev };
-
-        const arr = Array.isArray(next[effectiveProviderId]) ? [...next[effectiveProviderId]] : [];
-        const initialStatus = PRIMARY_STREAMING_PROVIDER_IDS.includes(effectiveProviderId)
-          ? "streaming"
-          : "pending";
-
-        arr.push({
-          providerId: effectiveProviderId as ProviderKey,
-          text: "",
-          status: initialStatus,
-          createdAt: Date.now(),
-        });
-        next[effectiveProviderId] = arr;
-        aiTurn.singularityResponses = next;
+        aiTurn.singularity = {
+          prompt: aiTurn.singularity?.prompt,
+          output: aiTurn.singularity?.output ?? "",
+          timestamp: Date.now(),
+        };
+        aiTurn.singularityVersion = (aiTurn.singularityVersion ?? 0) + 1;
       });
 
       // Set Loading
@@ -300,15 +234,13 @@ export function useRoundActions() {
 
         setTurnsMap((draft) => {
           const turn = draft.get(ai.id) as AiTurnWithUI | undefined;
-          if (!turn || turn.type !== "ai" || !turn.singularityResponses) return;
-          const arr = turn.singularityResponses[effectiveProviderId];
-          if (Array.isArray(arr) && arr.length > 0) {
-            const last = arr[arr.length - 1];
-            if (last.status === "streaming" || last.status === "pending") {
-              last.status = "error";
-              last.text = "Request failed";
-            }
-          }
+          if (!turn || turn.type !== "ai") return;
+          turn.singularity = {
+            prompt: turn.singularity?.prompt,
+            output: "Request failed",
+            timestamp: Date.now(),
+          };
+          turn.singularityVersion = (turn.singularityVersion ?? 0) + 1;
         });
       } finally {
         setIsLoading(false);

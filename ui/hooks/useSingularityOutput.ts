@@ -43,8 +43,30 @@ export function useSingularityOutput(aiTurnId: string | null, forcedProviderId?:
         const aiTurn = turn as AiTurn;
         const pinnedId = pinnedProviders[aiTurnId] || forcedProviderId;
 
-        // Simplify responses into comparable candidates
-        const candidates = Object.entries(aiTurn.singularityResponses || {})
+        const singularityProviderFromMeta = (aiTurn.meta as any)?.singularity || null;
+        const pinnedProviderId = pinnedId || singularityProviderFromMeta;
+
+        if (aiTurn.singularity?.output) {
+            const providerId = pinnedProviderId || singularityProviderFromMeta;
+            const output: SingularityOutput = {
+                text: aiTurn.singularity.output,
+                providerId: providerId || 'singularity',
+                timestamp: aiTurn.singularity.timestamp || Date.now(),
+            } as any;
+
+            return {
+                output,
+                isLoading: false,
+                isError: false,
+                providerId: providerId,
+                requestedProviderId: pinnedProviderId,
+                rawText: aiTurn.singularity.output,
+                setPinnedProvider,
+            };
+        }
+
+        const legacyResponses = (aiTurn as any)?.singularityResponses || {};
+        const candidates = Object.entries(legacyResponses)
             .map(([pid, arr]) => {
                 const responses = arr as any[];
                 if (!responses.length) return null;

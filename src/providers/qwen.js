@@ -43,8 +43,25 @@ export class QwenSessionApi {
     this._logs = true;
     this.fetch = fetchImpl;
     this._csrfToken = null;
+    this._csrfTokenTs = 0;
     this._deviceId = null;
     this.ask = this._wrapMethod(this.ask);
+  }
+
+  _extractCsrfTokenFromHtml(html) {
+    const raw = String(html || "");
+    if (!raw) return null;
+
+    const meta = /<meta[^>]+name=["']csrf-token["'][^>]+content=["']([^"']+)["'][^>]*>/i.exec(raw);
+    if (meta?.[1]) return meta[1];
+
+    const any = /csrfToken["']?\s*[:=]\s*["']([^"']+)["']/i.exec(raw);
+    if (any?.[1]) return any[1];
+
+    const legacy = /csrfToken\s?=\s?"([^"]+)"/i.exec(raw);
+    if (legacy?.[1]) return legacy[1];
+
+    return null;
   }
 
   // Generate or retrieve device ID (persisted for session)
@@ -107,23 +124,85 @@ export class QwenSessionApi {
 
   async _fetchCsrfToken() {
     const existingToken = this._csrfToken;
-    if (typeof existingToken === "string" && existingToken.length > 0)
+    const now = Date.now();
+    const ttlMs = 10 * 60 * 1000;
+    const perTryTimeoutMs = 4000;
+    const maxAttemptsPerUrl = 2;
+    if (
+      typeof existingToken === "string" &&
+      existingToken.length > 0 &&
+      now - (this._csrfTokenTs || 0) < ttlMs
+    ) {
       return existingToken;
+    }
+
+    this._csrfToken = null;
+    this._csrfTokenTs = 0;
+
     try {
-      const response = await this.fetch(`${QWEN_WEB_BASE}/`, {
-        credentials: "include",
-      });
-      const html = await response.text();
-      const match = /csrfToken\s?=\s?"([^"]+)"/.exec(html);
-      if (!match || !match[1]) {
-        throw this._createError(
-          "csrf",
-          "Failed to extract CSRF token from page HTML.",
-        );
+      const candidates = [
+        `${QWEN_WEB_BASE}/`,
+        "https://qianwen.com/",
+      ];
+
+      let lastError = null;
+      for (const url of candidates) {
+        for (let attempt = 0; attempt < maxAttemptsPerUrl; attempt++) {
+          try {
+            const response = await this.fetch(url, {
+              credentials: "include",
+              cache: "no-store",
+              signal: AbortSignal.timeout(perTryTimeoutMs),
+              headers: {
+                Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+              },
+            });
+
+            if (!response.ok) {
+              const body = await response.text().catch(() => "");
+              lastError = this._createError(
+                "network",
+                `Failed to fetch CSRF token: HTTP ${response.status} ${String(body || "").slice(0, 200)}`,
+              );
+
+              if (attempt < maxAttemptsPerUrl - 1) {
+                await new Promise((r) => setTimeout(r, 300 * Math.pow(2, attempt)));
+                continue;
+              }
+
+              break;
+            }
+
+            const html = await response.text();
+            const token = this._extractCsrfTokenFromHtml(html);
+            if (!token) {
+              lastError = this._createError(
+                "csrf",
+                "Failed to extract CSRF token from page HTML.",
+              );
+              break;
+            }
+
+            this._csrfToken = token;
+            this._csrfTokenTs = Date.now();
+            return token;
+          } catch (e) {
+            if (this.isOwnError(e)) {
+              lastError = e;
+            } else {
+              const msg = e instanceof Error ? e.message : String(e);
+              lastError = this._createError("network", `Failed to fetch CSRF token: ${msg}`);
+            }
+
+            if (attempt < maxAttemptsPerUrl - 1) {
+              await new Promise((r) => setTimeout(r, 300 * Math.pow(2, attempt)));
+              continue;
+            }
+          }
+        }
       }
-      const token = match[1];
-      this._csrfToken = token;
-      return token;
+
+      throw lastError || this._createError("network", "Failed to fetch CSRF token: unknown error");
     } catch (e) {
       if (this.isOwnError(e)) throw e;
       const msg = e instanceof Error ? e.message : String(e);

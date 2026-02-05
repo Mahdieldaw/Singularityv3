@@ -237,9 +237,6 @@ export function useChat() {
           setIsLoading(false);
           return;
         }
-
-        const providerContexts = (fullSession as any).providerContexts || {};
-
         /**
          * CRITICAL FIX: Transform backend "rounds" format
          * Backend sends: { userTurnId, aiTurnId, user: {...}, providers: {...}, mappingResponses }
@@ -265,8 +262,8 @@ export function useChat() {
 
           // 2. Extract AiTurn
           const providers = round.providers || {};
-          const mappingRaw = round.mappingResponses || {};
-          const singularityRaw = round.singularityResponses || {};
+          const mappingRaw = (round as any).mappingResponses || {};
+          const singularityRaw = (round as any).singularityResponses || {};
 
           const hasAnyResponseData =
             Object.keys(providers).length > 0 ||
@@ -323,47 +320,46 @@ export function useChat() {
                 ) as Record<string, ProviderResponse[]>)
                 : undefined;
 
-            // Normalize mapping/other responses to arrays
-            const normalizeResponseMap = (
-              raw: any,
-            ): Record<string, ProviderResponse[]> => {
-              if (!raw) return {};
-              const result: Record<string, ProviderResponse[]> = {};
-              const hydrateTextFromMeta = (
-                resp: any,
-                pid: string,
-              ): ProviderResponse => {
-                const baseMeta = resp?.meta || {};
-                const ctxEntry = (providerContexts as any)?.[pid];
-                const ctxMeta =
-                  ctxEntry && typeof ctxEntry === "object"
-                    ? (ctxEntry as any).meta || {}
-                    : {};
-                const mergedMeta = { ...ctxMeta, ...baseMeta };
-                const fromMeta =
-                  typeof mergedMeta?.rawMappingText === "string"
-                    ? mergedMeta.rawMappingText
-                    : "";
-                const fromText = typeof resp?.text === "string" ? resp.text : "";
-                const text =
-                  fromMeta && fromMeta.length >= fromText.length ? fromMeta : fromText;
-                return {
-                  ...(resp || {}),
-                  text,
-                  meta: mergedMeta,
-                } as ProviderResponse;
-              };
-              Object.entries(raw).forEach(([pid, val]: [string, any]) => {
-                if (Array.isArray(val)) {
-                  result[pid] = val.map((resp: any) =>
-                    hydrateTextFromMeta(resp, pid),
-                  );
-                } else {
-                  result[pid] = [hydrateTextFromMeta(val, pid)];
+            const batchPhaseFromLegacy =
+              !round.batch && batchResponses
+                ? {
+                  responses: Object.fromEntries(
+                    Object.entries(batchResponses).map(([pid, arr]) => {
+                      const last = (arr as any[])[(arr as any[]).length - 1] as any;
+                      return [
+                        pid,
+                        {
+                          text: String(last?.text || ""),
+                          modelIndex: Number(last?.meta?.modelIndex || 0),
+                          status: last?.status || "completed",
+                          meta: last?.meta,
+                        },
+                      ];
+                    }),
+                  ),
+                  timestamp: round.completedAt || round.createdAt || Date.now(),
                 }
-              });
-              return result;
-            };
+                : undefined;
+
+            const singularityPhaseFromLegacy =
+              !round.singularity && singularityRaw && Object.keys(singularityRaw).length > 0
+                ? (() => {
+                  let best: any = null;
+                  for (const arr of Object.values(singularityRaw)) {
+                    const a = Array.isArray(arr) ? arr : [arr];
+                    const last = a[a.length - 1];
+                    if (!best) best = last;
+                    const bestTs = Number(best?.updatedAt || best?.createdAt || 0);
+                    const ts = Number(last?.updatedAt || last?.createdAt || 0);
+                    if (ts >= bestTs) best = last;
+                  }
+                  return {
+                    prompt: "",
+                    output: String(best?.text || ""),
+                    timestamp: round.completedAt || round.createdAt || Date.now(),
+                  };
+                })()
+                : undefined;
 
             const aiTurn: AiTurn = {
               type: "ai",
@@ -372,18 +368,9 @@ export function useChat() {
               sessionId: fullSession.sessionId,
               threadId: DEFAULT_THREAD,
               createdAt: round.completedAt || round.createdAt || Date.now(),
-              ...(batchResponses ? { batchResponses } : {}),
-
-              ...(round.batch ? { batch: round.batch } : {}),
+              ...(round.batch ? { batch: round.batch } : batchPhaseFromLegacy ? { batch: batchPhaseFromLegacy } : {}),
               ...(round.mapping ? { mapping: round.mapping } : {}),
-              ...(round.singularity ? { singularity: round.singularity } : {}),
-
-              mappingResponses: normalizeResponseMap(mappingRaw),
-              singularityResponses: normalizeResponseMap(singularityRaw),
-              // Cognitive pipeline structured outputs
-              mapperArtifact: round.mapperArtifact || undefined,
-              pipelineArtifacts: round.pipelineArtifacts || undefined,
-              singularityOutput: round.singularityOutput || undefined,
+              ...(round.singularity ? { singularity: round.singularity } : singularityPhaseFromLegacy ? { singularity: singularityPhaseFromLegacy } : {}),
               pipelineStatus: round.pipelineStatus || undefined,
             };
             newIds.push(aiTurn.id);

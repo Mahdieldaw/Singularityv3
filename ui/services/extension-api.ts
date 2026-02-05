@@ -104,7 +104,8 @@ class ExtensionAPI {
     }
 
     if (this.portHealthManager) {
-      if (this.port && !force) {
+      const isConnected = this.portHealthManager.getStatus().isConnected;
+      if (this.port && isConnected && !force) {
         await this.portHealthManager.waitForReady();
         return this.port;
       }

@@ -32,24 +32,6 @@ const getBatchResponses = (aiTurn: AiTurn): Record<string, ProviderResponse[]> =
       ]),
     );
   }
-  if (aiTurn.batchResponses && Object.keys(aiTurn.batchResponses).length > 0) {
-    const createdAt = aiTurn.createdAt ?? 0;
-    return Object.fromEntries(
-      Object.entries(aiTurn.batchResponses).map(([providerId, data]) => {
-        const arr = Array.isArray(data) ? data : [data];
-        return [
-          providerId,
-          arr.map((item) => ({
-            ...item,
-            providerId,
-            createdAt: item?.createdAt ?? createdAt,
-            updatedAt: item?.updatedAt ?? item?.createdAt ?? createdAt,
-            meta: item?.meta ? { ...item.meta, modelIndex: item?.meta?.modelIndex ?? (item as any)?.modelIndex } : { modelIndex: (item as any)?.modelIndex },
-          } as ProviderResponse)),
-        ];
-      }),
-    );
-  }
   return {};
 };
 

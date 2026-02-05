@@ -8,9 +8,7 @@ const DecisionMapGraph = safeLazy(() => import("./DecisionMapGraph"));
 import { adaptGraphTopology } from "../utils/graphAdapter";
 import MarkdownDisplay from "./MarkdownDisplay";
 import { LLM_PROVIDERS_CONFIG } from "../constants";
-import { getLatestResponse, normalizeResponseArray } from "../utils/turn-helpers";
 import { getProviderColor, getProviderConfig } from "../utils/provider-helpers";
-import type { ProviderResponse } from "../../shared/contract";
 import type { AiTurnWithUI } from "../types";
 import clsx from "clsx";
 import { CopyButton } from "./CopyButton";
@@ -21,10 +19,6 @@ import { ParagraphSpaceView } from "./ParagraphSpaceView";
 // PARSING UTILITIES - Import from shared module (single source of truth)
 // ============================================================================
 
-import {
-  parseUnifiedMapperOutput,
-
-} from "../../shared/parsing-utils";
 import { computeProblemStructureFromArtifact, computeStructuralAnalysis } from "../../src/core/PromptMethods";
 import type { StructuralAnalysis } from "../../shared/contract";
 const StructuralDebugPanel = safeLazy(() => import("./debug/StructuralDebugPanel").then(m => ({ default: m.StructuralDebugPanel })));
@@ -769,9 +763,10 @@ const SingularitySelector: React.FC<{ aiTurn: AiTurnWithUI, activeProviderId?: s
               const pid = String(p.id);
               const isActive = pid === activeProviderId;
               const isUnauthorized = authStatus && authStatus[pid] === false;
-              const latestResp = getLatestResponse(aiTurn.singularityResponses?.[pid]);
-              const hasError = latestResp?.status === 'error';
-              const errorMessage = hasError ? (latestResp?.meta?._rawError || "Failed") : null;
+              const hasError =
+                pid === activeProviderId &&
+                String((aiTurn as any)?.singularity?.output || '') === 'Request failed';
+              const errorMessage = hasError ? 'Request failed' : null;
               const isDisabled = isUnauthorized;
 
               return (
@@ -919,6 +914,10 @@ export const DecisionMapSheet = React.memo(() => {
     return t && (t as any).type === 'ai' ? (t as AiTurnWithUI) : null;
   }, [openState, turnGetter]);
 
+  const activeMappingPid = useMemo(() => {
+    return mappingProvider || aiTurn?.meta?.mapper || undefined;
+  }, [mappingProvider, aiTurn?.meta?.mapper]);
+
   useEffect(() => {
     console.log('🔬 Phase persistence:', {
       turnId: aiTurn?.id,
@@ -937,64 +936,36 @@ export const DecisionMapSheet = React.memo(() => {
     return (t as any).text || "";
   }, [aiTurn?.userTurnId, turnGetter]);
 
-  const mappingResponses = useMemo(() => {
-    const out: Record<string, ProviderResponse[]> = {};
-    LLM_PROVIDERS_CONFIG.forEach((p) => (out[String(p.id)] = []));
-    if (!aiTurn) return out;
-    const map = aiTurn.mappingResponses || {};
-    Object.entries(map).forEach(([pid, resp]) => {
-      out[pid] = normalizeResponseArray(resp);
-    });
-    return out;
-  }, [aiTurn?.id, aiTurn?.mappingVersion]);
-
-  const activeMappingPid = useMemo(() => {
-    if (!aiTurn) return undefined;
-    const availableKeys = Object.keys(aiTurn.mappingResponses || {});
-    const hasData = (pid: string | undefined) => {
-      if (!pid) return false;
-      return (mappingResponses[pid]?.length || 0) > 0;
-    };
-
-    if (mappingProvider && hasData(mappingProvider)) return mappingProvider;
-    if (aiTurn.meta?.mapper && hasData(aiTurn.meta.mapper)) return aiTurn.meta.mapper;
-
-    const firstWithData = availableKeys.find((k) => hasData(k));
-    if (firstWithData) return firstWithData;
-    return availableKeys.length > 0 ? availableKeys[0] : undefined;
-  }, [aiTurn, mappingProvider, mappingResponses]);
-
-  const latestMapping = useMemo(() => {
-    if (!activeMappingPid) return undefined;
-    return getLatestResponse(mappingResponses[activeMappingPid]);
-  }, [activeMappingPid, mappingResponses]);
-
-  const parsedMapping = useMemo(() => {
-    const fromMeta = String((latestMapping?.meta as any)?.rawMappingText || '');
-    const fromText = String(latestMapping?.text || '');
-    const rawText =
-      fromMeta && fromMeta.length >= fromText.length ? fromMeta : fromText;
-    return parseUnifiedMapperOutput(String(rawText));
-  }, [latestMapping]);
-
-  const rawMappingText = useMemo(() => {
-    const fromMeta = String((latestMapping?.meta as any)?.rawMappingText || '');
-    const fromText = String(latestMapping?.text || '');
-    return fromMeta && fromMeta.length >= fromText.length ? fromMeta : fromText;
-  }, [latestMapping]);
+  const mappingArtifact = (aiTurn as any)?.mapping?.artifact || null;
 
   const semanticMapperPrompt = useMemo(() => {
-    const v = (latestMapping?.meta as any)?.semanticMapperPrompt;
-    return typeof v === 'string' && v.trim() ? v : null;
-  }, [latestMapping]);
+    const v = (aiTurn as any)?.meta?.semanticMapperPrompt;
+    if (typeof v !== 'string') return null;
+    const trimmed = v.trim();
+    return trimmed ? trimmed : null;
+  }, [aiTurn?.meta]);
+
+  const rawMappingText = useMemo(() => {
+    const v = (aiTurn as any)?.meta?.rawMappingText;
+    return typeof v === 'string' ? v : '';
+  }, [aiTurn?.meta]);
+
+  const parsedMapping = useMemo(() => {
+    const claims = Array.isArray(mappingArtifact?.semantic?.claims)
+      ? mappingArtifact.semantic.claims
+      : [];
+    const edges = Array.isArray(mappingArtifact?.semantic?.edges)
+      ? mappingArtifact.semantic.edges
+      : [];
+    const conditionals = Array.isArray(mappingArtifact?.semantic?.conditionals)
+      ? mappingArtifact.semantic.conditionals
+      : [];
+    const topology = mappingArtifact?.traversal?.graph || null;
+    return { claims, edges, conditionals, topology, map: { claims, edges } } as any;
+  }, [mappingArtifact]);
 
   const graphTopology = useMemo(() => {
-    const meta: any = latestMapping?.meta || null;
-    const fromMeta =
-      normalizeGraphTopologyCandidate(meta?.graphTopology) ||
-      normalizeGraphTopologyCandidate(meta?.graph_topology) ||
-      normalizeGraphTopologyCandidate(meta?.topology) ||
-      null;
+    const fromMeta = normalizeGraphTopologyCandidate(mappingArtifact?.traversal?.graph) || null;
     const fromParsed = normalizeGraphTopologyCandidate(parsedMapping.topology) || null;
     const picked = fromMeta || fromParsed || null;
     decisionMapSheetDbg("graphTopology source", {
@@ -1004,7 +975,7 @@ export const DecisionMapSheet = React.memo(() => {
       edges: picked ? (picked as any)?.edges?.length : 0,
     });
     return picked;
-  }, [latestMapping, parsedMapping.topology]);
+  }, [mappingArtifact, parsedMapping.topology]);
 
   const graphData = useMemo(() => {
     const claimsFromMap = Array.isArray(parsedMapping.map?.claims) ? parsedMapping.map!.claims : null;
@@ -1029,8 +1000,6 @@ export const DecisionMapSheet = React.memo(() => {
     });
     return adaptGraphTopology(graphTopology);
   }, [parsedMapping, graphTopology]);
-
-  const mappingArtifact = (aiTurn as any)?.mapping?.artifact || null;
 
   const derivedMapperArtifact = useMemo(() => {
     if (!mappingArtifact) return null;
@@ -1067,7 +1036,6 @@ export const DecisionMapSheet = React.memo(() => {
           claims: graphData.claims,
           edges: graphData.edges,
           ghosts: Array.isArray((parsedMapping as any)?.ghosts) ? (parsedMapping as any).ghosts : null,
-          query: (latestMapping as any)?.meta?.query || null,
         }
         : null);
 
@@ -1076,7 +1044,7 @@ export const DecisionMapSheet = React.memo(() => {
     const claims = Array.isArray(flatClaims) ? flatClaims : Array.isArray(nestedClaims) ? nestedClaims : null;
     if (!artifact || !claims || claims.length === 0) return null;
     return artifact;
-  }, [aiTurn, derivedMapperArtifact, parsedMapping, graphData, latestMapping]);
+  }, [aiTurn, derivedMapperArtifact, parsedMapping, graphData]);
 
   useEffect(() => {
     if (activeTab !== 'debug' && activeTab !== 'concierge') return;
@@ -1136,13 +1104,8 @@ export const DecisionMapSheet = React.memo(() => {
   }, [mappingArtifact?.semantic?.narrative, parsedMapping.narrative]);
 
   const optionsText = useMemo(() => {
-    const meta: any = latestMapping?.meta || null;
-    let fromMeta = meta?.allAvailableOptions || meta?.all_available_options || meta?.options || null;
-    if (fromMeta) {
-      return fromMeta;
-    }
-    return parsedMapping.options ?? null;
-  }, [latestMapping, parsedMapping.options]);
+    return (parsedMapping as any)?.options ?? null;
+  }, [parsedMapping]);
 
   // Options now built directly from claims - no separate parsing needed, but fallback to text parsing if needed
   const parsedThemes = useMemo(() => {
@@ -1152,13 +1115,9 @@ export const DecisionMapSheet = React.memo(() => {
 
   // Extract citation source order from mapping metadata for correct citation-to-model mapping
   const citationSourceOrder = useMemo(() => {
-    const metaOrder = latestMapping?.meta?.citationSourceOrder || null;
-    if (metaOrder && typeof metaOrder === 'object') {
-      return metaOrder as Record<string | number, string>;
-    }
     // Fallback: build from active batch responses in order
     if (aiTurn) {
-      const activeOrdered = LLM_PROVIDERS_CONFIG.map((p) => String(p.id)).filter((pid) => !!(aiTurn.batchResponses || {})[pid]);
+      const activeOrdered = LLM_PROVIDERS_CONFIG.map((p) => String(p.id)).filter((pid) => !!(aiTurn.batch?.responses || {})[pid]);
       const order: Record<number, string> = {};
       activeOrdered.forEach((pid, idx) => {
         order[idx + 1] = pid;
@@ -1166,22 +1125,18 @@ export const DecisionMapSheet = React.memo(() => {
       return order;
     }
     return undefined;
-  }, [latestMapping, aiTurn]);
+  }, [aiTurn]);
 
   const handleCitationClick = useCallback((modelNumber: number | string) => {
     try {
       let providerId: string | undefined;
-      const metaOrder = latestMapping?.meta?.citationSourceOrder || null;
 
       const isNumeric = typeof modelNumber === 'number' || (!isNaN(parseInt(modelNumber, 10)) && /^\d+$/.test(modelNumber));
 
       if (isNumeric) {
         const num = typeof modelNumber === 'number' ? modelNumber : parseInt(modelNumber, 10);
-        if (metaOrder && typeof metaOrder === 'object') {
-          providerId = (metaOrder as any)[num];
-        }
         if (!providerId && aiTurn) {
-          const activeOrdered = LLM_PROVIDERS_CONFIG.map((p) => String(p.id)).filter((pid) => !!(aiTurn.batchResponses || {})[pid]);
+          const activeOrdered = LLM_PROVIDERS_CONFIG.map((p) => String(p.id)).filter((pid) => !!(aiTurn.batch?.responses || {})[pid]);
           providerId = activeOrdered[num - 1];
         }
       } else if (typeof modelNumber === 'string') {
@@ -1191,7 +1146,7 @@ export const DecisionMapSheet = React.memo(() => {
       if (!providerId || !aiTurn) return;
       setActiveSplitPanel({ turnId: aiTurn.id, providerId });
     } catch { }
-  }, [latestMapping, aiTurn, setActiveSplitPanel]);
+  }, [aiTurn, setActiveSplitPanel]);
 
   const handleNodeClick = useCallback((node: any) => {
     setSelectedNode({
@@ -1255,10 +1210,32 @@ export const DecisionMapSheet = React.memo(() => {
   }, []);
 
   const resolvedPipelineArtifacts = useMemo(() => {
-    const fromTurn = (aiTurn as any)?.pipelineArtifacts || null;
-    const fromMeta = (latestMapping?.meta as any)?.pipelineArtifacts || null;
-    return fromTurn || fromMeta || null;
-  }, [aiTurn, latestMapping?.meta]);
+    if (!mappingArtifact) return null;
+
+    return {
+      paragraphProjection: {
+        paragraphs: mappingArtifact.shadow?.paragraphs || [],
+      },
+      shadow: {
+        extraction: {
+          statements: mappingArtifact.shadow?.statements || [],
+        },
+        audit: mappingArtifact.shadow?.audit || {},
+        delta: mappingArtifact.shadow?.delta || null,
+      },
+      substrate: {
+        graph: mappingArtifact.geometry?.substrate || { nodes: [], edges: [] },
+      },
+      preSemantic: mappingArtifact.geometry?.preSemantic || undefined,
+      clustering: null,
+      enrichmentResult: null,
+      validation: null,
+      prompts: {
+        semanticMapperPrompt: semanticMapperPrompt || '',
+        rawMappingText: rawMappingText || '',
+      },
+    };
+  }, [mappingArtifact, semanticMapperPrompt, rawMappingText]);
 
   const pipelineStages = useMemo(() => {
     const mapperArtifact =
@@ -1269,11 +1246,10 @@ export const DecisionMapSheet = React.memo(() => {
           claims: graphData.claims,
           edges: graphData.edges,
           ghosts: Array.isArray((parsedMapping as any)?.ghosts) ? (parsedMapping as any).ghosts : null,
-          query: (latestMapping as any)?.meta?.query || null,
         }
         : null);
 
-    const singularityOutput = (aiTurn as any)?.singularityOutput || singularityState.output || null;
+    const singularityOutput = (aiTurn as any)?.singularity?.output || singularityState.output || null;
 
     const hasValue = (value: any, kind: 'json' | 'text') => {
       if (value == null) return false;
@@ -1297,7 +1273,7 @@ export const DecisionMapSheet = React.memo(() => {
       { key: 'pipeline_clustering_summary', label: 'Clustering Summary', kind: 'json' as const, value: p?.clustering?.summary ?? null, group: 'Clustering', disabled: !hasValue(p?.clustering?.summary, 'json') },
 
       { key: 'pipeline_substrate_summary', label: 'Substrate Summary', kind: 'json' as const, value: substrate ?? null, group: 'Substrate', disabled: !hasValue(substrate, 'json') },
-      { key: 'pipeline_substrate_degeneracy', label: 'Substrate Degeneracy', kind: 'json' as const, value: substrate ?? null, group: 'Substrate', disabled: !hasValue(substrate, 'json') },
+      { key: 'pipeline_substrate_degeneracy', label: 'Substrate Degeneracy', kind: 'json' as const, value: substrate?.degeneracy ?? null, group: 'Substrate', disabled: !hasValue(substrate?.degeneracy, 'json') },
 
       { key: 'pipeline_presemantic', label: 'Pre-Semantic Interpretation', kind: 'json' as const, value: p?.preSemantic ?? null, group: 'Interpretation', disabled: !hasValue(p?.preSemantic, 'json') },
       { key: 'pipeline_validation', label: 'Structural Validation', kind: 'json' as const, value: p?.validation ?? null, group: 'Validation', disabled: !hasValue(p?.validation, 'json') },
@@ -1316,7 +1292,7 @@ export const DecisionMapSheet = React.memo(() => {
       { key: 'singularity_output', label: 'Singularity Output', kind: 'json' as const, value: singularityOutput, group: 'Singularity', disabled: !hasValue(singularityOutput, 'json') },
       { key: 'singularity_pipeline', label: 'Singularity Pipeline', kind: 'json' as const, value: (singularityOutput as any)?.pipeline || null, group: 'Singularity', disabled: !hasValue((singularityOutput as any)?.pipeline || null, 'json') },
     ];
-  }, [aiTurn, derivedMapperArtifact, parsedMapping, graphData, latestMapping, singularityState.output, semanticMapperPrompt, rawMappingText, resolvedPipelineArtifacts, mappingArtifact, problemStructure, structuralAnalysis]);
+  }, [aiTurn, derivedMapperArtifact, parsedMapping, graphData, singularityState.output, resolvedPipelineArtifacts, mappingArtifact, problemStructure, structuralAnalysis]);
 
   const pipelineStageGroups = useMemo(() => {
     const groups: Array<{ label: string; stages: typeof pipelineStages }> = [];

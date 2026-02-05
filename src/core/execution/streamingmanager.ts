@@ -48,8 +48,8 @@ export class StreamingManager {
     stepId: string,
     providerId: string,
     fullText: string = ""
-  ): string {
-    if (!sessionId) return fullText || "";
+  ): { text: string; isReplace: boolean } {
+    if (!sessionId) return { text: fullText || "", isReplace: false };
 
     const key = `${sessionId}:${stepId}:${providerId}`;
     const existingState = this.streamStates.get(key) ?? { text: "" };
@@ -63,7 +63,7 @@ export class StreamingManager {
         providerId,
         textLength: fullText.length,
       });
-      return delta;
+      return { text: delta, isReplace: false };
     }
 
     if (fullText && fullText.length > prev.length) {
@@ -76,24 +76,26 @@ export class StreamingManager {
 
       if (prefixLen >= prev.length * 0.7) {
         delta = fullText.slice(prev.length);
+        // Standard append updates state
         this.streamStates.set(key, { ...existingState, text: fullText });
         logger.stream("Incremental append:", {
           providerId,
           deltaLen: delta.length,
         });
+        return { text: delta, isReplace: false };
       } else {
+        // Divergence: return partial update (or could replace, but stick to slice for now)
         logger.stream(
           `Divergence detected for ${providerId}: commonPrefix=${prefixLen}/${prev.length}`,
         );
         this.streamStates.set(key, { ...existingState, text: fullText });
-        return fullText.slice(prefixLen);
+        return { text: fullText.slice(prefixLen), isReplace: false };
       }
-      return delta;
     }
 
     if (fullText === prev) {
       logger.stream("Duplicate call (no-op):", { providerId });
-      return "";
+      return { text: "", isReplace: false };
     }
 
     if (fullText.length < prev.length) {
@@ -102,12 +104,14 @@ export class StreamingManager {
       const isSmallRegression = regression <= 200 || regressionPercent <= 5;
 
       if (isSmallRegression) {
+        // Even small regressions should just sync. 
+        // Returning replace ensures UI is correct.
         logger.stream(`Acceptable regression for ${providerId}:`, {
           chars: regression,
           percent: regressionPercent.toFixed(1) + "%",
         });
         this.streamStates.set(key, { ...existingState, text: fullText });
-        return "";
+        return { text: fullText, isReplace: true };
       }
 
       const now = Date.now();
@@ -133,10 +137,11 @@ export class StreamingManager {
       } else {
         this.streamStates.set(key, { ...existingState, text: fullText });
       }
-      return "";
+      // Regression handling: ALWAYS valid replacement now
+      return { text: fullText, isReplace: true };
     }
 
-    return "";
+    return { text: "", isReplace: false };
   }
 
   clearCache(sessionId: string) {
@@ -164,7 +169,7 @@ export class StreamingManager {
     isFinal = false
   ): boolean {
     try {
-      let delta: string;
+      let delta = "";
       let isReplace = false;
 
       if (isFinal) {
@@ -179,10 +184,12 @@ export class StreamingManager {
           len: text.length,
         });
       } else {
-        delta = this.makeDelta(sessionId, stepId, providerId, text);
+        const result = this.makeDelta(sessionId, stepId, providerId, text);
+        delta = result.text;
+        isReplace = result.isReplace;
       }
 
-      if ((delta && delta.length > 0) || (isFinal && isReplace)) {
+      if ((delta && delta.length > 0) || (isFinal && isReplace) || isReplace) {
         const chunk = {
           text: delta,
           isFinal: !!isFinal,
@@ -195,7 +202,7 @@ export class StreamingManager {
           providerId,
           chunk,
         });
-        logger.stream(label || "Delta", { stepId, providerId, len: delta.length });
+        logger.stream(label || "Delta", { stepId, providerId, len: delta.length, isReplace });
         return true;
       } else {
         logger.stream("Delta skipped (empty):", { stepId, providerId });

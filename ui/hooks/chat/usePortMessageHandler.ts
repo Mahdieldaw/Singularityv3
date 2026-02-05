@@ -34,6 +34,7 @@ import type { TurnMessage, UserTurn, AiTurnWithUI } from "../../types";
 import type { ProviderKey } from "../../../shared/contract";
 import { LLM_PROVIDERS_CONFIG } from "../../constants";
 import { DEFAULT_THREAD } from "../../../shared/messaging";
+import { buildCognitiveArtifact } from "@shared/cognitive-artifact";
 
 const PORT_DEBUG_UI = false;
 
@@ -151,6 +152,11 @@ export function usePortMessageHandler(enabled: boolean = true) {
       }
 
       switch (message.type) {
+
+        case "CHEWED_SUBSTRATE_DEBUG": {
+          console.log("[ChewedSubstrate]", message);
+          break;
+        }
 
         case "PREFLIGHT_WARNINGS": {
           const { warnings } = message;
@@ -555,82 +561,51 @@ export function usePortMessageHandler(enabled: boolean = true) {
                   if (!existing || existing.type !== "ai") return;
                   const aiTurn = existing as AiTurnWithUI;
 
-                  // Helper to safely update/append response
-                  const updateResponseList = (
-                    list: any[] | undefined,
-                    entry: any,
-                  ) => {
-                    const arr = Array.isArray(list) ? [...list] : [];
-                    const last = arr.length > 0 ? arr[arr.length - 1] : null;
-                    // If last item is completed/error, we append a new version (history).
-                    // If last item is streaming/pending, we update it (in-place).
-                    const isFinal =
-                      last?.status === "completed" || last?.status === "error";
-
-                    if (!last || isFinal) {
-                      arr.push(entry);
-                    } else {
-                      // Preserve creation time when updating
-                      arr[arr.length - 1] = {
-                        ...last,
-                        ...entry,
-                        createdAt: last.createdAt,
-                      };
-                    }
-                    return arr;
-                  };
-
-                  const baseEntry = {
-                    providerId: normalizedId,
-                    text: data?.text || "",
-                    status: "completed" as const,
-                    createdAt: Date.now(),
-                    updatedAt: Date.now(),
-                    meta: {
-                      ...(data?.meta || {}),
-                    },
-                    artifacts: data?.artifacts || [], // ✅ Preserve artifacts
-                  };
-
-
-                  if (stepType === "mapping") {
-                    aiTurn.mappingResponses = {
-                      ...(aiTurn.mappingResponses || {}),
-                      [normalizedId]: updateResponseList(
-                        aiTurn.mappingResponses?.[normalizedId],
-                        baseEntry,
-                      ),
-                    };
-                    aiTurn.mappingVersion = (aiTurn.mappingVersion ?? 0) + 1;
-                    const artifact = data?.mapperArtifact || data?.meta?.mapperArtifact;
+                  const now = Date.now();
+                  if (stepType === "batch") {
+                    if (!aiTurn.batch) aiTurn.batch = { responses: {}, timestamp: now };
+                    const existingResp = aiTurn.batch.responses?.[normalizedId];
+                    aiTurn.batch.responses[normalizedId] = {
+                      text: data?.text || "",
+                      modelIndex:
+                        existingResp?.modelIndex ??
+                        data?.meta?.modelIndex ??
+                        existingResp?.meta?.modelIndex ??
+                        0,
+                      status: data?.status || "completed",
+                      meta: data?.meta,
+                    } as any;
+                    aiTurn.batch.timestamp = now;
+                    aiTurn.batchVersion = (aiTurn.batchVersion ?? 0) + 1;
+                  } else if (stepType === "mapping") {
+                    const mapper = data?.mapperArtifact || data?.meta?.mapperArtifact;
+                    const pipeline = data?.pipelineArtifacts || data?.meta?.pipelineArtifacts;
+                    const artifact =
+                      data?.mapping?.artifact ||
+                      data?.mappingArtifact ||
+                      data?.meta?.mappingArtifact ||
+                      buildCognitiveArtifact(mapper, pipeline);
                     if (artifact) {
-                      aiTurn.mapperArtifact = artifact;
+                      aiTurn.mapping = { artifact, timestamp: now } as any;
                     }
-                    const pipelineArtifacts = data?.pipelineArtifacts || data?.meta?.pipelineArtifacts;
-                    if (pipelineArtifacts) {
-                      (aiTurn as any).pipelineArtifacts = pipelineArtifacts;
-                    }
-                  } else if (stepType === "batch") {
-                    aiTurn.batchResponses = {
-                      ...(aiTurn.batchResponses || {}),
-                      [normalizedId]: updateResponseList(
-                        aiTurn.batchResponses?.[normalizedId],
-                        baseEntry,
-                      ),
-                    };
+                    aiTurn.mappingVersion = (aiTurn.mappingVersion ?? 0) + 1;
                   } else if (stepType === "singularity") {
-                    aiTurn.singularityResponses = {
-                      ...(aiTurn.singularityResponses || {}),
-                      [normalizedId]: updateResponseList(
-                        aiTurn.singularityResponses?.[normalizedId],
-                        baseEntry,
-                      ),
-                    };
-                    if (data?.meta?.singularityOutput) {
-                      aiTurn.singularityOutput = data.meta.singularityOutput;
-                    }
-                    aiTurn.singularityVersion =
-                      (aiTurn.singularityVersion ?? 0) + 1;
+                    const out = data?.output || data?.meta?.singularityOutput;
+                    const outputText = data?.text || out?.text || out?.output || "";
+                    const prompt =
+                      out?.pipeline?.prompt ||
+                      out?.prompt ||
+                      aiTurn.singularity?.prompt ||
+                      "";
+                    const traversalState =
+                      out?.traversalState || aiTurn.singularity?.traversalState;
+                    aiTurn.singularity = {
+                      prompt,
+                      output: outputText,
+                      traversalState,
+                      timestamp: now,
+                    } as any;
+                    aiTurn.singularityVersion = (aiTurn.singularityVersion ?? 0) + 1;
                   }
 
                   // CRITICAL: ensure the Map entry is observed as changed
@@ -695,87 +670,40 @@ export function usePortMessageHandler(enabled: boolean = true) {
                     const now = Date.now();
 
 
-                    if (stepType === "mapping") {
-                      const arr = Array.isArray(
-                        aiTurn.mappingResponses?.[providerId!],
-                      )
-                        ? [...(aiTurn.mappingResponses![providerId!] as any[])]
-                        : [];
-                      if (arr.length > 0) {
-                        const latest = arr[arr.length - 1] as any;
-                        arr[arr.length - 1] = {
-                          ...latest,
-                          status: "error",
-                          text: errText || (latest?.text ?? ""),
-                          updatedAt: now,
-                        };
-                      } else {
-                        arr.push({
-                          providerId: providerId!,
-                          text: errText || "",
-                          status: "error",
-                          createdAt: now,
-                          updatedAt: now,
-                        } as any);
-                      }
-                      aiTurn.mappingResponses = {
-                        ...(aiTurn.mappingResponses || {}),
-                        [providerId!]: arr as any,
-                      };
+                    if (stepType === "batch") {
+                      if (!aiTurn.batch) aiTurn.batch = { responses: {}, timestamp: now };
+                      const existingResp = aiTurn.batch.responses?.[providerId!];
+                      aiTurn.batch.responses[providerId!] = {
+                        text: errText || existingResp?.text || "",
+                        modelIndex: existingResp?.modelIndex ?? 0,
+                        status: "error",
+                        meta: { ...(existingResp as any)?.meta, error: errText },
+                      } as any;
+                      aiTurn.batch.timestamp = now;
+                      aiTurn.batchVersion = (aiTurn.batchVersion ?? 0) + 1;
+                    } else if (stepType === "mapping") {
+                      const existingArtifact = (aiTurn.mapping?.artifact as any) || null;
+                      aiTurn.mapping = {
+                        artifact: existingArtifact || {
+                          shadow: { statements: [], paragraphs: [], audit: {}, delta: null },
+                          geometry: { embeddingStatus: "none", substrate: { nodes: [], edges: [] } },
+                          semantic: { claims: [], edges: [], conditionals: [], narrative: errText || "" },
+                          traversal: { forcingPoints: [], graph: { claims: [], tensions: [], tiers: [], maxTier: 0, roots: [], cycles: [] } },
+                        },
+                        timestamp: now,
+                      } as any;
                       aiTurn.mappingVersion = (aiTurn.mappingVersion ?? 0) + 1;
-                    } else if (stepType === "batch") {
-                      const arr = Array.isArray(aiTurn.batchResponses?.[providerId!])
-                        ? [...(aiTurn.batchResponses![providerId!] as any[])]
-                        : [];
-                      if (arr.length > 0) {
-                        const latest = arr[arr.length - 1] as any;
-                        arr[arr.length - 1] = {
-                          ...latest,
-                          status: "error",
-                          text: errText || (latest?.text ?? ""),
-                          updatedAt: now,
-                        } as any;
-                      } else {
-                        arr.push({
-                          providerId: providerId!,
-                          text: errText || "",
-                          status: "error",
-                          createdAt: now,
-                          updatedAt: now,
-                        } as any);
-                      }
-                      aiTurn.batchResponses = {
-                        ...(aiTurn.batchResponses || {}),
-                        [providerId!]: arr as any,
-                      } as any;
                     } else if (stepType === "singularity") {
-                      const arr = Array.isArray(aiTurn.singularityResponses?.[providerId!])
-                        ? [...(aiTurn.singularityResponses![providerId!] as any[])]
-                        : [];
-                      if (arr.length > 0) {
-                        const latest = arr[arr.length - 1] as any;
-                        arr[arr.length - 1] = {
-                          ...latest,
-                          status: "error",
-                          text: errText || (latest?.text ?? ""),
-                          updatedAt: now,
-                        } as any;
-                      } else {
-                        arr.push({
-                          providerId: providerId!,
-                          text: errText || "",
-                          status: "error",
-                          createdAt: now,
-                          updatedAt: now,
-                        } as any);
-                      }
-                      aiTurn.singularityResponses = {
-                        ...(aiTurn.singularityResponses || {}),
-                        [providerId!]: arr as any,
+                      aiTurn.singularity = {
+                        prompt: aiTurn.singularity?.prompt || "",
+                        output: errText || aiTurn.singularity?.output || "",
+                        traversalState: aiTurn.singularity?.traversalState,
+                        timestamp: now,
                       } as any;
-                      aiTurn.singularityVersion =
-                        (aiTurn.singularityVersion ?? 0) + 1;
+                      aiTurn.singularityVersion = (aiTurn.singularityVersion ?? 0) + 1;
                     }
+
+                    draft.set(targetId, { ...aiTurn });
                   });
                 }
                 // ✅ CRITICAL: Always clear loading state on step failure to unlock UI
@@ -928,14 +856,20 @@ export function usePortMessageHandler(enabled: boolean = true) {
                 threadId: DEFAULT_THREAD,
                 userTurnId: "unknown",
                 createdAt: now,
-                mappingResponses: {},
-                singularityResponses: {},
+                ...(artifact ? { mapping: { artifact, timestamp: now } } : {}),
+                ...(singularityOutput
+                  ? {
+                    singularity: {
+                      prompt: "",
+                      output: String((singularityOutput as any)?.text || ""),
+                      timestamp: now,
+                    },
+                  }
+                  : {}),
                 meta: { isOptimistic: false },
               };
               draft.set(aiTurnId, {
                 ...baseTurn,
-                mapperArtifact: artifact,
-                ...(singularityOutput ? { singularityOutput } : {}),
                 ...(pipelineStatus ? { pipelineStatus } : {}),
               });
               return;
@@ -946,9 +880,16 @@ export function usePortMessageHandler(enabled: boolean = true) {
             // Update with cognitive artifacts
             draft.set(aiTurnId, {
               ...aiTurn,
-              mapperArtifact: artifact,
-              ...(message as any)?.pipelineArtifacts ? { pipelineArtifacts: (message as any).pipelineArtifacts } : {},
-              ...(singularityOutput ? { singularityOutput } : {}),
+              ...(artifact ? { mapping: { artifact, timestamp: Date.now() } } : {}),
+              ...(singularityOutput
+                ? {
+                  singularity: {
+                    prompt: "",
+                    output: String((singularityOutput as any)?.text || ""),
+                    timestamp: Date.now(),
+                  },
+                }
+                : {}),
               ...(pipelineStatus ? { pipelineStatus } : {}),
             });
           });

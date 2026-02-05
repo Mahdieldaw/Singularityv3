@@ -40,19 +40,12 @@ export function useClipActions() {
           return;
         }
 
-        const responsesMap =
+        const hasValidExisting =
           type === "mapping"
-            ? aiTurn.mappingResponses || {}
+            ? !!aiTurn.mapping?.artifact
             : type === "singularity"
-              ? aiTurn.singularityResponses || {}
-              : {};
-        const responseEntry = responsesMap[providerId];
-
-        // Check if we have a valid (non-error) existing response
-        const lastResponse = Array.isArray(responseEntry) && responseEntry.length > 0
-          ? responseEntry[responseEntry.length - 1]
-          : undefined;
-        const hasValidExisting = lastResponse && lastResponse.status !== "error";
+              ? !!aiTurn.singularity?.output?.trim()
+              : false;
 
         // Update global provider preference (Crown Move / Mapper Select)
         if (type === "mapping") {
@@ -61,36 +54,26 @@ export function useClipActions() {
           setSingularityProvider(providerId);
         }
 
-        // If the selected provider is not present in the AI turn's batchResponses, add an optimistic
-        // batch response so the batch count increases and the model shows up in the batch area.
-        if (!aiTurn.batchResponses || !aiTurn.batchResponses[providerId]) {
+        if (!aiTurn.batch?.responses || !aiTurn.batch.responses[providerId]) {
           setTurnsMap((draft) => {
             const turn = draft.get(aiTurnId) as AiTurnWithUI | undefined;
             if (!turn || turn.type !== "ai") return;
-            type BatchResponse = {
-              providerId: string;
-              text: string;
-              status: string;
-              createdAt: number;
-              updatedAt: number;
-              meta?: any;
-            };
-            const batchResponses: Record<string, BatchResponse[]> =
-              (turn.batchResponses ||= {}) as Record<string, BatchResponse[]>;
-            if (!batchResponses[providerId]) {
-              const initialStatus: "streaming" | "pending" =
-                PRIMARY_STREAMING_PROVIDER_IDS.includes(providerId)
-                  ? "streaming"
-                  : "pending";
-              batchResponses[providerId] = [
-                {
-                  providerId,
-                  text: "",
-                  status: initialStatus,
-                  createdAt: Date.now(),
-                  updatedAt: Date.now(),
-                } as BatchResponse,
-              ];
+            const initialStatus: "streaming" | "pending" =
+              PRIMARY_STREAMING_PROVIDER_IDS.includes(providerId)
+                ? "streaming"
+                : "pending";
+            if (!turn.batch) {
+              turn.batch = { responses: {}, timestamp: Date.now() };
+            }
+            if (!turn.batch.responses) {
+              turn.batch.responses = {} as any;
+            }
+            if (!turn.batch.responses[providerId]) {
+              (turn.batch.responses as any)[providerId] = {
+                text: "",
+                status: initialStatus,
+              };
+              turn.batchVersion = (turn.batchVersion ?? 0) + 1;
             }
           });
         }

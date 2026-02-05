@@ -1081,8 +1081,7 @@ chrome.runtime.onConnect.addListener(async (port) => {
   if (port.name !== "htos-popup") return;
   console.log("[SW] New connection...");
   try {
-    const svcs = await initializeGlobalServices();
-    const handler = new ConnectionHandler(port, svcs);
+    const handler = new ConnectionHandler(port, () => initializeGlobalServices());
     await handler.init();
     console.log("[SW] Connection handler ready");
   } catch (error) {

@@ -64,7 +64,6 @@ export function createOptimisticAiTurn(
     sessionId: userTurn.sessionId,
     threadId: DEFAULT_THREAD,
     userTurnId: effectiveUserTurnId,
-    mappingResponses: {},
     ...(pendingBatch ? { batch: pendingBatch } : {}),
     meta: {
       isOptimistic: true,
@@ -118,6 +117,25 @@ export function applyStreamingTurnUpdate(
         timestamp: Date.now(),
       };
       aiTurn.singularityVersion = (aiTurn.singularityVersion ?? 0) + 1;
+    } else if (responseType === "mapping") {
+      const existingArtifact = aiTurn.mapping?.artifact as any;
+      const existingNarrative = existingArtifact?.semantic?.narrative || "";
+      const nextText = isReplace ? delta : `${existingNarrative}${delta}`;
+      aiTurn.mapping = {
+        artifact: {
+          shadow: existingArtifact?.shadow || { statements: [], paragraphs: [], audit: {}, delta: null },
+          geometry: existingArtifact?.geometry || { embeddingStatus: "none", substrate: { nodes: [], edges: [] } },
+          semantic: {
+            claims: existingArtifact?.semantic?.claims || [],
+            edges: existingArtifact?.semantic?.edges || [],
+            conditionals: existingArtifact?.semantic?.conditionals || [],
+            narrative: nextText,
+          },
+          traversal: existingArtifact?.traversal || { forcingPoints: [], graph: { claims: [], tensions: [], tiers: [], maxTier: 0, roots: [], cycles: [] } },
+        } as any,
+        timestamp: Date.now(),
+      };
+      aiTurn.mappingVersion = (aiTurn.mappingVersion ?? 0) + 1;
     }
   });
 }
@@ -170,7 +188,6 @@ export function normalizeBackendRoundsToTurns(
         sessionId: sessionId,
         threadId: DEFAULT_THREAD,
         createdAt: round.completedAt || round.createdAt || Date.now(),
-        mappingResponses: {},
         ...(batch ? { batch } : {}),
         ...(mapping ? { mapping } : {}),
         ...(singularity ? { singularity } : {}),
