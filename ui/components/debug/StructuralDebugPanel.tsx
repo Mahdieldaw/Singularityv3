@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from "react";
-import type { EnrichmentResult, CognitiveArtifact, StructuralAnalysis, SerializedTraversalGraph, ForcingPoint } from "../../../shared/contract";
+import type { EnrichmentResult, StructuralAnalysis, SerializedTraversalGraph, ForcingPoint } from "../../../shared/contract";
 import clsx from "clsx";
 import { CopyButton } from "../CopyButton";
 
@@ -566,7 +566,7 @@ export const StructuralDebugPanel: React.FC<StructuralDebugPanelProps> = ({ anal
                                                         </tr>
                                                     </thead>
                                                     <tbody>
-                                                        {(completeness?.unattendedRegions || []).map((r) => (
+                                                        {(completeness?.unattendedRegions || []).map((r: any) => (
                                                             <tr key={r.id} className="border-t border-border-subtle/60">
                                                                 <td className="px-2 py-1 font-mono text-text-secondary">{r.id}</td>
                                                                 <td className="px-2 py-1">{r.reason}</td>
@@ -598,7 +598,7 @@ export const StructuralDebugPanel: React.FC<StructuralDebugPanelProps> = ({ anal
                                                         </tr>
                                                     </thead>
                                                     <tbody>
-                                                        {completenessReport.recovery.highSignalOrphans.map((o) => (
+                                                        {completenessReport.recovery.highSignalOrphans.map((o: any) => (
                                                             <tr key={o.statementId} className="border-t border-border-subtle/60">
                                                                 <td className="px-2 py-1">
                                                                     <div className="whitespace-pre-wrap leading-snug">{o.text}</div>
@@ -620,7 +620,7 @@ export const StructuralDebugPanel: React.FC<StructuralDebugPanelProps> = ({ anal
                                             <div className="text-text-muted">None</div>
                                         ) : (
                                             <div className="space-y-2">
-                                                {completenessReport.recovery.unattendedRegionPreviews.map((r) => (
+                                                {completenessReport.recovery.unattendedRegionPreviews.map((r: any) => (
                                                     <div
                                                         key={r.regionId}
                                                         className="bg-surface border border-border-subtle rounded-lg p-3"
@@ -634,7 +634,7 @@ export const StructuralDebugPanel: React.FC<StructuralDebugPanelProps> = ({ anal
                                                         </div>
                                                         {r.statementPreviews.length > 0 && (
                                                             <div className="mt-2 space-y-1">
-                                                                {r.statementPreviews.map((s, idx) => (
+                                                                {r.statementPreviews.map((s: string, idx: number) => (
                                                                     <div key={`${r.regionId}-${idx}`} className="text-[11px] leading-snug text-text-secondary whitespace-pre-wrap">
                                                                         {s}
                                                                     </div>

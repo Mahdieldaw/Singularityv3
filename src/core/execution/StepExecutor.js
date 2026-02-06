@@ -734,8 +734,7 @@ export class StepExecutor {
     // 3. Build Prompt (LLM) - pass pre-computed paragraph projection and clustering
     const mappingPrompt = buildSemanticMapperPrompt(
       payload.originalPrompt,
-      paragraphResult.paragraphs,
-      preSemanticInterpretation?.hints || null
+      paragraphResult.paragraphs
     );
 
     const promptLength = mappingPrompt.length;
@@ -1177,43 +1176,6 @@ export class StepExecutor {
                 // Fallback? Or just fail? For now, we proceed with raw text but no artifact.
               }
 
-              try {
-                pipelineArtifacts = {
-                  shadow: {
-                    extraction: shadowResult || null,
-                    delta: shadowDelta || null,
-                    topUnreferenced: topUnindexed || null,
-                    referencedIds: referencedIds ? Array.from(referencedIds || []) : null,
-                  },
-                  enrichmentResult: enrichmentResult || null,
-                  paragraphProjection: paragraphResult || null,
-                  clustering: {
-                    result: clusteringResult
-                      ? {
-                        clusters: Array.isArray(clusteringResult.clusters) ? clusteringResult.clusters : [],
-                        meta: clusteringResult.meta || null,
-                      }
-                      : null,
-                    summary: paragraphClusteringSummary || null,
-                  },
-                  substrate: {
-                    summary: substrateSummary || null,
-                    graph: substrateGraph,
-                    degenerate: typeof substrateDegenerate === 'boolean' ? substrateDegenerate : undefined,
-                    degenerateReason: substrateDegenerateReason || null,
-                  },
-                  preSemantic: preSemanticInterpretation || null,
-                  validation: structuralValidation || null,
-                  prompts: {
-                    semanticMapperPrompt: mappingPrompt || "",
-                    rawMappingText: rawText || "",
-                  },
-                  sourceData: indexedSourceData,
-                };
-              } catch (_) {
-                pipelineArtifacts = null;
-              }
-
               // Process raw text for clean display
               const processed = artifactProcessor.process(finalResult.text);
               finalResult.text = processed.cleanText;
@@ -1256,7 +1218,18 @@ export class StepExecutor {
               },
             };
 
-            const cognitiveArtifact = buildCognitiveArtifact(mapperArtifact, pipelineArtifacts);
+            // Build cognitive artifact directly with only the fields it actually uses
+            const cognitiveArtifact = buildCognitiveArtifact(mapperArtifact, {
+              shadow: {
+                extraction: shadowResult || null,
+                delta: shadowDelta || null,
+              },
+              paragraphProjection: paragraphResult || null,
+              substrate: {
+                graph: substrateGraph,
+              },
+              preSemantic: preSemanticInterpretation || null,
+            });
 
             try {
               if (finalResultWithMeta?.meta) {

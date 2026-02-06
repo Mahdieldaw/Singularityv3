@@ -1018,6 +1018,8 @@ export const DecisionMapSheet = React.memo(() => {
     };
   }, [mappingArtifact]);
 
+
+
   const semanticClaims = useMemo(() => {
     const semantic = mappingArtifact?.semantic;
     if (Array.isArray(semantic?.claims)) return semantic?.claims;
@@ -1209,33 +1211,27 @@ export const DecisionMapSheet = React.memo(() => {
     return t;
   }, []);
 
-  const resolvedPipelineArtifacts = useMemo(() => {
-    if (!mappingArtifact) return null;
+  // CLEAN: Read directly from mappingArtifact (CognitiveArtifact shape)
+  // No need for resolvedPipelineArtifacts adapter anymore
 
+  const paragraphProjection = useMemo(() => {
+    const paragraphs = mappingArtifact?.shadow?.paragraphs;
+    if (!Array.isArray(paragraphs) || paragraphs.length === 0) return null;
+
+    // Compute meta from CognitiveArtifact - NO fallbacks to old shapes
     return {
-      paragraphProjection: {
-        paragraphs: mappingArtifact.shadow?.paragraphs || [],
+      paragraphs,
+      meta: {
+        totalParagraphs: paragraphs.length,
+        byModel: paragraphs.reduce((acc: Record<number, number>, p: any) => {
+          acc[p.modelIndex] = (acc[p.modelIndex] || 0) + 1;
+          return acc;
+        }, {}),
+        contestedCount: paragraphs.filter((p: any) => p.contested).length,
+        processingTimeMs: 0,
       },
-      shadow: {
-        extraction: {
-          statements: mappingArtifact.shadow?.statements || [],
-        },
-        audit: mappingArtifact.shadow?.audit || {},
-        delta: mappingArtifact.shadow?.delta || null,
-      },
-      substrate: {
-        graph: mappingArtifact.geometry?.substrate || { nodes: [], edges: [] },
-      },
-      preSemantic: mappingArtifact.geometry?.preSemantic || undefined,
-      clustering: null,
-      enrichmentResult: null,
-      validation: null,
-      prompts: {
-        semanticMapperPrompt: semanticMapperPrompt || '',
-        rawMappingText: rawMappingText || '',
-      },
-    };
-  }, [mappingArtifact, semanticMapperPrompt, rawMappingText]);
+    } as any; // Type assertion to satisfy PipelineParagraphProjectionResult
+  }, [mappingArtifact]);
 
   const pipelineStages = useMemo(() => {
     const mapperArtifact =
@@ -1257,29 +1253,25 @@ export const DecisionMapSheet = React.memo(() => {
       return true;
     };
 
-    const p = resolvedPipelineArtifacts as any;
+    // Read directly from mappingArtifact (CognitiveArtifact)
+    const shadowExtraction = mappingArtifact?.shadow?.statements ? { statements: mappingArtifact.shadow.statements } : null;
+    const shadowDelta = mappingArtifact?.shadow?.delta || null;
+    const preSemantic = mappingArtifact?.geometry?.preSemantic || null;
     const substrate = mappingArtifact?.geometry?.substrate || null;
 
     return [
-      { key: 'pipeline_shadow_extraction', label: 'Shadow Extraction', kind: 'json' as const, value: p?.shadow?.extraction ?? null, group: 'Shadow', disabled: !hasValue(p?.shadow?.extraction, 'json') },
-      { key: 'pipeline_shadow_delta', label: 'Shadow Delta', kind: 'json' as const, value: p?.shadow?.delta ?? null, group: 'Shadow', disabled: !hasValue(p?.shadow?.delta, 'json') },
-      { key: 'pipeline_shadow_top_unreferenced', label: 'Top Unreferenced', kind: 'json' as const, value: p?.shadow?.topUnreferenced ?? null, group: 'Shadow', disabled: !hasValue(p?.shadow?.topUnreferenced, 'json') },
-      { key: 'pipeline_shadow_referenced_ids', label: 'Referenced IDs', kind: 'json' as const, value: p?.shadow?.referencedIds ?? null, group: 'Shadow', disabled: !hasValue(p?.shadow?.referencedIds, 'json') },
-      { key: 'pipeline_enrichment_result', label: 'Geometry Enrichment', kind: 'json' as const, value: p?.enrichmentResult ?? null, group: 'Shadow', disabled: !hasValue(p?.enrichmentResult, 'json') },
+      { key: 'pipeline_shadow_extraction', label: 'Shadow Extraction', kind: 'json' as const, value: shadowExtraction, group: 'Shadow', disabled: !hasValue(shadowExtraction, 'json') },
+      { key: 'pipeline_shadow_delta', label: 'Shadow Delta', kind: 'json' as const, value: shadowDelta, group: 'Shadow', disabled: !hasValue(shadowDelta, 'json') },
+      { key: 'pipeline_shadow_audit', label: 'Shadow Audit', kind: 'json' as const, value: mappingArtifact?.shadow?.audit ?? null, group: 'Shadow', disabled: !hasValue(mappingArtifact?.shadow?.audit, 'json') },
 
-      { key: 'pipeline_paragraph_projection', label: 'Paragraph Projection', kind: 'json' as const, value: p?.paragraphProjection ?? null, group: 'Projection', disabled: !hasValue(p?.paragraphProjection, 'json') },
+      { key: 'pipeline_paragraph_projection', label: 'Paragraph Projection', kind: 'json' as const, value: paragraphProjection, group: 'Projection', disabled: !hasValue(paragraphProjection, 'json') },
 
-      { key: 'pipeline_clustering_result', label: 'Clustering Result', kind: 'json' as const, value: p?.clustering?.result ?? null, group: 'Clustering', disabled: !hasValue(p?.clustering?.result, 'json') },
-      { key: 'pipeline_clustering_summary', label: 'Clustering Summary', kind: 'json' as const, value: p?.clustering?.summary ?? null, group: 'Clustering', disabled: !hasValue(p?.clustering?.summary, 'json') },
+      { key: 'pipeline_substrate_summary', label: 'Substrate', kind: 'json' as const, value: substrate, group: 'Substrate', disabled: !hasValue(substrate, 'json') },
 
-      { key: 'pipeline_substrate_summary', label: 'Substrate Summary', kind: 'json' as const, value: substrate ?? null, group: 'Substrate', disabled: !hasValue(substrate, 'json') },
-      { key: 'pipeline_substrate_degeneracy', label: 'Substrate Degeneracy', kind: 'json' as const, value: substrate?.degeneracy ?? null, group: 'Substrate', disabled: !hasValue(substrate?.degeneracy, 'json') },
+      { key: 'pipeline_presemantic', label: 'Pre-Semantic Interpretation', kind: 'json' as const, value: preSemantic, group: 'Interpretation', disabled: !hasValue(preSemantic, 'json') },
 
-      { key: 'pipeline_presemantic', label: 'Pre-Semantic Interpretation', kind: 'json' as const, value: p?.preSemantic ?? null, group: 'Interpretation', disabled: !hasValue(p?.preSemantic, 'json') },
-      { key: 'pipeline_validation', label: 'Structural Validation', kind: 'json' as const, value: p?.validation ?? null, group: 'Validation', disabled: !hasValue(p?.validation, 'json') },
-
-      { key: 'pipeline_semantic_mapper_prompt', label: 'Semantic Mapper Prompt', kind: 'text' as const, value: p?.prompts?.semanticMapperPrompt || semanticMapperPrompt || '', group: 'Prompts', disabled: !hasValue(p?.prompts?.semanticMapperPrompt || semanticMapperPrompt || '', 'text') },
-      { key: 'pipeline_raw_mapping_text', label: 'Raw Mapping Text', kind: 'text' as const, value: p?.prompts?.rawMappingText || rawMappingText || '', group: 'Prompts', disabled: !hasValue(p?.prompts?.rawMappingText || rawMappingText || '', 'text') },
+      { key: 'pipeline_semantic_mapper_prompt', label: 'Semantic Mapper Prompt', kind: 'text' as const, value: semanticMapperPrompt || '', group: 'Prompts', disabled: !hasValue(semanticMapperPrompt || '', 'text') },
+      { key: 'pipeline_raw_mapping_text', label: 'Raw Mapping Text', kind: 'text' as const, value: rawMappingText || '', group: 'Prompts', disabled: !hasValue(rawMappingText || '', 'text') },
 
       { key: 'mapper_artifact', label: 'Mapper Artifact', kind: 'json' as const, value: mapperArtifact, group: 'Mapper', disabled: !hasValue(mapperArtifact, 'json') },
       { key: 'mapper_problem_structure', label: 'Problem Structure', kind: 'json' as const, value: problemStructure || null, group: 'Mapper', disabled: !hasValue(problemStructure || null, 'json') },
@@ -1292,7 +1284,7 @@ export const DecisionMapSheet = React.memo(() => {
       { key: 'singularity_output', label: 'Singularity Output', kind: 'json' as const, value: singularityOutput, group: 'Singularity', disabled: !hasValue(singularityOutput, 'json') },
       { key: 'singularity_pipeline', label: 'Singularity Pipeline', kind: 'json' as const, value: (singularityOutput as any)?.pipeline || null, group: 'Singularity', disabled: !hasValue((singularityOutput as any)?.pipeline || null, 'json') },
     ];
-  }, [aiTurn, derivedMapperArtifact, parsedMapping, graphData, singularityState.output, resolvedPipelineArtifacts, mappingArtifact, problemStructure, structuralAnalysis]);
+  }, [aiTurn, derivedMapperArtifact, parsedMapping, graphData, singularityState.output, mappingArtifact, problemStructure, structuralAnalysis, semanticMapperPrompt, rawMappingText, paragraphProjection]);
 
   const pipelineStageGroups = useMemo(() => {
     const groups: Array<{ label: string; stages: typeof pipelineStages }> = [];
@@ -1576,9 +1568,9 @@ export const DecisionMapSheet = React.memo(() => {
                   >
                     <ParagraphSpaceView
                       graph={mappingArtifact?.geometry?.substrate || null}
-                      paragraphProjection={(resolvedPipelineArtifacts as any)?.paragraphProjection}
+                      paragraphProjection={paragraphProjection}
                       claims={semanticClaims as any}
-                      shadowStatements={(resolvedPipelineArtifacts as any)?.shadow?.extraction?.statements}
+                      shadowStatements={mappingArtifact?.shadow?.statements || []}
                     />
                   </m.div>
                 )}
@@ -1681,7 +1673,7 @@ export const DecisionMapSheet = React.memo(() => {
                           semanticMapperPrompt={semanticMapperPrompt}
                           rawMappingText={rawMappingText}
                           completeness={(parsedMapping as any)?.artifact?.completeness || null}
-                          enrichmentResult={(resolvedPipelineArtifacts as any)?.enrichmentResult || null}
+                          enrichmentResult={null}
                           traversalGraph={mappingArtifact?.traversal?.graph || (parsedMapping as any)?.artifact?.traversalGraph || null}
                           forcingPoints={mappingArtifact?.traversal?.forcingPoints || (parsedMapping as any)?.artifact?.forcingPoints || null}
                         />

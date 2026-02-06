@@ -8,46 +8,6 @@
 import { MapperArtifact } from "../../shared/contract";
 
 /**
- * @deprecated - No longer used in simplified context bridge
- * Kept for backwards compatibility during migration
- */
-export interface EstablishedFacts {
-  positive: Array<{
-    text: string;
-    source: "correction" | "grounding";
-  }>;
-  negative: Array<{
-    text: string;
-    source: "removal";
-  }>;
-}
-
-/**
- * @deprecated - No longer used in simplified context bridge
- * Kept for backwards compatibility during migration
- */
-export interface CascadeEffects {
-  orphanedClaims: Array<{
-    claimId: string;
-    claimText: string;
-    lostPrerequisite: string;
-    action: "flag" | "auto_remove";
-  }>;
-  freedClaims: Array<{
-    claimId: string;
-    claimText: string;
-  }>;
-  resolvedConflicts: Array<{
-    survivingClaim: string;
-    eliminatedClaim: string;
-  }>;
-  brokenComplements: Array<{
-    orphanedClaim: string;
-    lostComplement: string;
-  }>;
-}
-
-/**
  * Singularity context passed to the next turn.
  * Contains the response, the brief used, and any narrative context.
  */
@@ -72,20 +32,8 @@ export interface ContextBridge {
   /** The user's query/message */
   query: string;
 
-  /** @deprecated - No longer actively used */
-  established: EstablishedFacts;
-
-  /** @deprecated - No longer actively used */
-  openEdges: string[];
-
-  /** @deprecated - No longer actively used */
-  nextStep: string | null;
-
   /** The mapper artifact/landscape from the completed turn */
   landscape: MapperArtifact | null;
-
-  /** @deprecated - No longer actively used */
-  cascadeEffects?: CascadeEffects;
 
   /** The turn ID this context was built from */
   turnId: string;
@@ -96,3 +44,4 @@ export interface ContextBridge {
   /** The particular brief from the mapper that singularity used */
   mapperBrief?: string;
 }
+

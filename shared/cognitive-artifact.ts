@@ -43,21 +43,21 @@ export function buildCognitiveArtifact(
       forcingPoints: mapper?.forcingPoints ?? [],
       graph: traversalGraph
         ? {
-            claims: traversalGraph.claims ?? [],
-            tensions: traversalGraph.tensions ?? [],
-            tiers: traversalGraph.tiers ?? [],
-            maxTier: traversalGraph.maxTier ?? 0,
-            roots: traversalGraph.roots ?? [],
-            cycles: traversalGraph.cycles ?? [],
-          }
+          claims: traversalGraph.claims ?? [],
+          tensions: traversalGraph.tensions ?? [],
+          tiers: traversalGraph.tiers ?? [],
+          maxTier: traversalGraph.maxTier ?? 0,
+          roots: traversalGraph.roots ?? [],
+          cycles: traversalGraph.cycles ?? [],
+        }
         : {
-            claims: [],
-            tensions: [],
-            tiers: [],
-            maxTier: 0,
-            roots: [],
-            cycles: [],
-          },
+          claims: [],
+          tensions: [],
+          tiers: [],
+          maxTier: 0,
+          roots: [],
+          cycles: [],
+        },
     },
     meta: {
       modelCount: mapper?.model_count ?? mapper?.modelCount ?? undefined,

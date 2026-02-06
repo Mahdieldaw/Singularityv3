@@ -4,7 +4,6 @@ import { WorkflowEngine } from "./workflow-engine.js";
 import { runPreflight, createAuthErrorMessage } from './preflight-validator.js';
 import { authManager } from './auth-manager.js';
 import { DEFAULT_THREAD } from '../../shared/messaging.js';
-import { buildCognitiveArtifact } from '../../shared/cognitive-artifact';
 // Note: ContextResolver is now available via services; we don't import it directly here
 
 /**

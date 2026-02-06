@@ -7,7 +7,6 @@
 
 import type { ShadowParagraph } from '../shadow';
 import type { UnifiedMapperOutput } from '../../shared/contract';
-import type { MapperGeometricHints } from '../geometry/interpretation/types';
 import {
   parseSemanticMapperOutput as baseParseOutput
 } from '../../shared/parsing-utils';
@@ -36,40 +35,14 @@ function buildCleanModelOutputs(paragraphs: ShadowParagraph[]): string {
   return blocks.join('\n\n---\n\n');
 }
 
-function formatGeometricHints(hints?: MapperGeometricHints | null): string {
-  if (!hints) return 'No geometric hints available.';
-
-  const lines: string[] = [];
-  lines.push(`Predicted shape: ${hints.predictedShape.predicted} (conf=${hints.predictedShape.confidence.toFixed(2)})`);
-  lines.push(`Expected claim count: ${hints.expectedClaimCount[0]}–${hints.expectedClaimCount[1]}`);
-  lines.push(`Expected conflicts: ${hints.expectedConflicts}`);
-  lines.push(`Expected dissent: ${hints.expectedDissent ? 'yes' : 'no'}`);
-
-  if (Array.isArray(hints.attentionRegions) && hints.attentionRegions.length > 0) {
-    lines.push('');
-    lines.push('Attention regions (do not mention regions explicitly):');
-    for (const r of hints.attentionRegions) {
-      lines.push(`- ${r.priority.toUpperCase()}: ${r.guidance}`);
-    }
-  }
-
-  return lines.join('\n');
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// PROMPT BUILDER
-// ═══════════════════════════════════════════════════════════════════════════
-
 /**
  * Build semantic mapper prompt.
  */
 export function buildSemanticMapperPrompt(
   userQuery: string,
-  paragraphs: ShadowParagraph[],
-  hints?: MapperGeometricHints | null
+  paragraphs: ShadowParagraph[]
 ): string {
   const modelOutputs = buildCleanModelOutputs(paragraphs);
-  const geometric = formatGeometricHints(hints);
 
   return `You are the Cartographer of the Possible.
 
@@ -82,12 +55,6 @@ The user's query:
 <query>
 ${userQuery}
 </query>
-
-You may receive a geometric shape signal hinting at how the space arranges itself; treat it as guidance for what to look for, never as constraint on what you may find.
-
-<geometric_hints>
-${geometric}
-</geometric_hints>
 
 Here are the model outputs you must map:
 

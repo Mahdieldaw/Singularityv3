@@ -1541,9 +1541,7 @@ export interface MappingStepPayload {
   sourceStepIds?: string[];
   sourceHistorical?: {
     turnId: string;
-    mapperArtifact?: MapperArtifact;
   }
-
 }
 
 
@@ -1642,14 +1640,6 @@ export type PersistRequest = {
   mapping?: MappingPhase;
   singularity?: SingularityPhase;
 
-  // Legacy / compatibility fields
-  mapperArtifact?: MapperArtifact; // Legacy - serialized business artifact
-  pipelineArtifacts?: PipelineArtifacts; // Legacy
-  storedAnalysis?: StructuralAnalysis; // Legacy
-  singularityOutput?: SingularityOutput; // Legacy
-
-  understandOutput?: { short_answer?: string } | null;
-  gauntletOutput?: { the_answer?: { statement?: string } } | null;
   sourceTurnId?: string;
   stepType?: ProviderResponseType;
   targetProvider?: ProviderKey;

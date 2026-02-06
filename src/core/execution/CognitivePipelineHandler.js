@@ -376,12 +376,12 @@ export class CognitivePipelineHandler {
               conciergePromptSeed =
                 conciergeState?.commitPending && conciergeState?.pendingHandoff
                   ? {
-                      ...conciergePromptSeedBase,
-                      priorContext: {
-                        handoff: conciergeState.pendingHandoff,
-                        committed: conciergeState.pendingHandoff?.commit || null,
-                      },
-                    }
+                    ...conciergePromptSeedBase,
+                    priorContext: {
+                      handoff: conciergeState.pendingHandoff,
+                      committed: conciergeState.pendingHandoff?.commit || null,
+                    },
+                  }
                   : conciergePromptSeedBase;
 
               if (conciergePromptSeed.priorContext) {
@@ -709,90 +709,74 @@ export class CognitivePipelineHandler {
         const userTurnId = aiTurn.userTurnId;
         const userTurn = userTurnId ? await adapter.get("turns", userTurnId) : null;
 
-      // Allow overriding prompt for traversal continuation
-      const originalPrompt = payload.userMessage || extractUserMessage(userTurn);
+        // Allow overriding prompt for traversal continuation
+        const originalPrompt = payload.userMessage || extractUserMessage(userTurn);
 
-      // Resolve cognitive artifact from turn's mapping phase or payload
-      let mappingArtifact =
-        payload?.mapping?.artifact ||
-        aiTurn?.mapping?.artifact ||
-        null;
+        // Resolve cognitive artifact from turn's mapping phase or payload
+        let mappingArtifact =
+          payload?.mapping?.artifact ||
+          aiTurn?.mapping?.artifact ||
+          null;
 
-      const priorResponses = await adapter.getResponsesByTurnId(aiTurnId);
-      const latestSingularityResponse = (priorResponses || [])
-        .filter((r) => r && r.responseType === "singularity")
-        .sort((a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0))?.[0];
-      const frozenSingularityPromptType = latestSingularityResponse?.meta?.frozenSingularityPromptType;
-      const frozenSingularityPromptSeed = latestSingularityResponse?.meta?.frozenSingularityPromptSeed;
-      const frozenSingularityPrompt = latestSingularityResponse?.meta?.frozenSingularityPrompt;
-      const mappingResponses = (priorResponses || [])
-        .filter((r) => r && r.responseType === "mapping" && r.providerId)
-        .sort((a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0));
-      const latestMappingText = mappingResponses?.[0]?.text || "";
-      const latestMappingMeta = mappingResponses?.[0]?.meta || {};
+        const priorResponses = await adapter.getResponsesByTurnId(aiTurnId);
+        const latestSingularityResponse = (priorResponses || [])
+          .filter((r) => r && r.responseType === "singularity")
+          .sort((a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0))?.[0];
+        const frozenSingularityPromptType = latestSingularityResponse?.meta?.frozenSingularityPromptType;
+        const frozenSingularityPromptSeed = latestSingularityResponse?.meta?.frozenSingularityPromptSeed;
+        const frozenSingularityPrompt = latestSingularityResponse?.meta?.frozenSingularityPrompt;
+        const mappingResponses = (priorResponses || [])
+          .filter((r) => r && r.responseType === "mapping" && r.providerId)
+          .sort((a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0));
+        const latestMappingText = mappingResponses?.[0]?.text || "";
+        const latestMappingMeta = mappingResponses?.[0]?.meta || {};
 
-      // Fallback: parse raw text into legacy shape, then convert to cognitive
-      if (!mappingArtifact && mappingResponses?.[0]) {
-        const parsed = parseMapperArtifact(String(latestMappingText));
-        if (parsed) {
-          parsed.query = originalPrompt;
-          mappingArtifact = buildCognitiveArtifact(parsed, null);
+        // Fallback: parse raw text into legacy shape, then convert to cognitive
+        if (!mappingArtifact && mappingResponses?.[0]) {
+          const parsed = parseMapperArtifact(String(latestMappingText));
+          if (parsed) {
+            parsed.query = originalPrompt;
+            mappingArtifact = buildCognitiveArtifact(parsed, null);
+          }
         }
-      }
 
-      if (!mappingArtifact) {
-        throw new Error(`Mapping artifact missing for turn ${aiTurnId}.`);
-      }
-      let chewedSubstrate = null;
-      if (payload?.isTraversalContinuation && payload?.traversalState) {
-        try {
-          const { buildChewedSubstrate, normalizeTraversalState, getSourceData } = await import('../../skeletonization');
-          const sourceDataFromResponses = (priorResponses || [])
-            .filter((r) => r && r.responseType === "batch" && r.providerId && r.text?.trim())
-            .map((r, idx) => ({
-              providerId: r.providerId,
-              modelIndex: typeof r.responseIndex === 'number'
-                ? r.responseIndex
-                : (typeof r?.meta?.modelIndex === 'number' ? r.meta.modelIndex : idx),
-              text: r.text,
-            }));
+        if (!mappingArtifact) {
+          throw new Error(`Mapping artifact missing for turn ${aiTurnId}.`);
+        }
+        let chewedSubstrate = null;
+        if (payload?.isTraversalContinuation && payload?.traversalState) {
+          try {
+            const { buildChewedSubstrate, normalizeTraversalState, getSourceData } = await import('../../skeletonization');
+            const sourceDataFromResponses = (priorResponses || [])
+              .filter((r) => r && r.responseType === "batch" && r.providerId && r.text?.trim())
+              .map((r, idx) => ({
+                providerId: r.providerId,
+                modelIndex: typeof r.responseIndex === 'number'
+                  ? r.responseIndex
+                  : (typeof r?.meta?.modelIndex === 'number' ? r.meta.modelIndex : idx),
+                text: r.text,
+              }));
 
-          console.log('[Skeletonization] Source data from DB:', {
-            count: sourceDataFromResponses.length,
-            providers: sourceDataFromResponses.map(s => s.providerId),
-            hasText: sourceDataFromResponses.map(s => !!s.text?.trim()),
-          });
-
-          const sourceData = sourceDataFromResponses.length > 0
-            ? sourceDataFromResponses
-            : getSourceData(aiTurn, null);
-
-          if (Array.isArray(sourceData) && sourceData.length > 0) {
-            chewedSubstrate = await buildChewedSubstrate({
-              statements: mappingArtifact?.shadow?.statements || [],
-              paragraphs: mappingArtifact?.shadow?.paragraphs || [],
-              claims: mappingArtifact?.semantic?.claims || [],
-              traversalState: normalizeTraversalState(payload.traversalState),
-              sourceData,
+            console.log('[Skeletonization] Source data from DB:', {
+              count: sourceDataFromResponses.length,
+              providers: sourceDataFromResponses.map(s => s.providerId),
+              hasText: sourceDataFromResponses.map(s => !!s.text?.trim()),
             });
 
-            console.log('🍖 Chewed substrate built:', {
-              hasSubstrate: !!chewedSubstrate,
-              outputsCount: chewedSubstrate?.outputs?.length,
-              nonEmptyOutputsCount: Array.isArray(chewedSubstrate?.outputs)
-                ? chewedSubstrate.outputs.reduce((acc, o) => acc + (String(o?.text || '').trim() ? 1 : 0), 0)
-                : 0,
-              protectedCount: chewedSubstrate?.summary?.protectedStatementCount,
-              skeletonizedCount: chewedSubstrate?.summary?.skeletonizedStatementCount,
-              removedCount: chewedSubstrate?.summary?.removedStatementCount
-            });
+            const sourceData = sourceDataFromResponses.length > 0
+              ? sourceDataFromResponses
+              : getSourceData(aiTurn);
 
-            try {
-              this.port.postMessage({
-                type: 'CHEWED_SUBSTRATE_DEBUG',
-                sessionId: effectiveSessionId,
-                aiTurnId,
-                stage: 'chewed_substrate_built',
+            if (Array.isArray(sourceData) && sourceData.length > 0) {
+              chewedSubstrate = await buildChewedSubstrate({
+                statements: mappingArtifact?.shadow?.statements || [],
+                paragraphs: mappingArtifact?.shadow?.paragraphs || [],
+                claims: mappingArtifact?.semantic?.claims || [],
+                traversalState: normalizeTraversalState(payload.traversalState),
+                sourceData,
+              });
+
+              console.log('🍖 Chewed substrate built:', {
                 hasSubstrate: !!chewedSubstrate,
                 outputsCount: chewedSubstrate?.outputs?.length,
                 nonEmptyOutputsCount: Array.isArray(chewedSubstrate?.outputs)
@@ -800,36 +784,52 @@ export class CognitivePipelineHandler {
                   : 0,
                 protectedCount: chewedSubstrate?.summary?.protectedStatementCount,
                 skeletonizedCount: chewedSubstrate?.summary?.skeletonizedStatementCount,
-                removedCount: chewedSubstrate?.summary?.removedStatementCount,
+                removedCount: chewedSubstrate?.summary?.removedStatementCount
               });
-            } catch (_) { }
-          } else {
-            console.warn('🍖 No source data available for chewed substrate');
+
+              try {
+                this.port.postMessage({
+                  type: 'CHEWED_SUBSTRATE_DEBUG',
+                  sessionId: effectiveSessionId,
+                  aiTurnId,
+                  stage: 'chewed_substrate_built',
+                  hasSubstrate: !!chewedSubstrate,
+                  outputsCount: chewedSubstrate?.outputs?.length,
+                  nonEmptyOutputsCount: Array.isArray(chewedSubstrate?.outputs)
+                    ? chewedSubstrate.outputs.reduce((acc, o) => acc + (String(o?.text || '').trim() ? 1 : 0), 0)
+                    : 0,
+                  protectedCount: chewedSubstrate?.summary?.protectedStatementCount,
+                  skeletonizedCount: chewedSubstrate?.summary?.skeletonizedStatementCount,
+                  removedCount: chewedSubstrate?.summary?.removedStatementCount,
+                });
+              } catch (_) { }
+            } else {
+              console.warn('🍖 No source data available for chewed substrate');
+
+              try {
+                this.port.postMessage({
+                  type: 'CHEWED_SUBSTRATE_DEBUG',
+                  sessionId: effectiveSessionId,
+                  aiTurnId,
+                  stage: 'no_source_data',
+                });
+              } catch (_) { }
+            }
+          } catch (e) {
+            console.error('[CognitiveHandler] Failed to build chewedSubstrate:', e);
 
             try {
               this.port.postMessage({
                 type: 'CHEWED_SUBSTRATE_DEBUG',
                 sessionId: effectiveSessionId,
                 aiTurnId,
-                stage: 'no_source_data',
+                stage: 'chewed_substrate_error',
+                error: String(e?.message || e),
               });
             } catch (_) { }
+            chewedSubstrate = null;
           }
-        } catch (e) {
-          console.error('[CognitiveHandler] Failed to build chewedSubstrate:', e);
-
-          try {
-            this.port.postMessage({
-              type: 'CHEWED_SUBSTRATE_DEBUG',
-              sessionId: effectiveSessionId,
-              aiTurnId,
-              stage: 'chewed_substrate_error',
-              error: String(e?.message || e),
-            });
-          } catch (_) { }
-          chewedSubstrate = null;
         }
-      }
 
         const context = {
           sessionId: effectiveSessionId,
@@ -841,209 +841,209 @@ export class CognitivePipelineHandler {
           chewedSubstrate
         };
 
-      const executorOptions = {
-        streamingManager,
-        persistenceCoordinator: this.persistenceCoordinator,
-        contextManager,
-        sessionManager: this.sessionManager
-      };
-      if (isRecompute) {
-        executorOptions.frozenSingularityPromptType = frozenSingularityPromptType;
-        executorOptions.frozenSingularityPromptSeed = frozenSingularityPromptSeed;
-        executorOptions.frozenSingularityPrompt = frozenSingularityPrompt;
-      }
-
-      const stepId = `singularity-${preferredProvider}-${Date.now()}`;
-      const step = {
-        stepId,
-        type: 'singularity',
-        payload: {
-          singularityProvider: preferredProvider,
-          mappingArtifact,
-          originalPrompt,
-          mappingText: latestMappingText,
-          mappingMeta: latestMappingMeta,
-          useThinking: payload.useThinking || false,
-          isTraversalContinuation: payload.isTraversalContinuation,
-          chewedSubstrate
-        },
-      };
-
-      const result = await stepExecutor.executeSingularityStep(step, context, new Map(), executorOptions);
-      const effectiveProviderId = result?.providerId || preferredProvider;
-
-      const singularityOutput = result?.text
-        ? {
-          text: result.text,
-          providerId: effectiveProviderId,
-          timestamp: result?.timestamp || Date.now(),
-          leakageDetected: result?.leakageDetected,
-          leakageViolations: result?.leakageViolations,
-          pipeline: result?.pipeline || null,
+        const executorOptions = {
+          streamingManager,
+          persistenceCoordinator: this.persistenceCoordinator,
+          contextManager,
+          sessionManager: this.sessionManager
+        };
+        if (isRecompute) {
+          executorOptions.frozenSingularityPromptType = frozenSingularityPromptType;
+          executorOptions.frozenSingularityPromptSeed = frozenSingularityPromptSeed;
+          executorOptions.frozenSingularityPrompt = frozenSingularityPrompt;
         }
-        : null;
 
-      const singularityPhase = singularityOutput?.text
-        ? {
-          prompt: originalPrompt || "",
-          output: singularityOutput.text,
-          traversalState: payload?.traversalState,
-          timestamp: singularityOutput.timestamp,
-        }
-        : undefined;
-
-      try {
-        this.port.postMessage({
-          type: "WORKFLOW_STEP_UPDATE",
-          sessionId: effectiveSessionId,
+        const stepId = `singularity-${preferredProvider}-${Date.now()}`;
+        const step = {
           stepId,
-          status: "completed",
-          result,
-          ...(isRecompute ? { isRecompute: true, sourceTurnId: sourceTurnId || aiTurnId } : {}),
-        });
-      } catch (err) {
-        console.error("port.postMessage failed in CognitivePipelineHandler (handleContinueRequest):", err);
-      }
-
-      await this.sessionManager.upsertProviderResponse(
-        effectiveSessionId,
-        aiTurnId,
-        effectiveProviderId,
-        'singularity',
-        0,
-        { text: result?.text || "", status: result?.status || "completed", meta: result?.meta || {} },
-      );
-
-      // Re-fetch and emit final turn
-      const responses = await adapter.getResponsesByTurnId(aiTurnId);
-      const buckets = {
-        batchResponses: {},
-        mappingResponses: {},
-        singularityResponses: {},
-      };
-
-      for (const r of responses || []) {
-        if (!r) continue;
-        const entry = {
-          providerId: r.providerId,
-          text: r.text || "",
-          status: r.status || "completed",
-          createdAt: r.createdAt || Date.now(),
-          updatedAt: r.updatedAt || r.createdAt || Date.now(),
-          meta: r.meta || {},
-          responseIndex: r.responseIndex ?? 0,
+          type: 'singularity',
+          payload: {
+            singularityProvider: preferredProvider,
+            mappingArtifact,
+            originalPrompt,
+            mappingText: latestMappingText,
+            mappingMeta: latestMappingMeta,
+            useThinking: payload.useThinking || false,
+            isTraversalContinuation: payload.isTraversalContinuation,
+            chewedSubstrate
+          },
         };
 
-        const target =
-          r.responseType === "batch"
-            ? buckets.batchResponses
-            : r.responseType === "mapping"
-              ? buckets.mappingResponses
-              : r.responseType === "singularity"
-                ? buckets.singularityResponses
-                : null;
+        const result = await stepExecutor.executeSingularityStep(step, context, new Map(), executorOptions);
+        const effectiveProviderId = result?.providerId || preferredProvider;
 
-        if (!target || !entry.providerId) continue;
-        (target[entry.providerId] ||= []).push(entry);
-      }
+        const singularityOutput = result?.text
+          ? {
+            text: result.text,
+            providerId: effectiveProviderId,
+            timestamp: result?.timestamp || Date.now(),
+            leakageDetected: result?.leakageDetected,
+            leakageViolations: result?.leakageViolations,
+            pipeline: result?.pipeline || null,
+          }
+          : null;
 
-      for (const group of Object.values(buckets)) {
-        for (const pid of Object.keys(group)) {
-          group[pid].sort((a, b) => (a.responseIndex ?? 0) - (b.responseIndex ?? 0));
+        const singularityPhase = singularityOutput?.text
+          ? {
+            prompt: originalPrompt || "",
+            output: singularityOutput.text,
+            traversalState: payload?.traversalState,
+            timestamp: singularityOutput.timestamp,
+          }
+          : undefined;
+
+        try {
+          this.port.postMessage({
+            type: "WORKFLOW_STEP_UPDATE",
+            sessionId: effectiveSessionId,
+            stepId,
+            status: "completed",
+            result,
+            ...(isRecompute ? { isRecompute: true, sourceTurnId: sourceTurnId || aiTurnId } : {}),
+          });
+        } catch (err) {
+          console.error("port.postMessage failed in CognitivePipelineHandler (handleContinueRequest):", err);
         }
-      }
 
-      // Update pipeline status if we were waiting
-      if (aiTurn.pipelineStatus === 'awaiting_traversal') {
+        await this.sessionManager.upsertProviderResponse(
+          effectiveSessionId,
+          aiTurnId,
+          effectiveProviderId,
+          'singularity',
+          0,
+          { text: result?.text || "", status: result?.status || "completed", meta: result?.meta || {} },
+        );
+
+        // Re-fetch and emit final turn
+        const responses = await adapter.getResponsesByTurnId(aiTurnId);
+        const buckets = {
+          batchResponses: {},
+          mappingResponses: {},
+          singularityResponses: {},
+        };
+
+        for (const r of responses || []) {
+          if (!r) continue;
+          const entry = {
+            providerId: r.providerId,
+            text: r.text || "",
+            status: r.status || "completed",
+            createdAt: r.createdAt || Date.now(),
+            updatedAt: r.updatedAt || r.createdAt || Date.now(),
+            meta: r.meta || {},
+            responseIndex: r.responseIndex ?? 0,
+          };
+
+          const target =
+            r.responseType === "batch"
+              ? buckets.batchResponses
+              : r.responseType === "mapping"
+                ? buckets.mappingResponses
+                : r.responseType === "singularity"
+                  ? buckets.singularityResponses
+                  : null;
+
+          if (!target || !entry.providerId) continue;
+          (target[entry.providerId] ||= []).push(entry);
+        }
+
+        for (const group of Object.values(buckets)) {
+          for (const pid of Object.keys(group)) {
+            group[pid].sort((a, b) => (a.responseIndex ?? 0) - (b.responseIndex ?? 0));
+          }
+        }
+
+        // Update pipeline status if we were waiting
+        if (aiTurn.pipelineStatus === 'awaiting_traversal') {
+          try {
+            const t = await adapter.get("turns", aiTurnId);
+            if (t) {
+              t.pipelineStatus = 'complete';
+              await adapter.put("turns", t);
+              // Update local reference for emission
+              aiTurn.pipelineStatus = 'complete';
+            }
+          } catch (e) {
+            console.warn("[CognitiveHandler] Failed to update pipeline status:", e);
+          }
+        }
+
+        let finalAiTurn = aiTurn;
         try {
           const t = await adapter.get("turns", aiTurnId);
-          if (t) {
-            t.pipelineStatus = 'complete';
-            await adapter.put("turns", t);
-            // Update local reference for emission
-            aiTurn.pipelineStatus = 'complete';
+          if (t) finalAiTurn = t;
+        } catch (_) { }
+
+        const batchPhase = Object.keys(buckets.batchResponses || {}).length > 0
+          ? {
+            responses: Object.fromEntries(
+              Object.entries(buckets.batchResponses).map(([pid, arr]) => {
+                const last = Array.isArray(arr) && arr.length > 0 ? arr[arr.length - 1] : arr;
+                return [
+                  pid,
+                  {
+                    text: last?.text || "",
+                    modelIndex: last?.meta?.modelIndex ?? 0,
+                    status: last?.status || "completed",
+                    meta: last?.meta,
+                  },
+                ];
+              }),
+            ),
+            timestamp: Date.now(),
           }
-        } catch (e) {
-          console.warn("[CognitiveHandler] Failed to update pipeline status:", e);
-        }
-      }
+          : undefined;
+        const finalCognitiveArtifact = finalAiTurn?.mapping?.artifact || mappingArtifact;
+        const mappingPhase = finalCognitiveArtifact
+          ? { artifact: finalCognitiveArtifact, timestamp: Date.now() }
+          : undefined;
 
-      let finalAiTurn = aiTurn;
-      try {
-        const t = await adapter.get("turns", aiTurnId);
-        if (t) finalAiTurn = t;
-      } catch (_) { }
+        try {
+          const t = finalAiTurn;
+          if (t) {
+            if (mappingPhase) t.mapping = mappingPhase;
+            if (singularityPhase) t.singularity = singularityPhase;
+            if (batchPhase && !t.batch) t.batch = batchPhase;
+            await adapter.put("turns", t);
+          }
+        } catch (_) { }
 
-      const batchPhase = Object.keys(buckets.batchResponses || {}).length > 0
-        ? {
-          responses: Object.fromEntries(
-            Object.entries(buckets.batchResponses).map(([pid, arr]) => {
-              const last = Array.isArray(arr) && arr.length > 0 ? arr[arr.length - 1] : arr;
-              return [
-                pid,
-                {
-                  text: last?.text || "",
-                  modelIndex: last?.meta?.modelIndex ?? 0,
-                  status: last?.status || "completed",
-                  meta: last?.meta,
-                },
-              ];
-            }),
-          ),
-          timestamp: Date.now(),
-        }
-        : undefined;
-      const finalCognitiveArtifact = finalAiTurn?.mapping?.artifact || mappingArtifact;
-      const mappingPhase = finalCognitiveArtifact
-        ? { artifact: finalCognitiveArtifact, timestamp: Date.now() }
-        : undefined;
-
-      try {
-        const t = finalAiTurn;
-        if (t) {
-          if (mappingPhase) t.mapping = mappingPhase;
-          if (singularityPhase) t.singularity = singularityPhase;
-          if (batchPhase && !t.batch) t.batch = batchPhase;
-          await adapter.put("turns", t);
-        }
-      } catch (_) { }
-
-      this.port?.postMessage({
-        type: "TURN_FINALIZED",
-        sessionId: effectiveSessionId,
-        userTurnId: userTurnId,
-        aiTurnId: aiTurnId,
-        turn: {
-          user: userTurn
-            ? {
-              id: userTurn.id,
-              type: "user",
-              text: userTurn.text || userTurn.content || "",
-              createdAt: userTurn.createdAt || Date.now(),
+        this.port?.postMessage({
+          type: "TURN_FINALIZED",
+          sessionId: effectiveSessionId,
+          userTurnId: userTurnId,
+          aiTurnId: aiTurnId,
+          turn: {
+            user: userTurn
+              ? {
+                id: userTurn.id,
+                type: "user",
+                text: userTurn.text || userTurn.content || "",
+                createdAt: userTurn.createdAt || Date.now(),
+                sessionId: effectiveSessionId,
+              }
+              : {
+                id: userTurnId || "unknown",
+                type: "user",
+                text: originalPrompt || "",
+                createdAt: Date.now(),
+                sessionId: effectiveSessionId,
+              },
+            ai: {
+              id: aiTurnId,
+              type: "ai",
+              userTurnId: userTurnId || "unknown",
               sessionId: effectiveSessionId,
-            }
-            : {
-              id: userTurnId || "unknown",
-              type: "user",
-              text: originalPrompt || "",
-              createdAt: Date.now(),
-              sessionId: effectiveSessionId,
+              threadId: aiTurn.threadId || DEFAULT_THREAD,
+              createdAt: aiTurn.createdAt || Date.now(),
+              ...(batchPhase ? { batch: batchPhase } : {}),
+              ...(mappingPhase ? { mapping: mappingPhase } : {}),
+              ...(singularityPhase ? { singularity: singularityPhase } : {}),
+              meta: finalAiTurn?.meta || aiTurn.meta || {},
+              pipelineStatus: finalAiTurn?.pipelineStatus || aiTurn.pipelineStatus,
             },
-          ai: {
-            id: aiTurnId,
-            type: "ai",
-            userTurnId: userTurnId || "unknown",
-            sessionId: effectiveSessionId,
-            threadId: aiTurn.threadId || DEFAULT_THREAD,
-            createdAt: aiTurn.createdAt || Date.now(),
-            ...(batchPhase ? { batch: batchPhase } : {}),
-            ...(mappingPhase ? { mapping: mappingPhase } : {}),
-            ...(singularityPhase ? { singularity: singularityPhase } : {}),
-            meta: finalAiTurn?.meta || aiTurn.meta || {},
-            pipelineStatus: finalAiTurn?.pipelineStatus || aiTurn.pipelineStatus,
           },
-        },
-      });
+        });
 
       } finally {
         this._inflightContinuations.delete(inflightKey);

@@ -34,18 +34,17 @@ export async function buildChewedSubstrate(input: SkeletonizationInput): Promise
   return reconstructSubstrate(normalizedInput, triageResult, embeddingTimeMs);
 }
 
-interface PipelineArtifacts {
-  sourceData?: SkeletonizationInput['sourceData'];
-}
-
 interface BatchResponse {
   modelIndex?: number;
   text?: string;
 }
 
+/**
+ * Extract source data from a turn's batch responses.
+ * Reads directly from turn.batch.responses.
+ */
 export function getSourceData(
-  turn: AiTurn | null | undefined,
-  pipelineArtifacts: PipelineArtifacts | null | undefined
+  turn: AiTurn | null | undefined
 ): SkeletonizationInput['sourceData'] {
   const batchResponses =
     ((turn as any)?.batch?.responses as unknown) ??
@@ -79,7 +78,7 @@ export function getSourceData(
     if (out.length > 0) return out;
   }
 
-  return pipelineArtifacts?.sourceData || [];
+  return [];
 }
 
 export function normalizeTraversalState(state: unknown): NormalizedTraversalState {
