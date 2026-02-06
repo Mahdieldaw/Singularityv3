@@ -1145,7 +1145,9 @@ export class StepExecutor {
                     if (preSemanticInterpretation && mapperArtifact) {
                       const { computeStructuralAnalysis } = await import('../PromptMethods');
                       const { validateStructuralMapping } = await import('../../geometry/interpretation');
-                      const postSemantic = computeStructuralAnalysis(JSON.parse(JSON.stringify(mapperArtifact)));
+                      // Convert to cognitive shape for structural analysis
+                      const tempCognitive = buildCognitiveArtifact(JSON.parse(JSON.stringify(mapperArtifact)), null);
+                      const postSemantic = computeStructuralAnalysis(tempCognitive);
                       structuralValidation = validateStructuralMapping(preSemanticInterpretation, postSemantic);
                     }
                   } catch (_) {
@@ -1253,9 +1255,6 @@ export class StepExecutor {
                 semanticMapperPrompt: mappingPrompt,
               },
             };
-
-            if (mapperArtifact) context.mapperArtifact = mapperArtifact;
-            if (pipelineArtifacts) context.pipelineArtifacts = pipelineArtifacts;
 
             const cognitiveArtifact = buildCognitiveArtifact(mapperArtifact, pipelineArtifacts);
 
@@ -1623,24 +1622,20 @@ export class StepExecutor {
   async executeSingularityStep(step, context, _previousResults, options) {
     const payload = step.payload;
 
-    const mapperArtifact =
-      payload.mapperArtifact ||
-      (payload.mappingText
-        ? parseMapperArtifact(payload.mappingText)
-        : null);
+    // Resolve the cognitive artifact from payload
+    let mappingArtifact = payload.mappingArtifact || null;
 
-    if (!mapperArtifact) {
-      throw new Error("Singularity mode requires a MapperArtifact.");
+    // Fallback: parse from raw mapping text and convert to cognitive shape
+    if (!mappingArtifact && payload.mappingText) {
+      const parsed = parseMapperArtifact(payload.mappingText);
+      if (parsed) {
+        mappingArtifact = buildCognitiveArtifact(parsed, null);
+      }
     }
 
-    console.log('[StepExecutor] executeSingularityStep mapperArtifact:', {
-      hasArtifact: !!mapperArtifact,
-      claimCount: mapperArtifact?.claims?.length,
-      edgeCount: mapperArtifact?.edges?.length,
-      ghostCount: mapperArtifact?.ghosts?.length,
-      modelCount: mapperArtifact?.model_count,
-      query: mapperArtifact?.query?.slice(0, 50),
-    });
+    if (!mappingArtifact) {
+      throw new Error("Singularity mode requires a mapping artifact.");
+    }
 
     let ConciergeService;
     try {
@@ -1662,7 +1657,7 @@ export class StepExecutor {
     if (!analysis) {
       try {
         const { computeStructuralAnalysis } = await import('../PromptMethods');
-        analysis = computeStructuralAnalysis(mapperArtifact);
+        analysis = computeStructuralAnalysis(mappingArtifact);
       } catch (e) {
         console.error("[StepExecutor] computeStructuralAnalysis failed:", e);
         throw new Error(`Structural Analysis Failed: ${getErrorMessage(e)}`);

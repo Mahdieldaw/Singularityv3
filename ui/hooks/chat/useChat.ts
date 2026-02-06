@@ -270,7 +270,7 @@ export function useChat() {
             Object.keys(mappingRaw).length > 0 ||
             Object.keys(singularityRaw).length > 0;
           const hasAnyCognitiveData =
-            !!round.mapperArtifact ||
+            !!round.mapping?.artifact ||
             !!round.singularityOutput ||
             typeof round.pipelineStatus === "string";
 

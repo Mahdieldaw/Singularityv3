@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from "react";
-import type { EnrichmentResult, MapperArtifact, StructuralAnalysis } from "../../../shared/contract";
+import type { EnrichmentResult, CognitiveArtifact, StructuralAnalysis, SerializedTraversalGraph, ForcingPoint } from "../../../shared/contract";
 import clsx from "clsx";
 import { CopyButton } from "../CopyButton";
 
@@ -18,10 +18,10 @@ interface StructuralDebugPanelProps {
     analysis: StructuralAnalysis;
     semanticMapperPrompt?: string | null;
     rawMappingText?: string | null;
-    completeness?: MapperArtifact['completeness'] | null;
+    completeness?: any | null;
     enrichmentResult?: EnrichmentResult | null;
-    traversalGraph?: MapperArtifact['traversalGraph'] | null;
-    forcingPoints?: MapperArtifact['forcingPoints'] | null;
+    traversalGraph?: SerializedTraversalGraph | null;
+    forcingPoints?: ForcingPoint[] | null;
 }
 
 export const StructuralDebugPanel: React.FC<StructuralDebugPanelProps> = ({ analysis, semanticMapperPrompt, rawMappingText, completeness, enrichmentResult, traversalGraph, forcingPoints }) => {

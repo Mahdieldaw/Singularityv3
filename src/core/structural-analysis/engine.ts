@@ -1,5 +1,4 @@
 import {
-    MapperArtifact,
     CognitiveArtifact,
     ProblemStructure,
     EnrichedClaim,
@@ -157,22 +156,14 @@ const applyComputedRoles = (
     });
 };
 
-export const computeStructuralAnalysis = (artifact: MapperArtifact | CognitiveArtifact): StructuralAnalysis => {
-    const semantic = (artifact as any)?.semantic;
-    const analysisArtifact: MapperArtifact = Array.isArray((artifact as any)?.claims)
-        ? (artifact as MapperArtifact)
-        : {
-            claims: Array.isArray(semantic?.claims) ? semantic.claims : [],
-            edges: Array.isArray(semantic?.edges) ? semantic.edges : [],
-            conditionals: Array.isArray(semantic?.conditionals) ? semantic.conditionals : [],
-            narrative: semantic?.narrative,
-        };
+export const computeStructuralAnalysis = (artifact: CognitiveArtifact): StructuralAnalysis => {
+    const semantic = artifact?.semantic;
 
-    const rawClaims = Array.isArray(analysisArtifact?.claims) ? analysisArtifact.claims : [];
-    const edges = Array.isArray(analysisArtifact?.edges) ? analysisArtifact.edges : [];
-    const ghosts = Array.isArray(analysisArtifact?.ghosts) ? analysisArtifact.ghosts.filter(Boolean).map(String) : [];
-    const landscape = computeLandscapeMetrics(analysisArtifact);
-    const conditionals = Array.isArray(analysisArtifact?.conditionals) ? analysisArtifact.conditionals : [];
+    const rawClaims = Array.isArray(semantic?.claims) ? semantic.claims : [];
+    const edges = Array.isArray(semantic?.edges) ? semantic.edges : [];
+    const ghosts = Array.isArray(semantic?.ghosts) ? semantic.ghosts.filter(Boolean).map(String) : [];
+    const landscape = computeLandscapeMetrics(artifact);
+    const conditionals = Array.isArray(semantic?.conditionals) ? semantic.conditionals : [];
     const claimsWithDerivedRoles = applyComputedRoles(rawClaims, edges, conditionals, landscape.modelCount);
     const claimIds = claimsWithDerivedRoles.map(c => c.id);
     const claimsWithRatios = claimsWithDerivedRoles.map((c) =>
@@ -293,13 +284,13 @@ export const computeStructuralAnalysis = (artifact: MapperArtifact | CognitiveAr
     return analysis;
 };
 
-export const computeProblemStructureFromArtifact = (artifact: MapperArtifact | CognitiveArtifact): ProblemStructure => {
+export const computeProblemStructureFromArtifact = (artifact: CognitiveArtifact): ProblemStructure => {
     return computeStructuralAnalysis(artifact).shape;
 };
 
 export const computeFullAnalysis = (
     batchResponses: Array<{ modelIndex: number; content: string }>,
-    primaryArtifact: MapperArtifact,
+    primaryArtifact: CognitiveArtifact,
     userQuery: string
 ): StructuralAnalysis & {
     shadow?: {
@@ -311,7 +302,8 @@ export const computeFullAnalysis = (
 } => {
     const baseAnalysis = computeStructuralAnalysis(primaryArtifact);
     const shadowExtraction = executeShadowExtraction(batchResponses);
-    const referencedIds = extractReferencedIds(primaryArtifact.claims || []);
+    const claims = primaryArtifact?.semantic?.claims || [];
+    const referencedIds = extractReferencedIds(claims);
     const shadowDelta = executeShadowDelta(
         shadowExtraction,
         referencedIds,

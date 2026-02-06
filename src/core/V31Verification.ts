@@ -1,5 +1,6 @@
 import { computeProblemStructureFromArtifact } from "./PromptMethods";
 import { MapperArtifact, Claim, Edge } from "../../shared/contract";
+import { buildCognitiveArtifact } from "../../shared/cognitive-artifact";
 
 // Mock helper
 const createClaim = (id: string, supporters: number[], role: Claim["role"] = "branch"): Claim => ({
@@ -58,11 +59,11 @@ const scenario2: MapperArtifact = {
 };
 
 console.log("\n--- RUNNING SCENARIO 1 (Settled/Keystone) ---");
-const result1 = computeProblemStructureFromArtifact(scenario1);
+const result1 = computeProblemStructureFromArtifact(buildCognitiveArtifact(scenario1, null)!);
 console.log("Primary Shape:", result1.primary);
 console.log("Evidence:", result1.evidence);
 
 console.log("\n--- RUNNING SCENARIO 2 (Leverage/Contested) ---");
-const result2 = computeProblemStructureFromArtifact(scenario2);
+const result2 = computeProblemStructureFromArtifact(buildCognitiveArtifact(scenario2, null)!);
 console.log("Primary Shape:", result2.primary);
 console.log("Evidence:", result2.evidence);

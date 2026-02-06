@@ -239,10 +239,6 @@ export class WorkflowEngine {
         console.log('🚨 MAPPING RESULT STRUCTURE:', {
           resultKeys: Object.keys(result || {}),
           hasMappingArtifact: !!result?.mapping?.artifact,
-          hasMapperArtifact: !!result?.mapperArtifact,
-          hasMetaMapperArtifact: !!result?.meta?.mapperArtifact,
-          claimsAtRoot: result?.mapperArtifact?.claims?.length,
-          claimsInMeta: result?.meta?.mapperArtifact?.claims?.length,
         });
       }
       this._emitStepUpdate(step, context, result, resolvedContext, "completed");
@@ -255,23 +251,11 @@ export class WorkflowEngine {
         });
       }
 
-      console.log('🚨 STEP CHECK:', {
-        stepType: step.type,
-        hasMappingArtifact: !!result?.mapping?.artifact,
-        hasMapperArtifact: !!result?.mapperArtifact,
-      });
       if (step.type === 'mapping') {
         const mappingArtifact = result?.mapping?.artifact;
         if (mappingArtifact) {
           context.mappingArtifact = mappingArtifact;
-        } else {
-          const mapperArtifact = result?.mapperArtifact;
-          const pipelineArtifacts = result?.pipelineArtifacts;
-          if (mapperArtifact || pipelineArtifacts) {
-            context.mappingArtifact = buildCognitiveArtifact(mapperArtifact, pipelineArtifacts);
-          }
         }
-        console.log('🚨 ASSIGNED mappingArtifact to context:', !!context.mappingArtifact);
       }
 
       await this._persistStepResponse(step, context, result, resolvedContext);
@@ -515,8 +499,7 @@ export class WorkflowEngine {
       }
       : undefined;
 
-    const cognitiveArtifact =
-      context?.mappingArtifact || buildCognitiveArtifact(context?.mapperArtifact, context?.pipelineArtifacts);
+    const cognitiveArtifact = context?.mappingArtifact || null;
     const mappingPhase = cognitiveArtifact ? { artifact: cognitiveArtifact } : undefined;
     const singularity = context?.singularityData || context?.singularityOutput;
     const singularityPhase = singularity
@@ -527,11 +510,6 @@ export class WorkflowEngine {
       }
       : undefined;
 
-    console.log('🚨 PRE-FINALIZE CHECK:', {
-      contextBatch: !!context?.batch,
-      batchPhase: !!batchPhase,
-      batchResponseCount: Object.keys(batchPhase?.responses || {}).length,
-    });
 
     const persistRequest = {
       type: resolvedContext?.type || "unknown",
