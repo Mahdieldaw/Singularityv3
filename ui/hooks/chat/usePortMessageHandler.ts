@@ -34,7 +34,6 @@ import type { TurnMessage, UserTurn, AiTurnWithUI } from "../../types";
 import type { ProviderKey } from "../../../shared/contract";
 import { LLM_PROVIDERS_CONFIG } from "../../constants";
 import { DEFAULT_THREAD } from "../../../shared/messaging";
-import { buildCognitiveArtifact } from "@shared/cognitive-artifact";
 
 const PORT_DEBUG_UI = false;
 
@@ -259,13 +258,11 @@ export function usePortMessageHandler(enabled: boolean = true) {
             sessionId: msgSessionId,
           } = message;
 
-          console.log('🚨 TURN_FINALIZED received in UI:', {
+          console.log('[Port] TURN_FINALIZED received:', {
             aiTurnId: turn?.ai?.id,
             hasBatch: !!turn?.ai?.batch,
             hasMapping: !!turn?.ai?.mapping,
             hasSingularity: !!turn?.ai?.singularity,
-            mappingArtifactClaims: turn?.ai?.mapping?.artifact?.semantic?.claims?.length,
-            hasMapperArtifact: !!(turn?.ai as any)?.mapperArtifact,
           });
 
           // Adopt sessionId on finalization to ensure coherence
@@ -578,13 +575,10 @@ export function usePortMessageHandler(enabled: boolean = true) {
                     aiTurn.batch.timestamp = now;
                     aiTurn.batchVersion = (aiTurn.batchVersion ?? 0) + 1;
                   } else if (stepType === "mapping") {
-                    const mapper = data?.mapperArtifact || data?.meta?.mapperArtifact;
-                    const pipeline = data?.pipelineArtifacts || data?.meta?.pipelineArtifacts;
                     const artifact =
                       data?.mapping?.artifact ||
                       data?.mappingArtifact ||
-                      data?.meta?.mappingArtifact ||
-                      buildCognitiveArtifact(mapper, pipeline);
+                      data?.meta?.mappingArtifact;
                     if (artifact) {
                       aiTurn.mapping = { artifact, timestamp: now } as any;
                     }
@@ -828,11 +822,12 @@ export function usePortMessageHandler(enabled: boolean = true) {
         case "MAPPER_ARTIFACT_READY": {
           const {
             aiTurnId,
-            artifact,
+            mapping,
             singularityOutput,
             pipelineStatus,
             sessionId: msgSessionId,
           } = message as any;
+          const artifact = mapping?.artifact;
           if (!aiTurnId) return;
 
           if (msgSessionId) {

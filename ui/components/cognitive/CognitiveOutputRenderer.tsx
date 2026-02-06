@@ -10,7 +10,6 @@ import { selectedModelsAtom, workflowProgressForTurnFamily, activeSplitPanelAtom
 import { MetricsRibbon } from './MetricsRibbon';
 import StructureGlyph from '../StructureGlyph';
 import { computeProblemStructureFromArtifact, computeStructuralAnalysis } from '../../../src/core/PromptMethods';
-import { MapperArtifact } from '../../../shared/contract';
 import { TraversalGraphView } from '../traversal/TraversalGraphView';
 import { PipelineErrorBanner } from '../PipelineErrorBanner';
 
@@ -32,22 +31,6 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
     const [viewOverride, setViewOverride] = useState<null | 'traverse' | 'response'>(null);
     const { runSingularity } = useSingularityMode(aiTurn.id);
     const mappingArtifact = aiTurn.mapping?.artifact || null;
-    const effectiveMapperArtifact = useMemo(() => {
-        if (!mappingArtifact) return undefined;
-        return {
-            claims: mappingArtifact.semantic?.claims || [],
-            edges: mappingArtifact.semantic?.edges || [],
-            conditionals: mappingArtifact.semantic?.conditionals || [],
-            narrative: mappingArtifact.semantic?.narrative,
-            traversalGraph: mappingArtifact.traversal?.graph || null,
-            forcingPoints: mappingArtifact.traversal?.forcingPoints || null,
-            shadow: {
-                statements: mappingArtifact.shadow?.statements || [],
-                audit: mappingArtifact.shadow?.audit || {},
-                topUnreferenced: mappingArtifact.shadow?.topUnreferenced ?? [],
-            },
-        } as MapperArtifact;
-    }, [mappingArtifact]);
 
     // Derived transition state
     const isTransitioning = singularityState.isLoading;
@@ -110,24 +93,24 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
         });
     }, [workflowProgress]);
 
-    // Compute structural analysis
+    // Compute structural analysis directly from cognitive artifact
     const structuralAnalysis = useMemo(() => {
-        if (!effectiveMapperArtifact) return undefined;
+        if (!mappingArtifact) return undefined;
         try {
-            return computeStructuralAnalysis(effectiveMapperArtifact as MapperArtifact);
+            return computeStructuralAnalysis(mappingArtifact);
         } catch (e) {
             return undefined;
         }
-    }, [effectiveMapperArtifact]);
+    }, [mappingArtifact]);
 
     const problemStructure = useMemo(() => {
-        if (!effectiveMapperArtifact) return undefined;
+        if (!mappingArtifact) return undefined;
         try {
-            return computeProblemStructureFromArtifact(effectiveMapperArtifact as MapperArtifact);
+            return computeProblemStructureFromArtifact(mappingArtifact);
         } catch {
             return undefined;
         }
-    }, [effectiveMapperArtifact]);
+    }, [mappingArtifact]);
 
     if (aiTurn.pipelineStatus === 'error') {
         const pipelineError = (aiTurn.meta as any)?.pipelineError;
@@ -157,7 +140,7 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
     }
 
     const isAwaitingTraversal = aiTurn.pipelineStatus === 'awaiting_traversal';
-    const hasTraversalGraph = !!effectiveMapperArtifact?.traversalGraph && !!effectiveSessionId;
+    const hasTraversalGraph = !!mappingArtifact?.traversal?.graph && !!effectiveSessionId;
     const isPipelineComplete = !aiTurn.pipelineStatus || aiTurn.pipelineStatus === 'complete';
     const isRoundActive = streamingState.isLoading || isAwaitingTraversal;
 
@@ -232,7 +215,7 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
                 {isPipelineComplete && structuralAnalysis && (
                     <div className="space-y-4 animate-in fade-in slide-in-from-top-2 duration-500">
                         <MetricsRibbon
-                            artifact={effectiveMapperArtifact}
+                            artifact={mappingArtifact}
                             analysis={structuralAnalysis}
                             problemStructure={problemStructure}
                         />
@@ -245,7 +228,7 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
                                     </div>
                                     <StructureGlyph
                                         pattern={problemStructure.primary}
-                                        claimCount={effectiveMapperArtifact?.claims?.length || 0}
+                                        claimCount={mappingArtifact?.semantic?.claims?.length || 0}
                                         width={320}
                                         height={140}
                                     />
@@ -275,10 +258,10 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
             ) : currentView === 'traverse' && canShowTraversal ? (
                 <div className="animate-in fade-in duration-500">
                     <TraversalGraphView
-                        traversalGraph={effectiveMapperArtifact!.traversalGraph!}
-                        conditionals={effectiveMapperArtifact!.conditionals || []}
-                        claims={effectiveMapperArtifact!.claims || []}
-                        originalQuery={effectiveMapperArtifact!.query || ''}
+                        traversalGraph={mappingArtifact!.traversal!.graph!}
+                        conditionals={mappingArtifact!.semantic?.conditionals || []}
+                        claims={mappingArtifact!.semantic?.claims || []}
+                        originalQuery={mappingArtifact!.meta?.query || ''}
                         aiTurnId={aiTurn.id}
                         completedTraversalState={aiTurn.singularity?.traversalState}
                         sessionId={effectiveSessionId!}

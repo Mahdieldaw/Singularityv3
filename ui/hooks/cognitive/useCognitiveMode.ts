@@ -10,11 +10,11 @@ import {
 import api from "../../services/extension-api";
 
 
-import { MapperArtifact } from "../../../shared/contract";
+import { CognitiveArtifact } from "../../../shared/contract";
 
 export type SingularityTransitionOptions = {
     providerId?: string;
-    mapperArtifact?: MapperArtifact;
+    mappingArtifact?: CognitiveArtifact;
     userNotes?: string[];
     isRecompute?: boolean;
     sourceTurnId?: string;
@@ -69,7 +69,7 @@ export function useSingularityMode(trackedAiTurnId?: string) {
                     sessionId,
                     aiTurnId,
                     providerId: options.providerId,
-                    mapperArtifact: options.mapperArtifact,
+                    mappingArtifact: options.mappingArtifact,
                     userNotes: options.userNotes,
                     isRecompute: !!options.isRecompute,
                     sourceTurnId: options.sourceTurnId,

@@ -291,12 +291,12 @@ export class ContextResolver {
       if (fromStructural) return fromStructural;
     }
 
-    const fallbackFromMapper = await this._computeStoredAnalysisFromMapperArtifact(lastTurn?.mapperArtifact);
-    if (fallbackFromMapper) return fallbackFromMapper;
+    const fallbackFromArtifact = await this._computeStoredAnalysisFromArtifact(lastTurn?.mapping?.artifact);
+    if (fallbackFromArtifact) return fallbackFromArtifact;
 
     if (structuralTurn) {
-      const fromMapper = await this._computeStoredAnalysisFromMapperArtifact(structuralTurn.mapperArtifact);
-      if (fromMapper) return fromMapper;
+      const fromArtifact = await this._computeStoredAnalysisFromArtifact(structuralTurn.mapping?.artifact);
+      if (fromArtifact) return fromArtifact;
     }
 
     if (!structuralTurnId) {
@@ -322,7 +322,7 @@ export class ContextResolver {
             const stored = this._extractStoredAnalysisFromTurn(t);
             if (stored) return stored;
 
-            const computed = await this._computeStoredAnalysisFromMapperArtifact(t.mapperArtifact);
+            const computed = await this._computeStoredAnalysisFromArtifact(t.mapping?.artifact);
             if (computed) return computed;
           }
         }
@@ -346,10 +346,10 @@ export class ContextResolver {
     return { claimsWithLeverage, edges };
   }
 
-  async _computeStoredAnalysisFromMapperArtifact(mapperArtifact) {
-    if (!mapperArtifact || typeof mapperArtifact !== "object") return null;
-    const claims = mapperArtifact.claims;
-    const edges = mapperArtifact.edges;
+  async _computeStoredAnalysisFromArtifact(artifact) {
+    if (!artifact || typeof artifact !== "object") return null;
+    const claims = artifact.semantic?.claims;
+    const edges = artifact.semantic?.edges;
     if (!Array.isArray(claims) || !Array.isArray(edges)) return null;
     if (claims.length === 0 && edges.length === 0) return null;
 
@@ -357,7 +357,7 @@ export class ContextResolver {
       const mod = await import("./PromptMethods");
       const computeStructuralAnalysis = mod?.computeStructuralAnalysis;
       if (typeof computeStructuralAnalysis !== "function") return null;
-      const analysis = computeStructuralAnalysis(mapperArtifact);
+      const analysis = computeStructuralAnalysis(artifact);
       if (!analysis || !Array.isArray(analysis.claimsWithLeverage) || !Array.isArray(analysis.edges)) return null;
       return { claimsWithLeverage: analysis.claimsWithLeverage, edges: analysis.edges };
     } catch (_) {

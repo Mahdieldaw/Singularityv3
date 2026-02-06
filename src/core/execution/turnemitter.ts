@@ -1,5 +1,4 @@
 import { DEFAULT_THREAD } from '../../../shared/messaging.js';
-import { buildCognitiveArtifact } from '../../../shared/cognitive-artifact';
 
 interface Statement {
   id: string;
@@ -109,48 +108,6 @@ interface CognitiveArtifact {
   };
 }
 
-interface MapperArtifact {
-  shadow?: {
-    statements?: Statement[];
-    audit?: ShadowAudit;
-  };
-  claims?: Claim[];
-  edges?: SemanticEdge[];
-  conditionals?: Conditional[];
-  narrative?: Narrative;
-  forcingPoints?: ForcingPoint[];
-  traversalGraph?: {
-    claims?: Claim[];
-    tensions?: Tension[];
-    tiers?: number[];
-    maxTier?: number;
-    roots?: string[];
-    cycles?: string[][];
-  };
-}
-
-interface PipelineArtifacts {
-  shadow?: {
-    extraction?: {
-      statements?: Statement[];
-    };
-    delta?: ShadowDelta;
-  };
-  paragraphProjection?: {
-    paragraphs?: Paragraph[];
-  };
-  substrate?: {
-    graph?: {
-      nodes?: SubstrateNode[];
-      edges?: SubstrateEdge[];
-    };
-  };
-  preSemantic?: {
-    lens?: {
-      shape?: string;
-    };
-  };
-}
 
 interface StepPayload {
   providers?: string[];
@@ -207,8 +164,7 @@ interface EmitContext {
   userMessage?: string;
   canonicalUserTurnId?: string;
   canonicalAiTurnId?: string;
-  mapperArtifact?: MapperArtifact;
-  pipelineArtifacts?: PipelineArtifacts;
+  mappingArtifact?: CognitiveArtifact;
   singularityOutput?: SingularityOutput;
   pipelineStatus?: string;
   traversalState?: TraversalState;
@@ -299,14 +255,6 @@ function isStepResultFailed(result: StepResult): result is StepResultFailed {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
-}
-
-function isMapperArtifact(value: unknown): value is MapperArtifact {
-  return isRecord(value);
-}
-
-function isPipelineArtifacts(value: unknown): value is PipelineArtifacts {
-  return isRecord(value);
 }
 
 function isSingularityOutput(value: unknown): value is SingularityOutput {
@@ -522,34 +470,7 @@ export class TurnEmitter {
             }
           : undefined;
 
-      let effectiveMapperArtifact = context?.mapperArtifact;
-      let effectivePipelineArtifacts = context?.pipelineArtifacts;
-      if (!effectiveMapperArtifact || !effectivePipelineArtifacts) {
-        try {
-          const mapperKey = primaryMapper ?? Object.keys(mappingResponses ?? {})[0];
-          const arr = mapperKey ? mappingResponses[mapperKey] : null;
-          const last =
-            Array.isArray(arr) && arr.length > 0 ? arr[arr.length - 1] : null;
-          const mapperCandidate = last?.meta?.['mapperArtifact'];
-          const pipelineCandidate = last?.meta?.['pipelineArtifacts'];
-          if (!effectiveMapperArtifact && isMapperArtifact(mapperCandidate)) {
-            effectiveMapperArtifact = mapperCandidate;
-          }
-          if (
-            !effectivePipelineArtifacts &&
-            isPipelineArtifacts(pipelineCandidate)
-          ) {
-            effectivePipelineArtifacts = pipelineCandidate;
-          }
-        } catch (err) {
-          console.debug('[TurnEmitter] Failed to extract mapper artifacts:', err);
-        }
-      }
-
-      const cognitiveArtifact = buildCognitiveArtifact(
-        effectiveMapperArtifact,
-        effectivePipelineArtifacts
-      );
+      const cognitiveArtifact = context?.mappingArtifact ?? null;
       const mappingPhase = cognitiveArtifact
         ? { artifact: cognitiveArtifact }
         : undefined;
@@ -580,16 +501,6 @@ export class TurnEmitter {
             traversalState: context?.traversalState,
           }
         : undefined;
-console.log('🚨 TurnEmitter phases:', { 
-  hasBatchPhase: !!batchPhase, 
-  hasMappingPhase: !!mappingPhase, 
-  hasSingularityPhase: !!singularityPhase, 
-  batchResponseCount: Object.keys(batchResponses).length, 
-  mappingResponseCount: Object.keys(mappingResponses).length, 
-  contextHasMapperArtifact: !!context?.mapperArtifact, 
-  contextHasPipelineArtifacts: !!context?.pipelineArtifacts, 
-  cognitiveArtifact: !!cognitiveArtifact, 
-});
       const aiTurn: AiTurn = {
         id: aiTurnId,
         type: 'ai',

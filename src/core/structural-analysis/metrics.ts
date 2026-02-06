@@ -1,5 +1,5 @@
 import {
-    MapperArtifact,
+    CognitiveArtifact,
     Claim,
     Edge,
     EnrichedClaim,
@@ -54,7 +54,7 @@ export const computeCoreRatios = (
     return { concentration, alignment, tension, fragmentation, depth };
 };
 
-export const computeLandscapeMetrics = (artifact: MapperArtifact): {
+export const computeLandscapeMetrics = (artifact: CognitiveArtifact): {
     dominantType: Claim["type"];
     typeDistribution: Record<string, number>;
     dominantRole: Claim["role"];
@@ -63,7 +63,7 @@ export const computeLandscapeMetrics = (artifact: MapperArtifact): {
     modelCount: number;
     convergenceRatio: number;
 } => {
-    const claims = Array.isArray(artifact?.claims) ? artifact.claims : [];
+    const claims = Array.isArray(artifact?.semantic?.claims) ? artifact.semantic.claims : [];
 
     const typeDistribution: Record<string, number> = {};
     const roleDistribution: Record<string, number> = {};
@@ -83,12 +83,7 @@ export const computeLandscapeMetrics = (artifact: MapperArtifact): {
     const dominantType = (Object.entries(typeDistribution).sort((a, b) => b[1] - a[1])[0]?.[0] || "prescriptive") as Claim["type"];
     const dominantRole = (Object.entries(roleDistribution).sort((a, b) => b[1] - a[1])[0]?.[0] || "anchor") as Claim["role"];
 
-    const explicitModelCount =
-        typeof artifact?.model_count === "number"
-            ? artifact.model_count
-            : typeof (artifact as any)?.modelCount === "number"
-                ? (artifact as any).modelCount
-                : null;
+    const explicitModelCount = artifact?.meta?.modelCount;
 
     const modelCount =
         typeof explicitModelCount === "number" && explicitModelCount > 0

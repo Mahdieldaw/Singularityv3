@@ -4,6 +4,11 @@ export function buildCognitiveArtifact(
 ): any | null {
   if (!mapper && !pipeline) return null;
 
+  // If mapper is already a CognitiveArtifact (has .semantic), pass through
+  if (mapper?.semantic?.claims) {
+    return mapper;
+  }
+
   const substrateGraph = pipeline?.substrate?.graph;
   const traversalGraph = mapper?.traversalGraph;
 
@@ -32,6 +37,7 @@ export function buildCognitiveArtifact(
       edges: mapper?.edges ?? [],
       conditionals: mapper?.conditionals ?? [],
       narrative: mapper?.narrative,
+      ghosts: Array.isArray(mapper?.ghosts) ? mapper.ghosts : undefined,
     },
     traversal: {
       forcingPoints: mapper?.forcingPoints ?? [],
@@ -52,6 +58,12 @@ export function buildCognitiveArtifact(
             roots: [],
             cycles: [],
           },
+    },
+    meta: {
+      modelCount: mapper?.model_count ?? mapper?.modelCount ?? undefined,
+      query: mapper?.query ?? undefined,
+      turn: mapper?.turn ?? undefined,
+      timestamp: mapper?.timestamp ?? undefined,
     },
   };
 }

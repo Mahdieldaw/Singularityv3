@@ -1358,10 +1358,17 @@ export interface CognitiveArtifact {
     edges: Edge[];
     conditionals: ConditionalPruner[];
     narrative?: string;
+    ghosts?: string[];
   };
   traversal: {
     forcingPoints: ForcingPoint[];
     graph: SerializedTraversalGraph;
+  };
+  meta?: {
+    modelCount?: number;
+    query?: string;
+    turn?: number;
+    timestamp?: string;
   };
 }
 
