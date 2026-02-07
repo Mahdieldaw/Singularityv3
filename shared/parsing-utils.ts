@@ -664,7 +664,9 @@ export function parseUnifiedMapperOutput(text: string): ParsedMapperOutput {
         ...createEmptyMapperArtifact(),
         claims: normalizedClaims,
         edges: normalizedEdges,
-        ghosts: normalizedGhosts
+        ghosts: normalizedGhosts,
+        narrative,
+        anchors
     };
 
     return {
@@ -690,7 +692,11 @@ export function parseMapperArtifact(text: string): MapperArtifact {
     // 1. Try Unified Tagged Parser
     const unified = parseUnifiedMapperOutput(text);
     if (unified.artifact && unified.artifact.claims && unified.artifact.claims.length > 0) {
-        return unified.artifact;
+        return {
+            ...unified.artifact,
+            narrative: unified.narrative || unified.artifact.narrative,
+            anchors: unified.anchors || unified.artifact.anchors
+        };
     }
 
     // 2. Try raw JSON fallback (if the text IS just the JSON object)

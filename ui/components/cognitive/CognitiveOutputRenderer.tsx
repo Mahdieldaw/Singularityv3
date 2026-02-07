@@ -9,7 +9,7 @@ import { useAtomValue, useSetAtom } from 'jotai';
 import { selectedModelsAtom, workflowProgressForTurnFamily, activeSplitPanelAtom, currentSessionIdAtom, turnStreamingStateFamily, isDecisionMapOpenAtom } from '../../state/atoms';
 import { MetricsRibbon } from './MetricsRibbon';
 import StructureGlyph from '../StructureGlyph';
-import { computeProblemStructureFromArtifact, computeStructuralAnalysis } from '../../../src/core/PromptMethods';
+import { computeStructuralAnalysis } from '../../../src/core/PromptMethods';
 import { TraversalGraphView } from '../traversal/TraversalGraphView';
 import { PipelineErrorBanner } from '../PipelineErrorBanner';
 
@@ -104,13 +104,8 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
     }, [mappingArtifact]);
 
     const problemStructure = useMemo(() => {
-        if (!mappingArtifact) return undefined;
-        try {
-            return computeProblemStructureFromArtifact(mappingArtifact);
-        } catch {
-            return undefined;
-        }
-    }, [mappingArtifact]);
+        return structuralAnalysis?.shape;
+    }, [structuralAnalysis]);
 
     if (aiTurn.pipelineStatus === 'error') {
         const pipelineError = (aiTurn.meta as any)?.pipelineError;

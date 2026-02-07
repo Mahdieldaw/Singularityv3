@@ -1,6 +1,6 @@
 import React, { useMemo, useCallback, useEffect, useRef, useState, Suspense } from "react";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
-import { isDecisionMapOpenAtom, turnByIdAtom, mappingProviderAtom, activeSplitPanelAtom, providerAuthStatusAtom } from "../state/atoms";
+import { isDecisionMapOpenAtom, turnByIdAtom, mappingProviderAtom, activeSplitPanelAtom, providerAuthStatusAtom, toastAtom } from "../state/atoms";
 import { useClipActions } from "../hooks/useClipActions";
 import { m, AnimatePresence, LazyMotion, domAnimation } from "framer-motion";
 import { safeLazy } from "../utils/safeLazy";
@@ -462,33 +462,6 @@ const DetailView: React.FC<DetailViewProps> = ({ node, narrativeExcerpt, citatio
 
     const insights: Array<{ type: any; metadata: any }> = [];
 
-    const leverageInversion = structural.patterns.leverageInversions.find((inv: any) => inv.claimId === node.id);
-
-    if (leverageInversion && leverageInversion.reason === "singular_foundation") {
-      const cascade = structural.patterns.cascadeRisks.find((r: any) => r.sourceId === node.id);
-      insights.push({
-        type: "fragile_foundation",
-        metadata: {
-          dependentCount: leverageInversion.affectedClaims.length,
-          dependentLabels: cascade?.dependentLabels || [],
-        },
-      });
-    }
-
-    const claimWithLeverage = structural.claimsWithLeverage.find((c: any) => c.id === node.id);
-    if (claimWithLeverage && claimWithLeverage.leverage > 8) {
-      const cascade = structural.patterns.cascadeRisks.find((r: any) => r.sourceId === node.id);
-      if (cascade && cascade.dependentIds.length >= 3) {
-        insights.push({
-          type: "keystone",
-          metadata: {
-            dependentCount: cascade.dependentIds.length,
-            dependentLabels: cascade.dependentLabels,
-          },
-        });
-      }
-    }
-
     const conflict = structural.patterns.conflicts.find(
       (c: any) =>
         (c.claimA.id === node.id || c.claimB.id === node.id) && c.isBothConsensus
@@ -503,45 +476,16 @@ const DetailView: React.FC<DetailViewProps> = ({ node, narrativeExcerpt, citatio
       });
     }
 
-    if (leverageInversion && leverageInversion.reason === "high_connectivity_low_support") {
+    const tradeoff = structural.patterns.tradeoffs?.find(
+      (t: any) => t.claimA.id === node.id || t.claimB.id === node.id
+    );
+    if (tradeoff) {
+      const otherClaim = tradeoff.claimA.id === node.id ? tradeoff.claimB : tradeoff.claimA;
       insights.push({
-        type: "high_leverage_singular",
+        type: "tradeoff",
         metadata: {
-          leverageScore: claimWithLeverage?.leverage,
-        },
-      });
-    }
-
-    const cascade = structural.patterns.cascadeRisks.find((r: any) => r.sourceId === node.id);
-    if (cascade && cascade.depth >= 3) {
-      insights.push({
-        type: "cascade_risk",
-        metadata: {
-          dependentCount: cascade.dependentIds.length,
-          cascadeDepth: cascade.depth,
-          dependentLabels: cascade.dependentLabels,
-        },
-      });
-    }
-
-    if (claimWithLeverage && claimWithLeverage.isEvidenceGap) {
-      const gapCascade = structural.patterns.cascadeRisks.find((r: any) => r.sourceId === node.id);
-      insights.push({
-        type: "evidence_gap",
-        metadata: {
-          gapScore: claimWithLeverage.evidenceGapScore,
-          dependentCount: gapCascade?.dependentIds.length || 0,
-          dependentLabels: gapCascade?.dependentLabels || [],
-        },
-      });
-    }
-
-    if (claimWithLeverage && claimWithLeverage.isOutlier) {
-      insights.push({
-        type: "support_outlier",
-        metadata: {
-          skew: claimWithLeverage.supportSkew,
-          supporterCount: node.supporters.length,
+          tradeoffWith: otherClaim.label,
+          symmetry: tradeoff.symmetry,
         },
       });
     }
@@ -724,6 +668,8 @@ export const DecisionMapSheet = React.memo(() => {
   const mappingProvider = useAtomValue(mappingProviderAtom);
   const setActiveSplitPanel = useSetAtom(activeSplitPanelAtom);
 
+  const setToast = useSetAtom(toastAtom);
+
   const [activeTab, setActiveTab] = useState<'graph' | 'narrative' | 'options' | 'space' | 'json'>('graph');
   const [selectedNode, setSelectedNode] = useState<{ id: string; label: string; supporters: (string | number)[]; theme?: string } | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -899,13 +845,43 @@ export const DecisionMapSheet = React.memo(() => {
 
 
 
-  const semanticClaims = useMemo(() => {
+  const semanticClaims = useMemo<any[]>(() => {
     const semantic = mappingArtifact?.semantic;
     if (Array.isArray(semantic?.claims)) return semantic?.claims;
     if (derivedMapperArtifact?.claims) return derivedMapperArtifact.claims;
     if (Array.isArray((parsedMapping as any)?.claims)) return (parsedMapping as any)?.claims;
     return graphData.claims.length > 0 ? graphData.claims : [];
   }, [mappingArtifact, derivedMapperArtifact, parsedMapping, graphData]);
+
+  const preSemanticRegions = useMemo(() => {
+    const ps = mappingArtifact?.geometry?.preSemantic;
+    if (!ps || typeof ps !== 'object') return null;
+    const obj = ps as Record<string, unknown>;
+
+    const normalize = (input: unknown) => {
+      if (!Array.isArray(input)) return null;
+      const out: Array<{ id: string; kind: "cluster" | "component" | "patch"; nodeIds: string[] }> = [];
+      for (const r of input) {
+        if (!r || typeof r !== 'object') continue;
+        const rr = r as Record<string, unknown>;
+        const id = typeof rr.id === 'string' ? rr.id : '';
+        if (!id) continue;
+        const kindRaw = typeof rr.kind === 'string' ? rr.kind : '';
+        const kind = kindRaw === 'cluster' || kindRaw === 'component' || kindRaw === 'patch' ? kindRaw : 'patch';
+        const nodeIds = Array.isArray(rr.nodeIds) ? rr.nodeIds.map((x) => String(x)).filter(Boolean) : [];
+        out.push({ id, kind, nodeIds });
+      }
+      return out;
+    };
+
+    const direct = normalize(obj.regions);
+    if (direct) return direct;
+
+    const regionization = obj.regionization;
+    if (!regionization || typeof regionization !== 'object') return null;
+    const regionizationObj = regionization as Record<string, unknown>;
+    return normalize(regionizationObj.regions);
+  }, [mappingArtifact]);
 
   const artifactForStructure = useMemo(() => {
     const artifact =
@@ -931,7 +907,10 @@ export const DecisionMapSheet = React.memo(() => {
     if (!artifactForStructure) return null;
     try {
       return computeStructuralAnalysis(artifactForStructure as any);
-    } catch {
+    } catch (err) {
+      if (process.env.NODE_ENV !== 'production') {
+        console.error("[DecisionMapSheet] structuralAnalysis failed:", err);
+      }
       return null;
     }
   }, [artifactForStructure]);
@@ -940,7 +919,7 @@ export const DecisionMapSheet = React.memo(() => {
 
   const claimThemes = useMemo(() => {
     if (!semanticClaims || semanticClaims.length === 0) return [];
-    return buildThemesFromClaims(semanticClaims as any);
+    return buildThemesFromClaims(semanticClaims);
   }, [semanticClaims]);
 
   const mappingText = useMemo(() => {
@@ -1114,6 +1093,13 @@ export const DecisionMapSheet = React.memo(() => {
     const substrate = mappingArtifact?.geometry?.substrate || null;
     const completeness = (mapperArtifact as any)?.completeness || null;
 
+    const narrative = mappingArtifact?.semantic?.narrative || (parsedMapping as any)?.narrative || null;
+    const singularityPrompt = (aiTurn as any)?.singularity?.prompt || null;
+    const ghosts = mappingArtifact?.semantic?.ghosts || (parsedMapping as any)?.ghosts || null;
+    const conditionals = mappingArtifact?.semantic?.conditionals || (parsedMapping as any)?.conditionals || null;
+    const embeddingStatus = mappingArtifact?.geometry?.embeddingStatus || null;
+    const artifactMeta = mappingArtifact?.meta || null;
+
     return [
       { key: 'shadow_extraction', label: 'Shadow Extraction', kind: 'json' as const, value: shadowExtraction },
       { key: 'shadow_delta', label: 'Shadow Delta', kind: 'json' as const, value: shadowDelta },
@@ -1123,8 +1109,15 @@ export const DecisionMapSheet = React.memo(() => {
       { key: 'substrate', label: 'Substrate', kind: 'json' as const, value: substrate },
       { key: 'presemantic', label: 'Pre-Semantic', kind: 'json' as const, value: preSemantic },
 
+      { key: 'narrative', label: 'Narrative', kind: 'text' as const, value: narrative || '' },
+      { key: 'ghosts', label: 'Ghost Claims', kind: 'json' as const, value: ghosts },
+      { key: 'conditionals', label: 'Conditionals', kind: 'json' as const, value: conditionals },
+      { key: 'embedding_status', label: 'Embedding Status', kind: 'text' as const, value: embeddingStatus || '' },
+      { key: 'artifact_meta', label: 'Artifact Meta', kind: 'json' as const, value: artifactMeta },
+
       { key: 'mapper_prompt', label: 'Mapper Prompt', kind: 'text' as const, value: semanticMapperPrompt || '' },
       { key: 'raw_mapping', label: 'Raw Mapping Text', kind: 'text' as const, value: rawMappingText || '' },
+      { key: 'singularity_prompt', label: 'Semantic Prompt', kind: 'text' as const, value: singularityPrompt || '' },
 
       { key: 'mapper_artifact', label: 'Mapper Artifact', kind: 'json' as const, value: mapperArtifact },
       { key: 'structural_analysis', label: 'Structural Analysis', kind: 'json' as const, value: structuralAnalysis },
@@ -1153,8 +1146,15 @@ export const DecisionMapSheet = React.memo(() => {
       } else {
         try {
           map.set(s.key, s.value == null ? '' : stringifyForDebug(s.value));
-        } catch {
-          map.set(s.key, String(s.value || ''));
+        } catch (err) {
+          console.error(`[DecisionMapSheet] Failed to stringify ${s.key}:`, err);
+
+          // Safe fallback
+          try {
+            map.set(s.key, JSON.stringify(s.value, (_k, v) => (typeof v === 'object' && v !== null ? (v === s.value ? v : '[Object]') : v)));
+          } catch {
+            map.set(s.key, String(s.value || ''));
+          }
         }
       }
     }
@@ -1373,12 +1373,12 @@ export const DecisionMapSheet = React.memo(() => {
                     <ParagraphSpaceView
                       graph={mappingArtifact?.geometry?.substrate || null}
                       paragraphProjection={paragraphProjection}
-                      claims={semanticClaims as any}
+                        claims={semanticClaims}
                       shadowStatements={mappingArtifact?.shadow?.statements || []}
-                      mutualEdges={(mappingArtifact?.geometry?.substrate as any)?.mutualEdges || null}
-                      strongEdges={(mappingArtifact?.geometry?.substrate as any)?.strongEdges || null}
-                      regions={(mappingArtifact?.geometry?.preSemantic as any)?.regions || (mappingArtifact?.geometry?.preSemantic as any)?.regionization?.regions || null}
-                      traversalState={(aiTurn as any)?.singularity?.traversalState || null}
+                      mutualEdges={mappingArtifact?.geometry?.substrate?.mutualEdges || null}
+                      strongEdges={mappingArtifact?.geometry?.substrate?.strongEdges || null}
+                        regions={preSemanticRegions}
+                        traversalState={aiTurn?.singularity?.traversalState || null}
                       batchResponses={(() => {
                         const responses = (aiTurn as any)?.batch?.responses || {};
                         const entries = Object.entries(responses);
@@ -1433,16 +1433,24 @@ export const DecisionMapSheet = React.memo(() => {
                           type="button"
                           className="px-3 py-1.5 rounded-full border border-white/10 text-xs text-text-muted hover:bg-white/5 hover:text-text-primary"
                           onClick={() => {
+                            let url: string | undefined;
                             try {
                               const text = jsonTextByKey.get('cognitive_artifact') || '';
+                              if (!text) throw new Error("No artifact data available");
+
                               const blob = new Blob([text], { type: 'application/json' });
-                              const url = URL.createObjectURL(blob);
+                              url = URL.createObjectURL(blob);
                               const a = document.createElement('a');
                               a.href = url;
                               a.download = `cognitive_artifact_${aiTurn?.id || 'turn'}.json`;
                               a.click();
-                              URL.revokeObjectURL(url);
-                            } catch {
+
+                              setToast({ id: Date.now(), message: 'Exported successfully', type: 'success' });
+                            } catch (err: any) {
+                              console.error("[DecisionMapSheet] Export failed:", err);
+                              setToast({ id: Date.now(), message: `Export failed: ${err.message}`, type: 'error' });
+                            } finally {
+                              if (url) URL.revokeObjectURL(url);
                             }
                           }}
                         >

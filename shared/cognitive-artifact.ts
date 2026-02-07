@@ -27,9 +27,19 @@ export function buildCognitiveArtifact(
       substrate: {
         nodes: substrateGraph?.nodes ?? [],
         edges: substrateGraph?.edges ?? [],
+        mutualEdges: substrateGraph?.mutualEdges ?? [],
+        strongEdges: substrateGraph?.strongEdges ?? [],
+        softThreshold: substrateGraph?.softThreshold,
       },
       preSemantic: pipeline?.preSemantic
-        ? { hint: pipeline.preSemantic.lens?.shape ?? 'sparse' }
+        ? {
+          hint: pipeline.preSemantic.lens?.shape ?? 'sparse',
+          regions: (pipeline.preSemantic.regionization?.regions || []).map((r: any) => ({
+            id: r.id,
+            kind: r.kind,
+            nodeIds: r.nodeIds,
+          })),
+        }
         : undefined,
       alignment: mapper?.alignment ?? undefined,
     },

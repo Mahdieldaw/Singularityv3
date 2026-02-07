@@ -47,6 +47,12 @@ interface SubstrateEdge {
   weight?: number;
 }
 
+interface PreSemanticRegion {
+  id: string;
+  kind?: string;
+  nodeIds: string[];
+}
+
 interface ForcingPoint {
   id: string;
   claimId: string;
@@ -86,8 +92,14 @@ interface CognitiveArtifact {
   };
   geometry: {
     embeddingStatus: 'computed' | 'failed';
-    substrate: { nodes: SubstrateNode[]; edges: SubstrateEdge[] };
-    preSemantic?: { hint: string };
+    substrate: {
+      nodes: SubstrateNode[];
+      edges: SubstrateEdge[];
+      mutualEdges?: SubstrateEdge[];
+      strongEdges?: SubstrateEdge[];
+      softThreshold?: number;
+    };
+    preSemantic?: { hint: string; regions?: PreSemanticRegion[] };
   };
   semantic: {
     claims: Claim[];
@@ -493,7 +505,7 @@ export class TurnEmitter {
 
       const singularityPhase = inferredSingularityOutput
         ? {
-            prompt: inferredSingularityOutput?.prompt ?? '',
+            prompt: (context as any)?.singularityPromptUsed ?? inferredSingularityOutput?.prompt ?? '',
             output:
               inferredSingularityOutput?.output ??
               inferredSingularityOutput?.text ??

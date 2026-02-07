@@ -1,9 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as d3 from 'd3-force';
 import {
-    Claim, Edge, ProblemStructure, GraphAnalysis, EnrichedClaim,
-    DissentPatternData, KeystonePatternData, ChainPatternData,
-    FragilePatternData
+    Claim, Edge, ProblemStructure, EnrichedClaim,
 } from '../../shared/contract';
 
 const DEBUG_DECISION_MAP_GRAPH = false;
@@ -40,7 +38,6 @@ interface Props {
     claims: Claim[];
     edges: Edge[];
     problemStructure?: ProblemStructure;
-    graphAnalysis?: GraphAnalysis;
     enrichedClaims?: EnrichedClaim[];
     citationSourceOrder?: Record<number, string>;
     onNodeClick?: (node: GraphNode) => void;
@@ -71,13 +68,42 @@ function getNodeRadius(supportCount: number): number {
     return base + Math.max(1, supportCount) * scale;
 }
 
+// Simple connected-components for parallel layout
+function buildSimpleComponents(nodeIds: string[], edges: Edge[]): string[][] {
+    const neighbors = new Map<string, Set<string>>();
+    for (const id of nodeIds) neighbors.set(id, new Set());
+    for (const e of edges) {
+        if (!neighbors.has(e.from) || !neighbors.has(e.to)) continue;
+        neighbors.get(e.from)!.add(e.to);
+        neighbors.get(e.to)!.add(e.from);
+    }
+    const visited = new Set<string>();
+    const components: string[][] = [];
+    for (const id of nodeIds) {
+        if (visited.has(id)) continue;
+        const stack = [id];
+        const comp: string[] = [];
+        visited.add(id);
+        while (stack.length) {
+            const cur = stack.pop()!;
+            comp.push(cur);
+            for (const nxt of neighbors.get(cur) ?? []) {
+                if (visited.has(nxt)) continue;
+                visited.add(nxt);
+                stack.push(nxt);
+            }
+        }
+        components.push(comp);
+    }
+    return components.sort((a, b) => b.length - a.length);
+}
+
 // Helper logic moved inside component with O(1) lookups
 
 const DecisionMapGraph: React.FC<Props> = ({
     claims: inputClaims,
     edges: inputEdges,
     problemStructure,
-    graphAnalysis,
     enrichedClaims,
     citationSourceOrder: _citationSourceOrder,
     onNodeClick,
@@ -101,31 +127,14 @@ const DecisionMapGraph: React.FC<Props> = ({
 
     // OPTIMIZATION: Precompute lookups for O(1) access
     const lookups = React.useMemo(() => {
-        const peakSet = new Set(problemStructure?.peaks?.map(p => p.id));
+        const peakSet = new Set<string>();
         const dissentSet = new Set<string>();
         const fragileSet = new Set<string>();
         const keystoneSet = new Set<string>();
         const chainMap = new Map<string, number>();
 
-        problemStructure?.patterns?.forEach(p => {
-            if (p.type === 'dissent') {
-                const data = p.data as DissentPatternData;
-                if (data.strongestVoice) dissentSet.add(data.strongestVoice.id);
-                data.voices.forEach(v => dissentSet.add(v.id));
-            } else if (p.type === 'keystone') {
-                const data = p.data as KeystonePatternData;
-                keystoneSet.add(data.keystone.id);
-            } else if (p.type === 'chain') {
-                const data = p.data as ChainPatternData;
-                data.chain.forEach((id, idx) => chainMap.set(id, idx));
-            } else if (p.type === 'fragile') {
-                const data = p.data as FragilePatternData;
-                data.fragilities.forEach(f => fragileSet.add(f.peak.id));
-            }
-        });
-
         return { peakSet, dissentSet, fragileSet, keystoneSet, chainMap };
-    }, [problemStructure]);
+    }, []);
 
     useEffect(() => {
         if (!inputClaims.length) {
@@ -145,16 +154,12 @@ const DecisionMapGraph: React.FC<Props> = ({
         const usableW = Math.max(1, width - padding * 2);
         const usableH = Math.max(1, height - padding * 2);
 
-        // Layout based on PRIMARY SHAPE (peaks/hills model)
+        // Layout based on PRIMARY SHAPE
         const primaryShape = problemStructure?.primary;
-        let layoutMode: 'chain' | 'keystone' | 'convergent' | 'forked' | 'constrained' | 'parallel' | 'force' = 'force';
+        let layoutMode: 'convergent' | 'forked' | 'constrained' | 'parallel' | 'force' = 'force';
 
         // Determine Layout Mode
-        if (graphAnalysis?.longestChain && graphAnalysis.longestChain.length >= 3) {
-            layoutMode = 'chain';
-        } else if (graphAnalysis?.hubClaim && lookups.keystoneSet.size > 0) {
-            layoutMode = 'keystone';
-        } else if (primaryShape === 'convergent') {
+        if (primaryShape === 'convergent') {
             layoutMode = 'convergent';
         } else if (primaryShape === 'forked') {
             layoutMode = 'forked';
@@ -162,49 +167,9 @@ const DecisionMapGraph: React.FC<Props> = ({
             layoutMode = 'constrained';
         } else if (primaryShape === 'parallel') {
             layoutMode = 'parallel';
-        } else if (primaryShape === 'sparse') {
-            layoutMode = 'force';
         }
 
-        if (layoutMode === 'chain') {
-            // CHAIN secondary pattern takes precedence for layout
-            const longestChain = graphAnalysis!.longestChain;
-            const chainPositions = new Map<string, number>();
-            longestChain.forEach((id: string, idx: number) => chainPositions.set(id, idx));
-            const maxPos = longestChain.length - 1;
-
-            longestChain.forEach((id: string, idx: number) => {
-                const y = padding + (maxPos === 0 ? usableH / 2 : (idx / maxPos) * usableH);
-                targets.set(id, { x: width / 2, y });
-            });
-
-            // Position non-chain nodes off to the side
-            nodeIds.filter(id => !chainPositions.has(id)).forEach((id, idx) => {
-                targets.set(id, {
-                    x: padding + 50,
-                    y: padding + (idx / Math.max(1, nodeIds.length - longestChain.length)) * usableH
-                });
-            });
-        } else if (layoutMode === 'keystone') {
-            // KEYSTONE secondary pattern - radial layout around hub
-            const keystoneId = graphAnalysis!.hubClaim!;
-            targets.set(keystoneId, { x: width / 2, y: height / 2 });
-
-            const neighbors = inputEdges
-                .filter(e => e.from === keystoneId || e.to === keystoneId)
-                .map(e => e.from === keystoneId ? e.to : e.from)
-                .filter(id => id !== keystoneId);
-            const uniq = Array.from(new Set(neighbors));
-            const radius = Math.min(usableW, usableH) * 0.28;
-
-            uniq.forEach((id, idx) => {
-                const a = (idx / Math.max(uniq.length, 1)) * Math.PI * 2;
-                targets.set(id, {
-                    x: width / 2 + Math.cos(a) * radius,
-                    y: height / 2 + Math.sin(a) * radius,
-                });
-            });
-        } else if (layoutMode === 'convergent') {
+        if (layoutMode === 'convergent') {
             // CONVERGENT - tight cluster in center
             const centerX = width / 2;
             const centerY = height / 2;
@@ -231,37 +196,37 @@ const DecisionMapGraph: React.FC<Props> = ({
             });
         } else if (layoutMode === 'forked') {
             // FORKED - two clusters on opposite sides
-            const peaks = problemStructure?.peaks || [];
+            const peaks = [...nodeIds];
             const leftPeaks = peaks.slice(0, Math.ceil(peaks.length / 2));
             const rightPeaks = peaks.slice(Math.ceil(peaks.length / 2));
 
-            leftPeaks.forEach((p, idx) => {
-                targets.set(p.id, {
+            leftPeaks.forEach((id: string, idx: number) => {
+                targets.set(id, {
                     x: width * 0.25,
                     y: height / 2 + (idx - leftPeaks.length / 2) * 60,
                 });
             });
 
-            rightPeaks.forEach((p, idx) => {
-                targets.set(p.id, {
+            rightPeaks.forEach((id: string, idx: number) => {
+                targets.set(id, {
                     x: width * 0.75,
                     y: height / 2 + (idx - rightPeaks.length / 2) * 60,
                 });
             });
         } else if (layoutMode === 'constrained') {
             // CONSTRAINED - horizontal spread showing tradeoff
-            const peaks = problemStructure?.peaks || [];
+            const peaks = [...nodeIds];
             const spacing = usableW / (peaks.length + 1);
 
-            peaks.forEach((p, idx) => {
-                targets.set(p.id, {
+            peaks.forEach((id: string, idx: number) => {
+                targets.set(id, {
                     x: padding + spacing * (idx + 1),
                     y: height / 2,
                 });
             });
         } else if (layoutMode === 'parallel') {
-            // PARALLEL - separate clusters for each dimension
-            const components = graphAnalysis?.components || [nodeIds];
+            // PARALLEL - separate clusters for each connected component
+            const components = buildSimpleComponents(nodeIds, inputEdges);
             const colWidth = usableW / components.length;
 
             components.forEach((comp, compIdx) => {
@@ -325,11 +290,8 @@ const DecisionMapGraph: React.FC<Props> = ({
         const isWideLayout = aspectRatio > 1.5;
         const nodePadding = 80; // Keep nodes away from edges (increased for larger spread)
 
-        const isLinear = layoutMode === 'chain';
-        const isKeystone = layoutMode === 'keystone';
-
         const simulation = d3.forceSimulation<GraphNode>(simNodes)
-            .force('charge', d3.forceManyBody().strength(isLinear ? -700 : -1000))
+            .force('charge', d3.forceManyBody().strength(-1000))
             .force('link', d3.forceLink<GraphNode, GraphEdge>(simEdges)
                 .id(d => d.id)
                 .distance(link => {
@@ -388,9 +350,10 @@ const DecisionMapGraph: React.FC<Props> = ({
             })
             .alphaDecay(0.02);
 
-        if (isLinear || isKeystone) {
-            simulation.force('xTarget', d3.forceX<GraphNode>(d => (targets.get(d.id)?.x ?? width / 2)).strength(isLinear ? 0.18 : 0.12));
-            simulation.force('yTarget', d3.forceY<GraphNode>(d => (targets.get(d.id)?.y ?? height / 2)).strength(isLinear ? 0.22 : 0.12));
+        // Apply target positions if layout has set them
+        if (targets.size > 0) {
+            simulation.force('xTarget', d3.forceX<GraphNode>(d => (targets.get(d.id)?.x ?? width / 2)).strength(0.1));
+            simulation.force('yTarget', d3.forceY<GraphNode>(d => (targets.get(d.id)?.y ?? height / 2)).strength(0.1));
         } else {
             simulation.force('xTarget', null);
             simulation.force('yTarget', null);
@@ -406,7 +369,7 @@ const DecisionMapGraph: React.FC<Props> = ({
         return () => {
             simulation.stop();
         };
-    }, [inputClaims, inputEdges, width, height, problemStructure, graphAnalysis, lookups]);
+    }, [inputClaims, inputEdges, width, height, problemStructure, lookups]);
 
     // Get edge coordinates
     const getEdgeCoords = useCallback((edge: GraphEdge) => {
@@ -450,19 +413,6 @@ const DecisionMapGraph: React.FC<Props> = ({
         ));
     }, []);
 
-    const getComponentColor = useCallback((claimId: string): string => {
-        if (!graphAnalysis?.components) return 'transparent';
-
-        const componentColors = [
-            'rgba(59, 130, 246, 0.1)',   // Blue
-            'rgba(16, 185, 129, 0.1)',   // Green
-            'rgba(245, 158, 11, 0.1)',   // Amber
-            'rgba(139, 92, 246, 0.1)',   // Purple
-        ];
-
-        const componentIdx = graphAnalysis.components.findIndex((c: string[]) => c.includes(claimId));
-        return componentColors[componentIdx % componentColors.length];
-    }, [graphAnalysis]);
 
     // Mouse handlers for SVG
     const dragState = useRef<{ nodeId: string | null; startX: number; startY: number }>({
@@ -760,35 +710,6 @@ const DecisionMapGraph: React.FC<Props> = ({
                     })}
                 </g>
 
-                {/* Component backgrounds (if fragmented) */}
-                {graphAnalysis && graphAnalysis.componentCount > 1 && graphAnalysis.components.map((component: string[], idx: number) => {
-                    const componentNodes = nodes.filter(n => component.includes(n.id));
-                    if (componentNodes.length === 0) return null;
-
-                    const xs = componentNodes.map(n => n.x || 0);
-                    const ys = componentNodes.map(n => n.y || 0);
-                    const centerX = (Math.min(...xs) + Math.max(...xs)) / 2;
-                    const centerY = (Math.min(...ys) + Math.max(...ys)) / 2;
-                    const radius = Math.max(
-                        Math.max(...xs) - Math.min(...xs),
-                        Math.max(...ys) - Math.min(...ys)
-                    ) / 2 + 60;
-
-                    const componentColor = getComponentColor(component[0]); // Use first node to get color
-
-                    return (
-                        <circle
-                            key={`component-${idx}`}
-                            cx={centerX}
-                            cy={centerY}
-                            r={radius}
-                            fill={componentColor}
-                            stroke={componentColor.replace('0.1', '0.3')}
-                            strokeWidth={1}
-                            strokeDasharray="4,4"
-                        />
-                    );
-                })}
 
                 {/* Nodes with premium styling */}
                 <g className="nodes">
@@ -816,12 +737,11 @@ const DecisionMapGraph: React.FC<Props> = ({
                                     isFragile ? '#f97316' :           // Orange for fragile
                                         isPeak ? '#3b82f6' :              // Blue for peaks
                                             enriched?.isChallenger ? '#f59e0b' :
-                                                enriched?.isEvidenceGap ? '#ef4444' :
                                                     enriched?.isHighSupport ? '#10b981' :
                                                         getRoleColor(node.role);
 
                         const isSelected = Array.isArray(selectedClaimIds) && selectedClaimIds.includes(node.id);
-                        const showWarning = enriched?.isEvidenceGap || enriched?.isLeverageInversion || isFragile;
+                        const showWarning = isFragile;
 
                         return (
                             <g

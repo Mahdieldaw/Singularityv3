@@ -375,7 +375,7 @@ export function isMetaQuery(message: string): boolean {
 }
 
 export function buildMetaResponse(analysis: StructuralAnalysis): string {
-    const { landscape, patterns, shape, ghostAnalysis } = analysis;
+    const { landscape, patterns, shape, edges } = analysis;
     const highSupportCount = analysis.claimsWithLeverage.filter(c => c.isHighSupport).length;
     const tensionCount = patterns.conflicts.length + patterns.tradeoffs.length;
 
@@ -387,7 +387,7 @@ export function buildMetaResponse(analysis: StructuralAnalysis): string {
 • **Pattern**: ${shape.primary} (${Math.round(shape.confidence * 100)}% confidence)
 • **Strong positions**: ${highSupportCount}
 • **Tensions**: ${tensionCount}
-• **Gaps**: ${ghostAnalysis.count}
+• **Edges**: ${edges.length}
 
 ${actionText}
 

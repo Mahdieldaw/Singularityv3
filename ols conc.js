@@ -1,5 +1,4 @@
-import { parseMapperArtifact, parseHandoffResponse, hasHandoffContent } from '../../../shared/parsing-utils';
-import { normalizeCitationSourceOrder } from '../../shared/citation-utils.js';
+import { parseMapperArtifact } from '../../../shared/parsing-utils';
 import { extractUserMessage } from '../context-utils.js';
 import { DEFAULT_THREAD } from '../../../shared/messaging.js';
 import { buildCognitiveArtifact } from '../../../shared/cognitive-artifact';
@@ -175,9 +174,6 @@ export class CognitivePipelineHandler {
       singularityProviderId = request?.singularity ||
         context?.singularityProvider ||
         context?.meta?.singularity;
-      if (singularityProviderId === 'singularity' || typeof singularityProviderId !== 'string' || !singularityProviderId) {
-        singularityProviderId = null;
-      }
 
       // Check if singularity was explicitly provided (even if null/false)
       const singularityExplicitlySet = request && Object.prototype.hasOwnProperty.call(request, 'singularity');
@@ -207,10 +203,94 @@ export class CognitivePipelineHandler {
         console.log(`[CognitiveHandler] Orchestrating singularity for Turn = ${context.canonicalAiTurnId}, Provider = ${singularityProviderId}`);
         let singularityStep = null;
         try {
-          const { computeStructuralAnalysis } = await import('../PromptMethods');
           let structuralAnalysis = null;
           try {
-            structuralAnalysis = computeStructuralAnalysis(mappingArtifact);
+            const { computeStructuralAnalysis, computeFullAnalysis } = await import('../PromptMethods');
+
+            // Collect batch responses if available (Turn 1 transition)
+            const promptStep = steps.find(s => s.type === 'prompt');
+            const promptResult = promptStep ? stepResults.get(promptStep.stepId) : null;
+            const batchResults = promptResult?.result?.results || null;
+
+            if (batchResults && Object.keys(batchResults).length > 0) {
+              const rawCitationOrder = mappingResult?.meta?.citationSourceOrder;
+              let normalizedCitationOrder = {}; // providerId -> numericIndex
+
+              if (rawCitationOrder && typeof rawCitationOrder === 'object') {
+                const entries = Object.entries(rawCitationOrder);
+                if (entries.length > 0) {
+                  const [firstKey, firstVal] = entries[0];
+                  // If values are numbers AND key is not numeric, treat as provider -> index
+                  const isProviderToIndex = typeof firstVal === 'number' && Number.isFinite(firstVal) && isNaN(Number(firstKey));
+
+                  if (isProviderToIndex) {
+                    // Start with what we have, but filter for valid numbers
+                    Object.entries(rawCitationOrder).forEach(([k, v]) => {
+                      if (typeof v === 'number' && Number.isFinite(v)) {
+                        normalizedCitationOrder[k] = v;
+                      }
+                    });
+                  } else {
+                    // Treat as index -> provider and invert
+                    entries.forEach(([k, v]) => {
+                      if (v && typeof v === 'string') {
+                        const index = Number(k);
+                        if (Number.isFinite(index)) {
+                          normalizedCitationOrder[v] = index;
+                        } else {
+                          console.warn(`[CognitivePipelineHandler] Invalid citation index '${k}' for provider '${v}'. Skipping.`);
+                        }
+                      }
+                    });
+                  }
+                }
+              }
+
+              const batchResponses = [];
+              const providersInResults = Object.keys(batchResults);
+              const processedProviders = new Set();
+
+              // 1. Process providers that exist in our confirmed citation order
+              const sortedByCitation = Object.entries(normalizedCitationOrder)
+                .sort(([, a], [, b]) => (a || 0) - (b || 0));
+
+              sortedByCitation.forEach(([providerId, index]) => {
+                const resp = batchResults[providerId];
+                if (resp) {
+                  // Double check index is a number
+                  const validIndex = Number.isFinite(Number(index)) ? Number(index) : 1;
+                  batchResponses.push({
+                    modelIndex: validIndex,
+                    content: resp.text || ""
+                  });
+                  processedProviders.add(providerId);
+                }
+              });
+
+              // 2. Append any providers present in batchResults but missing from citationOrder
+              // Safely compute fallback index, ensuring no NaNs
+              const validIndices = batchResponses.map(r => r.modelIndex).filter(n => Number.isFinite(n));
+              let fallbackIndex = validIndices.length > 0
+                ? Math.max(...validIndices) + 1
+                : 1;
+
+              if (!Number.isFinite(fallbackIndex)) fallbackIndex = 1;
+
+              providersInResults.forEach(providerId => {
+                if (!processedProviders.has(providerId)) {
+                  batchResponses.push({
+                    modelIndex: fallbackIndex++,
+                    content: batchResults[providerId]?.text || ""
+                  });
+                }
+              });
+
+              console.log(`[CognitiveHandler] Normalized batchResponses (${batchResponses.length} models) from ${providersInResults.length} raw results`);
+              structuralAnalysis = computeFullAnalysis(batchResponses, mappingArtifact, userMessageForSingularity);
+            } else {
+              console.log(`[CognitiveHandler] Running base structural analysis (no batch responses found)`);
+              structuralAnalysis = computeStructuralAnalysis(mappingArtifact);
+            }
           } catch (e) {
             console.error("[CognitiveHandler] Analysis failed:", e);
           }
@@ -269,7 +349,15 @@ export class CognitivePipelineHandler {
           let conciergePrompt = null;
           let conciergePromptType = "standard";
           let conciergePromptSeed = null;
-          const { ConciergeService } = await import('../../ConciergeService/ConciergeService');
+
+          // Guarded dynamic import for resilience during partial deploys
+          let ConciergeModule;
+          try {
+            ConciergeModule = await import('../../ConciergeService/ConciergeService');
+          } catch (err) {
+            console.error("[CognitiveHandler] Critical error: ConciergeService module could not be loaded", err);
+          }
+          const ConciergeService = ConciergeModule?.ConciergeService;
 
           try {
             if (!ConciergeService) {
@@ -409,7 +497,7 @@ export class CognitivePipelineHandler {
 
               if (turnInCurrentInstance >= 2) {
                 try {
-                  // parseHandoffResponse, hasHandoffContent imported statically
+                  const { parseHandoffResponse, hasHandoffContent } = await import('../../../shared/parsing-utils');
                   const parsed = parseHandoffResponse(singularityResult?.text || '');
 
                   if (parsed.handoff && hasHandoffContent(parsed.handoff)) {
@@ -449,7 +537,6 @@ export class CognitivePipelineHandler {
                 singularityResult?.providerId || singularityProviderId;
               singularityOutput = {
                 text: userFacingText, // Use handoff-stripped text
-                prompt: conciergePrompt || null, // Actual concierge prompt for debug
                 providerId: effectiveProviderId,
                 timestamp: Date.now(),
                 leakageDetected: singularityResult?.output?.leakageDetected || false,
@@ -574,20 +661,10 @@ export class CognitivePipelineHandler {
         return;
       }
 
-      let conciergeState = null;
-      try {
-        conciergeState = await this.sessionManager.getConciergePhaseState(effectiveSessionId);
-      } catch (e) {
-        console.warn("[CognitiveHandler] Failed to fetch concierge state in continuation:", e);
-      }
-
-      let preferredProvider = providerId || aiTurn.meta?.singularity || aiTurn.meta?.mapper || null;
-      if (preferredProvider === 'singularity' || typeof preferredProvider !== 'string' || !preferredProvider) {
-        preferredProvider = null;
-      }
-      if (!preferredProvider) {
-        preferredProvider = conciergeState?.lastSingularityProviderId || aiTurn.meta?.mapper || "gemini";
-      }
+      const preferredProvider = providerId ||
+        aiTurn.meta?.singularity ||
+        aiTurn.meta?.mapper ||
+        "gemini";
 
       const inflightKey = `${effectiveSessionId}:${aiTurnId}:${preferredProvider || 'default'}`;
       if (this._inflightContinuations.has(inflightKey)) {
@@ -669,7 +746,8 @@ export class CognitivePipelineHandler {
         let chewedSubstrate = null;
         if (payload?.isTraversalContinuation && payload?.traversalState) {
           try {
-            // skeletonization and citation-utils imported statically
+            const { buildChewedSubstrate, normalizeTraversalState, getSourceData } = await import('../../skeletonization');
+            const { normalizeCitationSourceOrder } = await import('../../../shared/citation-utils.js');
 
             // Reconstruct citationOrder from mapping meta using shared helper
             const citationOrderArr = normalizeCitationSourceOrder(latestMappingMeta?.citationSourceOrder);
@@ -716,8 +794,6 @@ export class CognitivePipelineHandler {
               hasText: sourceDataFromResponses.map(s => !!s.text?.trim()),
               citationOrderAvailable: citationOrderArr.length > 0,
             });
-
-            const { buildChewedSubstrate, normalizeTraversalState, getSourceData } = await import('../../skeletonization');
 
             const sourceData = sourceDataFromResponses.length > 0
               ? sourceDataFromResponses
@@ -821,8 +897,7 @@ export class CognitivePipelineHandler {
             mappingMeta: latestMappingMeta,
             useThinking: payload.useThinking || false,
             isTraversalContinuation: payload.isTraversalContinuation,
-            chewedSubstrate,
-            conciergePromptSeed: frozenSingularityPromptSeed || null,
+            chewedSubstrate
           },
         };
 
@@ -842,7 +917,7 @@ export class CognitivePipelineHandler {
 
         const singularityPhase = singularityOutput?.text
           ? {
-            prompt: context.singularityPromptUsed || originalPrompt || "",
+            prompt: originalPrompt || "",
             output: singularityOutput.text,
             traversalState: payload?.traversalState,
             timestamp: singularityOutput.timestamp,

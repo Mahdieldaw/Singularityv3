@@ -2,23 +2,20 @@ import React, { useMemo } from "react";
 import {
     EnrichedClaim,
     ProblemStructure,
-    ConflictInfo,
-    CascadeRisk,
-    LeverageInversion,
+    ConflictPair,
+    TradeoffPair,
 } from "../../../shared/contract";
 
 interface StructuralSummaryProps {
     claims: EnrichedClaim[];
-    conflicts: ConflictInfo[];
-    cascadeRisks: CascadeRisk[];
-    leverageInversions: LeverageInversion[];
-    ghosts: string[];
+    conflicts: ConflictPair[];
+    tradeoffs: TradeoffPair[];
     problemStructure?: ProblemStructure;
     modelCount: number;
 }
 
 interface SummaryLine {
-    type: "floor" | "tension" | "risk";
+    type: "floor" | "tension" | "tradeoff";
     icon: string;
     text: string;
     color: string;
@@ -27,9 +24,7 @@ interface SummaryLine {
 export const StructuralSummary: React.FC<StructuralSummaryProps> = ({
     claims,
     conflicts,
-    cascadeRisks,
-    leverageInversions,
-    ghosts,
+    tradeoffs,
     problemStructure,
     modelCount,
 }) => {
@@ -66,20 +61,11 @@ export const StructuralSummary: React.FC<StructuralSummaryProps> = ({
         const tensionLine = buildTensionLine(conflicts, problemStructure);
         if (tensionLine) result.push(tensionLine);
 
-        // ═══════════════════════════════════════════════════════════════════
-        // LINE 3: THE RISK (What's fragile or missing)
-        // ═══════════════════════════════════════════════════════════════════
-
-        const riskLine = buildRiskLine(
-            cascadeRisks,
-            leverageInversions,
-            ghosts,
-            claims
-        );
-        if (riskLine) result.push(riskLine);
+        const tradeoffLine = buildTradeoffLine(tradeoffs);
+        if (tradeoffLine) result.push(tradeoffLine);
 
         return result;
-    }, [claims, conflicts, cascadeRisks, leverageInversions, ghosts, problemStructure, modelCount]);
+    }, [claims, conflicts, tradeoffs, problemStructure, modelCount]);
 
     if (lines.length === 0) {
         return (
@@ -190,11 +176,10 @@ function buildFloorLine(
 // ═══════════════════════════════════════════════════════════════════════════
 
 function buildTensionLine(
-    conflicts: ConflictInfo[],
+    conflicts: ConflictPair[],
     structure?: ProblemStructure
 ): SummaryLine | null {
-    // High-support conflicts are the interesting ones
-    const highStakes = conflicts.filter((c) => c.isBothHighSupport);
+    const highStakes = conflicts.filter((c) => c.isBothConsensus);
 
     if (highStakes.length > 0) {
         const main = highStakes[0];
@@ -209,10 +194,10 @@ function buildTensionLine(
         }
 
         // Asymmetric - one is winning
-        const stronger = main.claimA.supportCount > main.claimB.supportCount
+        const stronger = main.claimA.supporterCount > main.claimB.supporterCount
             ? main.claimA
             : main.claimB;
-        const weaker = main.claimA.supportCount > main.claimB.supportCount
+        const weaker = main.claimA.supporterCount > main.claimB.supporterCount
             ? main.claimB
             : main.claimA;
 
@@ -248,64 +233,16 @@ function buildTensionLine(
     return null;
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// RISK LINE BUILDER
-// ═══════════════════════════════════════════════════════════════════════════
+function buildTradeoffLine(tradeoffs: TradeoffPair[]): SummaryLine | null {
+    if (tradeoffs.length === 0) return null;
 
-function buildRiskLine(
-    cascadeRisks: CascadeRisk[],
-    leverageInversions: LeverageInversion[],
-    ghosts: string[],
-    claims: EnrichedClaim[]
-): SummaryLine | null {
-    // Priority 1: Fragile load-bearing claims (low support, high dependents)
-    const fragileCascades = cascadeRisks.filter((r) => {
-        const claim = claims.find((c) => c.id === r.sourceId);
-        return claim && claim.supporters.length <= 1 && r.dependentIds.length >= 2;
-    });
-
-    if (fragileCascades.length > 0) {
-        const worst = fragileCascades.sort(
-            (a, b) => b.dependentIds.length - a.dependentIds.length
-        )[0];
-        return {
-            type: "risk",
-            icon: "⚠️",
-            text: `"${worst.sourceLabel}" is thinly supported but ${worst.dependentIds.length} other claims depend on it`,
-            color: "text-amber-400",
-        };
-    }
-
-    // Priority 2: Leverage inversions
-    if (leverageInversions.length > 0) {
-        const inv = leverageInversions[0];
-        return {
-            type: "risk",
-            icon: "💎",
-            text: `"${inv.claimLabel}" might be undervalued — low support but structurally important`,
-            color: "text-purple-400",
-        };
-    }
-
-    // Priority 3: Ghosts (unexplored territory)
-    if (ghosts.length > 0) {
-        if (ghosts.length === 1) {
-            return {
-                type: "risk",
-                icon: "👻",
-                text: `Not addressed: "${ghosts[0]}"`,
-                color: "text-slate-400",
-            };
-        }
-        return {
-            type: "risk",
-            icon: "👻",
-            text: `Not addressed: "${ghosts[0]}" and ${ghosts.length - 1} other area${ghosts.length > 2 ? "s" : ""}`,
-            color: "text-slate-400",
-        };
-    }
-
-    return null;
+    const main = tradeoffs[0];
+    return {
+        type: "tradeoff",
+        icon: "⚖️",
+        text: `Tradeoff between "${main.claimA.label}" and "${main.claimB.label}"`,
+        color: "text-orange-400",
+    };
 }
 
 export default StructuralSummary;

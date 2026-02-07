@@ -5,6 +5,7 @@ import {
   extractUserMessage
 } from './context-utils.js';
 import { DEFAULT_THREAD } from '../../shared/messaging.js';
+import { computeStructuralAnalysis } from './PromptMethods';
 
 /**
  * ContextResolver
@@ -354,9 +355,6 @@ export class ContextResolver {
     if (claims.length === 0 && edges.length === 0) return null;
 
     try {
-      const mod = await import("./PromptMethods");
-      const computeStructuralAnalysis = mod?.computeStructuralAnalysis;
-      if (typeof computeStructuralAnalysis !== "function") return null;
       const analysis = computeStructuralAnalysis(artifact);
       if (!analysis || !Array.isArray(analysis.claimsWithLeverage) || !Array.isArray(analysis.edges)) return null;
       return { claimsWithLeverage: analysis.claimsWithLeverage, edges: analysis.edges };

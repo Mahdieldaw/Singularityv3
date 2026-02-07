@@ -11,7 +11,6 @@ import {
   getErrorMessage
 } from '../../utils/ErrorHandler';
 import { buildReactiveBridge } from '../../services/ReactiveBridge';
-import { formatSubstrateForPrompt } from '../../skeletonization';
 import { PROMPT_TEMPLATES } from '../templates/prompt-templates.js';
 // computeExplore import removed (unused)
 // persona signal injections removed (absorbed by Concierge)
@@ -1694,6 +1693,7 @@ export class StepExecutor {
     analysis = payload.structuralAnalysis || null;
     if (!analysis) {
       try {
+        const { computeStructuralAnalysis } = await import('../PromptMethods');
         analysis = computeStructuralAnalysis(mappingArtifact);
       } catch (e) {
         console.error("[StepExecutor] computeStructuralAnalysis failed:", e);
@@ -1713,6 +1713,7 @@ export class StepExecutor {
       const substrate = payload?.chewedSubstrate;
       if (substrate && typeof substrate === "object") {
         try {
+          const { formatSubstrateForPrompt } = await import('../../skeletonization');
           if (typeof formatSubstrateForPrompt === 'function') {
             const formatted = String(formatSubstrateForPrompt(substrate) || '').trim();
             if (formatted) evidenceSubstrate = formatted;
@@ -1737,22 +1738,14 @@ export class StepExecutor {
     }
 
 
-    if (evidenceSubstrate && ConciergeService.buildConciergePrompt) {
-      // When chewed substrate is available, always rebuild the prompt so the
-      // evidence section is injected.  This covers both traversal-continuation
-      // and recompute flows where a frozen/pre-built prompt would otherwise
-      // skip the substrate.
-      const userMessage = payload.originalPrompt;
-      const opts = promptSeed && typeof promptSeed === "object" ? { ...promptSeed } : {};
-      opts.evidenceSubstrate = evidenceSubstrate;
-      singularityPrompt = ConciergeService.buildConciergePrompt(userMessage, opts);
-    } else if (options?.frozenSingularityPrompt) {
+    if (options?.frozenSingularityPrompt) {
       singularityPrompt = options.frozenSingularityPrompt;
     } else if (payload.conciergePrompt && typeof payload.conciergePrompt === "string") {
       singularityPrompt = payload.conciergePrompt;
     } else if (ConciergeService.buildConciergePrompt) {
       const userMessage = payload.originalPrompt;
       const opts = promptSeed && typeof promptSeed === "object" ? { ...promptSeed } : {};
+      if (evidenceSubstrate) opts.evidenceSubstrate = evidenceSubstrate;
       singularityPrompt = ConciergeService.buildConciergePrompt(userMessage, opts);
     }
 
@@ -1816,12 +1809,6 @@ export class StepExecutor {
         },
       };
     };
-
-    // Store on context so callers (turnemitter, handleContinueRequest) can
-    // surface the actual concierge prompt in the UI / debug panel.
-    if (context && typeof context === "object") {
-      context.singularityPromptUsed = singularityPrompt;
-    }
 
     return this._executeGenericSingleStep(
       step, context, payload.singularityProvider, singularityPrompt, "Singularity", { ...options, contextRole: "singularity" },

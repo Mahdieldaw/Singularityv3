@@ -5,6 +5,7 @@ interface StructuralInsightProps {
   | "fragile_foundation"
   | "keystone"
   | "consensus_conflict"    // Keep but rename internally to "high_support_conflict"
+  | "tradeoff"
   | "high_leverage_singular"
   | "cascade_risk"
   | "evidence_gap"
@@ -33,6 +34,8 @@ interface StructuralInsightProps {
     inversionReason?: "challenger_prerequisite_to_consensus" | "singular_foundation" | "high_connectivity_low_support";
     hubDominance?: number;
     chainLength?: number;
+    tradeoffWith?: string;
+    symmetry?: string;
   };
 }
 
@@ -65,6 +68,12 @@ export const StructuralInsight: React.FC<StructuralInsightProps> = ({
       description: `"${claim.label}" conflicts with "${metadata?.conflictsWith || "another claim"
         }". Both are in the top 30% by support—fundamental disagreement.`,
       color: "red" as const,
+    },
+    tradeoff: {
+      icon: "⚖️",
+      title: "Tradeoff",
+      description: `"${claim.label}" trades off against "${metadata?.tradeoffWith || "another claim"}".`,
+      color: "orange" as const,
     },
     high_leverage_singular: {
       icon: "💎",

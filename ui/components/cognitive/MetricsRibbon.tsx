@@ -25,11 +25,9 @@ export const MetricsRibbon: React.FC<MetricsRibbonProps> = ({
         claimsWithLeverage: claims = [],
         patterns,
         landscape,
-        ghostAnalysis,
     } = analysis;
 
     const modelCount = landscape?.modelCount || 0;
-    const ghosts = artifact?.ghosts || [];
     const substrate = artifact?.substrate;
     const paragraphProjection = artifact?.paragraphProjection;
     const paragraphClustering = artifact?.paragraphClustering;
@@ -71,10 +69,8 @@ export const MetricsRibbon: React.FC<MetricsRibbonProps> = ({
             {/* The three summary lines */}
             <StructuralSummary
                 claims={claims}
-                conflicts={patterns?.conflictInfos || []}
-                cascadeRisks={patterns?.cascadeRisks || []}
-                leverageInversions={patterns?.leverageInversions || []}
-                ghosts={ghosts}
+                conflicts={patterns?.conflicts || []}
+                tradeoffs={patterns?.tradeoffs || []}
                 problemStructure={problemStructure}
                 modelCount={modelCount}
             />
@@ -88,11 +84,6 @@ export const MetricsRibbon: React.FC<MetricsRibbonProps> = ({
                     {patterns?.conflicts && patterns.conflicts.length > 0 && (
                         <div>
                             <span className="text-text-secondary">Conflicts:</span> Point-to-point disagreements detected
-                        </div>
-                    )}
-                    {ghostAnalysis && ghostAnalysis.count > 0 && (
-                        <div>
-                            <span className="text-text-secondary">Gaps:</span> Unexplored territory identified
                         </div>
                     )}
                     {problemStructure?.evidence && (

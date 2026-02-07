@@ -4,6 +4,7 @@ import type {
   Claim,
   PipelineParagraphProjectionResult,
   PipelineShadowStatement,
+  PipelineRegion,
   PipelineSubstrateEdge,
   PipelineSubstrateGraph,
   ProblemStructure,
@@ -17,7 +18,7 @@ interface Props {
   shadowStatements: PipelineShadowStatement[] | null | undefined;
   mutualEdges?: PipelineSubstrateEdge[] | null | undefined;
   strongEdges?: PipelineSubstrateEdge[] | null | undefined;
-  regions?: any[] | null | undefined;
+  regions?: Array<Pick<PipelineRegion, "id" | "kind" | "nodeIds">> | null | undefined;
   traversalState?: any;
   batchResponses?: Array<{ modelIndex: number; text: string; providerId?: string }> | null | undefined;
   completeness?: any;
@@ -30,25 +31,25 @@ const MODEL_COLORS = ["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#0
 
 const FATE_NODE_STYLE: Record<ParagraphFate, { fill: string; stroke: string; strokeWidth: number; opacity: number }> = {
   protected: { fill: "rgba(16,185,129,0.85)", stroke: "none", strokeWidth: 0, opacity: 0.9 },
-  skeleton:  { fill: "rgba(245,158,11,0.80)", stroke: "none", strokeWidth: 0, opacity: 0.85 },
-  removed:   { fill: "rgba(100,116,139,0.40)", stroke: "none", strokeWidth: 0, opacity: 0.45 },
-  orphan:    { fill: "rgba(0,0,0,0.15)",       stroke: "rgba(239,68,68,0.7)", strokeWidth: 1.5, opacity: 0.75 },
-  mixed:     { fill: "rgba(99,102,241,0.65)",  stroke: "rgba(255,255,255,0.3)", strokeWidth: 1, opacity: 0.85 },
+  skeleton: { fill: "rgba(245,158,11,0.80)", stroke: "none", strokeWidth: 0, opacity: 0.85 },
+  removed: { fill: "rgba(100,116,139,0.40)", stroke: "none", strokeWidth: 0, opacity: 0.45 },
+  orphan: { fill: "rgba(0,0,0,0.15)", stroke: "rgba(239,68,68,0.7)", strokeWidth: 1.5, opacity: 0.75 },
+  mixed: { fill: "rgba(99,102,241,0.65)", stroke: "rgba(255,255,255,0.3)", strokeWidth: 1, opacity: 0.85 },
 };
 
 const REGION_KIND_STYLE: Record<string, { fill: string; stroke: string }> = {
-  cluster:   { fill: "rgba(59,130,246,0.07)",  stroke: "rgba(59,130,246,0.30)" },
-  component: { fill: "rgba(139,92,246,0.07)",  stroke: "rgba(139,92,246,0.30)" },
-  patch:     { fill: "rgba(148,163,184,0.06)", stroke: "rgba(148,163,184,0.25)" },
+  cluster: { fill: "rgba(59,130,246,0.07)", stroke: "rgba(59,130,246,0.30)" },
+  component: { fill: "rgba(139,92,246,0.07)", stroke: "rgba(139,92,246,0.30)" },
+  patch: { fill: "rgba(148,163,184,0.06)", stroke: "rgba(148,163,184,0.25)" },
 };
 const DEFAULT_HULL_STYLE = { fill: "rgba(148,163,184,0.05)", stroke: "rgba(148,163,184,0.20)" };
 
 const FATE_BADGE: Record<string, { label: string; cls: string }> = {
   protected: { label: "protected", cls: "bg-emerald-500/15 text-emerald-300" },
-  skeleton:  { label: "skeleton",  cls: "bg-amber-500/15 text-amber-300" },
-  removed:   { label: "removed",   cls: "bg-slate-500/15 text-slate-400" },
-  orphan:    { label: "orphan",    cls: "bg-red-500/10 text-red-300" },
-  mixed:     { label: "mixed",     cls: "bg-indigo-500/15 text-indigo-300" },
+  skeleton: { label: "skeleton", cls: "bg-amber-500/15 text-amber-300" },
+  removed: { label: "removed", cls: "bg-slate-500/15 text-slate-400" },
+  orphan: { label: "orphan", cls: "bg-red-500/10 text-red-300" },
+  mixed: { label: "mixed", cls: "bg-indigo-500/15 text-indigo-300" },
 };
 
 /* ── helpers ───────────────────────────────────────────────────── */
@@ -78,7 +79,7 @@ function normalizeClaimStatuses(input: any): Map<string, "active" | "pruned"> {
       const kk = String(k || "").trim();
       const vv = String(v || "").trim();
       if (!kk) continue;
-      if (vv === "active" || vv === "pruned") out.set(kk, vv as any);
+      if (vv === "active" || vv === "pruned") out.set(kk, vv);
     }
     return out;
   }
@@ -138,6 +139,7 @@ export function ParagraphSpaceView({
   const [sourceFilter, setSourceFilter] = useState<"all" | "referenced" | "orphan">("all");
   const [modelFilter, setModelFilter] = useState<number | "all">("all");
   const [regionFilter, setRegionFilter] = useState<string | "all">("all");
+  const [deltaOnly, setDeltaOnly] = useState(false);
   const [showKnnEdges, setShowKnnEdges] = useState(true);
   const [showMutualEdges, setShowMutualEdges] = useState(true);
   const [showStrongEdges, setShowStrongEdges] = useState(true);
@@ -154,20 +156,20 @@ export function ParagraphSpaceView({
   const hasTraversal = traversalClaimStatuses.size > 0;
 
   const paragraphs = paragraphProjection?.paragraphs || [];
-  const nodes = Array.isArray(graph?.nodes) ? graph!.nodes : [];
+  const nodes = graph?.nodes || [];
 
   /* ── lookups ─────────────────────────────────────────────────── */
 
   const statementToParagraphId = useMemo(() => {
     const map = new Map<string, string>();
     for (const p of paragraphs) {
-      for (const sid of (p as any)?.statementIds || []) {
-        if (sid && (p as any)?.id) map.set(String(sid), String((p as any).id));
+      for (const sid of p.statementIds) {
+        if (sid) map.set(String(sid), String(p.id));
       }
     }
     for (const stmt of shadowStatements || []) {
-      const pid = (stmt as any)?.geometricCoordinates?.paragraphId;
-      if ((stmt as any)?.id && pid) map.set(String((stmt as any).id), String(pid));
+      const pid = stmt.geometricCoordinates?.paragraphId;
+      if (stmt.id && pid) map.set(String(stmt.id), String(pid));
     }
     return map;
   }, [paragraphs, shadowStatements]);
@@ -204,12 +206,10 @@ export function ParagraphSpaceView({
   const modelIndices = useMemo(() => {
     const set = new Set<number>();
     for (const n of nodes) {
-      const mi = typeof (n as any)?.modelIndex === "number" ? (n as any).modelIndex : 1;
-      if (Number.isFinite(mi) && mi > 0) set.add(mi);
+      if (Number.isFinite(n.modelIndex) && n.modelIndex > 0) set.add(n.modelIndex);
     }
     for (const p of paragraphs) {
-      const mi = typeof (p as any)?.modelIndex === "number" ? (p as any).modelIndex : null;
-      if (mi && Number.isFinite(mi) && mi > 0) set.add(mi);
+      if (Number.isFinite(p.modelIndex) && p.modelIndex > 0) set.add(p.modelIndex);
     }
     return Array.from(set).sort((a, b) => a - b);
   }, [nodes, paragraphs]);
@@ -232,13 +232,13 @@ export function ParagraphSpaceView({
   const paragraphPosition = useMemo(() => {
     const map = new Map<string, { x: number; y: number; modelIndex: number; regionId: string | null }>();
     for (const n of nodes) {
-      const pid = String((n as any).paragraphId || "").trim();
+      const pid = String(n.paragraphId || "").trim();
       if (!pid) continue;
       map.set(pid, {
-        x: Number((n as any).x),
-        y: Number((n as any).y),
-        modelIndex: typeof (n as any).modelIndex === "number" && (n as any).modelIndex > 0 ? (n as any).modelIndex : 1,
-        regionId: (n as any).regionId ? String((n as any).regionId) : null,
+        x: Number(n.x),
+        y: Number(n.y),
+        modelIndex: Number.isFinite(n.modelIndex) && n.modelIndex > 0 ? n.modelIndex : 1,
+        regionId: n.regionId ? String(n.regionId) : null,
       });
     }
     return map;
@@ -247,17 +247,17 @@ export function ParagraphSpaceView({
   const regionOptions = useMemo(() => {
     const map = new Map<string, { id: string; kind?: string; nodeIds: string[] }>();
     for (const r of regions || []) {
-      const id = String((r as any)?.id || "").trim();
+      const id = String(r?.id || "").trim();
       if (!id) continue;
-      const nodeIds = Array.isArray((r as any)?.nodeIds) ? (r as any).nodeIds.map((x: any) => String(x)).filter(Boolean) : [];
-      const kind = (r as any)?.kind ? String((r as any).kind) : undefined;
+      const nodeIds = Array.isArray(r?.nodeIds) ? r.nodeIds.map((x) => String(x)).filter(Boolean) : [];
+      const kind = r?.kind ? String(r.kind) : undefined;
       map.set(id, { id, kind, nodeIds });
     }
     if (map.size === 0) {
       for (const n of nodes) {
-        const rid = (n as any)?.regionId ? String((n as any).regionId) : "";
+        const rid = n.regionId ? String(n.regionId) : "";
         if (!rid) continue;
-        const pid = String((n as any).paragraphId || "").trim();
+        const pid = String(n.paragraphId || "").trim();
         if (!pid) continue;
         const prev = map.get(rid);
         if (!prev) map.set(rid, { id: rid, kind: undefined, nodeIds: [pid] });
@@ -270,11 +270,39 @@ export function ParagraphSpaceView({
   const paragraphFates = useMemo(() => {
     if (!hasTraversal) return new Map<string, ParagraphFate>();
     return computeParagraphFates(
-      paragraphs.map((p: any) => ({ id: String(p.id), statementIds: Array.isArray(p.statementIds) ? p.statementIds.map((x: any) => String(x)) : [] })),
-      (claims || []).map((c: any) => ({ id: String(c.id), sourceStatementIds: Array.isArray(c.sourceStatementIds) ? c.sourceStatementIds.map((x: any) => String(x)) : [] })),
+      paragraphs.map((p) => ({ id: String(p.id), statementIds: p.statementIds.map((x) => String(x)) })),
+      (claims || []).map((c) => ({ id: String(c.id), sourceStatementIds: (c.sourceStatementIds || []).map((x) => String(x)) })),
       traversalClaimStatuses,
     );
   }, [hasTraversal, paragraphs, claims, traversalClaimStatuses]);
+
+  const baselineClaimStatuses = useMemo(() => {
+    const out = new Map<string, "active" | "pruned">();
+    for (const c of claims || []) out.set(String(c.id), "active");
+    return out;
+  }, [claims]);
+
+  const baselineParagraphFates = useMemo(() => {
+    if (!hasTraversal) return new Map<string, ParagraphFate>();
+    return computeParagraphFates(
+      paragraphs.map((p) => ({ id: String(p.id), statementIds: p.statementIds.map((x) => String(x)) })),
+      (claims || []).map((c) => ({ id: String(c.id), sourceStatementIds: (c.sourceStatementIds || []).map((x) => String(x)) })),
+      baselineClaimStatuses,
+    );
+  }, [hasTraversal, paragraphs, claims, baselineClaimStatuses]);
+
+  const deltaParagraphIds = useMemo(() => {
+    if (!hasTraversal) return null;
+    const set = new Set<string>();
+    for (const p of paragraphs) {
+      const pid = String(p?.id || "").trim();
+      if (!pid) continue;
+      const base = baselineParagraphFates.get(pid) || "orphan";
+      const post = paragraphFates.get(pid) || "orphan";
+      if (base !== post) set.add(pid);
+    }
+    return set;
+  }, [hasTraversal, paragraphs, baselineParagraphFates, paragraphFates]);
 
   /* ── filtering ───────────────────────────────────────────────── */
 
@@ -288,19 +316,21 @@ export function ParagraphSpaceView({
   const filteredParagraphIds = useMemo(() => {
     const set = new Set<string>();
     for (const p of paragraphs) {
-      const pid = String((p as any)?.id || "").trim();
+      const pid = String(p?.id || "").trim();
       if (!pid) continue;
       if (modelFilter !== "all") {
-        const mi = typeof (p as any)?.modelIndex === "number" ? (p as any).modelIndex : null;
-        if (mi !== modelFilter) continue;
+        if (p.modelIndex !== modelFilter) continue;
       }
       if (sourceFilter === "referenced" && !referencedParagraphIds.has(pid)) continue;
       if (sourceFilter === "orphan" && referencedParagraphIds.has(pid)) continue;
+      if (deltaOnly && mode === "post" && hasTraversal) {
+        if (!deltaParagraphIds || !deltaParagraphIds.has(pid)) continue;
+      }
       // region filter does NOT exclude — it highlights on the map
       set.add(pid);
     }
     return set;
-  }, [paragraphs, modelFilter, sourceFilter, referencedParagraphIds]);
+  }, [paragraphs, modelFilter, sourceFilter, referencedParagraphIds, deltaOnly, mode, hasTraversal, deltaParagraphIds]);
 
   /* ── viewBox & scale ─────────────────────────────────────────── */
 
@@ -444,7 +474,14 @@ export function ParagraphSpaceView({
           {/* toolbar */}
           <div className="flex items-center gap-4 px-4 py-2 border-b border-white/10 flex-wrap">
             <div className="flex items-center gap-2">
-              <select className="bg-black/30 border border-white/10 rounded px-2 py-1 text-xs text-text-primary" value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value as any)}>
+              <select
+                className="bg-black/30 border border-white/10 rounded px-2 py-1 text-xs text-text-primary"
+                value={sourceFilter}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (v === "all" || v === "referenced" || v === "orphan") setSourceFilter(v);
+                }}
+              >
                 <option value="all">All</option>
                 <option value="referenced">Referenced</option>
                 <option value="orphan">Orphan</option>
@@ -453,14 +490,30 @@ export function ParagraphSpaceView({
                 <option value="all">All models</option>
                 {modelIndices.map((mi) => <option key={mi} value={String(mi)}>Model {mi}</option>)}
               </select>
-              <select className="bg-black/30 border border-white/10 rounded px-2 py-1 text-xs text-text-primary" value={regionFilter} onChange={(e) => setRegionFilter(e.target.value as any)} disabled={regionOptions.length === 0}>
+              <select
+                className="bg-black/30 border border-white/10 rounded px-2 py-1 text-xs text-text-primary"
+                value={regionFilter}
+                onChange={(e) => setRegionFilter(e.target.value === "all" ? "all" : e.target.value)}
+                disabled={regionOptions.length === 0}
+              >
                 <option value="all">All regions</option>
                 {regionOptions.map((r) => <option key={r.id} value={r.id}>{r.kind ? `${r.kind}: ${r.id}` : `Region ${r.id}`}</option>)}
               </select>
-              <select className="bg-black/30 border border-white/10 rounded px-2 py-1 text-xs text-text-primary" value={mode} onChange={(e) => setMode(e.target.value as any)} disabled={!hasTraversal}>
+              <select
+                className="bg-black/30 border border-white/10 rounded px-2 py-1 text-xs text-text-primary"
+                value={mode}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (v === "pre" || v === "post") setMode(v);
+                }}
+                disabled={!hasTraversal}
+              >
                 <option value="pre">Pre-traversal</option>
                 <option value="post">Post-traversal</option>
               </select>
+              <label className={clsx("flex items-center gap-1.5 cursor-pointer select-none text-[11px] text-text-muted", (!hasTraversal || mode !== "post") && "opacity-40")}>
+                <input type="checkbox" className="rounded" checked={deltaOnly} onChange={(e) => setDeltaOnly(e.target.checked)} disabled={!hasTraversal || mode !== "post"} />Changes
+              </label>
             </div>
 
             <div className="flex items-center gap-3 text-[11px] text-text-muted ml-auto">
@@ -495,8 +548,9 @@ export function ParagraphSpaceView({
               })}
 
               {/* KNN edges */}
-              {showKnnEdges && (graph.edges || []).map((e: any, idx: number) => {
-                const sId = String(e.source), tId = String(e.target);
+              {showKnnEdges && (graph?.edges || []).map((e, idx) => {
+                const sId = String(e.source);
+                const tId = String(e.target);
                 if (!filteredParagraphIds.has(sId) || !filteredParagraphIds.has(tId)) return null;
                 const s = paragraphPosition.get(sId), t = paragraphPosition.get(tId);
                 if (!s || !t) return null;
@@ -649,8 +703,8 @@ export function ParagraphSpaceView({
                         className={clsx(
                           "w-full text-left rounded-lg border px-3 py-2 transition-all mb-1",
                           isClaimHighlighted ? "border-amber-400/40 bg-amber-500/5 ring-1 ring-amber-400/20" :
-                          (isHovered || isSelected) ? "border-white/25 bg-white/5" :
-                          "border-white/[0.06] bg-black/10 hover:bg-white/[0.03] hover:border-white/10",
+                            (isHovered || isSelected) ? "border-white/25 bg-white/5" :
+                              "border-white/[0.06] bg-black/10 hover:bg-white/[0.03] hover:border-white/10",
                         )}
                         onMouseEnter={() => setHoveredParagraphId(p.id)}
                         onMouseLeave={() => setHoveredParagraphId(null)}

@@ -257,7 +257,7 @@ const SingularityOutputView: React.FC<SingularityOutputViewProps> = ({
             )}
 
             {/* Shadow Audit (Debug) */}
-            <ShadowAuditView analysis={null} />
+            <ShadowAuditView />
         </div>
     );
 };

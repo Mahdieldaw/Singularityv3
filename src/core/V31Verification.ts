@@ -1,4 +1,4 @@
-import { computeProblemStructureFromArtifact } from "./PromptMethods";
+import { computeStructuralAnalysis } from "./PromptMethods";
 import { MapperArtifact, Claim, Edge } from "../../shared/contract";
 import { buildCognitiveArtifact } from "../../shared/cognitive-artifact";
 
@@ -59,11 +59,11 @@ const scenario2: MapperArtifact = {
 };
 
 console.log("\n--- RUNNING SCENARIO 1 (Settled/Keystone) ---");
-const result1 = computeProblemStructureFromArtifact(buildCognitiveArtifact(scenario1, null)!);
+const result1 = computeStructuralAnalysis(buildCognitiveArtifact(scenario1, null)!).shape;
 console.log("Primary Shape:", result1.primary);
 console.log("Evidence:", result1.evidence);
 
 console.log("\n--- RUNNING SCENARIO 2 (Leverage/Contested) ---");
-const result2 = computeProblemStructureFromArtifact(buildCognitiveArtifact(scenario2, null)!);
+const result2 = computeStructuralAnalysis(buildCognitiveArtifact(scenario2, null)!).shape;
 console.log("Primary Shape:", result2.primary);
 console.log("Evidence:", result2.evidence);

@@ -1,25 +1,24 @@
 import React from 'react';
-import { StructuralAnalysis } from '../../../shared/contract';
+import type { PipelineUnreferencedStatement, ShadowAudit } from '../../../shared/contract';
 
 interface ShadowAuditViewProps {
-    analysis: StructuralAnalysis | null | undefined;
+    audit?: ShadowAudit | null | undefined;
+    topUnreferenced?: PipelineUnreferencedStatement[] | null | undefined;
+    processingTimeMs?: number | null | undefined;
 }
 
 /**
  * Debug view for the Shadow Mapper's findings.
  * Surfaces "unindexed" statements that the mechanical mapper found but the primary model missed.
  */
-export const ShadowAuditView: React.FC<ShadowAuditViewProps> = ({ analysis }) => {
-    if (!analysis?.shadow) return null;
+export const ShadowAuditView: React.FC<ShadowAuditViewProps> = ({ audit, topUnreferenced, processingTimeMs }) => {
+    if (!audit) return null;
 
-    const shadow = analysis?.shadow;
-    const audit = shadow?.audit;
-    const topUnindexed = shadow?.topUnindexed || [];
-
-    const gaps = audit?.gaps ?? { conflicts: 0, prerequisites: 0, prescriptive: 0 };
-    const extraction = audit?.extraction ?? { survivalRate: 0, pass1Candidates: 0 };
-    const shadowStatementCount = audit?.shadowStatementCount ?? 0;
-    const processingTime = shadow?.processingTime ?? 0;
+    const topUnindexed = topUnreferenced || [];
+    const gaps = audit.gaps ?? { conflicts: 0, prerequisites: 0, prescriptive: 0 };
+    const extraction = audit.extraction ?? { survivalRate: 0, pass1Candidates: 0 };
+    const shadowStatementCount = audit.shadowStatementCount ?? 0;
+    const processingTime = processingTimeMs ?? 0;
 
     return (
         <div className="mt-8 pt-6 border-t border-border-subtle animate-in fade-in slide-in-from-bottom-2 duration-700">
