@@ -1,463 +1,744 @@
-import { useMemo, useState } from "react";
-import type { Claim, PipelineParagraphProjectionResult, PipelineShadowStatement, PipelineSubstrateGraph } from "../../shared/contract";
+import { useMemo, useState, useCallback, useRef, useEffect } from "react";
+import clsx from "clsx";
+import type {
+  Claim,
+  PipelineParagraphProjectionResult,
+  PipelineShadowStatement,
+  PipelineSubstrateEdge,
+  PipelineSubstrateGraph,
+  ProblemStructure,
+} from "../../shared/contract";
+import { computeParagraphFates, type ParagraphFate } from "../../src/utils/cognitive/fateComputation";
 
 interface Props {
   graph: PipelineSubstrateGraph | null | undefined;
   paragraphProjection?: PipelineParagraphProjectionResult | null | undefined;
   claims: Claim[] | null | undefined;
   shadowStatements: PipelineShadowStatement[] | null | undefined;
+  mutualEdges?: PipelineSubstrateEdge[] | null | undefined;
+  strongEdges?: PipelineSubstrateEdge[] | null | undefined;
+  regions?: any[] | null | undefined;
+  traversalState?: any;
+  batchResponses?: Array<{ modelIndex: number; text: string; providerId?: string }> | null | undefined;
+  completeness?: any;
+  shape?: ProblemStructure | null | undefined;
 }
 
-const MODEL_COLORS = ["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#06b6d4", "#ec4899", "#84cc16"];
-const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
-const quantile = (values: number[], q: number) => {
-  if (values.length === 0) return 0;
-  const sorted = [...values].sort((a, b) => a - b);
-  const idx = (sorted.length - 1) * clamp01(q);
-  const lo = Math.floor(idx);
-  const hi = Math.ceil(idx);
-  if (lo === hi) return sorted[lo];
-  const t = idx - lo;
-  return sorted[lo] * (1 - t) + sorted[hi] * t;
-};
-const distortionColor = (t: number) => `hsl(${Math.round(220 - 220 * clamp01(t))} 85% 55%)`;
+/* ── colour constants ─────────────────────────────────────────── */
 
-export function ParagraphSpaceView({ graph, paragraphProjection, claims, shadowStatements }: Props) {
-  const [showEdges, setShowEdges] = useState(true);
+const MODEL_COLORS = ["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#06b6d4", "#ec4899", "#84cc16"];
+
+const FATE_NODE_STYLE: Record<ParagraphFate, { fill: string; stroke: string; strokeWidth: number; opacity: number }> = {
+  protected: { fill: "rgba(16,185,129,0.85)", stroke: "none", strokeWidth: 0, opacity: 0.9 },
+  skeleton:  { fill: "rgba(245,158,11,0.80)", stroke: "none", strokeWidth: 0, opacity: 0.85 },
+  removed:   { fill: "rgba(100,116,139,0.40)", stroke: "none", strokeWidth: 0, opacity: 0.45 },
+  orphan:    { fill: "rgba(0,0,0,0.15)",       stroke: "rgba(239,68,68,0.7)", strokeWidth: 1.5, opacity: 0.75 },
+  mixed:     { fill: "rgba(99,102,241,0.65)",  stroke: "rgba(255,255,255,0.3)", strokeWidth: 1, opacity: 0.85 },
+};
+
+const REGION_KIND_STYLE: Record<string, { fill: string; stroke: string }> = {
+  cluster:   { fill: "rgba(59,130,246,0.07)",  stroke: "rgba(59,130,246,0.30)" },
+  component: { fill: "rgba(139,92,246,0.07)",  stroke: "rgba(139,92,246,0.30)" },
+  patch:     { fill: "rgba(148,163,184,0.06)", stroke: "rgba(148,163,184,0.25)" },
+};
+const DEFAULT_HULL_STYLE = { fill: "rgba(148,163,184,0.05)", stroke: "rgba(148,163,184,0.20)" };
+
+const FATE_BADGE: Record<string, { label: string; cls: string }> = {
+  protected: { label: "protected", cls: "bg-emerald-500/15 text-emerald-300" },
+  skeleton:  { label: "skeleton",  cls: "bg-amber-500/15 text-amber-300" },
+  removed:   { label: "removed",   cls: "bg-slate-500/15 text-slate-400" },
+  orphan:    { label: "orphan",    cls: "bg-red-500/10 text-red-300" },
+  mixed:     { label: "mixed",     cls: "bg-indigo-500/15 text-indigo-300" },
+};
+
+/* ── helpers ───────────────────────────────────────────────────── */
+
+function maskText(input: string): string {
+  return input.replace(/\S/g, "\u2588");
+}
+
+function normalizeClaimStatuses(input: any): Map<string, "active" | "pruned"> {
+  if (!input) return new Map();
+  const raw = input?.claimStatuses;
+  if (raw instanceof Map) return raw as Map<string, "active" | "pruned">;
+  if (Array.isArray(raw)) {
+    const out = new Map<string, "active" | "pruned">();
+    for (const pair of raw) {
+      if (!Array.isArray(pair) || pair.length < 2) continue;
+      const k = String(pair[0] || "").trim();
+      const v = String(pair[1] || "").trim();
+      if (!k) continue;
+      if (v === "active" || v === "pruned") out.set(k, v);
+    }
+    return out;
+  }
+  if (raw && typeof raw === "object") {
+    const out = new Map<string, "active" | "pruned">();
+    for (const [k, v] of Object.entries(raw)) {
+      const kk = String(k || "").trim();
+      const vv = String(v || "").trim();
+      if (!kk) continue;
+      if (vv === "active" || vv === "pruned") out.set(kk, vv as any);
+    }
+    return out;
+  }
+  return new Map();
+}
+
+type Point = { x: number; y: number };
+
+function hull(points: Point[]): Point[] {
+  const pts = points
+    .filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y))
+    .map((p) => ({ x: p.x, y: p.y }))
+    .sort((a, b) => a.x - b.x || a.y - b.y);
+  if (pts.length < 3) return [];
+  const cross = (o: Point, a: Point, b: Point) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+  const lower: Point[] = [];
+  for (const p of pts) { while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) lower.pop(); lower.push(p); }
+  const upper: Point[] = [];
+  for (let i = pts.length - 1; i >= 0; i--) { const p = pts[i]; while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) upper.pop(); upper.push(p); }
+  upper.pop();
+  lower.pop();
+  return lower.concat(upper);
+}
+
+function shapeBadge(shape: ProblemStructure | null | undefined): { label: string; icon: string } {
+  if (!shape) return { label: "Unknown", icon: "?" };
+  const p = String(shape.primary || "unknown");
+  const icons: Record<string, string> = { convergent: "\u25C9", forked: "\u2B4F", constrained: "\u21C5", parallel: "\u2225", sparse: "\u2059" };
+  return { label: p.charAt(0).toUpperCase() + p.slice(1), icon: icons[p] || "?" };
+}
+
+/* ── paragraph data structure ─────────────────────────────────── */
+
+interface ParagraphEntry {
+  id: string;
+  modelIndex: number | null;
+  text: string;
+  statementIds: string[];
+}
+
+/* ── component ────────────────────────────────────────────────── */
+
+export function ParagraphSpaceView({
+  graph,
+  paragraphProjection,
+  claims,
+  shadowStatements,
+  mutualEdges,
+  strongEdges,
+  regions,
+  traversalState,
+  batchResponses,
+  shape,
+}: Props) {
+  /* state */
+  const [mode, setMode] = useState<"pre" | "post">("pre");
+  const [sourceFilter, setSourceFilter] = useState<"all" | "referenced" | "orphan">("all");
+  const [modelFilter, setModelFilter] = useState<number | "all">("all");
+  const [regionFilter, setRegionFilter] = useState<string | "all">("all");
+  const [showKnnEdges, setShowKnnEdges] = useState(true);
+  const [showMutualEdges, setShowMutualEdges] = useState(true);
+  const [showStrongEdges, setShowStrongEdges] = useState(true);
+  const [showRegionHulls, setShowRegionHulls] = useState(true);
   const [showClaims, setShowClaims] = useState(true);
+  const [showFates, setShowFates] = useState(true);
+  const [hoveredParagraphId, setHoveredParagraphId] = useState<string | null>(null);
+  const [selectedParagraphId, setSelectedParagraphId] = useState<string | null>(null);
   const [hoveredClaimId, setHoveredClaimId] = useState<string | null>(null);
-  const [colorByDistortion, setColorByDistortion] = useState(false);
-  const [isolatedModelIndex, setIsolatedModelIndex] = useState<number | null>(null);
+
+  const textPanelRef = useRef<HTMLDivElement>(null);
+
+  const traversalClaimStatuses = useMemo(() => normalizeClaimStatuses(traversalState), [traversalState]);
+  const hasTraversal = traversalClaimStatuses.size > 0;
+
+  const paragraphs = paragraphProjection?.paragraphs || [];
+  const nodes = Array.isArray(graph?.nodes) ? graph!.nodes : [];
+
+  /* ── lookups ─────────────────────────────────────────────────── */
 
   const statementToParagraphId = useMemo(() => {
     const map = new Map<string, string>();
-    for (const p of paragraphProjection?.paragraphs || []) {
-      for (const sid of p.statementIds || []) {
-        if (sid && p.id) map.set(sid, p.id);
+    for (const p of paragraphs) {
+      for (const sid of (p as any)?.statementIds || []) {
+        if (sid && (p as any)?.id) map.set(String(sid), String((p as any).id));
       }
     }
     for (const stmt of shadowStatements || []) {
-      const pid = stmt.geometricCoordinates?.paragraphId;
-      if (stmt?.id && pid) map.set(stmt.id, pid);
+      const pid = (stmt as any)?.geometricCoordinates?.paragraphId;
+      if ((stmt as any)?.id && pid) map.set(String((stmt as any).id), String(pid));
     }
     return map;
-  }, [paragraphProjection, shadowStatements]);
+  }, [paragraphs, shadowStatements]);
 
-  type EffectiveNode = { paragraphId: string; modelIndex: number; x: number; y: number; mutualDegree?: number };
-
-  const nodesForRender: EffectiveNode[] = useMemo(() => {
-    const nodes = Array.isArray(graph?.nodes) ? graph?.nodes : [];
-    if (nodes.length > 0) {
-      return nodes.map((n) => ({
-        paragraphId: n.paragraphId,
-        modelIndex: typeof n.modelIndex === "number" && n.modelIndex > 0 ? n.modelIndex : 1,
-        x: n.x,
-        y: n.y,
-        mutualDegree: n.mutualDegree,
-      }));
+  const referencedParagraphIds = useMemo(() => {
+    const set = new Set<string>();
+    for (const c of claims || []) {
+      for (const sid of c.sourceStatementIds || []) {
+        const pid = statementToParagraphId.get(String(sid));
+        if (pid) set.add(pid);
+      }
     }
+    return set;
+  }, [claims, statementToParagraphId]);
 
-    const paras = paragraphProjection?.paragraphs || [];
-    if (paras.length === 0) return [];
-
-    const goldenAngle = 2.399963229728653;
-    const n = paras.length;
-    return paras.map((p, i) => {
-      const r = Math.sqrt((i + 0.5) / Math.max(1, n));
-      const theta = i * goldenAngle;
-      return {
-        paragraphId: p.id,
-        modelIndex: typeof p.modelIndex === "number" && p.modelIndex > 0 ? p.modelIndex : 1,
-        x: r * Math.cos(theta),
-        y: r * Math.sin(theta),
-        mutualDegree: 0,
-      };
-    });
-  }, [graph, paragraphProjection]);
+  /** Reverse map: paragraphId → claimIds that reference it */
+  const paragraphToClaimIds = useMemo(() => {
+    const map = new Map<string, string[]>();
+    for (const c of claims || []) {
+      const seen = new Set<string>();
+      for (const sid of c.sourceStatementIds || []) {
+        const pid = statementToParagraphId.get(String(sid));
+        if (pid && !seen.has(pid)) {
+          seen.add(pid);
+          const arr = map.get(pid);
+          if (arr) arr.push(c.id);
+          else map.set(pid, [c.id]);
+        }
+      }
+    }
+    return map;
+  }, [claims, statementToParagraphId]);
 
   const modelIndices = useMemo(() => {
     const set = new Set<number>();
-    for (const n of nodesForRender) {
-      if (typeof n.modelIndex === "number" && Number.isFinite(n.modelIndex) && n.modelIndex > 0) {
-        set.add(n.modelIndex);
-      }
+    for (const n of nodes) {
+      const mi = typeof (n as any)?.modelIndex === "number" ? (n as any).modelIndex : 1;
+      if (Number.isFinite(mi) && mi > 0) set.add(mi);
+    }
+    for (const p of paragraphs) {
+      const mi = typeof (p as any)?.modelIndex === "number" ? (p as any).modelIndex : null;
+      if (mi && Number.isFinite(mi) && mi > 0) set.add(mi);
     }
     return Array.from(set).sort((a, b) => a - b);
-  }, [nodesForRender]);
+  }, [nodes, paragraphs]);
 
   const modelColorByIndex = useMemo(() => {
     const map = new Map<number, string>();
-    for (let i = 0; i < modelIndices.length; i++) {
-      map.set(modelIndices[i], MODEL_COLORS[i % MODEL_COLORS.length]);
-    }
+    for (let i = 0; i < modelIndices.length; i++) map.set(modelIndices[i], MODEL_COLORS[i % MODEL_COLORS.length]);
     return map;
   }, [modelIndices]);
 
-  const paragraphPositions = useMemo(() => {
-    const map = new Map<string, { x: number; y: number }>();
-    for (const n of nodesForRender) {
-      map.set(n.paragraphId, { x: n.x, y: n.y });
+  /** Provider names keyed by model index */
+  const modelProviders = useMemo(() => {
+    const map = new Map<number, string>();
+    for (const r of batchResponses || []) {
+      if (r.providerId && !map.has(r.modelIndex)) map.set(r.modelIndex, r.providerId);
     }
     return map;
-  }, [nodesForRender]);
+  }, [batchResponses]);
 
-  const paragraphModelIndex = useMemo(() => {
-    const map = new Map<string, number>();
-    for (const n of nodesForRender) {
-      map.set(n.paragraphId, n.modelIndex);
+  const paragraphPosition = useMemo(() => {
+    const map = new Map<string, { x: number; y: number; modelIndex: number; regionId: string | null }>();
+    for (const n of nodes) {
+      const pid = String((n as any).paragraphId || "").trim();
+      if (!pid) continue;
+      map.set(pid, {
+        x: Number((n as any).x),
+        y: Number((n as any).y),
+        modelIndex: typeof (n as any).modelIndex === "number" && (n as any).modelIndex > 0 ? (n as any).modelIndex : 1,
+        regionId: (n as any).regionId ? String((n as any).regionId) : null,
+      });
     }
     return map;
-  }, [nodesForRender]);
+  }, [nodes]);
 
-  const visibleParagraphIds = useMemo(() => {
-    if (isolatedModelIndex === null) return null;
+  const regionOptions = useMemo(() => {
+    const map = new Map<string, { id: string; kind?: string; nodeIds: string[] }>();
+    for (const r of regions || []) {
+      const id = String((r as any)?.id || "").trim();
+      if (!id) continue;
+      const nodeIds = Array.isArray((r as any)?.nodeIds) ? (r as any).nodeIds.map((x: any) => String(x)).filter(Boolean) : [];
+      const kind = (r as any)?.kind ? String((r as any).kind) : undefined;
+      map.set(id, { id, kind, nodeIds });
+    }
+    if (map.size === 0) {
+      for (const n of nodes) {
+        const rid = (n as any)?.regionId ? String((n as any).regionId) : "";
+        if (!rid) continue;
+        const pid = String((n as any).paragraphId || "").trim();
+        if (!pid) continue;
+        const prev = map.get(rid);
+        if (!prev) map.set(rid, { id: rid, kind: undefined, nodeIds: [pid] });
+        else if (!prev.nodeIds.includes(pid)) prev.nodeIds.push(pid);
+      }
+    }
+    return Array.from(map.values()).sort((a, b) => a.id.localeCompare(b.id));
+  }, [regions, nodes]);
+
+  const paragraphFates = useMemo(() => {
+    if (!hasTraversal) return new Map<string, ParagraphFate>();
+    return computeParagraphFates(
+      paragraphs.map((p: any) => ({ id: String(p.id), statementIds: Array.isArray(p.statementIds) ? p.statementIds.map((x: any) => String(x)) : [] })),
+      (claims || []).map((c: any) => ({ id: String(c.id), sourceStatementIds: Array.isArray(c.sourceStatementIds) ? c.sourceStatementIds.map((x: any) => String(x)) : [] })),
+      traversalClaimStatuses,
+    );
+  }, [hasTraversal, paragraphs, claims, traversalClaimStatuses]);
+
+  /* ── filtering ───────────────────────────────────────────────── */
+
+  /** Set of region node IDs when a region is selected (for highlighting, not hiding) */
+  const regionHighlightIds = useMemo(() => {
+    if (regionFilter === "all") return null;
+    const r = regionOptions.find((r) => r.id === regionFilter);
+    return r ? new Set(r.nodeIds) : null;
+  }, [regionFilter, regionOptions]);
+
+  const filteredParagraphIds = useMemo(() => {
     const set = new Set<string>();
-    for (const n of nodesForRender) {
-      if (n.modelIndex === isolatedModelIndex) set.add(n.paragraphId);
+    for (const p of paragraphs) {
+      const pid = String((p as any)?.id || "").trim();
+      if (!pid) continue;
+      if (modelFilter !== "all") {
+        const mi = typeof (p as any)?.modelIndex === "number" ? (p as any).modelIndex : null;
+        if (mi !== modelFilter) continue;
+      }
+      if (sourceFilter === "referenced" && !referencedParagraphIds.has(pid)) continue;
+      if (sourceFilter === "orphan" && referencedParagraphIds.has(pid)) continue;
+      // region filter does NOT exclude — it highlights on the map
+      set.add(pid);
     }
     return set;
-  }, [isolatedModelIndex, nodesForRender]);
+  }, [paragraphs, modelFilter, sourceFilter, referencedParagraphIds]);
 
-  const distortionByParagraphId = useMemo(() => {
-    const edges = Array.isArray(graph?.edges) ? graph!.edges : [];
-    if (edges.length === 0) return new Map<string, { distortion: number; avgPre: number; avgPost: number }>();
+  /* ── viewBox & scale ─────────────────────────────────────────── */
 
-    const adjacency = new Map<string, Array<{ neighborId: string; similarity: number }>>();
-    const push = (a: string, b: string, similarity: number) => {
-      if (!adjacency.has(a)) adjacency.set(a, []);
-      adjacency.get(a)!.push({ neighborId: b, similarity });
-    };
-
-    for (const e of edges) {
-      const s = String(e.source);
-      const t = String(e.target);
-      const sim = typeof e.similarity === "number" ? e.similarity : Number(e.similarity) || 0;
-      push(s, t, sim);
-      push(t, s, sim);
+  const viewBox = useMemo(() => {
+    const pts: Point[] = [];
+    for (const pid of filteredParagraphIds) {
+      const pos = paragraphPosition.get(pid);
+      if (!pos || !Number.isFinite(pos.x) || !Number.isFinite(pos.y)) continue;
+      pts.push({ x: pos.x, y: pos.y });
     }
+    if (pts.length === 0) return { minX: -1, minY: -1, maxX: 1, maxY: 1 };
+    let minX = pts[0].x, maxX = pts[0].x, minY = pts[0].y, maxY = pts[0].y;
+    for (const p of pts) { if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x; if (p.y < minY) minY = p.y; if (p.y > maxY) maxY = p.y; }
+    const padX = Math.max(1e-6, (maxX - minX) * 0.08);
+    const padY = Math.max(1e-6, (maxY - minY) * 0.08);
+    return { minX: minX - padX, maxX: maxX + padX, minY: minY - padY, maxY: maxY + padY };
+  }, [filteredParagraphIds, paragraphPosition]);
 
-    const preById = new Map<string, number>();
-    const postById = new Map<string, number>();
+  const svgW = 920;
+  const svgH = 600;
+  const margin = 28;
+  const scaleX = useCallback((x: number) => {
+    const d = (viewBox.maxX - viewBox.minX) || 1;
+    return margin + ((x - viewBox.minX) / d) * (svgW - 2 * margin);
+  }, [viewBox.maxX, viewBox.minX]);
+  const scaleY = useCallback((y: number) => {
+    const d = (viewBox.maxY - viewBox.minY) || 1;
+    return margin + ((viewBox.maxY - y) / d) * (svgH - 2 * margin);
+  }, [viewBox.maxY, viewBox.minY]);
 
-    for (const n of nodesForRender) {
-      const id = n.paragraphId;
-      const neighbors = adjacency.get(id) || [];
-      if (neighbors.length === 0) continue;
-      const posA = paragraphPositions.get(id);
-      if (!posA) continue;
+  /* ── derived render data ─────────────────────────────────────── */
 
-      let preSum = 0;
-      let postSum = 0;
-      let used = 0;
-
-      for (const nb of neighbors) {
-        const posB = paragraphPositions.get(nb.neighborId);
-        if (!posB) continue;
-        const preD = 1 - nb.similarity;
-        const dx = posA.x - posB.x;
-        const dy = posA.y - posB.y;
-        const postD = Math.sqrt(dx * dx + dy * dy);
-        preSum += preD;
-        postSum += postD;
-        used++;
+  const claimCentroids = useMemo(() => {
+    const out: Array<{ claim: Claim; x: number; y: number; sourceParagraphIds: string[]; hasPosition: boolean }> = [];
+    for (const claim of claims || []) {
+      const paraIds = (claim.sourceStatementIds || []).map((sid) => statementToParagraphId.get(String(sid))).filter((pid): pid is string => !!pid);
+      const unique = Array.from(new Set(paraIds));
+      let sumX = 0, sumY = 0, count = 0;
+      for (const pid of unique) {
+        if (!filteredParagraphIds.has(pid)) continue;
+        const pos = paragraphPosition.get(pid);
+        if (!pos || !Number.isFinite(pos.x) || !Number.isFinite(pos.y)) continue;
+        sumX += pos.x; sumY += pos.y; count++;
       }
-
-      if (used === 0) continue;
-      preById.set(id, preSum / used);
-      postById.set(id, postSum / used);
-    }
-
-    const preVals = Array.from(preById.values());
-    const postVals = Array.from(postById.values());
-    const globalPre = preVals.length > 0 ? preVals.reduce((a, b) => a + b, 0) / preVals.length : 1;
-    const globalPost = postVals.length > 0 ? postVals.reduce((a, b) => a + b, 0) / postVals.length : 1;
-    const eps = 1e-9;
-
-    const out = new Map<string, { distortion: number; avgPre: number; avgPost: number }>();
-    for (const [id, avgPre] of preById) {
-      const avgPost = postById.get(id);
-      if (typeof avgPost !== "number") continue;
-      const d = (avgPost / (globalPost + eps)) / (avgPre / (globalPre + eps));
-      out.set(id, { distortion: d, avgPre, avgPost });
+      out.push({ claim, x: count ? sumX / count : 0, y: count ? sumY / count : 0, sourceParagraphIds: unique, hasPosition: count > 0 });
     }
     return out;
-  }, [graph, nodesForRender, paragraphPositions]);
+  }, [claims, statementToParagraphId, filteredParagraphIds, paragraphPosition]);
 
-  const distortionScale = useMemo(() => {
-    const vals = Array.from(distortionByParagraphId.values()).map((v) => v.distortion).filter((v) => Number.isFinite(v));
-    if (vals.length === 0) return { lo: 1, hi: 1 };
-    const lo = quantile(vals, 0.05);
-    const hi = Math.max(lo + 1e-9, quantile(vals, 0.95));
-    return { lo, hi };
-  }, [distortionByParagraphId]);
+  const hoveredClaim = hoveredClaimId ? claimCentroids.find((c) => c.claim.id === hoveredClaimId) : null;
 
-  const claimPositions = useMemo(() => {
-    const items = (claims || []).map((claim) => {
-      const paraIds = (claim.sourceStatementIds || [])
-        .map((sid) => statementToParagraphId.get(sid))
-        .filter((pid): pid is string => !!pid);
-
-      const uniqueParaIds = Array.from(new Set(paraIds));
-      if (uniqueParaIds.length === 0) {
-        return { claim, x: 0, y: 0, hasPosition: false, sourceParagraphIds: [] as string[], tension: 0 };
-      }
-
-      let sumX = 0;
-      let sumY = 0;
-      let count = 0;
-      for (const pid of uniqueParaIds) {
-        const pos = paragraphPositions.get(pid);
+  const hullPolygons = useMemo(() => {
+    if (!showRegionHulls) return [] as Array<{ id: string; kind?: string; points: Point[] }>;
+    const out: Array<{ id: string; kind?: string; points: Point[] }> = [];
+    for (const r of regionOptions) {
+      const pts: Point[] = [];
+      for (const pid of r.nodeIds) {
+        if (!filteredParagraphIds.has(pid)) continue;
+        const pos = paragraphPosition.get(pid);
         if (!pos) continue;
-        sumX += pos.x;
-        sumY += pos.y;
-        count++;
+        pts.push({ x: scaleX(pos.x), y: scaleY(pos.y) });
       }
+      const poly = hull(pts);
+      if (poly.length >= 3) out.push({ id: r.id, kind: r.kind, points: poly });
+    }
+    return out;
+  }, [showRegionHulls, regionOptions, filteredParagraphIds, paragraphPosition, scaleX, scaleY]);
 
-      let maxPairwise = 0;
-      const positioned = uniqueParaIds.filter((pid) => paragraphPositions.has(pid));
-      for (let i = 0; i < positioned.length; i++) {
-        const a = paragraphPositions.get(positioned[i]);
-        if (!a) continue;
-        for (let j = i + 1; j < positioned.length; j++) {
-          const b = paragraphPositions.get(positioned[j]);
-          if (!b) continue;
-          const dx = a.x - b.x;
-          const dy = a.y - b.y;
-          const d = Math.sqrt(dx * dx + dy * dy);
-          if (d > maxPairwise) maxPairwise = d;
-        }
-      }
+  /* ── paragraph list grouped by model ─────────────────────────── */
 
-      return {
-        claim,
-        x: count > 0 ? sumX / count : 0,
-        y: count > 0 ? sumY / count : 0,
-        hasPosition: count > 0,
-        sourceParagraphIds: uniqueParaIds,
-        tension: maxPairwise,
-      };
-    });
+  const paragraphList: ParagraphEntry[] = useMemo(() =>
+    paragraphs
+      .map((p: any) => ({
+        id: String(p.id || "").trim(),
+        modelIndex: typeof p.modelIndex === "number" ? p.modelIndex : null,
+        text: typeof p._fullParagraph === "string" ? p._fullParagraph : (typeof p.text === "string" ? p.text : ""),
+        statementIds: Array.isArray(p.statementIds) ? p.statementIds.map((x: any) => String(x)) : [],
+      }))
+      .filter((p) => p.id && filteredParagraphIds.has(p.id)),
+    [paragraphs, filteredParagraphIds]
+  );
 
-    return items;
-  }, [claims, paragraphPositions, statementToParagraphId]);
+  const modelGroups = useMemo(() => {
+    const groups = new Map<number, ParagraphEntry[]>();
+    for (const p of paragraphList) {
+      const mi = p.modelIndex ?? 0;
+      const arr = groups.get(mi);
+      if (arr) arr.push(p);
+      else groups.set(mi, [p]);
+    }
+    return Array.from(groups.entries()).sort(([a], [b]) => a - b);
+  }, [paragraphList]);
 
-  const claimTensionScale = useMemo(() => {
-    const vals = claimPositions.filter((c) => c.hasPosition).map((c) => c.tension).filter((v) => Number.isFinite(v) && v > 0);
-    if (vals.length === 0) return { p95: 1 };
-    const p95 = Math.max(1e-9, quantile(vals, 0.95));
-    return { p95 };
-  }, [claimPositions]);
+  /* scroll to paragraph when claim is hovered on graph */
+  useEffect(() => {
+    if (!hoveredClaim || !textPanelRef.current) return;
+    const firstPid = hoveredClaim.sourceParagraphIds[0];
+    if (!firstPid) return;
+    const el = textPanelRef.current.querySelector(`[data-pid="${firstPid}"]`);
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }, [hoveredClaim]);
 
-  const hoveredClaim = hoveredClaimId ? claimPositions.find((c) => c.claim.id === hoveredClaimId) : null;
+  /* ── early return ────────────────────────────────────────────── */
 
-  if (nodesForRender.length === 0) {
+  if (!graph || nodes.length === 0 || paragraphs.length === 0) {
     return (
       <div className="w-full h-full flex items-center justify-center text-text-muted text-sm">
         <div className="text-center">
-          <div className="text-sm font-semibold">No paragraph space data available</div>
-          <div className="text-xs mt-1 opacity-60">Run a query with embeddings enabled</div>
+          <div className="text-sm font-semibold">No space data available</div>
+          <div className="text-xs mt-1 opacity-60">Missing paragraph projection or substrate graph</div>
         </div>
       </div>
     );
   }
 
-  const width = 900;
-  const height = 560;
-  const margin = 48;
-  const scaleX = (v: number) => margin + ((v + 1) / 2) * (width - 2 * margin);
-  const scaleY = (v: number) => margin + ((1 - v) / 2) * (height - 2 * margin);
+  /* ── node colour resolver ────────────────────────────────────── */
 
-  const nodeCount = nodesForRender.length;
-  const positionedClaims = claimPositions.filter((c) => c.hasPosition).length;
+  const useFates = mode === "post" && hasTraversal && showFates;
+
+  function nodeStyle(pid: string, pos: { modelIndex: number }) {
+    if (useFates) {
+      const fate = paragraphFates.get(pid);
+      if (fate && FATE_NODE_STYLE[fate]) return FATE_NODE_STYLE[fate];
+    }
+    const base = modelColorByIndex.get(pos.modelIndex) || MODEL_COLORS[0];
+    return { fill: base, stroke: "none", strokeWidth: 0, opacity: 0.8 };
+  }
+
+  /* ── shape badge ─────────────────────────────────────────────── */
+  const sb = shapeBadge(shape);
+
+  /* ── render ──────────────────────────────────────────────────── */
 
   return (
-    <div className="w-full h-full flex flex-col">
-      <div className="flex items-center gap-4 px-4 py-2 border-b border-white/10">
-        <label className="flex items-center gap-2 text-xs text-text-muted cursor-pointer select-none">
-          <input type="checkbox" checked={showEdges} onChange={(e) => setShowEdges(e.target.checked)} className="rounded" />
-          Show edges
-        </label>
-        <label className="flex items-center gap-2 text-xs text-text-muted cursor-pointer select-none">
-          <input type="checkbox" checked={showClaims} onChange={(e) => setShowClaims(e.target.checked)} className="rounded" />
-          Show claims
-        </label>
-        <label className="flex items-center gap-2 text-xs text-text-muted cursor-pointer select-none">
-          <input
-            type="checkbox"
-            checked={colorByDistortion}
-            onChange={(e) => setColorByDistortion(e.target.checked)}
-            className="rounded"
-          />
-          Distortion heatmap
-        </label>
-        <div className="flex-1" />
-        <div className="text-xs text-text-muted">
-          {nodeCount} paragraphs · {positionedClaims} claims positioned
-        </div>
-      </div>
+    <div className="w-full h-full flex flex-col overflow-hidden">
+      {/* ─── main area ──────────────────────────────────────────── */}
+      <div className="flex-1 flex overflow-hidden min-h-0">
 
-      <div className="flex-1 overflow-auto p-4">
-        <svg width={width} height={height} className="bg-black/20 rounded-xl border border-white/10 mx-auto">
-          {showEdges &&
-            (graph?.edges || []).map((edge, i) => {
-              if (visibleParagraphIds && (!visibleParagraphIds.has(edge.source) || !visibleParagraphIds.has(edge.target))) return null;
-              const s = paragraphPositions.get(edge.source);
-              const t = paragraphPositions.get(edge.target);
-              if (!s || !t) return null;
+        {/* ═══ LEFT: UMAP visualisation ═══════════════════════════ */}
+        <div className="flex-1 flex flex-col min-w-0">
+          {/* toolbar */}
+          <div className="flex items-center gap-4 px-4 py-2 border-b border-white/10 flex-wrap">
+            <div className="flex items-center gap-2">
+              <select className="bg-black/30 border border-white/10 rounded px-2 py-1 text-xs text-text-primary" value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value as any)}>
+                <option value="all">All</option>
+                <option value="referenced">Referenced</option>
+                <option value="orphan">Orphan</option>
+              </select>
+              <select className="bg-black/30 border border-white/10 rounded px-2 py-1 text-xs text-text-primary" value={modelFilter} onChange={(e) => { const v = e.target.value; setModelFilter(v === "all" ? "all" : Number(v)); }}>
+                <option value="all">All models</option>
+                {modelIndices.map((mi) => <option key={mi} value={String(mi)}>Model {mi}</option>)}
+              </select>
+              <select className="bg-black/30 border border-white/10 rounded px-2 py-1 text-xs text-text-primary" value={regionFilter} onChange={(e) => setRegionFilter(e.target.value as any)} disabled={regionOptions.length === 0}>
+                <option value="all">All regions</option>
+                {regionOptions.map((r) => <option key={r.id} value={r.id}>{r.kind ? `${r.kind}: ${r.id}` : `Region ${r.id}`}</option>)}
+              </select>
+              <select className="bg-black/30 border border-white/10 rounded px-2 py-1 text-xs text-text-primary" value={mode} onChange={(e) => setMode(e.target.value as any)} disabled={!hasTraversal}>
+                <option value="pre">Pre-traversal</option>
+                <option value="post">Post-traversal</option>
+              </select>
+            </div>
 
-              const isHighlighted =
-                !!hoveredClaim &&
-                hoveredClaim.sourceParagraphIds.includes(edge.source) &&
-                hoveredClaim.sourceParagraphIds.includes(edge.target);
+            <div className="flex items-center gap-3 text-[11px] text-text-muted ml-auto">
+              <label className="flex items-center gap-1.5 cursor-pointer select-none"><input type="checkbox" className="rounded" checked={showKnnEdges} onChange={(e) => setShowKnnEdges(e.target.checked)} />KNN</label>
+              <label className="flex items-center gap-1.5 cursor-pointer select-none"><input type="checkbox" className="rounded" checked={showMutualEdges} onChange={(e) => setShowMutualEdges(e.target.checked)} />Mutual</label>
+              <label className="flex items-center gap-1.5 cursor-pointer select-none"><input type="checkbox" className="rounded" checked={showStrongEdges} onChange={(e) => setShowStrongEdges(e.target.checked)} />Strong</label>
+              <label className="flex items-center gap-1.5 cursor-pointer select-none"><input type="checkbox" className="rounded" checked={showRegionHulls} onChange={(e) => setShowRegionHulls(e.target.checked)} />Hulls</label>
+              <label className="flex items-center gap-1.5 cursor-pointer select-none"><input type="checkbox" className="rounded" checked={showClaims} onChange={(e) => setShowClaims(e.target.checked)} />Claims</label>
+              <label className={clsx("flex items-center gap-1.5 cursor-pointer select-none", (!hasTraversal || mode !== "post") && "opacity-40")}>
+                <input type="checkbox" className="rounded" checked={showFates} onChange={(e) => setShowFates(e.target.checked)} disabled={!hasTraversal || mode !== "post"} />Fates
+              </label>
+            </div>
+          </div>
 
-              return (
-                <line
-                  key={`${edge.source}-${edge.target}-${i}`}
-                  x1={scaleX(s.x)}
-                  y1={scaleY(s.y)}
-                  x2={scaleX(t.x)}
-                  y2={scaleY(t.y)}
-                  stroke={isHighlighted ? "#fbbf24" : "rgba(255,255,255,0.15)"}
-                  strokeWidth={isHighlighted ? 2 : Math.max(0.5, (Number(edge.similarity) || 0) * 2)}
-                  opacity={isHighlighted ? 1 : 0.5}
-                />
-              );
-            })}
+          {/* SVG canvas */}
+          <div className="flex-1 overflow-auto p-3">
+            <svg width={svgW} height={svgH} className="bg-black/20 rounded-xl border border-white/10 mx-auto block">
+              {/* hulls */}
+              {showRegionHulls && hullPolygons.map((h) => {
+                const style = REGION_KIND_STYLE[h.kind || ""] || DEFAULT_HULL_STYLE;
+                const isHighlighted = regionFilter !== "all" && h.id === regionFilter;
+                return (
+                  <polygon
+                    key={`hull-${h.id}`}
+                    points={h.points.map((p) => `${p.x},${p.y}`).join(" ")}
+                    fill={isHighlighted ? style.fill.replace(/[\d.]+\)$/, "0.18)") : style.fill}
+                    stroke={isHighlighted ? style.stroke.replace(/[\d.]+\)$/, "0.65)") : style.stroke}
+                    strokeWidth={isHighlighted ? 2.5 : 1.5}
+                    strokeDasharray={isHighlighted ? "none" : "none"}
+                  />
+                );
+              })}
 
-          {nodesForRender.map((node) => {
-            const isHighlighted = !!hoveredClaim && hoveredClaim.sourceParagraphIds.includes(node.paragraphId);
-            const isVisible = isolatedModelIndex === null || node.modelIndex === isolatedModelIndex;
-            const distortion = distortionByParagraphId.get(node.paragraphId);
-            const t = distortion ? (distortion.distortion - distortionScale.lo) / (distortionScale.hi - distortionScale.lo) : 0;
-            const color =
-              colorByDistortion && distortion
-                ? distortionColor(t)
-                : modelColorByIndex.get(node.modelIndex) || MODEL_COLORS[0];
-            const size = isHighlighted ? 8 : 5 + (node.mutualDegree || 0) * 0.5;
+              {/* KNN edges */}
+              {showKnnEdges && (graph.edges || []).map((e: any, idx: number) => {
+                const sId = String(e.source), tId = String(e.target);
+                if (!filteredParagraphIds.has(sId) || !filteredParagraphIds.has(tId)) return null;
+                const s = paragraphPosition.get(sId), t = paragraphPosition.get(tId);
+                if (!s || !t) return null;
+                const lit = !!hoveredClaim && hoveredClaim.sourceParagraphIds.includes(sId) && hoveredClaim.sourceParagraphIds.includes(tId);
+                return <line key={`knn-${idx}`} x1={scaleX(s.x)} y1={scaleY(s.y)} x2={scaleX(t.x)} y2={scaleY(t.y)} stroke={lit ? "rgba(251,191,36,0.85)" : "rgba(255,255,255,0.10)"} strokeWidth={lit ? 2 : 0.8} />;
+              })}
 
-            return (
-              <circle
-                key={node.paragraphId}
-                cx={scaleX(node.x)}
-                cy={scaleY(node.y)}
-                r={size}
-                fill={color}
-                opacity={isHighlighted ? 1 : isVisible ? 0.75 : 0.07}
-                stroke={isHighlighted ? "#fff" : "none"}
-                strokeWidth={isHighlighted ? 2 : 0}
-              >
-                <title>
-                  {`Paragraph ${node.paragraphId}\nModel ${node.modelIndex}${
-                    distortion
-                      ? `\nDistortion ${(distortion.distortion || 0).toFixed(2)}\nAvg pre ${(distortion.avgPre || 0).toFixed(3)} · Avg post ${(distortion.avgPost || 0).toFixed(3)}`
-                      : ""
-                  }`}
-                </title>
-              </circle>
-            );
-          })}
+              {/* Mutual edges */}
+              {showMutualEdges && (mutualEdges || []).map((e: any, idx: number) => {
+                const sId = String(e.source), tId = String(e.target);
+                if (!filteredParagraphIds.has(sId) || !filteredParagraphIds.has(tId)) return null;
+                const s = paragraphPosition.get(sId), t = paragraphPosition.get(tId);
+                if (!s || !t) return null;
+                return <line key={`mut-${idx}`} x1={scaleX(s.x)} y1={scaleY(s.y)} x2={scaleX(t.x)} y2={scaleY(t.y)} stroke="rgba(16,185,129,0.30)" strokeWidth={1.5} />;
+              })}
 
-          {showClaims &&
-            claimPositions
-              .filter((c) => c.hasPosition)
-              .map(({ claim, x, y, sourceParagraphIds, tension }) => {
-                const cx = scaleX(x);
-                const cy = scaleY(y);
-                const size = 10;
-                const isHovered = hoveredClaimId === claim.id;
-                const label = claim.label || claim.id;
-                const inIsolatedModel =
-                  isolatedModelIndex === null
-                    ? true
-                    : sourceParagraphIds.some((pid) => {
-                        return paragraphModelIndex.get(pid) === isolatedModelIndex;
-                      });
-                const tensionT = clamp01(tension / (claimTensionScale.p95 || 1));
-                const strokeWidth = 1 + 3 * tensionT;
+              {/* Strong edges */}
+              {showStrongEdges && (strongEdges || []).map((e: any, idx: number) => {
+                const sId = String(e.source), tId = String(e.target);
+                if (!filteredParagraphIds.has(sId) || !filteredParagraphIds.has(tId)) return null;
+                const s = paragraphPosition.get(sId), t = paragraphPosition.get(tId);
+                if (!s || !t) return null;
+                return <line key={`str-${idx}`} x1={scaleX(s.x)} y1={scaleY(s.y)} x2={scaleX(t.x)} y2={scaleY(t.y)} stroke="rgba(239,68,68,0.30)" strokeWidth={2} />;
+              })}
+
+              {/* Nodes */}
+              {nodes.map((n: any) => {
+                const pid = String(n.paragraphId || "").trim();
+                if (!pid || !filteredParagraphIds.has(pid)) return null;
+                const pos = paragraphPosition.get(pid);
+                if (!pos) return null;
+
+                const isHovered = hoveredParagraphId === pid;
+                const isSelected = selectedParagraphId === pid;
+                const isClaimSource = !!hoveredClaim && hoveredClaim.sourceParagraphIds.includes(pid);
+                const isRegionDimmed = regionHighlightIds !== null && !regionHighlightIds.has(pid);
+                const ns = nodeStyle(pid, pos);
+                const r = isHovered || isSelected || isClaimSource ? 7.5 : 5;
 
                 return (
-                  <g
-                    key={claim.id}
-                    onMouseEnter={() => setHoveredClaimId(claim.id)}
-                    onMouseLeave={() => setHoveredClaimId(null)}
+                  <circle
+                    key={pid}
+                    cx={scaleX(pos.x)}
+                    cy={scaleY(pos.y)}
+                    r={r}
+                    fill={ns.fill}
+                    stroke={isSelected ? "#fff" : isClaimSource ? "rgba(251,191,36,0.9)" : ns.stroke}
+                    strokeWidth={isSelected ? 2 : isClaimSource ? 2 : ns.strokeWidth}
+                    opacity={isRegionDimmed ? 0.2 : (isHovered || isSelected || isClaimSource ? 1 : ns.opacity)}
+                    onMouseEnter={() => setHoveredParagraphId(pid)}
+                    onMouseLeave={() => setHoveredParagraphId(null)}
+                    onClick={() => setSelectedParagraphId((prev) => (prev === pid ? null : pid))}
                     style={{ cursor: "pointer" }}
-                    opacity={inIsolatedModel ? 1 : 0.18}
                   >
+                    <title>{pid}</title>
+                  </circle>
+                );
+              }).filter(Boolean)}
+
+              {/* Claim diamonds */}
+              {showClaims && claimCentroids.filter((c) => c.hasPosition).map((c) => {
+                const cx = scaleX(c.x), cy = scaleY(c.y);
+                const isHov = hoveredClaimId === c.claim.id;
+                const label = (c.claim.label || c.claim.id || "").trim();
+                return (
+                  <g key={c.claim.id} onMouseEnter={() => setHoveredClaimId(c.claim.id)} onMouseLeave={() => setHoveredClaimId(null)} style={{ cursor: "pointer" }}>
                     <polygon
-                      points={`${cx},${cy - size} ${cx + size * 0.7},${cy} ${cx},${cy + size} ${cx - size * 0.7},${cy}`}
-                      fill={isHovered ? "#fbbf24" : "#f59e0b"}
-                      stroke="#fff"
-                      strokeWidth={strokeWidth}
-                      opacity={isHovered ? 1 : 0.85}
+                      points={`${cx},${cy - 9} ${cx + 7},${cy} ${cx},${cy + 9} ${cx - 7},${cy}`}
+                      fill={isHov ? "rgba(251,191,36,0.95)" : "rgba(245,158,11,0.75)"}
+                      stroke="rgba(255,255,255,0.6)"
+                      strokeWidth={isHov ? 2 : 1}
                     />
-                    {isHovered && (
-                      <text x={cx} y={cy - size - 8} textAnchor="middle" fill="#fff" fontSize={11} fontWeight={500}>
-                        {label.length > 40 ? `${label.slice(0, 40)}…` : label}
-                      </text>
-                    )}
-                    {tensionT > 0.85 && (
-                      <animate
-                        attributeName="opacity"
-                        values={`${inIsolatedModel ? 0.55 : 0.12};${inIsolatedModel ? 1 : 0.22};${inIsolatedModel ? 0.55 : 0.12}`}
-                        dur={`${1.8 - 0.7 * (tensionT - 0.85) / 0.15}s`}
-                        repeatCount="indefinite"
-                      />
-                    )}
+                    {isHov && <text x={cx} y={cy - 14} textAnchor="middle" fill="#fff" fontSize={11} fontWeight={600}>{label.length > 50 ? `${label.slice(0, 50)}\u2026` : label}</text>}
                   </g>
                 );
               })}
-        </svg>
+            </svg>
+          </div>
+        </div>
+
+        {/* ═══ RIGHT: Source text panel ════════════════════════════ */}
+        <div className="w-[400px] min-w-[300px] max-w-[480px] h-full border-l border-white/10 flex flex-col bg-black/10">
+          <div className="px-4 py-2.5 border-b border-white/10 flex items-center justify-between">
+            <div className="text-xs text-text-muted font-medium">Source Text</div>
+            <div className="text-[11px] text-text-muted">{paragraphList.length} paragraphs</div>
+          </div>
+
+          <div ref={textPanelRef} className="flex-1 overflow-auto custom-scrollbar px-3 py-2 space-y-1">
+            {modelGroups.map(([mi, paras]) => {
+              const color = modelColorByIndex.get(mi) || MODEL_COLORS[0];
+              const provider = modelProviders.get(mi);
+              return (
+                <div key={`model-${mi}`}>
+                  {/* Model group header */}
+                  <div className="flex items-center gap-2 py-2 mt-1 first:mt-0">
+                    <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: color }} />
+                    <div className="text-[11px] font-semibold text-text-primary tracking-wide">
+                      Model {mi}
+                      {provider && <span className="font-normal text-text-muted ml-1.5">{provider}</span>}
+                    </div>
+                    <div className="flex-1 border-b border-white/5" />
+                    <div className="text-[10px] text-text-muted">{paras.length}p</div>
+                  </div>
+
+                  {/* Paragraphs in this model */}
+                  {paras.map((p) => {
+                    const fate = paragraphFates.get(p.id) as ParagraphFate | undefined;
+                    const isReferenced = referencedParagraphIds.has(p.id);
+                    const isHovered = hoveredParagraphId === p.id;
+                    const isSelected = selectedParagraphId === p.id;
+                    const isClaimHighlighted = !!hoveredClaim && hoveredClaim.sourceParagraphIds.includes(p.id);
+
+                    // Linked claims for this paragraph
+                    const linkedClaimIds = paragraphToClaimIds.get(p.id) || [];
+                    const linkedClaims = linkedClaimIds.map((cid) => (claims || []).find((c) => c.id === cid)).filter(Boolean);
+
+                    // Display text based on fate
+                    const baseText = p.text || "";
+                    let displayText = baseText;
+                    let textClass = "text-text-primary";
+                    let fateIndicator: string | null = null;
+
+                    if (useFates) {
+                      if (fate === "skeleton") {
+                        displayText = maskText(baseText);
+                        textClass = "text-amber-400/70";
+                      } else if (fate === "removed") {
+                        displayText = "";
+                        fateIndicator = "[stripped]";
+                        textClass = "text-slate-500 italic";
+                      } else if (fate === "orphan") {
+                        textClass = "text-text-primary/60";
+                      } else if (fate === "protected") {
+                        textClass = "text-text-primary";
+                      }
+                    }
+
+                    // Badge
+                    const badgeInfo = useFates && fate
+                      ? (FATE_BADGE[fate] || { label: fate, cls: "bg-slate-500/15 text-slate-300" })
+                      : isReferenced
+                        ? { label: "ref", cls: "bg-sky-500/12 text-sky-300" }
+                        : { label: "orphan", cls: "bg-slate-500/12 text-slate-400" };
+
+                    return (
+                      <button
+                        key={p.id}
+                        type="button"
+                        data-pid={p.id}
+                        className={clsx(
+                          "w-full text-left rounded-lg border px-3 py-2 transition-all mb-1",
+                          isClaimHighlighted ? "border-amber-400/40 bg-amber-500/5 ring-1 ring-amber-400/20" :
+                          (isHovered || isSelected) ? "border-white/25 bg-white/5" :
+                          "border-white/[0.06] bg-black/10 hover:bg-white/[0.03] hover:border-white/10",
+                        )}
+                        onMouseEnter={() => setHoveredParagraphId(p.id)}
+                        onMouseLeave={() => setHoveredParagraphId(null)}
+                        onClick={() => setSelectedParagraphId((prev) => (prev === p.id ? null : p.id))}
+                      >
+                        <div className="flex items-center gap-2 mb-1">
+                          <div className="text-[10px] text-text-muted/60 font-mono">{p.id}</div>
+                          <div className="flex-1" />
+                          <div className={clsx("text-[9px] px-1.5 py-0.5 rounded-full font-medium", badgeInfo.cls)}>{badgeInfo.label}</div>
+                        </div>
+                        <div className={clsx("text-xs whitespace-pre-wrap break-words leading-relaxed", textClass)}>
+                          {fateIndicator ? fateIndicator : (displayText || "(empty)")}
+                        </div>
+                        {/* linked claims tooltip */}
+                        {(isSelected || isHovered) && linkedClaims.length > 0 && (
+                          <div className="mt-1.5 pt-1.5 border-t border-white/5">
+                            <div className="text-[9px] text-text-muted/60 mb-0.5">Claims:</div>
+                            {linkedClaims.slice(0, 4).map((c: any) => (
+                              <div key={c.id} className="text-[10px] text-amber-300/70 truncate">{"\u25C7"} {c.label || c.id}</div>
+                            ))}
+                            {linkedClaims.length > 4 && <div className="text-[9px] text-text-muted">+{linkedClaims.length - 4} more</div>}
+                          </div>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              );
+            })}
+          </div>
+        </div>
       </div>
 
-      <div className="flex items-center gap-6 px-4 py-2 border-t border-white/10 text-xs text-text-muted">
-        <div className="flex items-center gap-2">
-          <span>Models:</span>
-          <button
-            type="button"
-            className="px-2 py-1 rounded border border-white/10 hover:border-white/25 text-[11px]"
-            onClick={() => setIsolatedModelIndex(null)}
-            style={{ opacity: isolatedModelIndex === null ? 1 : 0.6 }}
-            title="Show all models"
-          >
-            All
-          </button>
-          {modelIndices.slice(0, 8).map((modelIndex) => {
-            const color = modelColorByIndex.get(modelIndex) || MODEL_COLORS[0];
-            const active = isolatedModelIndex === modelIndex;
-            const dimmed = isolatedModelIndex !== null && isolatedModelIndex !== modelIndex;
-            return (
-              <button
-                key={modelIndex}
-                type="button"
-                className="flex items-center gap-1 px-2 py-1 rounded border hover:border-white/25"
-                style={{ borderColor: active ? "rgba(255,255,255,0.6)" : "rgba(255,255,255,0.1)", opacity: dimmed ? 0.5 : 1 }}
-                onClick={() => setIsolatedModelIndex((prev) => (prev === modelIndex ? null : modelIndex))}
-                title={active ? "Clear model isolate" : `Isolate model ${modelIndex}`}
-              >
-                <div className="w-3 h-3 rounded-full" style={{ backgroundColor: color }} />
-                <span>{modelIndex}</span>
-              </button>
-            );
-          })}
+      {/* ─── footer legend ─────────────────────────────────────── */}
+      <div className="flex items-center gap-5 px-4 py-2 border-t border-white/10 bg-black/10 flex-wrap text-[11px] text-text-muted">
+        {/* shape badge */}
+        <div className="flex items-center gap-1.5 border border-white/10 rounded-full px-2.5 py-0.5">
+          <span className="text-sm leading-none">{sb.icon}</span>
+          <span className="font-medium text-text-primary">{sb.label}</span>
+          {shape?.confidence != null && <span className="text-text-muted/60">{Math.round((shape.confidence as number) * 100)}%</span>}
         </div>
-        {colorByDistortion && (
-          <div className="flex items-center gap-2">
-            <span>Distortion:</span>
-            <div
-              className="w-20 h-2 rounded"
-              style={{
-                background: `linear-gradient(90deg, ${distortionColor(0)} 0%, ${distortionColor(0.5)} 50%, ${distortionColor(1)} 100%)`,
-              }}
-              title={`Scaled to p5–p95: ${distortionScale.lo.toFixed(2)}–${distortionScale.hi.toFixed(2)}`}
-            />
-          </div>
+
+        <div className="w-px h-3 bg-white/10" />
+
+        {/* model legend */}
+        <div className="flex items-center gap-2">
+          <span className="text-text-muted/60">Models:</span>
+          {modelIndices.map((mi) => (
+            <div key={mi} className="flex items-center gap-1">
+              <div className="w-2 h-2 rounded-full" style={{ backgroundColor: modelColorByIndex.get(mi) }} />
+              <span>{mi}</span>
+            </div>
+          ))}
+        </div>
+
+        <div className="w-px h-3 bg-white/10" />
+
+        {/* edge legend */}
+        <div className="flex items-center gap-3">
+          <span className="text-text-muted/60">Edges:</span>
+          <div className="flex items-center gap-1"><div className="w-4 h-px" style={{ backgroundColor: "rgba(255,255,255,0.35)" }} /><span>KNN</span></div>
+          <div className="flex items-center gap-1"><div className="w-4 h-px" style={{ backgroundColor: "rgba(16,185,129,0.7)" }} /><span>Mutual</span></div>
+          <div className="flex items-center gap-1"><div className="w-4 h-[2px]" style={{ backgroundColor: "rgba(239,68,68,0.7)" }} /><span>Strong</span></div>
+        </div>
+
+        <div className="w-px h-3 bg-white/10" />
+
+        {/* hull legend */}
+        <div className="flex items-center gap-3">
+          <span className="text-text-muted/60">Hulls:</span>
+          <div className="flex items-center gap-1"><div className="w-3 h-2 rounded-sm border" style={{ backgroundColor: "rgba(59,130,246,0.15)", borderColor: "rgba(59,130,246,0.4)" }} /><span>Cluster</span></div>
+          <div className="flex items-center gap-1"><div className="w-3 h-2 rounded-sm border" style={{ backgroundColor: "rgba(139,92,246,0.15)", borderColor: "rgba(139,92,246,0.4)" }} /><span>Component</span></div>
+          <div className="flex items-center gap-1"><div className="w-3 h-2 rounded-sm border" style={{ backgroundColor: "rgba(148,163,184,0.12)", borderColor: "rgba(148,163,184,0.35)" }} /><span>Patch</span></div>
+        </div>
+
+        {useFates && (
+          <>
+            <div className="w-px h-3 bg-white/10" />
+            <div className="flex items-center gap-3">
+              <span className="text-text-muted/60">Fates:</span>
+              <div className="flex items-center gap-1"><div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: "rgba(16,185,129,0.85)" }} /><span>Protected</span></div>
+              <div className="flex items-center gap-1"><div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: "rgba(245,158,11,0.80)" }} /><span>Skeleton</span></div>
+              <div className="flex items-center gap-1"><div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: "rgba(100,116,139,0.40)" }} /><span>Removed</span></div>
+              <div className="flex items-center gap-1"><div className="w-2.5 h-2.5 rounded-full border" style={{ backgroundColor: "rgba(0,0,0,0.15)", borderColor: "rgba(239,68,68,0.7)" }} /><span>Orphan</span></div>
+              <div className="flex items-center gap-1"><div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: "rgba(99,102,241,0.65)" }} /><span>Mixed</span></div>
+            </div>
+          </>
         )}
-        <div className="flex items-center gap-2">
-          <svg width={14} height={14} viewBox="-7 -7 14 14">
-            <polygon points="0,-6 4,0 0,6 -4,0" fill="#f59e0b" stroke="#000" strokeWidth={0.5} />
-          </svg>
-          <span>Claim (at source centroid)</span>
-        </div>
       </div>
     </div>
   );

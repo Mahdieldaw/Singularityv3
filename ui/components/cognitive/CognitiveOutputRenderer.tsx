@@ -165,7 +165,7 @@ export const CognitiveOutputRenderer: React.FC<CognitiveOutputRendererProps> = (
                 <div className="flex justify-center">
                     <button
                         type="button"
-                        onClick={() => setDecisionMapOpen({ turnId: aiTurn.id, tab: 'pipeline' })}
+                        onClick={() => setDecisionMapOpen({ turnId: aiTurn.id, tab: 'json' })}
                         className="px-3 py-2 bg-surface-highlight border border-border-strong rounded-lg text-text-secondary cursor-pointer transition-all duration-200 hover:bg-surface-raised flex items-center gap-2"
                         aria-label="Open debug pipeline artifacts for this turn"
                     >

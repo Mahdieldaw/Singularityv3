@@ -1,6 +1,6 @@
 import React, { useMemo, useCallback, useEffect, useRef, useState, Suspense } from "react";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
-import { isDecisionMapOpenAtom, turnByIdAtom, mappingProviderAtom, activeSplitPanelAtom, providerAuthStatusAtom, singularityProviderAtom } from "../state/atoms";
+import { isDecisionMapOpenAtom, turnByIdAtom, mappingProviderAtom, activeSplitPanelAtom, providerAuthStatusAtom } from "../state/atoms";
 import { useClipActions } from "../hooks/useClipActions";
 import { m, AnimatePresence, LazyMotion, domAnimation } from "framer-motion";
 import { safeLazy } from "../utils/safeLazy";
@@ -19,10 +19,8 @@ import { ParagraphSpaceView } from "./ParagraphSpaceView";
 // PARSING UTILITIES - Import from shared module (single source of truth)
 // ============================================================================
 
-import { computeProblemStructureFromArtifact, computeStructuralAnalysis } from "../../src/core/PromptMethods";
-import type { StructuralAnalysis } from "../../shared/contract";
-const StructuralDebugPanel = safeLazy(() => import("./debug/StructuralDebugPanel").then(m => ({ default: m.StructuralDebugPanel })));
-const ConciergePipelinePanel = safeLazy(() => import("./debug/ConciergePipelinePanel").then(m => ({ default: m.ConciergePipelinePanel })));
+import { computeStructuralAnalysis } from "../../src/core/PromptMethods";
+import type { ProblemStructure, StructuralAnalysis } from "../../shared/contract";
 
 import { normalizeProviderId } from "../utils/provider-id-mapper";
 
@@ -716,96 +714,6 @@ const MapperSelector: React.FC<MapperSelectorProps> = ({ aiTurn, activeProviderI
   );
 };
 
-const SingularitySelector: React.FC<{ aiTurn: AiTurnWithUI, activeProviderId?: string, onSelect: (pid: string) => void }> = ({ aiTurn, activeProviderId, onSelect }) => {
-  const [isOpen, setIsOpen] = useState(false);
-  const { handleClipClick } = useClipActions();
-  const authStatus = useAtomValue(providerAuthStatusAtom);
-  const menuRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
-        setIsOpen(false);
-      }
-    };
-    if (isOpen) document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [isOpen]);
-
-  const activeProvider = activeProviderId ? getProviderConfig(activeProviderId) : null;
-  const providers = useMemo(() => LLM_PROVIDERS_CONFIG.filter(p => p.id !== 'system'), []);
-
-  return (
-    <div className="relative" ref={menuRef}>
-      <button
-        type="button"
-        onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 transition-all text-sm font-medium text-text-primary"
-      >
-        <span className="text-base">🕳️</span>
-        <span className="opacity-70 text-xs uppercase tracking-wide">Concierge</span>
-        <span className="w-px h-3 bg-white/20 mx-1" />
-        <span className={clsx(!activeProvider && "text-text-muted italic")}>
-          {activeProvider?.name || "Select Model"}
-        </span>
-        <svg
-          className={clsx("w-3 h-3 text-text-muted transition-transform", isOpen && "rotate-180")}
-          fill="none" viewBox="0 0 24 24" stroke="currentColor"
-        >
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-        </svg>
-      </button>
-
-      {isOpen && (
-        <div className="absolute top-full left-0 mt-2 w-64 bg-surface-raised border border-border-subtle rounded-xl shadow-elevated overflow-hidden z-[3600] animate-in fade-in slide-in-from-top-2 duration-200">
-          <div className="p-2 grid gap-1">
-            {providers.map(p => {
-              const pid = String(p.id);
-              const isActive = pid === activeProviderId;
-              const isUnauthorized = authStatus && authStatus[pid] === false;
-              const hasError =
-                pid === activeProviderId &&
-                String((aiTurn as any)?.singularity?.output || '') === 'Request failed';
-              const errorMessage = hasError ? 'Request failed' : null;
-              const isDisabled = isUnauthorized;
-
-              return (
-                <button
-                  key={pid}
-                  onClick={() => { if (!isDisabled) { onSelect(pid); handleClipClick(aiTurn.id, "singularity", pid); setIsOpen(false); } }}
-                  disabled={isDisabled}
-                  className={clsx(
-                    "w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left transition-colors relative group",
-                    isActive ? "bg-brand-500/10 text-brand-500" : "hover:bg-surface-highlight text-text-secondary",
-                    (isDisabled || hasError) && "opacity-60",
-                    isDisabled && "cursor-not-allowed",
-                  )}
-                  title={errorMessage && typeof errorMessage === 'string' ? errorMessage : undefined}
-                >
-                  <div
-                    className="w-2 h-2 rounded-full shadow-sm"
-                    style={{ backgroundColor: getProviderColor(pid) }}
-                  />
-                  <div className="flex-1 flex flex-col">
-                    <span className="text-xs font-medium">{p.name}</span>
-                  </div>
-                  {hasError && (
-                    <div className="absolute left-full ml-2 top-1/2 -translate-y-1/2 hidden group-hover:block z-50 w-48 bg-black/90 text-white text-[10px] p-2 rounded shadow-lg pointer-events-none">
-                      {typeof errorMessage === 'string' ? errorMessage : "Previous generation failed"}
-                    </div>
-                  )}
-                  {isActive && <span>✓</span>}
-                  {isUnauthorized && <span>🔒</span>}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-};
-
 // ============================================================================
 // MAIN COMPONENT
 // ============================================================================
@@ -814,20 +722,13 @@ export const DecisionMapSheet = React.memo(() => {
   const [openState, setOpenState] = useAtom(isDecisionMapOpenAtom);
   const turnGetter = useAtomValue(turnByIdAtom);
   const mappingProvider = useAtomValue(mappingProviderAtom);
-  const singularityProvider = useAtomValue(singularityProviderAtom);
-  const setSingularityProvider = useSetAtom(singularityProviderAtom);
   const setActiveSplitPanel = useSetAtom(activeSplitPanelAtom);
 
-  const [activeTab, setActiveTab] = useState<'graph' | 'narrative' | 'options' | 'space' | 'pipeline' | 'debug' | 'concierge'>('graph');
+  const [activeTab, setActiveTab] = useState<'graph' | 'narrative' | 'options' | 'space' | 'json'>('graph');
   const [selectedNode, setSelectedNode] = useState<{ id: string; label: string; supporters: (string | number)[]; theme?: string } | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [dims, setDims] = useState<{ w: number; h: number }>({ w: window.innerWidth, h: 400 });
-  const activeSingularityPid = singularityProvider;
   const [sheetHeightRatio, setSheetHeightRatio] = useState(0.5);
-  const [structuralAnalysis, setStructuralAnalysis] = useState<StructuralAnalysis | null>(null);
-  const [structuralTurnId, setStructuralTurnId] = useState<string | null>(null);
-  const [structuralLoading, setStructuralLoading] = useState(false);
-  const [pipelineStage, setPipelineStage] = useState<string>('pipeline_shadow_extraction');
   const resizeRef = useRef<{ active: boolean; startY: number; startRatio: number; moved: boolean }>({
     active: false,
     startY: 0,
@@ -840,23 +741,8 @@ export const DecisionMapSheet = React.memo(() => {
       setActiveTab(openState.tab || 'graph');
       setSelectedNode(null);
       setSheetHeightRatio(0.5);
-      setPipelineStage('pipeline_shadow_extraction');
     }
   }, [openState?.turnId, openState?.tab]);
-
-  useEffect(() => {
-    if (!openState?.turnId) {
-      setStructuralAnalysis(null);
-      setStructuralTurnId(null);
-      setStructuralLoading(false);
-      return;
-    }
-    if (structuralTurnId && structuralTurnId !== openState.turnId) {
-      setStructuralAnalysis(null);
-      setStructuralTurnId(null);
-      setStructuralLoading(false);
-    }
-  }, [openState?.turnId, structuralTurnId]);
 
   const handleResizePointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     e.preventDefault();
@@ -928,13 +814,6 @@ export const DecisionMapSheet = React.memo(() => {
   }, [aiTurn?.id, aiTurn?.batch, aiTurn?.mapping, aiTurn?.singularity]);
 
   const singularityState = useSingularityOutput(aiTurn?.id || null);
-
-  const userMessage = useMemo(() => {
-    if (!aiTurn?.userTurnId) return null;
-    const t = turnGetter(aiTurn.userTurnId);
-    if (!t || (t as any).type !== 'user') return null;
-    return (t as any).text || "";
-  }, [aiTurn?.userTurnId, turnGetter]);
 
   const mappingArtifact = (aiTurn as any)?.mapping?.artifact || null;
 
@@ -1048,53 +927,16 @@ export const DecisionMapSheet = React.memo(() => {
     return artifact;
   }, [aiTurn, derivedMapperArtifact, parsedMapping, graphData]);
 
-  useEffect(() => {
-    if (activeTab !== 'debug' && activeTab !== 'concierge') return;
-    if (!artifactForStructure || !openState?.turnId) return;
-    if (structuralTurnId === openState.turnId && structuralAnalysis) return;
-    let cancelled = false;
-    setStructuralLoading(true);
-
-    // Defer heavy computation to next tick
-    const timeoutId = window.setTimeout(() => {
-      if (cancelled) return;
-      try {
-        const analysis = computeStructuralAnalysis(artifactForStructure as any);
-        if (!cancelled) {
-          setStructuralAnalysis(analysis);
-          setStructuralTurnId(openState.turnId);
-        }
-      } catch (e) {
-        console.warn("[DecisionMapSheet] structuralAnalysis compute failed", e);
-        if (!cancelled) {
-          setStructuralAnalysis(null);
-          setStructuralTurnId(openState.turnId);
-        }
-      } finally {
-        if (!cancelled) {
-          setStructuralLoading(false);
-        }
-      }
-    }, 0);
-
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timeoutId);
-    };
-
-  }, [activeTab, artifactForStructure, openState?.turnId, structuralTurnId, structuralAnalysis]);
-
-  const problemStructure = useMemo(() => {
+  const structuralAnalysis: StructuralAnalysis | null = useMemo(() => {
     if (!artifactForStructure) return null;
     try {
-      const structure = computeProblemStructureFromArtifact(artifactForStructure as any);
-      decisionMapSheetDbg("problemStructure", structure);
-      return structure;
-    } catch (e) {
-      console.warn("[DecisionMapSheet] problemStructure compute failed", e);
+      return computeStructuralAnalysis(artifactForStructure as any);
+    } catch {
       return null;
     }
   }, [artifactForStructure]);
+
+  const shape: ProblemStructure | null = structuralAnalysis?.shape || null;
 
   const claimThemes = useMemo(() => {
     if (!semanticClaims || semanticClaims.length === 0) return [];
@@ -1233,73 +1075,6 @@ export const DecisionMapSheet = React.memo(() => {
     } as any; // Type assertion to satisfy PipelineParagraphProjectionResult
   }, [mappingArtifact]);
 
-  const pipelineStages = useMemo(() => {
-    const mapperArtifact =
-      derivedMapperArtifact ||
-      (parsedMapping as any)?.artifact ||
-      (graphData.claims.length > 0 || graphData.edges.length > 0
-        ? {
-          claims: graphData.claims,
-          edges: graphData.edges,
-          ghosts: Array.isArray((parsedMapping as any)?.ghosts) ? (parsedMapping as any).ghosts : null,
-        }
-        : null);
-
-    const singularityOutput = (aiTurn as any)?.singularity?.output || singularityState.output || null;
-
-    const hasValue = (value: any, kind: 'json' | 'text') => {
-      if (value == null) return false;
-      if (kind === 'text') return String(value).trim().length > 0;
-      return true;
-    };
-
-    // Read directly from mappingArtifact (CognitiveArtifact)
-    const shadowExtraction = mappingArtifact?.shadow?.statements ? { statements: mappingArtifact.shadow.statements } : null;
-    const shadowDelta = mappingArtifact?.shadow?.delta || null;
-    const preSemantic = mappingArtifact?.geometry?.preSemantic || null;
-    const substrate = mappingArtifact?.geometry?.substrate || null;
-
-    return [
-      { key: 'pipeline_shadow_extraction', label: 'Shadow Extraction', kind: 'json' as const, value: shadowExtraction, group: 'Shadow', disabled: !hasValue(shadowExtraction, 'json') },
-      { key: 'pipeline_shadow_delta', label: 'Shadow Delta', kind: 'json' as const, value: shadowDelta, group: 'Shadow', disabled: !hasValue(shadowDelta, 'json') },
-      { key: 'pipeline_shadow_audit', label: 'Shadow Audit', kind: 'json' as const, value: mappingArtifact?.shadow?.audit ?? null, group: 'Shadow', disabled: !hasValue(mappingArtifact?.shadow?.audit, 'json') },
-
-      { key: 'pipeline_paragraph_projection', label: 'Paragraph Projection', kind: 'json' as const, value: paragraphProjection, group: 'Projection', disabled: !hasValue(paragraphProjection, 'json') },
-
-      { key: 'pipeline_substrate_summary', label: 'Substrate', kind: 'json' as const, value: substrate, group: 'Substrate', disabled: !hasValue(substrate, 'json') },
-
-      { key: 'pipeline_presemantic', label: 'Pre-Semantic Interpretation', kind: 'json' as const, value: preSemantic, group: 'Interpretation', disabled: !hasValue(preSemantic, 'json') },
-
-      { key: 'pipeline_semantic_mapper_prompt', label: 'Semantic Mapper Prompt', kind: 'text' as const, value: semanticMapperPrompt || '', group: 'Prompts', disabled: !hasValue(semanticMapperPrompt || '', 'text') },
-      { key: 'pipeline_raw_mapping_text', label: 'Raw Mapping Text', kind: 'text' as const, value: rawMappingText || '', group: 'Prompts', disabled: !hasValue(rawMappingText || '', 'text') },
-
-      { key: 'mapper_artifact', label: 'Mapper Artifact', kind: 'json' as const, value: mapperArtifact, group: 'Mapper', disabled: !hasValue(mapperArtifact, 'json') },
-      { key: 'mapper_problem_structure', label: 'Problem Structure', kind: 'json' as const, value: problemStructure || null, group: 'Mapper', disabled: !hasValue(problemStructure || null, 'json') },
-      { key: 'mapper_completeness', label: 'Completeness', kind: 'json' as const, value: (mapperArtifact as any)?.completeness || null, group: 'Mapper', disabled: !hasValue((mapperArtifact as any)?.completeness || null, 'json') },
-      { key: 'mapper_conditionals', label: 'Conditionals', kind: 'json' as const, value: (mapperArtifact as any)?.conditionals || null, group: 'Mapper', disabled: !hasValue((mapperArtifact as any)?.conditionals || null, 'json') },
-      { key: 'mapper_full_analysis', label: 'Full Structural Analysis', kind: 'json' as const, value: structuralAnalysis || null, group: 'Mapper', disabled: !hasValue(structuralAnalysis || null, 'json') },
-      { key: 'traversal_graph', label: 'Traversal Graph', kind: 'json' as const, value: mappingArtifact?.traversal?.graph || (mapperArtifact as any)?.traversalGraph || null, group: 'Mapper', disabled: !hasValue(mappingArtifact?.traversal?.graph || (mapperArtifact as any)?.traversalGraph || null, 'json') },
-      { key: 'forcing_points', label: 'Forcing Points', kind: 'json' as const, value: mappingArtifact?.traversal?.forcingPoints || (mapperArtifact as any)?.forcingPoints || null, group: 'Mapper', disabled: !hasValue(mappingArtifact?.traversal?.forcingPoints || (mapperArtifact as any)?.forcingPoints || null, 'json') },
-
-      { key: 'singularity_output', label: 'Singularity Output', kind: 'json' as const, value: singularityOutput, group: 'Singularity', disabled: !hasValue(singularityOutput, 'json') },
-      { key: 'singularity_pipeline', label: 'Singularity Pipeline', kind: 'json' as const, value: (singularityOutput as any)?.pipeline || null, group: 'Singularity', disabled: !hasValue((singularityOutput as any)?.pipeline || null, 'json') },
-    ];
-  }, [aiTurn, derivedMapperArtifact, parsedMapping, graphData, singularityState.output, mappingArtifact, problemStructure, structuralAnalysis, semanticMapperPrompt, rawMappingText, paragraphProjection]);
-
-  const pipelineStageGroups = useMemo(() => {
-    const groups: Array<{ label: string; stages: typeof pipelineStages }> = [];
-    const order = ['Shadow', 'Projection', 'Clustering', 'Substrate', 'Interpretation', 'Validation', 'Prompts', 'Mapper', 'Singularity'];
-    order.forEach((label) => {
-      const stages = pipelineStages.filter((s: any) => s.group === label);
-      if (stages.length > 0) groups.push({ label, stages } as any);
-    });
-    return groups;
-  }, [pipelineStages]);
-
-  const activePipelineStage = useMemo(() => {
-    return pipelineStages.find((s) => s.key === pipelineStage) || pipelineStages[0];
-  }, [pipelineStages, pipelineStage]);
-
   const stringifyForDebug = useMemo(() => {
     return (value: any) => {
       const seen = new WeakSet();
@@ -1320,26 +1095,78 @@ export const DecisionMapSheet = React.memo(() => {
     };
   }, []);
 
-  const pipelineStageText = useMemo(() => {
-    const stage = activePipelineStage;
-    if (!stage) return '';
-    if (stage.kind === 'text') return String(stage.value || '');
-    try {
-      if (stage.value == null) return '';
-      return stringifyForDebug(stage.value);
-    } catch {
-      return String(stage.value || '');
+  const jsonSections = useMemo(() => {
+    const singularityOutput = (aiTurn as any)?.singularity?.output || singularityState.output || null;
+    const mapperArtifact =
+      derivedMapperArtifact ||
+      (parsedMapping as any)?.artifact ||
+      (graphData.claims.length > 0 || graphData.edges.length > 0
+        ? {
+          claims: graphData.claims,
+          edges: graphData.edges,
+          ghosts: Array.isArray((parsedMapping as any)?.ghosts) ? (parsedMapping as any).ghosts : null,
+        }
+        : null);
+
+    const shadowExtraction = mappingArtifact?.shadow?.statements ? { statements: mappingArtifact.shadow.statements } : null;
+    const shadowDelta = mappingArtifact?.shadow?.delta || null;
+    const preSemantic = mappingArtifact?.geometry?.preSemantic || null;
+    const substrate = mappingArtifact?.geometry?.substrate || null;
+    const completeness = (mapperArtifact as any)?.completeness || null;
+
+    return [
+      { key: 'shadow_extraction', label: 'Shadow Extraction', kind: 'json' as const, value: shadowExtraction },
+      { key: 'shadow_delta', label: 'Shadow Delta', kind: 'json' as const, value: shadowDelta },
+      { key: 'shadow_audit', label: 'Shadow Audit', kind: 'json' as const, value: mappingArtifact?.shadow?.audit ?? null },
+
+      { key: 'paragraph_projection', label: 'Paragraph Projection', kind: 'json' as const, value: paragraphProjection },
+      { key: 'substrate', label: 'Substrate', kind: 'json' as const, value: substrate },
+      { key: 'presemantic', label: 'Pre-Semantic', kind: 'json' as const, value: preSemantic },
+
+      { key: 'mapper_prompt', label: 'Mapper Prompt', kind: 'text' as const, value: semanticMapperPrompt || '' },
+      { key: 'raw_mapping', label: 'Raw Mapping Text', kind: 'text' as const, value: rawMappingText || '' },
+
+      { key: 'mapper_artifact', label: 'Mapper Artifact', kind: 'json' as const, value: mapperArtifact },
+      { key: 'structural_analysis', label: 'Structural Analysis', kind: 'json' as const, value: structuralAnalysis },
+      { key: 'completeness', label: 'Completeness', kind: 'json' as const, value: completeness },
+      { key: 'traversal_graph', label: 'Traversal Graph', kind: 'json' as const, value: mappingArtifact?.traversal?.graph || (mapperArtifact as any)?.traversalGraph || null },
+      { key: 'forcing_points', label: 'Forcing Points', kind: 'json' as const, value: mappingArtifact?.traversal?.forcingPoints || (mapperArtifact as any)?.forcingPoints || null },
+
+      { key: 'singularity_output', label: 'Singularity Output', kind: 'json' as const, value: singularityOutput },
+      { key: 'cognitive_artifact', label: 'Cognitive Artifact', kind: 'json' as const, value: mappingArtifact },
+    ];
+  }, [aiTurn, derivedMapperArtifact, parsedMapping, graphData, singularityState.output, mappingArtifact, semanticMapperPrompt, rawMappingText, paragraphProjection, structuralAnalysis]);
+
+  const [openJsonKeys, setOpenJsonKeys] = useState<Set<string>>(() => new Set());
+
+  useEffect(() => {
+    if (!openState?.turnId) return;
+    setOpenJsonKeys(new Set());
+  }, [openState?.turnId]);
+
+  const jsonTextByKey = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const s of jsonSections) {
+      if (s.kind === 'text') {
+        const v = String(s.value || '');
+        map.set(s.key, v);
+      } else {
+        try {
+          map.set(s.key, s.value == null ? '' : stringifyForDebug(s.value));
+        } catch {
+          map.set(s.key, String(s.value || ''));
+        }
+      }
     }
-  }, [activePipelineStage, stringifyForDebug]);
+    return map;
+  }, [jsonSections, stringifyForDebug]);
 
   const tabConfig = [
     { key: 'graph' as const, label: 'Graph', activeClass: 'decision-tab-active-graph' },
     { key: 'narrative' as const, label: 'Narrative', activeClass: 'decision-tab-active-narrative' },
     { key: 'options' as const, label: 'Options', activeClass: 'decision-tab-active-options' },
-    { key: 'space' as const, label: 'Space', activeClass: 'decision-tab-active-options' },
-    { key: 'pipeline' as const, label: 'Pipeline Artifacts', activeClass: 'decision-tab-active-options' },
-    { key: 'debug' as const, label: '🔬 Structural Analysis Debug', activeClass: 'decision-tab-active-options' },
-    { key: 'concierge' as const, label: 'Concierge Pipeline', activeClass: 'decision-tab-active-singularity' }
+    { key: 'space' as const, label: 'Space', activeClass: 'decision-tab-active-space' },
+    { key: 'json' as const, label: 'JSON', activeClass: 'decision-tab-active-options' },
   ];
 
   const sheetHeightPx = Math.max(260, Math.round(window.innerHeight * sheetHeightRatio));
@@ -1370,17 +1197,10 @@ export const DecisionMapSheet = React.memo(() => {
 
               {/* Left: Provider Selector (Mapper or Refiner based on tab) */}
               <div className="w-1/3 flex justify-start">
-                {aiTurn && activeTab !== 'concierge' && (
+                {aiTurn && (
                   <MapperSelector
                     aiTurn={aiTurn}
                     activeProviderId={activeMappingPid}
-                  />
-                )}
-                {aiTurn && activeTab === 'concierge' && (
-                  <SingularitySelector
-                    aiTurn={aiTurn}
-                    activeProviderId={activeSingularityPid || undefined}
-                    onSelect={(pid) => setSingularityProvider(pid as any)}
                   />
                 )}
               </div>
@@ -1452,26 +1272,10 @@ export const DecisionMapSheet = React.memo(() => {
                         />
                       </div>
                     )}
-                    {problemStructure && (
-                      <div className="absolute top-4 left-4 z-50 px-3 py-1.5 rounded-full bg-black/70 border border-white/10 text-xs font-medium text-white/90">
-                        <span className="opacity-60 mr-2">Structure:</span>
-                        <span className="capitalize">{problemStructure.primary}</span>
-                        {/* Show secondary patterns count if any */}
-                        {(problemStructure.patterns?.length ?? 0) > 0 && (
-                          <span className="ml-2 text-purple-400">
-                            +{problemStructure.patterns.length}
-                          </span>
-                        )}
-                        {problemStructure.confidence < 0.7 && (
-                          <span className="ml-2 text-amber-400">(?)</span>
-                        )}
-                      </div>
-                    )}
                     <Suspense fallback={<div className="w-full h-full flex items-center justify-center opacity-50"><div className="w-8 h-8 rounded-full border-2 border-brand-500 border-t-transparent animate-spin" /></div>}>
                       <DecisionMapGraph
                         claims={graphData.claims}
                         edges={graphData.edges}
-                        problemStructure={problemStructure || undefined}
                         citationSourceOrder={citationSourceOrder}
                         width={dims.w}
                         height={dims.h}
@@ -1571,13 +1375,28 @@ export const DecisionMapSheet = React.memo(() => {
                       paragraphProjection={paragraphProjection}
                       claims={semanticClaims as any}
                       shadowStatements={mappingArtifact?.shadow?.statements || []}
+                      mutualEdges={(mappingArtifact?.geometry?.substrate as any)?.mutualEdges || null}
+                      strongEdges={(mappingArtifact?.geometry?.substrate as any)?.strongEdges || null}
+                      regions={(mappingArtifact?.geometry?.preSemantic as any)?.regions || (mappingArtifact?.geometry?.preSemantic as any)?.regionization?.regions || null}
+                      traversalState={(aiTurn as any)?.singularity?.traversalState || null}
+                      batchResponses={(() => {
+                        const responses = (aiTurn as any)?.batch?.responses || {};
+                        const entries = Object.entries(responses);
+                        let fallbackIndex = 1;
+                        return entries.map(([providerId, r]: any) => {
+                          const modelIndex = typeof r?.modelIndex === 'number' ? r.modelIndex : fallbackIndex++;
+                          return { modelIndex, text: String(r?.text || ''), providerId: String(providerId) };
+                        });
+                      })()}
+                      completeness={null}
+                      shape={shape}
                     />
                   </m.div>
                 )}
 
-                {activeTab === 'pipeline' && (
+                {activeTab === 'json' && (
                   <m.div
-                    key="pipeline"
+                    key="json"
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
                     exit={{ opacity: 0 }}
@@ -1585,118 +1404,107 @@ export const DecisionMapSheet = React.memo(() => {
                   >
                     <div className="flex items-center justify-between mb-4">
                       <div className="flex items-center gap-3">
-                        <span className="text-2xl">🧪</span>
                         <div>
-                          <div className="text-sm font-semibold">Pipeline Artifacts</div>
-                          <div className="text-xs text-text-muted">Raw JSON/text captured for this turn</div>
+                          <div className="text-sm font-semibold">Raw Data</div>
+                          <div className="text-xs text-text-muted">Expand sections to view JSON/text</div>
                         </div>
                       </div>
-                      <CopyButton
-                        text={pipelineStageText}
-                        label="Copy artifact"
-                        buttonText="Copy"
-                        className="mr-1"
-                      />
-                    </div>
-
-                    <div className="space-y-4 mb-4">
-                      {pipelineStageGroups.map((group) => (
-                        <div key={group.label}>
-                          <div className="text-[11px] font-semibold uppercase tracking-wider text-text-muted mb-2">
-                            {group.label}
-                          </div>
-                          <div className="flex flex-wrap gap-2">
-                            {group.stages.map((s: any) => (
-                              <button
-                                key={s.key}
-                                type="button"
-                                disabled={!!s.disabled}
-                                onClick={() => setPipelineStage(s.key)}
-                                className={clsx(
-                                  "px-3 py-1.5 rounded-full border text-xs transition-colors",
-                                  s.disabled
-                                    ? "opacity-40 cursor-not-allowed bg-transparent border-white/10 text-text-muted"
-                                    : pipelineStage === s.key
-                                      ? "bg-white/10 border-white/20 text-text-primary"
-                                      : "bg-transparent border-white/10 text-text-muted hover:bg-white/5 hover:text-text-primary"
-                                )}
-                              >
-                                {s.label}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-
-                    <div className="bg-surface border border-border-subtle rounded-xl p-4">
-                      <div className="flex items-center justify-between mb-3">
-                        <div className="text-xs font-semibold uppercase tracking-wider text-text-muted">
-                          {activePipelineStage?.label || 'Artifact'}
-                        </div>
-                        <div className="text-[11px] text-text-muted font-mono">
-                          {pipelineStageText ? `${pipelineStageText.length.toLocaleString()} chars` : '—'}
-                        </div>
-                      </div>
-                      {pipelineStageText ? (
-                        <div className="max-h-[55vh] overflow-auto custom-scrollbar rounded-lg border border-border-subtle bg-black/20">
-                          <pre className="text-[11px] leading-snug whitespace-pre min-w-max p-3">
-                            {pipelineStageText}
-                          </pre>
-                        </div>
-                      ) : (
-                        <div className="text-text-muted text-sm">No artifact captured for this stage.</div>
-                      )}
-                    </div>
-                  </m.div>
-                )}
-
-                {activeTab === 'debug' && (
-                  <m.div
-                    key="debug"
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    exit={{ opacity: 0 }}
-                    className="h-full"
-                  >
-                    {structuralLoading || !structuralAnalysis ? (
-                      <div className="w-full h-full flex items-center justify-center opacity-70 text-xs text-text-muted">
-                        <div className="flex flex-col items-center gap-3">
-                          <div className="w-8 h-8 rounded-full border-2 border-brand-500 border-t-transparent animate-spin" />
-                          <div>Computing structural analysis for this turn…</div>
-                        </div>
-                      </div>
-                    ) : (
-                      <Suspense fallback={<div className="w-full h-full flex items-center justify-center opacity-50"><div className="w-8 h-8 rounded-full border-2 border-brand-500 border-t-transparent animate-spin" /></div>}>
-                        <StructuralDebugPanel
-                          analysis={structuralAnalysis}
-                          semanticMapperPrompt={semanticMapperPrompt}
-                          rawMappingText={rawMappingText}
-                          completeness={(parsedMapping as any)?.artifact?.completeness || null}
-                          enrichmentResult={null}
-                          traversalGraph={mappingArtifact?.traversal?.graph || (parsedMapping as any)?.artifact?.traversalGraph || null}
-                          forcingPoints={mappingArtifact?.traversal?.forcingPoints || (parsedMapping as any)?.artifact?.forcingPoints || null}
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          className="px-3 py-1.5 rounded-full border border-white/10 text-xs text-text-muted hover:bg-white/5 hover:text-text-primary"
+                          onClick={() => setOpenJsonKeys(new Set(jsonSections.map(s => s.key)))}
+                        >
+                          Expand All
+                        </button>
+                        <button
+                          type="button"
+                          className="px-3 py-1.5 rounded-full border border-white/10 text-xs text-text-muted hover:bg-white/5 hover:text-text-primary"
+                          onClick={() => setOpenJsonKeys(new Set())}
+                        >
+                          Collapse All
+                        </button>
+                        <CopyButton
+                          text={jsonTextByKey.get('cognitive_artifact') || ''}
+                          label="Copy cognitive artifact"
+                          buttonText="Copy All"
                         />
-                      </Suspense>
-                    )}
-                  </m.div>
-                )}
+                        <button
+                          type="button"
+                          className="px-3 py-1.5 rounded-full border border-white/10 text-xs text-text-muted hover:bg-white/5 hover:text-text-primary"
+                          onClick={() => {
+                            try {
+                              const text = jsonTextByKey.get('cognitive_artifact') || '';
+                              const blob = new Blob([text], { type: 'application/json' });
+                              const url = URL.createObjectURL(blob);
+                              const a = document.createElement('a');
+                              a.href = url;
+                              a.download = `cognitive_artifact_${aiTurn?.id || 'turn'}.json`;
+                              a.click();
+                              URL.revokeObjectURL(url);
+                            } catch {
+                            }
+                          }}
+                        >
+                          Export
+                        </button>
+                      </div>
+                    </div>
 
-                {activeTab === 'concierge' && (
-                  <m.div
-                    key="concierge"
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    exit={{ opacity: 0 }}
-                    className="h-full"
-                  >
-                    <Suspense fallback={<div className="w-full h-full flex items-center justify-center opacity-50"><div className="w-8 h-8 rounded-full border-2 border-brand-500 border-t-transparent animate-spin" /></div>}>
-                      <ConciergePipelinePanel
-                        state={singularityState}
-                        analysis={structuralAnalysis || null}
-                        userMessage={userMessage}
-                      />
-                    </Suspense>
+                    <div className="space-y-3">
+                      {jsonSections.map((s) => {
+                        const text = jsonTextByKey.get(s.key) || '';
+                        const hasValue = s.kind === 'text' ? text.trim().length > 0 : Boolean(s.value);
+                        const isOpen = openJsonKeys.has(s.key);
+                        return (
+                          <div key={s.key} className="bg-surface border border-border-subtle rounded-xl overflow-hidden">
+                            <button
+                              type="button"
+                              className="w-full px-4 py-3 flex items-center justify-between hover:bg-white/5"
+                              onClick={() => {
+                                setOpenJsonKeys((prev) => {
+                                  const next = new Set(prev);
+                                  if (next.has(s.key)) next.delete(s.key);
+                                  else next.add(s.key);
+                                  return next;
+                                });
+                              }}
+                            >
+                              <div className="flex items-center gap-3">
+                                <div className="text-xs font-semibold text-text-primary">{s.label}</div>
+                                {!hasValue && (
+                                  <div className="text-[11px] text-text-muted">(empty)</div>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <div className="text-[11px] text-text-muted font-mono">
+                                  {text ? `${text.length.toLocaleString()} chars` : '—'}
+                                </div>
+                                <div className={clsx("text-text-muted", isOpen && "rotate-180")}>
+                                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                  </svg>
+                                </div>
+                              </div>
+                            </button>
+                            {isOpen && (
+                              <div className="px-4 pb-4">
+                                <div className="flex items-center justify-end gap-2 mb-3">
+                                  <CopyButton text={text} label={`Copy ${s.label}`} variant="icon" />
+                                </div>
+                                {text ? (
+                                  <div className="max-h-[55vh] overflow-auto custom-scrollbar rounded-lg border border-border-subtle bg-black/20">
+                                    <pre className="text-[11px] leading-snug whitespace-pre min-w-max p-3">{text}</pre>
+                                  </div>
+                                ) : (
+                                  <div className="text-text-muted text-sm">No data available.</div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
                   </m.div>
                 )}
               </AnimatePresence>
