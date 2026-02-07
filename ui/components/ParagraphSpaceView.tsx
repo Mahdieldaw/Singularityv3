@@ -50,7 +50,7 @@ export function ParagraphSpaceView({ graph, paragraphProjection, claims, shadowS
     if (nodes.length > 0) {
       return nodes.map((n) => ({
         paragraphId: n.paragraphId,
-        modelIndex: n.modelIndex,
+        modelIndex: typeof n.modelIndex === "number" && n.modelIndex > 0 ? n.modelIndex : 1,
         x: n.x,
         y: n.y,
         mutualDegree: n.mutualDegree,
@@ -67,7 +67,7 @@ export function ParagraphSpaceView({ graph, paragraphProjection, claims, shadowS
       const theta = i * goldenAngle;
       return {
         paragraphId: p.id,
-        modelIndex: p.modelIndex ?? 0,
+        modelIndex: typeof p.modelIndex === "number" && p.modelIndex > 0 ? p.modelIndex : 1,
         x: r * Math.cos(theta),
         y: r * Math.sin(theta),
         mutualDegree: 0,
@@ -75,9 +75,23 @@ export function ParagraphSpaceView({ graph, paragraphProjection, claims, shadowS
     });
   }, [graph, paragraphProjection]);
 
-  const modelCount = useMemo(() => {
-    return nodesForRender.reduce((m, n) => Math.max(m, (n.modelIndex ?? 0) + 1), 0);
+  const modelIndices = useMemo(() => {
+    const set = new Set<number>();
+    for (const n of nodesForRender) {
+      if (typeof n.modelIndex === "number" && Number.isFinite(n.modelIndex) && n.modelIndex > 0) {
+        set.add(n.modelIndex);
+      }
+    }
+    return Array.from(set).sort((a, b) => a - b);
   }, [nodesForRender]);
+
+  const modelColorByIndex = useMemo(() => {
+    const map = new Map<number, string>();
+    for (let i = 0; i < modelIndices.length; i++) {
+      map.set(modelIndices[i], MODEL_COLORS[i % MODEL_COLORS.length]);
+    }
+    return map;
+  }, [modelIndices]);
 
   const paragraphPositions = useMemo(() => {
     const map = new Map<string, { x: number; y: number }>();
@@ -90,7 +104,7 @@ export function ParagraphSpaceView({ graph, paragraphProjection, claims, shadowS
   const paragraphModelIndex = useMemo(() => {
     const map = new Map<string, number>();
     for (const n of nodesForRender) {
-      map.set(n.paragraphId, n.modelIndex ?? 0);
+      map.set(n.paragraphId, n.modelIndex);
     }
     return map;
   }, [nodesForRender]);
@@ -315,7 +329,10 @@ export function ParagraphSpaceView({ graph, paragraphProjection, claims, shadowS
             const isVisible = isolatedModelIndex === null || node.modelIndex === isolatedModelIndex;
             const distortion = distortionByParagraphId.get(node.paragraphId);
             const t = distortion ? (distortion.distortion - distortionScale.lo) / (distortionScale.hi - distortionScale.lo) : 0;
-            const color = colorByDistortion && distortion ? distortionColor(t) : MODEL_COLORS[node.modelIndex % MODEL_COLORS.length];
+            const color =
+              colorByDistortion && distortion
+                ? distortionColor(t)
+                : modelColorByIndex.get(node.modelIndex) || MODEL_COLORS[0];
             const size = isHighlighted ? 8 : 5 + (node.mutualDegree || 0) * 0.5;
 
             return (
@@ -330,7 +347,7 @@ export function ParagraphSpaceView({ graph, paragraphProjection, claims, shadowS
                 strokeWidth={isHighlighted ? 2 : 0}
               >
                 <title>
-                  {`Paragraph ${node.paragraphId}\nModel ${node.modelIndex + 1}${
+                  {`Paragraph ${node.paragraphId}\nModel ${node.modelIndex}${
                     distortion
                       ? `\nDistortion ${(distortion.distortion || 0).toFixed(2)}\nAvg pre ${(distortion.avgPre || 0).toFixed(3)} · Avg post ${(distortion.avgPost || 0).toFixed(3)}`
                       : ""
@@ -404,20 +421,21 @@ export function ParagraphSpaceView({ graph, paragraphProjection, claims, shadowS
           >
             All
           </button>
-          {MODEL_COLORS.slice(0, Math.min(8, Math.max(1, modelCount))).map((color, i) => {
-            const active = isolatedModelIndex === i;
-            const dimmed = isolatedModelIndex !== null && isolatedModelIndex !== i;
+          {modelIndices.slice(0, 8).map((modelIndex) => {
+            const color = modelColorByIndex.get(modelIndex) || MODEL_COLORS[0];
+            const active = isolatedModelIndex === modelIndex;
+            const dimmed = isolatedModelIndex !== null && isolatedModelIndex !== modelIndex;
             return (
               <button
-                key={i}
+                key={modelIndex}
                 type="button"
                 className="flex items-center gap-1 px-2 py-1 rounded border hover:border-white/25"
                 style={{ borderColor: active ? "rgba(255,255,255,0.6)" : "rgba(255,255,255,0.1)", opacity: dimmed ? 0.5 : 1 }}
-                onClick={() => setIsolatedModelIndex((prev) => (prev === i ? null : i))}
-                title={active ? "Clear model isolate" : `Isolate model ${i + 1}`}
+                onClick={() => setIsolatedModelIndex((prev) => (prev === modelIndex ? null : modelIndex))}
+                title={active ? "Clear model isolate" : `Isolate model ${modelIndex}`}
               >
                 <div className="w-3 h-3 rounded-full" style={{ backgroundColor: color }} />
-                <span>{i + 1}</span>
+                <span>{modelIndex}</span>
               </button>
             );
           })}

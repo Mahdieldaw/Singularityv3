@@ -8,6 +8,7 @@ export type {
     ParagraphCluster,
     ClusteringResult,
     EmbeddingResult,
+    StatementEmbeddingResult,
 } from './types';
 
 // Configuration
@@ -30,7 +31,13 @@ export {
 export { hierarchicalCluster } from './hac';
 
 // Main functions
-export { generateEmbeddings, preloadModel, getEmbeddingStatus } from './embeddings';
+export {
+    generateEmbeddings,
+    generateStatementEmbeddings,
+    poolToParagraphEmbeddings,
+    preloadModel,
+    getEmbeddingStatus,
+} from './embeddings';
 export { buildClusters, toClusterableItems } from './engine';
 
 // Re-export for convenience

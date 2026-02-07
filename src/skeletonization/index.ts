@@ -52,7 +52,8 @@ export function getSourceData(
 
   if (batchResponses && typeof batchResponses === 'object') {
     const out: SkeletonizationInput['sourceData'] = [];
-    let fallbackIndex = 0;
+    // Start at 1 to match the 1-indexed modelIndex used by the shadow extraction system
+    let fallbackIndex = 1;
 
     for (const [providerId, responses] of Object.entries(batchResponses as Record<string, unknown>)) {
       const responseArray = Array.isArray(responses) ? responses : [responses];
@@ -67,9 +68,11 @@ export function getSourceData(
           continue;
         }
 
+        // Use stored modelIndex if valid (> 0), otherwise assign 1-indexed fallback
+        const storedIndex = typeof r?.modelIndex === 'number' ? r.modelIndex : 0;
         out.push({
           providerId,
-          modelIndex: typeof r?.modelIndex === 'number' ? r.modelIndex : fallbackIndex++,
+          modelIndex: storedIndex > 0 ? storedIndex : fallbackIndex++,
           text,
         });
       }

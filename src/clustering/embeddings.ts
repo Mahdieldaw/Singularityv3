@@ -12,7 +12,7 @@
 
 import type { ShadowParagraph } from '../shadow/ShadowParagraphProjector';
 import type { ShadowStatement } from '../shadow/ShadowExtractor';
-import type { EmbeddingResult } from './types';
+import type { EmbeddingResult, StatementEmbeddingResult } from './types';
 import { ClusteringConfig, DEFAULT_CONFIG } from './config';
 
 /**
@@ -185,6 +185,138 @@ export async function generateTextEmbeddings(
             }
         );
     });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// STATEMENT-LEVEL EMBEDDINGS + PARAGRAPH POOLING
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Embed individual statements and return a map keyed by statement ID.
+ *
+ * This is the foundation for the statement→paragraph pooling pipeline:
+ *   embed(statements) → pool into paragraph reps → geometry/substrate
+ */
+export async function generateStatementEmbeddings(
+    statements: ShadowStatement[],
+    config: ClusteringConfig = DEFAULT_CONFIG
+): Promise<StatementEmbeddingResult> {
+    await ensureOffscreen();
+
+    const startTime = performance.now();
+    const texts = statements.map(s => s.text);
+    const ids = statements.map(s => s.id);
+
+    return new Promise((resolve, reject) => {
+        chrome.runtime.sendMessage(
+            {
+                type: 'GENERATE_EMBEDDINGS',
+                payload: {
+                    texts,
+                    dimensions: config.embeddingDimensions,
+                    modelId: config.modelId,
+                },
+            },
+            (response) => {
+                if (chrome.runtime.lastError) {
+                    reject(new Error(chrome.runtime.lastError.message));
+                    return;
+                }
+
+                if (!response?.success) {
+                    reject(new Error(response?.error || 'Statement embedding generation failed'));
+                    return;
+                }
+
+                const embeddings = new Map<string, Float32Array>();
+                for (let i = 0; i < ids.length; i++) {
+                    const rawEntry = response.result.embeddings?.[i];
+                    if (!rawEntry || !Array.isArray(rawEntry) || rawEntry.length === 0) {
+                        reject(new Error(`Missing or malformed embedding for statement ${ids[i]}`));
+                        return;
+                    }
+
+                    const rawData = rawEntry as number[];
+                    const truncatedData = rawData.length > config.embeddingDimensions
+                        ? rawData.slice(0, config.embeddingDimensions)
+                        : rawData;
+
+                    const emb = new Float32Array(truncatedData);
+                    embeddings.set(ids[i], normalizeEmbedding(emb) as Float32Array<ArrayBuffer>);
+                }
+
+                resolve({
+                    embeddings,
+                    dimensions: config.embeddingDimensions,
+                    statementCount: ids.length,
+                    timeMs: performance.now() - startTime,
+                });
+            }
+        );
+    });
+}
+
+/**
+ * Pool statement embeddings into paragraph representations.
+ *
+ * Strategy: weighted mean of statement vectors within each paragraph.
+ * Weights combine statement confidence with stance-based signal boosts.
+ *
+ * Returns paragraph embeddings in the same Map<paragraphId, Float32Array>
+ * format as generateEmbeddings(), so downstream (substrate, knn) is unchanged.
+ */
+export function poolToParagraphEmbeddings(
+    paragraphs: ShadowParagraph[],
+    statements: ShadowStatement[],
+    statementEmbeddings: Map<string, Float32Array>,
+    dimensions: number
+): Map<string, Float32Array> {
+    const statementsById = new Map(statements.map(s => [s.id, s]));
+    const result = new Map<string, Float32Array>();
+
+    for (const para of paragraphs) {
+        const vecs: Array<{ vec: Float32Array; weight: number }> = [];
+
+        for (const sid of para.statementIds) {
+            const vec = statementEmbeddings.get(sid);
+            if (!vec) continue;
+            const stmt = statementsById.get(sid);
+            if (!stmt) continue;
+
+            // Weight: base confidence + signal boosts
+            let weight = Math.max(0.1, stmt.confidence);
+            if (stmt.signals.tension) weight *= 1.3;
+            if (stmt.signals.conditional) weight *= 1.2;
+            if (stmt.signals.sequence) weight *= 1.1;
+
+            vecs.push({ vec, weight });
+        }
+
+        if (vecs.length === 0) {
+            // No embeddable statements — zero vector (will appear isolated in substrate)
+            result.set(para.id, normalizeEmbedding(new Float32Array(dimensions)) as Float32Array<ArrayBuffer>);
+            continue;
+        }
+
+        // Weighted mean
+        const pooled = new Float32Array(dimensions);
+        let totalWeight = 0;
+        for (const { vec, weight } of vecs) {
+            for (let d = 0; d < dimensions; d++) {
+                pooled[d] += vec[d] * weight;
+            }
+            totalWeight += weight;
+        }
+        if (totalWeight > 0) {
+            for (let d = 0; d < dimensions; d++) {
+                pooled[d] /= totalWeight;
+            }
+        }
+
+        result.set(para.id, normalizeEmbedding(pooled) as Float32Array<ArrayBuffer>);
+    }
+
+    return result;
 }
 
 /**

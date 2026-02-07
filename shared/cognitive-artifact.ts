@@ -31,6 +31,7 @@ export function buildCognitiveArtifact(
       preSemantic: pipeline?.preSemantic
         ? { hint: pipeline.preSemantic.lens?.shape ?? 'sparse' }
         : undefined,
+      alignment: mapper?.alignment ?? undefined,
     },
     semantic: {
       claims: mapper?.claims ?? [],
@@ -44,6 +45,8 @@ export function buildCognitiveArtifact(
       graph: traversalGraph
         ? {
           claims: traversalGraph.claims ?? [],
+          edges: traversalGraph.edges ?? [],
+          conditionals: traversalGraph.conditionals ?? [],
           tensions: traversalGraph.tensions ?? [],
           tiers: traversalGraph.tiers ?? [],
           maxTier: traversalGraph.maxTier ?? 0,
@@ -52,6 +55,8 @@ export function buildCognitiveArtifact(
         }
         : {
           claims: [],
+          edges: [],
+          conditionals: [],
           tensions: [],
           tiers: [],
           maxTier: 0,

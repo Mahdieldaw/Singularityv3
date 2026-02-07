@@ -92,7 +92,7 @@ export class CognitivePipelineHandler {
                       pid,
                       {
                         text: last?.text || "",
-                        modelIndex: last?.meta?.modelIndex ?? 0,
+                        modelIndex: last?.meta?.modelIndex || last?.responseIndex || 0,
                         status: last?.status || "completed",
                         meta: last?.meta,
                       },
@@ -747,20 +747,56 @@ export class CognitivePipelineHandler {
         if (payload?.isTraversalContinuation && payload?.traversalState) {
           try {
             const { buildChewedSubstrate, normalizeTraversalState, getSourceData } = await import('../../skeletonization');
+
+            // Reconstruct citationOrder from mapping meta so modelIndex values
+            // match the 1-indexed scheme the shadow system uses.
+            const rawCitationOrder = latestMappingMeta?.citationSourceOrder;
+            let citationOrderArr = []; // ordered provider IDs
+            if (rawCitationOrder && typeof rawCitationOrder === 'object') {
+              citationOrderArr = Object.entries(rawCitationOrder)
+                .sort(([a], [b]) => Number(a) - Number(b))
+                .map(([, pid]) => pid);
+            }
+
             const sourceDataFromResponses = (priorResponses || [])
               .filter((r) => r && r.responseType === "batch" && r.providerId && r.text?.trim())
-              .map((r, idx) => ({
-                providerId: r.providerId,
-                modelIndex: typeof r.responseIndex === 'number'
-                  ? r.responseIndex
-                  : (typeof r?.meta?.modelIndex === 'number' ? r.meta.modelIndex : idx),
-                text: r.text,
-              }));
+              .map((r, idx) => {
+                // Use citationOrder to derive the same 1-indexed modelIndex
+                // that StepExecutor.executeMappingStep used during shadow extraction
+                let modelIndex;
+                if (citationOrderArr.length > 0) {
+                  const citIdx = citationOrderArr.indexOf(r.providerId);
+                  modelIndex = citIdx >= 0 ? citIdx + 1 : idx + 1;
+                } else {
+                  // Fallback: try stored values, but ensure 1-indexed
+                  const stored = typeof r.responseIndex === 'number'
+                    ? r.responseIndex
+                    : (typeof r?.meta?.modelIndex === 'number' ? r.meta.modelIndex : null);
+                  modelIndex = stored != null && stored > 0 ? stored : idx + 1;
+                }
+                return {
+                  providerId: r.providerId,
+                  modelIndex,
+                  text: r.text,
+                };
+              });
+
+            // Deduplicate: if two sources ended up with the same modelIndex, fix it
+            const usedIndices = new Set();
+            let nextFallback = sourceDataFromResponses.reduce((max, s) => Math.max(max, s.modelIndex), 0) + 1;
+            for (const s of sourceDataFromResponses) {
+              if (usedIndices.has(s.modelIndex)) {
+                console.warn(`[Skeletonization] Duplicate modelIndex ${s.modelIndex} for ${s.providerId}, reassigning to ${nextFallback}`);
+                s.modelIndex = nextFallback++;
+              }
+              usedIndices.add(s.modelIndex);
+            }
 
             console.log('[Skeletonization] Source data from DB:', {
               count: sourceDataFromResponses.length,
-              providers: sourceDataFromResponses.map(s => s.providerId),
+              providers: sourceDataFromResponses.map(s => `${s.providerId}(idx=${s.modelIndex})`),
               hasText: sourceDataFromResponses.map(s => !!s.text?.trim()),
+              citationOrderAvailable: citationOrderArr.length > 0,
             });
 
             const sourceData = sourceDataFromResponses.length > 0

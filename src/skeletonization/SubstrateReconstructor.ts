@@ -32,7 +32,22 @@ export function reconstructSubstrate(
   const outputs: ReconstructedOutput[] = [];
 
   for (const source of sourceData) {
-    const modelParagraphs = (paragraphsByModel.get(source.modelIndex) ?? []).slice();
+    let modelParagraphs = (paragraphsByModel.get(source.modelIndex) ?? []).slice();
+
+    // Defensive: if no paragraphs matched by modelIndex, the indexing may be
+    // misaligned (e.g. 0-indexed vs 1-indexed).  Try the opposite convention.
+    if (modelParagraphs.length === 0) {
+      const alt = paragraphsByModel.get(source.modelIndex - 1)
+        ?? paragraphsByModel.get(source.modelIndex + 1);
+      if (alt && alt.length > 0) {
+        console.warn(
+          `[SubstrateReconstructor] No paragraphs for modelIndex=${source.modelIndex} ` +
+          `(${source.providerId}), found ${alt.length} at adjacent index — using them.`
+        );
+        modelParagraphs = alt.slice();
+      }
+    }
+
     modelParagraphs.sort((a, b) => a.paragraphIndex - b.paragraphIndex);
 
     const reconstructedParagraphs: ReconstructedParagraph[] = [];
@@ -96,7 +111,18 @@ export function reconstructSubstrate(
       else outputParts.push(p.text);
     }
 
-    const outputText = outputParts.join('\n\n').replace(/\n{4,}/g, '\n\n\n').trim();
+    let outputText = outputParts.join('\n\n').replace(/\n{4,}/g, '\n\n\n').trim();
+
+    // Fallback: if reconstruction produced empty text but we have source text,
+    // pass through the original (no paragraphs matched = no skeletonization needed)
+    if (!outputText && source.text.trim()) {
+      console.warn(
+        `[SubstrateReconstructor] Empty reconstruction for modelIndex=${source.modelIndex} ` +
+        `(${source.providerId}), falling back to source text.`
+      );
+      outputText = source.text.trim();
+      protectedCount = 1; // Count as passthrough
+    }
 
     outputs.push({
       modelIndex: source.modelIndex,

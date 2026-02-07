@@ -68,3 +68,10 @@ export interface EmbeddingResult {
     dimensions: number;
     timeMs: number;
 }
+
+export interface StatementEmbeddingResult {
+    embeddings: Map<string, EmbeddingVector>;  // statementId -> embedding
+    dimensions: number;
+    statementCount: number;
+    timeMs: number;
+}

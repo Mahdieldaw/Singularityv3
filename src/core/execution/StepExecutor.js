@@ -477,6 +477,7 @@ export class StepExecutor {
     // ════════════════════════════════════════════════════════════════════════
     let clusteringResult = null;
     let embeddingResult = null;
+    let statementEmbeddingResult = null;
     let paragraphClusteringSummary = null;
     let substrateSummary = null;
     let substrateGraph = null;
@@ -488,15 +489,28 @@ export class StepExecutor {
     if (paragraphResult.paragraphs.length > 0) {
       try {
         const clusteringModule = await import('../../clustering');
-        const { generateEmbeddings, getEmbeddingStatus, buildClusters, DEFAULT_CONFIG } = clusteringModule;
+        const { generateStatementEmbeddings, poolToParagraphEmbeddings, getEmbeddingStatus, buildClusters, DEFAULT_CONFIG } = clusteringModule;
         const { buildGeometricSubstrate, isDegenerate } = await import('../../geometry');
         const { buildPreSemanticInterpretation } = await import('../../geometry/interpretation');
 
-        embeddingResult = await generateEmbeddings(
-          paragraphResult.paragraphs,
+        // Statement-level embeddings → pooled paragraph representations
+        statementEmbeddingResult = await generateStatementEmbeddings(
           shadowResult.statements,
           DEFAULT_CONFIG
         );
+
+        const pooledParagraphEmbeddings = poolToParagraphEmbeddings(
+          paragraphResult.paragraphs,
+          shadowResult.statements,
+          statementEmbeddingResult.embeddings,
+          DEFAULT_CONFIG.embeddingDimensions
+        );
+
+        embeddingResult = {
+          embeddings: pooledParagraphEmbeddings,
+          dimensions: DEFAULT_CONFIG.embeddingDimensions,
+          timeMs: statementEmbeddingResult.timeMs,
+        };
 
         /** @type {"none" | "webgpu" | "wasm"} */
         let embeddingBackend = 'none';
@@ -820,7 +834,8 @@ export class StepExecutor {
                   regions,
                   regionProfiles,
                   citationOrder.length,
-                  unifiedEdges
+                  unifiedEdges,
+                  statementEmbeddingResult?.embeddings || null
                 );
 
                 let completeness = null;
@@ -855,6 +870,36 @@ export class StepExecutor {
                 } catch (err) {
                   completeness = null;
                   console.warn('[Reconciliation] Failed:', getErrorMessage(err));
+                }
+
+                // ── CLAIM↔GEOMETRY ALIGNMENT ─────────────────────────────
+                let alignmentResult = null;
+                try {
+                  if (statementEmbeddingResult?.embeddings && regions.length > 0 && enrichedClaims.length > 0) {
+                    const { buildClaimVectors, computeAlignment } = await import('../../geometry');
+                    const claimVectors = buildClaimVectors(
+                      enrichedClaims,
+                      statementEmbeddingResult.embeddings,
+                      statementEmbeddingResult.dimensions
+                    );
+                    if (claimVectors.length > 0) {
+                      alignmentResult = computeAlignment(
+                        claimVectors,
+                        regions,
+                        regionProfiles,
+                        statementEmbeddingResult.embeddings
+                      );
+                      console.log('[Alignment]', {
+                        globalCoverage: `${(alignmentResult.globalCoverage * 100).toFixed(1)}%`,
+                        unattended: alignmentResult.unattendedRegionIds.length,
+                        splits: alignmentResult.splitAlerts.length,
+                        merges: alignmentResult.mergeAlerts.length,
+                      });
+                    }
+                  }
+                } catch (err) {
+                  alignmentResult = null;
+                  console.warn('[Alignment] Failed:', getErrorMessage(err));
                 }
 
                 const claimOrder = new Map();
@@ -1126,6 +1171,7 @@ export class StepExecutor {
                     forcingPoints,
                     preSemantic: preSemanticInterpretation || null,
                     ...(completeness ? { completeness } : {}),
+                    ...(alignmentResult ? { alignment: alignmentResult } : {}),
 
                     // SHADOW DATA
                     shadow: {

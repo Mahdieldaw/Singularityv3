@@ -55,6 +55,16 @@ export type {
     EdgeList,
 } from './interpretation/types';
 
+// Alignment (claim↔geometry)
+export type {
+    ClaimVector,
+    RegionCoverage,
+    SplitAlert,
+    MergeAlert,
+    AlignmentResult,
+} from './alignment';
+export { buildClaimVectors, computeAlignment } from './alignment';
+
 export { deriveLens } from './interpretation/lens';
 export { buildRegions } from './interpretation/regions';
 export { profileRegions } from './interpretation/profiles';

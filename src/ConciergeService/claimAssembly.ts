@@ -23,11 +23,15 @@ export async function reconstructProvenance(
     regions: Region[],
     regionProfiles: RegionProfile[],
     totalModelCount: number,
-    edges: MapperEdge[] = []
+    edges: MapperEdge[] = [],
+    statementEmbeddings: Map<string, Float32Array> | null = null
 ): Promise<EnrichedClaim[]> {
     const statementsById = new Map(statements.map(s => [s.id, s]));
     const claimTexts = claims.map(c => `${c.label}. ${c.text || ''}`);
     const claimEmbeddings = await generateTextEmbeddings(claimTexts);
+
+    // Use statement-level matching when available
+    const useStatementMatching = statementEmbeddings !== null && statementEmbeddings.size > 0;
 
     const paragraphToRegionIds = new Map<string, string[]>();
     for (const region of regions) {
@@ -99,38 +103,104 @@ export async function reconstructProvenance(
         return byId;
     })();
 
+    // Pre-build statement→paragraph lookup for statement-level matching
+    const statementToParagraphId = new Map<string, string>();
+    for (const para of paragraphs) {
+        for (const sid of para.statementIds) {
+            statementToParagraphId.set(sid, para.id);
+        }
+    }
+
     return claims.map((claim, idx) => {
         const claimEmbedding = claimEmbeddings.get(String(idx));
 
         const supporters = Array.isArray(claim.supporters) ? claim.supporters : [];
-        const candidateParagraphs = paragraphs.filter(p => supporters.includes(p.modelIndex));
-        const scored: Array<{ paragraph: ShadowParagraph; similarity: number }> = [];
 
-        if (claimEmbedding) {
-            for (const paragraph of candidateParagraphs) {
-                const paragraphEmbedding = paragraphEmbeddings.get(paragraph.id);
-                if (!paragraphEmbedding) continue;
+        let sourceStatementIds: string[];
 
-                const similarity = cosineSimilarity(claimEmbedding, paragraphEmbedding);
-                if (similarity > 0.5) {
-                    scored.push({ paragraph, similarity });
+        if (useStatementMatching && claimEmbedding) {
+            // ── STATEMENT-LEVEL MATCHING (fine-grained) ─────────────────
+            // Match claim embedding directly to individual statement embeddings.
+            // Only consider statements from supporting models.
+            const supporterSet = new Set(supporters);
+            const scoredStatements: Array<{ statementId: string; similarity: number }> = [];
+
+            for (const stmt of statements) {
+                if (!supporterSet.has(stmt.modelIndex)) continue;
+                const stmtEmb = statementEmbeddings!.get(stmt.id);
+                if (!stmtEmb) continue;
+
+                const similarity = cosineSimilarity(claimEmbedding, stmtEmb);
+                if (similarity > 0.45) {
+                    scoredStatements.push({ statementId: stmt.id, similarity });
                 }
             }
+
+            scoredStatements.sort((a, b) => {
+                if (b.similarity !== a.similarity) return b.similarity - a.similarity;
+                return a.statementId.localeCompare(b.statementId);
+            });
+
+            // Take top-K statements directly (more precise than paragraph grab-all)
+            sourceStatementIds = scoredStatements.slice(0, 12).map(s => s.statementId);
+
+            if (sourceStatementIds.length === 0) {
+                const candidateParagraphs = paragraphs.filter(p => supporters.includes(p.modelIndex));
+                const scored: Array<{ paragraph: ShadowParagraph; similarity: number }> = [];
+
+                for (const paragraph of candidateParagraphs) {
+                    const paragraphEmbedding = paragraphEmbeddings.get(paragraph.id);
+                    if (!paragraphEmbedding) continue;
+
+                    const similarity = cosineSimilarity(claimEmbedding, paragraphEmbedding);
+                    if (similarity > 0.5) {
+                        scored.push({ paragraph, similarity });
+                    }
+                }
+
+                scored.sort((a, b) => {
+                    if (b.similarity !== a.similarity) return b.similarity - a.similarity;
+                    return a.paragraph.id.localeCompare(b.paragraph.id);
+                });
+
+                const matched = scored.slice(0, 5);
+                const sourceStatementIdSet = new Set<string>();
+                for (const { paragraph } of matched) {
+                    for (const sid of paragraph.statementIds) sourceStatementIdSet.add(sid);
+                }
+                sourceStatementIds = Array.from(sourceStatementIdSet);
+            }
+        } else {
+            // ── PARAGRAPH-LEVEL MATCHING (fallback) ─────────────────────
+            const candidateParagraphs = paragraphs.filter(p => supporters.includes(p.modelIndex));
+            const scored: Array<{ paragraph: ShadowParagraph; similarity: number }> = [];
+
+            if (claimEmbedding) {
+                for (const paragraph of candidateParagraphs) {
+                    const paragraphEmbedding = paragraphEmbeddings.get(paragraph.id);
+                    if (!paragraphEmbedding) continue;
+
+                    const similarity = cosineSimilarity(claimEmbedding, paragraphEmbedding);
+                    if (similarity > 0.5) {
+                        scored.push({ paragraph, similarity });
+                    }
+                }
+            }
+
+            scored.sort((a, b) => {
+                if (b.similarity !== a.similarity) return b.similarity - a.similarity;
+                return a.paragraph.id.localeCompare(b.paragraph.id);
+            });
+
+            const matched = scored.slice(0, 5);
+            const sourceStatementIdSet = new Set<string>();
+            for (const { paragraph } of matched) {
+                for (const sid of paragraph.statementIds) sourceStatementIdSet.add(sid);
+            }
+            sourceStatementIds = Array.from(sourceStatementIdSet);
         }
 
-        scored.sort((a, b) => {
-            if (b.similarity !== a.similarity) return b.similarity - a.similarity;
-            return a.paragraph.id.localeCompare(b.paragraph.id);
-        });
-
-        const matched = scored.slice(0, 5);
-
-        const sourceStatementIdSet = new Set<string>();
-        for (const { paragraph } of matched) {
-            for (const sid of paragraph.statementIds) sourceStatementIdSet.add(sid);
-        }
-
-        const sourceStatementIds = Array.from(sourceStatementIdSet).sort();
+        sourceStatementIds.sort();
         const sourceStatements = sourceStatementIds
             .map(id => statementsById.get(id))
             .filter((s): s is ShadowStatement => s !== undefined);
@@ -141,9 +211,12 @@ export async function reconstructProvenance(
         const hasSequenceSignal = sourceStatements.some(s => s.signals.sequence);
         const hasTensionSignal = sourceStatements.some(s => s.signals.tension);
 
+        // Derive regions from source statements → paragraphs → regions
         const matchedRegionIds = new Set<string>();
-        for (const { paragraph } of matched) {
-            const regionIds = paragraphToRegionIds.get(paragraph.id) || [];
+        for (const sid of sourceStatementIds) {
+            const pid = statementToParagraphId.get(sid);
+            if (!pid) continue;
+            const regionIds = paragraphToRegionIds.get(pid) || [];
             for (const rid of regionIds) matchedRegionIds.add(rid);
         }
 
