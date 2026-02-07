@@ -50,6 +50,7 @@ export interface ReconstructedOutput {
     protectedStatementCount: number;
     skeletonizedStatementCount: number;
     removedStatementCount: number;
+    isPassthrough?: boolean;
   };
 }
 

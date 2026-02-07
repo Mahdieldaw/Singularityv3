@@ -113,6 +113,8 @@ export function reconstructSubstrate(
 
     let outputText = outputParts.join('\n\n').replace(/\n{4,}/g, '\n\n\n').trim();
 
+    let isPassthrough = false;
+
     // Fallback: if reconstruction produced empty text but we have source text,
     // pass through the original (no paragraphs matched = no skeletonization needed)
     if (!outputText && source.text.trim()) {
@@ -121,7 +123,8 @@ export function reconstructSubstrate(
         `(${source.providerId}), falling back to source text.`
       );
       outputText = source.text.trim();
-      protectedCount = 1; // Count as passthrough
+      isPassthrough = true;
+      // protectedCount remains whatever it was (likely 0), do not mutate it to flag passthrough
     }
 
     outputs.push({
@@ -135,6 +138,7 @@ export function reconstructSubstrate(
         protectedStatementCount: protectedCount,
         skeletonizedStatementCount: skeletonizedCount,
         removedStatementCount: removedCount,
+        isPassthrough,
       },
     });
   }

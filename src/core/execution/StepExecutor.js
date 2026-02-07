@@ -877,10 +877,16 @@ export class StepExecutor {
                 try {
                   if (statementEmbeddingResult?.embeddings && regions.length > 0 && enrichedClaims.length > 0) {
                     const { buildClaimVectors, computeAlignment } = await import('../../geometry');
+                    // Ensure dimensions are valid (fallback to length of first embedding if dimensions missing)
+                    const dimensions = statementEmbeddingResult.dimensions ||
+                      (statementEmbeddingResult.embeddings.size > 0
+                        ? (statementEmbeddingResult.embeddings.values().next().value?.length || 0)
+                        : 0);
+
                     const claimVectors = buildClaimVectors(
                       enrichedClaims,
                       statementEmbeddingResult.embeddings,
-                      statementEmbeddingResult.dimensions
+                      dimensions
                     );
                     if (claimVectors.length > 0) {
                       alignmentResult = computeAlignment(

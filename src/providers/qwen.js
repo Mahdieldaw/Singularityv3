@@ -118,6 +118,19 @@ export class QwenSessionApi {
         const response = await this.fetch(`${QWEN_WEB_BASE}/`, {
           credentials: "include",
         });
+
+        if (!response.ok) {
+          lastError = this._createError(
+            "network",
+            `Failed to fetch CSRF page: ${response.status} ${response.statusText}`
+          );
+          if (attempt < MAX_ATTEMPTS - 1) {
+            await new Promise((r) => setTimeout(r, 500));
+            continue;
+          }
+          throw lastError;
+        }
+
         const html = await response.text();
         const match = /csrfToken\s?=\s?"([^"]+)"/.exec(html);
         if (!match || !match[1]) {

@@ -747,16 +747,12 @@ export class CognitivePipelineHandler {
         if (payload?.isTraversalContinuation && payload?.traversalState) {
           try {
             const { buildChewedSubstrate, normalizeTraversalState, getSourceData } = await import('../../skeletonization');
+            const { normalizeCitationSourceOrder } = await import('../../../shared/citation-utils.js');
 
-            // Reconstruct citationOrder from mapping meta so modelIndex values
-            // match the 1-indexed scheme the shadow system uses.
-            const rawCitationOrder = latestMappingMeta?.citationSourceOrder;
-            let citationOrderArr = []; // ordered provider IDs
-            if (rawCitationOrder && typeof rawCitationOrder === 'object') {
-              citationOrderArr = Object.entries(rawCitationOrder)
-                .sort(([a], [b]) => Number(a) - Number(b))
-                .map(([, pid]) => pid);
-            }
+            // Reconstruct citationOrder from mapping meta using shared helper
+            const citationOrderArr = normalizeCitationSourceOrder(latestMappingMeta?.citationSourceOrder);
+
+            console.log(`[CognitiveHandler] Resolved citation order:`, citationOrderArr);
 
             const sourceDataFromResponses = (priorResponses || [])
               .filter((r) => r && r.responseType === "batch" && r.providerId && r.text?.trim())
