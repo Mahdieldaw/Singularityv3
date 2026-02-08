@@ -6,13 +6,12 @@ interface ForcingPointOption {
   claimId: string;
   label: string;
   text?: string;
-  prerequisites?: Array<{ claimId: string; label: string; text?: string }>;
 }
 
 interface TraversalForcingPointCardProps {
   forcingPoint: {
     id: string;
-    type: 'conditional' | 'prerequisite' | 'conflict';
+    type: 'conditional' | 'conflict';
     tier: number;
     question: string;
     condition: string;
@@ -69,10 +68,6 @@ export const TraversalForcingPointCard: React.FC<TraversalForcingPointCardProps>
     case 'conflict':
       typeIcon = '⚖️';
       typeLabel = 'Conflict';
-      break;
-    case 'prerequisite':
-      typeIcon = '🔒';
-      typeLabel = 'Prerequisite';
       break;
     case 'conditional':
       typeIcon = '🔀';
@@ -220,7 +215,6 @@ export const TraversalForcingPointCard: React.FC<TraversalForcingPointCardProps>
         {(forcingPoint.options || []).map((option) => {
           const claim = claims.find(c => c.id === option.claimId);
           const detailsText = String(claim?.text || option?.text || '').trim();
-          const prerequisites = Array.isArray(option?.prerequisites) ? option.prerequisites : [];
           const isSelected = selectedOption === option.claimId;
           const isThisResolved = isResolved && resolution?.selectedClaimId === option.claimId;
 
@@ -259,23 +253,6 @@ export const TraversalForcingPointCard: React.FC<TraversalForcingPointCardProps>
                   {detailsText && (
                     <div className="text-sm text-text-muted mb-2">
                       {detailsText}
-                    </div>
-                  )}
-                  {prerequisites.length > 0 && (
-                    <div className="mt-2">
-                      <div className="text-xs text-text-muted mb-1">Prerequisites</div>
-                      <div className="space-y-1">
-                        {prerequisites.map((p) => {
-                          const label = String(p?.label || p?.claimId || '').trim();
-                          if (!label) return null;
-                          const extra = String(p?.text || '').trim();
-                          return (
-                            <div key={String(p?.claimId || label)} className="text-xs text-text-muted">
-                              {extra ? `${label} — ${extra}` : label}
-                            </div>
-                          );
-                        })}
-                      </div>
                     </div>
                   )}
                 </div>

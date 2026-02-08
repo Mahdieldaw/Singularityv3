@@ -10,7 +10,6 @@ import { generateTextEmbeddings } from '../clustering/embeddings';
 import {
     Claim,
     ConditionalGate,
-    PrerequisiteGate,
     ConflictEdge,
     SemanticMapperOutput
 } from './contract';
@@ -58,12 +57,6 @@ export async function reconstructProvenance(
             supportCountById.set(c.id, supporters.length);
         }
 
-        const prereqOutCount = new Map<string, number>();
-        for (const e of edges || []) {
-            if (!e || e.type !== 'prerequisite') continue;
-            prereqOutCount.set(e.from, (prereqOutCount.get(e.from) || 0) + 1);
-        }
-
         const seenPairs = new Set<string>();
         for (const e of edges || []) {
             if (!e || e.type !== 'conflict') continue;
@@ -80,8 +73,6 @@ export async function reconstructProvenance(
             const aRatio = aCount / denom;
             const bRatio = bCount / denom;
 
-            const aIsFoundation = (prereqOutCount.get(a) || 0) > 0;
-            const bIsFoundation = (prereqOutCount.get(b) || 0) > 0;
             const aIsHighSupport = aRatio >= 0.25;
             const bIsHighSupport = bRatio >= 0.25;
 
@@ -90,13 +81,13 @@ export async function reconstructProvenance(
             if (supportDeltaRatio >= 0.15) {
                 const highId = aRatio >= bRatio ? a : b;
                 const lowId = aRatio >= bRatio ? b : a;
-                const highIsStable = (prereqOutCount.get(highId) || 0) > 0 || (supportCountById.get(highId) || 0) / denom >= 0.25;
+                const highIsStable = (supportCountById.get(highId) || 0) / denom >= 0.25;
                 if (highIsStable) {
                     byId.set(lowId, 'challenger');
                 }
             } else {
-                if ((aIsFoundation || aIsHighSupport) && byId.get(a) !== 'challenger') byId.set(a, 'anchor');
-                if ((bIsFoundation || bIsHighSupport) && byId.get(b) !== 'challenger') byId.set(b, 'anchor');
+                if (aIsHighSupport && byId.get(a) !== 'challenger') byId.set(a, 'anchor');
+                if (bIsHighSupport && byId.get(b) !== 'challenger') byId.set(b, 'anchor');
             }
         }
 
@@ -308,7 +299,6 @@ export interface AssembledClaim {
     // Gates (from mapper)
     gates: {
         conditionals: ConditionalGate[];
-        prerequisites: PrerequisiteGate[];
     };
 
     // Relationships (from mapper)
@@ -338,7 +328,6 @@ export interface ClaimAssemblyResult {
     meta: {
         totalClaims: number;
         conditionalGateCount: number;
-        prerequisiteGateCount: number;
         conflictCount: number;
         modelCount: number;
     };
@@ -397,20 +386,6 @@ export function assembleClaims(
     });
 
     // Second pass: compute inverse relationships (enables)
-    const claimMap = new Map(claims.map(c => [c.id, c]));
-
-    for (const claim of claims) {
-        // For each prerequisite gate, the required claim "enables" this claim
-        for (const prereq of claim.gates.prerequisites) {
-            const requiredClaim = claimMap.get(prereq.claimId);
-            if (requiredClaim && !requiredClaim.enables.includes(claim.id)) {
-                requiredClaim.enables.push(claim.id);
-            }
-        }
-        // Explicit enables from mapper are already on claim.enables
-    }
-
-    // Deduplicate enables for all claims
     for (const claim of claims) {
         claim.enables = Array.from(new Set(claim.enables));
     }
@@ -418,9 +393,6 @@ export function assembleClaims(
     // Compute meta
     const conditionalGateCount = claims.reduce(
         (sum, c) => sum + c.gates.conditionals.length, 0
-    );
-    const prerequisiteGateCount = claims.reduce(
-        (sum, c) => sum + c.gates.prerequisites.length, 0
     );
     const conflictCount = claims.reduce(
         (sum, c) => sum + c.conflicts.length, 0
@@ -431,7 +403,6 @@ export function assembleClaims(
         meta: {
             totalClaims: claims.length,
             conditionalGateCount,
-            prerequisiteGateCount,
             conflictCount,
             modelCount,
         },
@@ -446,7 +417,7 @@ export function assembleClaims(
  * Get provenance for a specific gate
  */
 export function getGateProvenance(
-    gate: ConditionalGate | PrerequisiteGate,
+    gate: ConditionalGate,
     statementMap: Map<string, ShadowStatement>
 ): ShadowStatement[] {
     return gate.sourceStatementIds
@@ -483,11 +454,6 @@ export function validateProvenance(
 
         // Check gate provenance
         for (const gate of claim.gates.conditionals) {
-            for (const id of gate.sourceStatementIds) {
-                if (!statementMap.has(id)) missing.push(id);
-            }
-        }
-        for (const gate of claim.gates.prerequisites) {
             for (const id of gate.sourceStatementIds) {
                 if (!statementMap.has(id)) missing.push(id);
             }

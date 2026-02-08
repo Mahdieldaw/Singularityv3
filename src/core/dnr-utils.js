@@ -1,7 +1,7 @@
 /**
  * HTOS DNR Utilities
  * - Provides scoped and temporary DNR rule management
- * - Implements provider prerequisite gates
+ * - Implements provider gates
  * - Ensures minimal blast radius for network modifications
  *
  * Build-phase safe: emitted to dist/core/*

@@ -293,7 +293,7 @@ function buildTermRelations(
     const termsFrom = claimTerms.get(edge.from) || [];
     const termsTo = claimTerms.get(edge.to) || [];
 
-    if (edge.type === 'supports' || edge.type === 'prerequisite') {
+    if (edge.type === 'supports') {
       // Terms in supporting claims are contextually related
       for (const termA of termsFrom) {
         if (!related.has(termA)) related.set(termA, new Set());
@@ -546,8 +546,7 @@ function formatBridge(matched: MatchedClaim[], edges: RelevantEdge[]): string {
     for (const e of edges) {
       const verb = e.type === 'conflicts' ? '↔ conflicts' :
         e.type === 'supports' ? '→ supports' :
-          e.type === 'tradeoff' ? '⇄ tradeoff' :
-            e.type === 'prerequisite' ? '→ requires' : '—';
+          e.type === 'tradeoff' ? '⇄ tradeoff' : '—';
       lines.push(`  ${e.fromLabel} ${verb} ${e.toLabel}`);
     }
   }

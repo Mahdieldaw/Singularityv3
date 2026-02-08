@@ -2,7 +2,7 @@ import { parseMapperArtifact } from '../../../shared/parsing-utils';
 import { extractUserMessage } from '../context-utils.js';
 import { DEFAULT_THREAD } from '../../../shared/messaging.js';
 import { buildCognitiveArtifact } from '../../../shared/cognitive-artifact';
-import { normalizeCitationSourceOrder } from '../../../shared/citation-utils.js';
+import { normalizeCitationSourceOrder } from '../../shared/citation-utils.js';
 
 /** Extract claims array from a CognitiveArtifact or legacy MapperArtifact */
 function extractClaims(artifact) {
@@ -207,103 +207,6 @@ export class CognitivePipelineHandler {
         console.log(`[CognitiveHandler] Orchestrating singularity for Turn = ${context.canonicalAiTurnId}, Provider = ${singularityProviderId}`);
         let singularityStep = null;
         try {
-          let structuralAnalysis = null;
-          try {
-            const { computeStructuralAnalysis, computeFullAnalysis } = await import('../PromptMethods');
-
-            // Collect batch responses if available (Turn 1 transition)
-            const promptStep = steps.find(s => s.type === 'prompt');
-            const promptResult = promptStep ? stepResults.get(promptStep.stepId) : null;
-            const batchResults = promptResult?.result?.results || null;
-
-            if (batchResults && Object.keys(batchResults).length > 0) {
-              const rawCitationOrder = mappingResult?.meta?.citationSourceOrder;
-              let normalizedCitationOrder = {}; // providerId -> numericIndex
-
-              if (rawCitationOrder && typeof rawCitationOrder === 'object') {
-                const entries = Object.entries(rawCitationOrder);
-                if (entries.length > 0) {
-                  const [firstKey, firstVal] = entries[0];
-                  // If values are numbers AND key is not numeric, treat as provider -> index
-                  const isProviderToIndex = typeof firstVal === 'number' && Number.isFinite(firstVal) && isNaN(Number(firstKey));
-
-                  if (isProviderToIndex) {
-                    // Start with what we have, but filter for valid numbers
-                    Object.entries(rawCitationOrder).forEach(([k, v]) => {
-                      if (typeof v === 'number' && Number.isFinite(v)) {
-                        normalizedCitationOrder[k] = v;
-                      }
-                    });
-                  } else {
-                    // Treat as index -> provider and invert
-                    entries.forEach(([k, v]) => {
-                      if (v && typeof v === 'string') {
-                        const index = Number(k);
-                        if (Number.isFinite(index)) {
-                          normalizedCitationOrder[v] = index;
-                        } else {
-                          console.warn(`[CognitivePipelineHandler] Invalid citation index '${k}' for provider '${v}'. Skipping.`);
-                        }
-                      }
-                    });
-                  }
-                }
-              }
-
-              const batchResponses = [];
-              const providersInResults = Object.keys(batchResults);
-              const processedProviders = new Set();
-
-              // 1. Process providers that exist in our confirmed citation order
-              const sortedByCitation = Object.entries(normalizedCitationOrder)
-                .sort(([, a], [, b]) => (a || 0) - (b || 0));
-
-              sortedByCitation.forEach(([providerId, index]) => {
-                const resp = batchResults[providerId];
-                if (resp) {
-                  // Double check index is a number
-                  const validIndex = Number.isFinite(Number(index)) ? Number(index) : 1;
-                  batchResponses.push({
-                    modelIndex: validIndex,
-                    content: resp.text || ""
-                  });
-                  processedProviders.add(providerId);
-                }
-              });
-
-              // 2. Append any providers present in batchResults but missing from citationOrder
-              // Safely compute fallback index, ensuring no NaNs
-              const validIndices = batchResponses.map(r => r.modelIndex).filter(n => Number.isFinite(n));
-              let fallbackIndex = validIndices.length > 0
-                ? Math.max(...validIndices) + 1
-                : 1;
-
-              if (!Number.isFinite(fallbackIndex)) fallbackIndex = 1;
-
-              providersInResults.forEach(providerId => {
-                if (!processedProviders.has(providerId)) {
-                  batchResponses.push({
-                    modelIndex: fallbackIndex++,
-                    content: batchResults[providerId]?.text || ""
-                  });
-                }
-              });
-
-              console.log(`[CognitiveHandler] Normalized batchResponses (${batchResponses.length} models) from ${providersInResults.length} raw results`);
-              structuralAnalysis = computeFullAnalysis(batchResponses, mappingArtifact, userMessageForSingularity);
-            } else {
-              console.log(`[CognitiveHandler] Running base structural analysis (no batch responses found)`);
-              structuralAnalysis = computeStructuralAnalysis(mappingArtifact);
-            }
-          } catch (e) {
-            console.error("[CognitiveHandler] Analysis failed:", e);
-          }
-
-          if (structuralAnalysis && Array.isArray(structuralAnalysis.claimsWithLeverage) && Array.isArray(structuralAnalysis.edges)) {
-            context.storedAnalysis = structuralAnalysis;
-          }
-
-
           // ══════════════════════════════════════════════════════════════════
           // HANDOFF V2: Determine if fresh instance needed
           // ══════════════════════════════════════════════════════════════════
@@ -466,7 +369,6 @@ export class CognitivePipelineHandler {
               originalPrompt: userMessageForSingularity,
               mappingText: mappingResult?.text || "",
               mappingMeta: mappingResult?.meta || {},
-              structuralAnalysis,
               conciergePrompt,
               conciergePromptType,
               conciergePromptSeed,

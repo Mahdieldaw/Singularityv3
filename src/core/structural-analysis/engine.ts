@@ -47,16 +47,16 @@ const applyComputedRoles = (
         for (const id of c.affectedClaims) branchIds.add(id);
     }
 
-    const prereqOutCounts = new Map<string, number>();
+    const supportsOutCounts = new Map<string, number>();
     for (const e of edges) {
-        if (e.type === "prerequisite") prereqOutCounts.set(e.from, (prereqOutCounts.get(e.from) ?? 0) + 1);
+        if (e.type === "supports") supportsOutCounts.set(e.from, (supportsOutCounts.get(e.from) ?? 0) + 1);
     }
 
     return claims.map((c) => {
         const targetId = challengerToTarget.get(c.id);
         if (targetId) return { ...c, role: "challenger", challenges: targetId };
         if (branchIds.has(c.id)) return { ...c, role: "branch", challenges: null };
-        if ((prereqOutCounts.get(c.id) ?? 0) >= 2) return { ...c, role: "anchor", challenges: null };
+        if ((supportsOutCounts.get(c.id) ?? 0) >= 2) return { ...c, role: "anchor", challenges: null };
         return { ...c, role: "supplement", challenges: null };
     });
 };
@@ -214,4 +214,3 @@ export const computeStructuralAnalysis = (artifact: CognitiveArtifact): Structur
         shape,
     };
 };
-

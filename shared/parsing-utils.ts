@@ -612,7 +612,6 @@ export function parseUnifiedMapperOutput(text: string): ParsedMapperOutput {
     const normalizeEdgeType = (e: any): Edge["type"] => {
         const t = String(e?.type ?? "").toLowerCase();
         if (t === "supports" || t === "support") return "supports";
-        if (t === "prerequisite" || t === "requires") return "prerequisite";
         if (t === "tradeoff") return "tradeoff";
         if (t === "conflicts") return "conflicts";
         if (t === "conflict") {
@@ -1213,10 +1212,13 @@ export function parseSemanticMapperOutput(
 
     let finalEdges = edges || [];
     let finalConditionals = conditionals || [];
+    let normalizedDeterminants: any[] = [];
 
     if (determinants) {
         const derivedEdges: any[] = [];
         const derivedConditionals: any[] = [];
+
+        normalizedDeterminants = [];
 
         for (let i = 0; i < determinants.length; i++) {
             const d = determinants[i];
@@ -1228,22 +1230,45 @@ export function parseSemanticMapperOutput(
             }
 
             const type = String((d as any).type || '').trim();
-            const trigger = String((d as any).trigger || '').trim();
+            const fork = String(((d as any).fork ?? '') || '').trim();
+            const hinge = String(((d as any).hinge ?? '') || '').trim();
+            const question = String(((d as any).question ?? '') || '').trim();
             const rawClaims = Array.isArray((d as any).claims) ? (d as any).claims : [];
-            const claimIds = rawClaims.map((c: any) => String(c || '').trim()).filter(Boolean);
+            const paths = (d as any).paths && typeof (d as any).paths === 'object' ? (d as any).paths : null;
+            const pathClaimIds = paths ? Object.keys(paths).map((k) => String(k || '').trim()).filter(Boolean) : [];
+            const claimIds = (pathClaimIds.length > 0 ? pathClaimIds : rawClaims.map((c: any) => String(c || '').trim()).filter(Boolean));
+            const yesMeans = String(((d as any).yes_means ?? '') || '').trim();
+            const noMeans = String(((d as any).no_means ?? '') || '').trim();
 
             if (type !== 'intrinsic' && type !== 'extrinsic') {
                 warnings.push(`${ctx}.type is invalid; skipping`);
                 continue;
             }
-            if (!trigger) {
-                warnings.push(`${ctx}.trigger is empty; skipping`);
+            if (!question) {
+                warnings.push(`${ctx}.question is empty; skipping`);
                 continue;
             }
             if (claimIds.length === 0) {
                 warnings.push(`${ctx}.claims is empty; skipping`);
                 continue;
             }
+
+            if (!fork) warnings.push(`${ctx}.fork is empty`);
+            if (!hinge) warnings.push(`${ctx}.hinge is empty`);
+
+            const normalized: any = {
+                type,
+                fork,
+                hinge,
+                question,
+                claims: claimIds,
+            };
+            if (paths) normalized.paths = paths;
+            if (type === 'extrinsic') {
+                if (yesMeans) normalized.yes_means = yesMeans;
+                if (noMeans) normalized.no_means = noMeans;
+            }
+            normalizedDeterminants.push(normalized);
 
             if (type === 'intrinsic') {
                 if (claimIds.length < 2) {
@@ -1256,7 +1281,7 @@ export function parseSemanticMapperOutput(
                             from: claimIds[a],
                             to: claimIds[b],
                             type: 'conflict',
-                            question: trigger,
+                            question,
                         });
                     }
                 }
@@ -1266,7 +1291,7 @@ export function parseSemanticMapperOutput(
                 const id = String((d as any).id || `det_ext_${i + 1}`).trim();
                 derivedConditionals.push({
                     id,
-                    question: trigger,
+                    question,
                     affectedClaims: claimIds,
                 });
             }
@@ -1292,11 +1317,6 @@ export function parseSemanticMapperOutput(
 
         if (!from || !to) {
             warnings.push(`${ctx} missing from/to; dropped`);
-            continue;
-        }
-
-        if (type === 'prerequisite') {
-            sanitizedEdges.push({ from, to, type: 'prerequisite' });
             continue;
         }
 
@@ -1364,7 +1384,7 @@ export function parseSemanticMapperOutput(
         success: true,
         output: {
             claims,
-            ...(determinants ? { determinants } : {}),
+            ...(normalizedDeterminants.length > 0 ? { determinants: normalizedDeterminants } : {}),
             edges: finalEdges,
             conditionals: finalConditionals,
         },

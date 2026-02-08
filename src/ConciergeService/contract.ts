@@ -19,18 +19,6 @@ export interface ConditionalGate {
     sourceStatementIds: string[];  // Provenance
 }
 
-/**
- * Prerequisite Gate (Tier 1)
- * "Requires X" - another claim that must be satisfied first
- */
-export interface PrerequisiteGate {
-    id: string;                    // "pg_0", "pg_1"
-    claimId: string;               // The required claim
-    condition: string;             // Human-readable description of dependency
-    question: string;              // Canonical question form (e.g., "Is a schema already defined?")
-    sourceStatementIds: string[];  // Provenance
-}
-
 // ═══════════════════════════════════════════════════════════════════════════
 // RELATIONSHIP TYPES
 // ═══════════════════════════════════════════════════════════════════════════
@@ -63,11 +51,10 @@ export interface Claim {
     // Gating (Tier structure)
     gates: {
         conditionals: ConditionalGate[];   // Tier 0
-        prerequisites: PrerequisiteGate[]; // Tier 1
     };
 
     // Relationships (minimal, provenance-required)
-    enables?: string[];            // Claim IDs this enables (beyond prerequisites)
+    enables?: string[];            // Claim IDs this enables (beyond dependencies)
     conflicts?: ConflictEdge[];    // Conflicts with provenance (REQUIRED)
 
     // Provenance (non-negotiable)

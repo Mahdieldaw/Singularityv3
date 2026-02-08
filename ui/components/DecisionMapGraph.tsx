@@ -298,14 +298,13 @@ const DecisionMapGraph: React.FC<Props> = ({
                     const baseDist = link.type === 'supports' ? 120 :
                         link.type === 'conflicts' ? 220 :
                             link.type === 'tradeoff' ? 180 :
-                                link.type === 'prerequisite' ? 150 : 120;
+                                120;
                     return isWideLayout ? baseDist * 1.6 : baseDist; // Increased distance
                 })
                 .strength(link => {
                     if (link.type === 'supports') return 0.45;
                     if (link.type === 'conflicts') return 0.15;
                     if (link.type === 'tradeoff') return 0.22;
-                    if (link.type === 'prerequisite') return 0.3;
                     return 0.28;
                 }))
             .force('center', d3.forceCenter(width / 2, height / 2).strength(0.01)) // Extremely weak centering
@@ -328,22 +327,6 @@ const DecisionMapGraph: React.FC<Props> = ({
                             node.vy = (node.vy || 0) + 1.5;
                         } else if (node.y > height - nodePadding - r) {
                             node.vy = (node.vy || 0) - 1.5;
-                        }
-                    }
-                });
-            })
-            .force('prerequisite', () => {
-                simEdges.forEach(link => {
-                    if (link.type === 'prerequisite') {
-                        const source = typeof link.source === 'object' ? link.source : simNodes.find(n => n.id === link.source);
-                        const target = typeof link.target === 'object' ? link.target : simNodes.find(n => n.id === link.target);
-
-                        if (source && target && source.x !== undefined && target.x !== undefined) {
-                            const dx = (target.x - source.x) - 60;
-                            if (dx < 0) {
-                                source.vx = (source.vx || 0) + dx * 0.01;
-                                target.vx = (target.vx || 0) - dx * 0.01;
-                            }
                         }
                     }
                 });
@@ -570,16 +553,6 @@ const DecisionMapGraph: React.FC<Props> = ({
                     </feMerge>
                 </filter>
 
-                <filter id="edgeGlowBlue" x="-150%" y="-150%" width="400%" height="400%">
-                    <feGaussianBlur stdDeviation="5" result="blur" />
-                    <feFlood floodColor="#3b82f6" floodOpacity="0.8" />
-                    <feComposite in2="blur" operator="in" result="glow" />
-                    <feMerge>
-                        <feMergeNode in="glow" />
-                        <feMergeNode in="SourceGraphic" />
-                    </feMerge>
-                </filter>
-
                 <filter id="edgeGlowOrange" x="-150%" y="-150%" width="400%" height="400%">
                     <feGaussianBlur stdDeviation="5" result="blur" />
                     <feFlood floodColor="#f97316" floodOpacity="0.75" />
@@ -598,9 +571,6 @@ const DecisionMapGraph: React.FC<Props> = ({
                 </marker>
                 <marker id="arrowOrange" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
                     <path d="M 0 0 L 10 5 L 0 10 z" fill="#f97316" />
-                </marker>
-                <marker id="arrowBlack" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-                    <path d="M 0 0 L 10 5 L 0 10 z" fill="#111827" />
                 </marker>
 
                 <filter id="nodeGlow" x="-200%" y="-200%" width="500%" height="500%">
@@ -632,8 +602,7 @@ const DecisionMapGraph: React.FC<Props> = ({
                             edge.type === 'supports' ? '#9ca3af' :
                                 edge.type === 'conflicts' ? '#ef4444' :
                                     edge.type === 'tradeoff' ? '#f97316' :
-                                        edge.type === 'prerequisite' ? '#111827' :
-                                            '#9ca3af';
+                                        '#9ca3af';
                         const dash =
                             edge.type === 'conflicts' ? '6,4' :
                                 edge.type === 'tradeoff' ? '2,2' :
@@ -642,8 +611,7 @@ const DecisionMapGraph: React.FC<Props> = ({
                             edge.type === 'supports' ? 'url(#arrowGray)' :
                                 edge.type === 'conflicts' ? 'url(#arrowRed)' :
                                     edge.type === 'tradeoff' ? 'url(#arrowOrange)' :
-                                        edge.type === 'prerequisite' ? 'url(#arrowBlack)' :
-                                            undefined;
+                                        undefined;
                         const markerStart =
                             edge.type === 'conflicts' ? 'url(#arrowRed)' :
                                 edge.type === 'tradeoff' ? 'url(#arrowOrange)' :
@@ -677,8 +645,7 @@ const DecisionMapGraph: React.FC<Props> = ({
                                     filter={
                                         edge.type === 'conflicts' ? 'url(#edgeGlowRed)' :
                                             edge.type === 'tradeoff' ? 'url(#edgeGlowOrange)' :
-                                                edge.type === 'prerequisite' ? 'url(#edgeGlowBlue)' :
-                                                    undefined
+                                                undefined
                                     }
                                     style={{
                                         animation: edge.type === 'conflicts' ? 'conflictPulse 2s ease-in-out infinite' : undefined
@@ -994,7 +961,7 @@ const DecisionMapGraph: React.FC<Props> = ({
                                 <div
                                     style={{
                                         background: 'rgba(0,0,0,0.95)',
-                                        border: `1px solid ${hoveredEdge.edge.type === 'supports' ? '#9ca3af' : hoveredEdge.edge.type === 'conflicts' ? '#ef4444' : hoveredEdge.edge.type === 'tradeoff' ? '#f97316' : '#111827'}`,
+                        border: `1px solid ${hoveredEdge.edge.type === 'supports' ? '#9ca3af' : hoveredEdge.edge.type === 'conflicts' ? '#ef4444' : hoveredEdge.edge.type === 'tradeoff' ? '#f97316' : '#9ca3af'}`,
                                         borderRadius: 6,
                                         padding: '6px 10px',
                                         fontSize: 11,
@@ -1016,7 +983,7 @@ const DecisionMapGraph: React.FC<Props> = ({
             {/* Legend - fixed position outside transform */}
             {/* Legend - updated for new model */}
             <g transform={`translate(${width - 160}, 20)`}>
-                <rect x={-10} y={-10} width={155} height={150} fill="rgba(0,0,0,0.85)" rx={8} stroke="rgba(139,92,246,0.3)" strokeWidth={1} />
+                <rect x={-10} y={-10} width={155} height={132} fill="rgba(0,0,0,0.85)" rx={8} stroke="rgba(139,92,246,0.3)" strokeWidth={1} />
                 <text x={0} y={8} fill="rgba(255,255,255,0.8)" fontSize={10} fontWeight={600}>Legend</text>
 
                 {/* Edges */}
@@ -1029,23 +996,20 @@ const DecisionMapGraph: React.FC<Props> = ({
                 <line x1={0} y1={60} x2={30} y2={60} stroke="#ef4444" strokeWidth={2.5} strokeDasharray="6,4" />
                 <text x={38} y={64} fill="rgba(255,255,255,0.7)" fontSize={9}>Conflicts</text>
 
-                <line x1={0} y1={78} x2={30} y2={78} stroke="#111827" strokeWidth={2.5} markerEnd="url(#arrowBlack)" />
-                <text x={38} y={82} fill="rgba(255,255,255,0.7)" fontSize={9}>Prerequisite</text>
-
                 {/* Node indicators */}
-                <text x={0} y={100} fill="rgba(255,255,255,0.6)" fontSize={8}>NODE INDICATORS</text>
+                <text x={0} y={82} fill="rgba(255,255,255,0.6)" fontSize={8}>NODE INDICATORS</text>
 
-                <text x={0} y={116} fontSize={12}>👑</text>
-                <text x={18} y={116} fill="rgba(255,255,255,0.7)" fontSize={9}>Keystone</text>
+                <text x={0} y={98} fontSize={12}>👑</text>
+                <text x={18} y={98} fill="rgba(255,255,255,0.7)" fontSize={9}>Keystone</text>
 
-                <text x={70} y={116} fontSize={12}>⚡</text>
-                <text x={88} y={116} fill="rgba(255,255,255,0.7)" fontSize={9}>Dissent</text>
+                <text x={70} y={98} fontSize={12}>⚡</text>
+                <text x={88} y={98} fill="rgba(255,255,255,0.7)" fontSize={9}>Dissent</text>
 
-                <text x={0} y={134} fontSize={10}>★</text>
-                <text x={18} y={134} fill="rgba(255,255,255,0.7)" fontSize={9}>Peak</text>
+                <text x={0} y={116} fontSize={10}>★</text>
+                <text x={18} y={116} fill="rgba(255,255,255,0.7)" fontSize={9}>Peak</text>
 
-                <circle cx={78} cy={130} r={6} fill="#f97316" />
-                <text x={88} y={134} fill="rgba(255,255,255,0.7)" fontSize={9}>Fragile</text>
+                <circle cx={78} cy={112} r={6} fill="#f97316" />
+                <text x={88} y={116} fill="rgba(255,255,255,0.7)" fontSize={9}>Fragile</text>
             </g>
         </svg>
     );

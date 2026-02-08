@@ -46,130 +46,114 @@ export function buildSemanticMapperPrompt(
   const modelCount = new Set(paragraphs.map(p => p.modelIndex)).size;
   const modelCountPhrase = modelCount === 1 ? 'one person' : `${modelCount} people`;
 
-  return `You're about to walk into a room where ${modelCountPhrase} just finished answering the same question — independently, without hearing each other. Some of them said remarkably similar things. Some of them said things that can't both be true. Most of them said things that sound different but could live side by side without any trouble at all.
+  return `You are entering a room after ${modelCountPhrase} independently answered the same question. Your task: find the questions their answers demand.
+ 
+Where their perspectives fork — where one path structurally excludes another — that's a question only the user can resolve. Where their advice assumes something about the user's situation that may not be true — that's a question too. Most landscapes contain few of these. Some contain none. Your job is to find exactly as many as exist, then deliver them inside a narrative that makes the terrain walkable and a map that makes it mechanically navigable.
+ 
+Input payload:
+ 
+text
+ 
+<query> ${userQuery} </query>
+<model_outputs> ${modelOutputs} </model_outputs>
 
-Your job isn't to pick a winner or smooth the edges. Your job is to walk through the room slowly, listen to everything, and come back with two things: a story about what you found, and a map someone could actually navigate by.
+You will make three passes, each strictly building on the last.
 
----
+PASS ONE — WALK THE TERRAIN
 
-THE QUESTION THEY WERE ALL ANSWERING:
+Read everything before interpreting anything.
 
-<query>
-${userQuery}
-</query>
+Start by identifying common ground: shared assumptions, shared direction, overlapping conclusions. This is stable terrain. It is also where shared blind spots hide.
 
----
+Next, notice shifts in emphasis. Different lenses on the same landscape are not disagreements. Treat most apparent conflict as people noticing different features of the same territory.
 
-WHAT EVERYONE ACTUALLY SAID:
+Then identify true forks. These are rare. A fork exists only where choosing one path structurally excludes another. Most landscapes contain zero or one. If you find many, you are confusing emphasis with incompatibility.
 
-<model_outputs>
-${modelOutputs}
-</model_outputs>
+Finally, identify conditions each path assumes about the traveler. These are not opinions. They are facts that may or may not be true about the user's situation. If a path assumes you have a team, it fails when you are alone. If a path assumes tight constraints, it fails where none exist. If a path assumes you are starting fresh, it fails when you are already midstream.
 
----
+PASS TWO — NAME WHAT EXISTS
 
-HERE'S HOW THIS WORKS.
+Identify each distinct position in the landscape and assign it a canonical label. Labels have strict requirements:
 
-You're going to make three passes through the room. Each pass has a different purpose, and the order matters — because what you notice in the first pass changes what you look for in the second, and what you find in the second determines what you build in the third.
+Verb-phrase, expressing a stance — a position that can be agreed with, opposed, or traded off. Not a topic, not a category, not a description of a mechanism.
+2–6 words, precise.
+Load-bearing. The label appears in the narrative, anchors the map, and drives downstream UI. Once assigned, never rename or paraphrase it.
+The test: if nobody in the room could have argued the opposite, it is not a stance. If it could serve as a section heading in a textbook, it is a category. Only stances survive.
 
----
+For any fork or condition, do not interrogate the technical landscape directly. The user does not live there. They live inside their situation.
 
-FIRST PASS — WALK THE ROOM
+Every determinant must be expressed through three layers:
 
-Read everything. Don't categorize yet. Just notice.
+Fork — the tension and why the paths exclude each other. This is system-facing only. The user never sees it.
 
-Notice the common ground first — the things everyone seems to take for granted, the shared assumptions, the direction they're all facing even when they disagree about how fast to walk. This is the stable terrain. It matters, but it's also where blind spots hide, because nobody questions what everyone believes.
+Hinge — a directly observable fact about the user's world that would resolve the fork. Not a preference. Not domain knowledge. Something you could verify by seeing their calendar, their constraints, or their recent decisions.
 
-Then notice where the emphasis shifts. Different people zoomed in on different things. One spent their time on architecture, another on process, another on risk. These aren't disagreements — they're different lenses on the same landscape. Most of what sounds like disagreement is actually this: people noticing different features of the same territory.
+Question — derived from the hinge, not the fork. The question asks the user to report a fact about their situation. The answer should imply one path without naming it.
 
-Then — and this is the hard part — notice the rare places where paths genuinely fork. Not "I'd prioritize X over Y" (that's preference). Not "do X before Y" (that's sequencing). A real fork is structural: the geometry of one path excludes the geometry of another. If you build it this way, you cannot also build it that way. If you assume this about the user's situation, that advice becomes dangerous. These are uncommon. Most conversations have zero or one. Some have two. If you're finding five, you're probably mistaking emphasis for exclusion.
+If answering your question requires the user to understand the landscape the responses describe, you asked about the fork instead of the hinge. Start over.
 
-Finally, notice what the paths assume about the traveler. Advice that requires an existing team is useless to a solo founder. A path that assumes regulatory constraints doesn't apply to someone operating in an unregulated space. These are the extrinsic conditions — things that are true or false about the person's actual situation, and the answer changes which paths are real.
+TRAVERSAL CONTRACT
 
----
+Your determinants become interactive gates. The system must know what to do with the user's answer mechanically — no interpretation, no judgment.
 
-SECOND PASS — NAME WHAT YOU FOUND
+For intrinsic determinants: the paths object lists exactly two mutually exclusive positions. The user selects one. The other is pruned, along with everything downstream of it. Your question must make the choice concrete without naming the paths.
 
-Now give everything a name. Short, precise, canonical — two to six words that capture the essence. These labels are load-bearing. They'll appear in your narrative, they'll anchor the map, and someone downstream will use them to build a UI. So make them distinct, make them memorable, and once you've named something, never call it anything else.
+For extrinsic determinants: the claims array lists positions that assume a condition is true about the user's situation. The question must be answerable with yes or no. "Yes" means the condition holds and the claims survive. "No" means the condition does not hold and the claims are removed — they depended on something that isn't real for this user. If an extrinsic question cannot be answered yes or no, it is not a gate. Restructure it until it is.
 
-For each named thing, know:
-- What it actually recommends (one sentence, concrete)
-- Who said it (which models, by index)
-- Whether it can coexist with everything else, or whether it structurally excludes something
+ZERO IS A VALID COUNT
 
-And for the forks and conditions you found:
+If every position coexists — if no position structurally excludes another, and no position assumes a condition that might not hold — produce an empty determinants array.
 
-If two paths are structurally incompatible — they can't both be walked — name the reason. Not "they disagree" but the mechanical reason why choosing one abandons the other. This is an intrinsic determinant. The traveler will face it as a choice.
+This is not a failure. A landscape with no forks is a landscape with clear terrain. Forcing a fork where none exists is worse than reporting none, because a fabricated gate will prune claims that should survive.
 
-If a path depends on ground that may or may not exist beneath this particular traveler — name the question that would reveal it. Make the question uncomfortably specific. If you could ask it about any project by swapping a few nouns, it's too generic. If it sounds like it belongs in a conference talk, it's too abstract. The right question feels like you've already seen this person's desk and you're asking about the one thing on it that changes everything. This is an extrinsic determinant. The traveler will face it as a reality check.
+The test: if you cannot fill the paths object (intrinsic) or yes_means/no_means (extrinsic) with statements that are obviously, plainly true, the determinant does not exist. Do not generate it.
 
-A landscape with no forks and no conditions is a finding, not a failure. It means all paths coexist — choose by preference, not necessity. Say so clearly.
+PASS THREE — BUILD THE DELIVERABLES
 
----
+Produce two outputs, in this order.
 
-THIRD PASS — BUILD THE DELIVERABLES
+Narrative
+Wrap in <narrative> tags.
+Walk the reader through the terrain as if you simply know it. Use [Label|claim_id] as waypoints. Make coexistence explicit. Make forks concrete. End by naming what remains unresolved. Do not mention models, counts, extraction, or process. Only the landscape and how to move through it.
 
-Now produce two things, in this exact order.
+Map
+Wrap in <map> tags. Output structured JSON with this shape:
 
-First: the narrative.
+JSON
 
-Walk the reader through what you discovered. Write it as if you're sitting across from someone who asked this question and genuinely needs to understand the shape of what came back — not a report, not a summary, but a guide through terrain you've already scouted.
-
-Start with the common ground. Then move through the distinct approaches, using your canonical labels as **[Label|claim_id]** waypoints so the reader can always orient themselves. When paths coexist, say so — don't manufacture tension. When paths fork, make the fork feel real. When a condition exists, make the reader feel the weight of the question.
-
-End with what remains open — the questions the models didn't answer, the assumptions nobody tested, the territory just past the edge of what was mapped.
-
-Wrap the whole thing in <narrative> tags.
-
-Second: the map.
-
-This is the structured version of what you just narrated. It goes inside <map> tags as a single JSON object with two arrays: claims and determinants.
-
-Claims are the named paths — every distinct approach, stance, or recommendation you found. Each one gets an id (claim_1, claim_2, ...), your canonical label, a one-sentence description, and the list of model indices that supported it.
-
-Determinants are the decision-relevant structures — the forks and conditions. Intrinsic determinants are structural conflicts (these paths exclude each other, here's why). Extrinsic determinants are reality checks (this path requires ground that may not exist, here's the question that reveals it).
-
-Not every claim needs a determinant. Many claims coexist peacefully. Only flag the genuine structural forks and the genuine situational dependencies. If you're generating more determinants than claims, something has gone wrong — you're treating preferences as conflicts.
-
----
-
-THE SHAPE OF YOUR OUTPUT:
-
-<narrative>
-Your walkthrough of the landscape. Use **[Label|claim_id]** as waypoints throughout.
-Fluid, insightful, written for someone who needs to understand before they decide.
-</narrative>
-
-<map>
 {
   "claims": [
     {
       "id": "claim_1",
-      "label": "Canonical label (2-6 words)",
-      "text": "What this path requires—one sentence",
-      "supporters": [model indices]
+      "label": "Verb-Phrase Stance Label",
+      "text": "One concrete sentence stating what this position holds",
+      "supporters": [0, 2, 4]
     }
   ],
   "determinants": [
     {
       "type": "intrinsic",
-      "trigger": "The structural reason these paths exclude each other",
-      "claims": ["claim_1", "claim_3"]
+      "fork": "Why these paths exclude each other",
+      "hinge": "Observable user-world fact that resolves it",
+      "question": "What the user can answer without domain knowledge",
+      "paths": {
+        "claim_1": "What choosing this path implies — and what it forecloses",
+        "claim_3": "What choosing this path implies — and what it forecloses"
+      }
     },
     {
       "type": "extrinsic",
-      "trigger": "The uncomfortably specific question that reveals whether this ground exists",
-      "claims": ["claim_2", "claim_5"]
+      "fork": "What this path assumes exists",
+      "hinge": "Observable thing that may or may not be present",
+      "question": "Do you have [thing in the user's own language]?",
+      "yes_means": "The condition holds — these claims remain",
+      "no_means": "The condition does not hold — these claims are pruned",
+      "claims": ["claim_2"]
     }
   ]
 }
-</map>
 
----
-
-ONE LAST THING.
-
-The person reading your narrative doesn't know how it was made. Don't mention models, don't mention counts, don't say "X out of ${modelCount} agreed." Write as if you simply know this landscape because you've walked it — and now you're showing someone else the way through.
+Not every claim requires a determinant. Most positions coexist. If you generate more determinants than claims, you are manufacturing conflict.
 
 Begin.
 `;

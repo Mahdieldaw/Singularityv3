@@ -996,26 +996,10 @@ export class StepExecutor {
 
                 const enablesById = new Map();
                 const conflictsById = new Map();
-                const prerequisiteGatesByClaimId = new Map();
 
                 for (const e of unifiedEdges) {
                   if (!e) continue;
-                  if (e.type === 'prerequisite') {
-                    const from = String(e.from || '').trim();
-                    const to = String(e.to || '').trim();
-                    if (!from || !to) continue;
-                    if (!enablesById.has(from)) enablesById.set(from, new Set());
-                    enablesById.get(from).add(to);
-                    if (!prerequisiteGatesByClaimId.has(to)) prerequisiteGatesByClaimId.set(to, []);
-                    const fromLabel = claimLabelById.get(from) || from;
-                    prerequisiteGatesByClaimId.get(to).push({
-                      id: `prereq_${from}_${to}`,
-                      claimId: from,
-                      condition: 'prerequisite',
-                      question: `Do you have "${fromLabel}"?`,
-                      sourceStatementIds: [],
-                    });
-                  } else if (e.type === 'conflict') {
+                  if (e.type === 'conflict') {
                     const from = String(e.from || '').trim();
                     const to = String(e.to || '').trim();
                     if (!from || !to) continue;
@@ -1040,9 +1024,6 @@ export class StepExecutor {
                   const tier = tierByClaimId.get(id) ?? 0;
                   const enables = enablesById.has(id) ? Array.from(enablesById.get(id)) : [];
                   const conflicts = conflictsById.has(id) ? conflictsById.get(id) : [];
-                  const prerequisites = prerequisiteGatesByClaimId.has(id)
-                    ? prerequisiteGatesByClaimId.get(id)
-                    : [];
 
                   return {
                     id,
@@ -1050,7 +1031,6 @@ export class StepExecutor {
                     stance: 'NEUTRAL',
                     gates: {
                       conditionals: [],
-                      prerequisites,
                     },
                     enables,
                     conflicts,
@@ -1114,15 +1094,11 @@ export class StepExecutor {
                   topUnindexed = getTopUnreferenced(shadowDelta, 10);
 
                   const EDGE_SUPPORTS = 'supports';
-                  const EDGE_PREREQUISITE = 'prerequisite';
                   const EDGE_CONFLICTS = 'conflicts';
 
                   const mappedEdges = unifiedEdges
-                    .filter((e) => e && e.from && e.to && (e.type === 'prerequisite' || e.type === 'conflict'))
+                    .filter((e) => e && e.from && e.to && e.type === 'conflict')
                     .map((e) => {
-                      if (e.type === 'prerequisite') {
-                        return { from: e.from, to: e.to, type: EDGE_PREREQUISITE };
-                      }
                       return {
                         from: e.from,
                         to: e.to,
@@ -1136,17 +1112,6 @@ export class StepExecutor {
                   // TODO: Derive support relationships from claim provenance embeddings/geometry.
                   // - High similarity between claim source paragraphs + compatible stance => support.
                   // - Consider geometry/topology proximity as an additional signal.
-
-                  for (const e of unifiedEdges) {
-                    if (!e || e.type !== 'prerequisite') continue;
-                    const from = String(e.from || '').trim();
-                    const to = String(e.to || '').trim();
-                    if (!from || !to) continue;
-                    const key = `${from}::${to}::supports`;
-                    if (supportKey.has(key)) continue;
-                    supportKey.add(key);
-                    derivedSupportEdges.push({ from, to, type: EDGE_SUPPORTS });
-                  }
 
                   for (const cond of unifiedConditionals) {
                     const affected = Array.isArray(cond?.affectedClaims) ? cond.affectedClaims : [];
@@ -1317,22 +1282,6 @@ export class StepExecutor {
       );
     });
   }
-
-  _mapStanceToType(stance) {
-    switch (stance) {
-      case 'prescriptive': return 'prescriptive';
-      case 'cautionary': return 'prescriptive'; // Warning is a type of prescription
-      case 'prerequisite': return 'conditional';
-      case 'dependent': return 'conditional';
-      case 'assertive': return 'factual';
-      case 'uncertain': return 'speculative';
-      default: return 'factual';
-    }
-  }
-
-  // Refiner, Antagonist, Explore, Understand, Gauntlet implementations follow similar patterns
-  // I'll condense them here assuming they use similar shared logic for resolving sources
-
   async _resolveSourceData(payload, context, previousResults, options) {
     const { sessionManager } = options;
     if (payload.sourceHistorical) {
@@ -1684,24 +1633,11 @@ export class StepExecutor {
       ConciergeService = null;
     }
 
-    let singularityPrompt;
-    let analysis = null;
+	    let singularityPrompt;
 
     if (!ConciergeService) {
       throw new Error("ConciergeService is not available. Cannot execute Singularity step.");
     }
-
-    analysis = payload.structuralAnalysis || null;
-    if (!analysis) {
-      try {
-        analysis = computeStructuralAnalysis(mappingArtifact);
-      } catch (e) {
-        console.error("[StepExecutor] computeStructuralAnalysis failed:", e);
-        throw new Error(`Structural Analysis Failed: ${getErrorMessage(e)}`);
-      }
-    }
-
-
 
     // ══════════════════════════════════════════════════════════════════
     // FEATURE 3: Rebuild historical prompts for recompute (Efficient Storage)
@@ -1791,10 +1727,6 @@ export class StepExecutor {
       const pipeline = {
         userMessage: payload.originalPrompt,
         prompt: singularityPrompt,
-        structuralShape: analysis && analysis.shape ? {
-          primaryPattern: analysis.shape.primaryPattern,
-          confidence: analysis.shape.confidence,
-        } : null,
         leakageDetected,
         leakageViolations,
         parsed: {

@@ -31,7 +31,7 @@ interface StructuralInsightProps {
     supporterCount?: number;
     // NEW V3.1 metadata
     supportRatio?: number;
-    inversionReason?: "challenger_prerequisite_to_consensus" | "singular_foundation" | "high_connectivity_low_support";
+    inversionReason?: "challenger_dependency_to_consensus" | "singular_foundation" | "high_connectivity_low_support";
     hubDominance?: number;
     chainLength?: number;
     tradeoffWith?: string;
@@ -109,8 +109,8 @@ export const StructuralInsight: React.FC<StructuralInsightProps> = ({
       title: "Leverage Inversion",
       description: (() => {
         const reason = metadata?.inversionReason;
-        if (reason === "challenger_prerequisite_to_consensus") {
-          return `"${claim.label}" is a challenger that high-support claims depend on. The floor may rest on contested ground.`;
+        if (reason === "challenger_dependency_to_consensus") {
+          return `"${claim.label}" is a challenger that high-support claims depend on. The shared foundation may rest on contested ground.`;
         }
         if (reason === "singular_foundation") {
           return `"${claim.label}" enables ${metadata?.dependentCount || 0} claims with minimal support. Single point of failure.`;
@@ -134,7 +134,7 @@ export const StructuralInsight: React.FC<StructuralInsightProps> = ({
     chain_root: {
       icon: "🌱",
       title: "Chain Root",
-      description: `"${claim.label}" is the start of a ${metadata?.chainLength || 0}-step prerequisite chain. Everything downstream depends on this.`,
+      description: `"${claim.label}" is the start of a ${metadata?.chainLength || 0}-step dependency chain. Everything downstream depends on this.`,
       color: "green" as const,
     },
     hub_dominance: {

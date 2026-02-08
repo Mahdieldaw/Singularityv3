@@ -73,9 +73,9 @@ export function useTraversal(
       const fp = forcingPoints.find(f => f.id === fpId);
       if (!fp || fp.type !== 'conditional') return;
 
-      setState(prev => resolveConditional(prev, graph, fpId, fp, satisfied, userInput));
+      setState(prev => resolveConditional(prev, fpId, fp, satisfied, userInput));
     },
-    [forcingPoints, graph]
+    [forcingPoints]
   );
 
   const resolveForcingPoint = useCallback(
@@ -83,9 +83,9 @@ export function useTraversal(
       const fp = forcingPoints.find(f => f.id === fpId);
       if (!fp || fp.type !== 'conflict') return;
 
-      setState(prev => resolveConflict(prev, graph, fpId, fp, claimId, label));
+      setState(prev => resolveConflict(prev, fpId, fp, claimId, label));
     },
-    [forcingPoints, graph]
+    [forcingPoints]
   );
 
   const reset = useCallback(() => {

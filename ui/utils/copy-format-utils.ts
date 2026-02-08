@@ -99,15 +99,6 @@ export function formatClaimsAsText(claims: Claim[], edges: Edge[]): string {
             lines.push(`↳ *Challenges: ${challenges}*`);
         }
 
-        const dependsOn = edges
-            .filter(e => e.to === claim.id && e.type === 'prerequisite')
-            .map(e => claims.find(c => c.id === e.from)?.label)
-            .filter(Boolean);
-
-        if (dependsOn.length > 0) {
-            lines.push(`↳ *Depends on: ${dependsOn.join(', ')}*`);
-        }
-
         const conflictsWith = edges
             .filter(e => e.type === 'conflicts' && (e.from === claim.id || e.to === claim.id))
             .map(e => {

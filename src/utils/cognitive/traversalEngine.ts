@@ -24,13 +24,6 @@ export interface ConflictOption {
   claimId: string;
   label: string;
   text?: string;
-  prerequisites: PrerequisiteInfo[];  // Advisory only
-}
-
-export interface PrerequisiteInfo {
-  claimId: string;
-  label: string;
-  text?: string;
 }
 
 export interface ForcingPoint {
@@ -193,7 +186,6 @@ function isValidMapperEdge(edge: any): edge is MapperEdge {
   const type = (edge as any).type;
   if (typeof from !== 'string' || !from.trim()) return false;
   if (typeof to !== 'string' || !to.trim()) return false;
-  if (type === 'prerequisite') return true;
   if (type === 'conflict') {
     const q = (edge as any).question;
     if (typeof q === 'undefined' || q === null) return true;
@@ -216,17 +208,6 @@ function normalizeEdges(input: any): { edges: MapperEdge[]; conflictBlocks: Map<
 
   const edges: any[] = [];
   const rawClaims = Array.isArray(input?.claims) ? input.claims : [];
-
-  for (const claim of rawClaims) {
-    const toId = String(claim?.id || '').trim();
-    if (!toId) continue;
-    const prereqs = Array.isArray(claim?.gates?.prerequisites) ? claim.gates.prerequisites : [];
-    for (const prereq of prereqs) {
-      const fromId = String(prereq?.claimId || '').trim();
-      if (!fromId) continue;
-      edges.push({ from: fromId, to: toId, type: 'prerequisite' } satisfies MapperEdge);
-    }
-  }
 
   const tensions = Array.isArray(input?.tensions) ? input.tensions : [];
   if (tensions.length > 0) {
@@ -280,10 +261,6 @@ function normalizeTraversalGraph(input: any): {
   const { edges, conflictBlocks } = normalizeEdges(input);
   const conditionals = normalizeConditionals(input);
   return { claims, edges, conditionals, conflictBlocks };
-}
-
-function getEdgesFromGraph(graph: any): MapperEdge[] {
-  return normalizeEdges(graph).edges;
 }
 
 export function extractForcingPoints(
@@ -371,10 +348,6 @@ export function extractForcingPoints(
     const b = claimMap.get(bId);
     if (!a || !b) continue;
 
-    // Find prerequisites for each option (advisory context)
-    const aPrereqs = findPrerequisites(aId, normalized.edges, claimMap);
-    const bPrereqs = findPrerequisites(bId, normalized.edges, claimMap);
-
     const edgeSourceIds = Array.isArray((edge as any)?.sourceStatementIds)
       ? (edge as any).sourceStatementIds.map((s: any) => String(s)).filter(Boolean)
       : [];
@@ -406,13 +379,11 @@ export function extractForcingPoints(
           claimId: a.id,
           label: a.label,
           text: a.text,
-          prerequisites: aPrereqs,
         },
         {
           claimId: b.id,
           label: b.label,
           text: b.text,
-          prerequisites: bPrereqs,
         },
       ],
       blockedByGateIds: blockedByGateIds.length > 0 ? blockedByGateIds : undefined,
@@ -424,23 +395,6 @@ export function extractForcingPoints(
   forcingPoints.sort((a, b) => a.tier - b.tier);
 
   return forcingPoints;
-}
-
-function findPrerequisites(
-  claimId: string,
-  edges: MapperEdge[],
-  claimMap: Map<string, ClaimLike>
-): PrerequisiteInfo[] {
-  return edges
-    .filter(e => e.type === 'prerequisite' && e.to === claimId)
-    .map(e => {
-      const prereqClaim = claimMap.get(e.from);
-      return {
-        claimId: e.from,
-        label: prereqClaim?.label || e.from,
-        text: prereqClaim?.text,
-      };
-    });
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -466,7 +420,6 @@ export function initTraversalState(claims: EnrichedClaim[]): TraversalState {
 
 export function resolveConditional(
   state: TraversalState,
-  graph: TraversalGraph,
   forcingPointId: string,
   forcingPoint: ForcingPoint,
   satisfied: boolean,
@@ -495,9 +448,6 @@ export function resolveConditional(
       nextState.claimStatuses.set(claimId, 'pruned');
     }
 
-    // Cascade pruning to dependent claims
-    cascadePruning(nextState, getEdgesFromGraph(graph), prunedIds);
-
     nextState.pathSteps.push(
       `✗ "${forcingPoint.condition}" — ${forcingPoint.affectedClaims.length} claim(s) pruned`
     );
@@ -512,7 +462,6 @@ export function resolveConditional(
 
 export function resolveConflict(
   state: TraversalState,
-  graph: TraversalGraph,
   forcingPointId: string,
   forcingPoint: ForcingPoint,
   selectedClaimId: string,
@@ -543,9 +492,6 @@ export function resolveConflict(
       prunedIds.push(opt.claimId);
       nextState.claimStatuses.set(opt.claimId, 'pruned');
     }
-
-    // Cascade pruning to dependent claims
-    cascadePruning(nextState, getEdgesFromGraph(graph), prunedIds);
 
     const rejectedLabels = rejected.map(r => r.label).join(', ');
     nextState.pathSteps.push(
@@ -634,46 +580,4 @@ export function getPathSummary(state: TraversalState): string {
     return 'No constraints applied.';
   }
   return state.pathSteps.join('\n');
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// CASCADING PRUNING
-// ═══════════════════════════════════════════════════════════════════════════
-
-/**
- * When a claim is pruned, cascade the pruning to all claims that depend on it.
- * Uses prerequisite edges to determine dependency relationships.
- * Follows the entire dependency chain to the end.
- */
-function cascadePruning(
-  state: TraversalState,
-  edges: MapperEdge[],
-  initialPrunedIds: string[]
-): void {
-  const queue = [...initialPrunedIds];
-  const processed = new Set<string>();
-
-  while (queue.length > 0) {
-    const prunedId = queue.shift()!;
-
-    // Skip if we've already processed this claim's dependents
-    if (processed.has(prunedId)) continue;
-    processed.add(prunedId);
-
-    // Find all claims that have this as a prerequisite
-    for (const edge of edges) {
-      if (edge.type !== 'prerequisite') continue;
-      if (edge.from !== prunedId) continue;
-
-      const dependentId = edge.to;
-      const currentStatus = state.claimStatuses.get(dependentId);
-
-      // Only prune if still active
-      if (currentStatus === 'active') {
-        state.claimStatuses.set(dependentId, 'pruned');
-        // Add to queue to cascade further - this is the key fix
-        queue.push(dependentId);
-      }
-    }
-  }
 }

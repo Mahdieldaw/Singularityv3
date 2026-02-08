@@ -100,9 +100,6 @@ export const assignPercentileFlags = (
         const hasConflict = edges.some(e =>
             e.type === "conflicts" && (e.from === claim.id || e.to === claim.id)
         );
-        const hasIncomingPrereq = edges.some(e =>
-            e.type === "prerequisite" && e.to === claim.id
-        );
 
         const isIsolated = !connectedIds.has(claim.id);
 
@@ -110,7 +107,7 @@ export const assignPercentileFlags = (
             ...claim,
             isHighSupport,
             isContested: hasConflict,
-            isConditional: hasIncomingPrereq,
+            isConditional: claim.type === 'conditional',
             isChallenger: claim.role === 'challenger',
             isIsolated,
         };

@@ -81,7 +81,7 @@ export interface Claim {
 export interface Edge {
   from: string;
   to: string;
-  type: 'supports' | 'conflicts' | 'tradeoff' | 'prerequisite';
+  type: 'supports' | 'conflicts' | 'tradeoff';
 }
 
 export interface MapperClaim {
@@ -92,11 +92,6 @@ export interface MapperClaim {
 }
 
 export type MapperEdge =
-  | {
-    from: string;
-    to: string;
-    type: 'prerequisite';
-  }
   | {
     from: string;
     to: string;
@@ -113,13 +108,20 @@ export interface ConditionalPruner {
 export type Determinant =
   | {
     type: 'intrinsic';
-    trigger: string;
+    fork: string;
+    hinge: string;
+    question: string;
     claims: string[];
+    paths?: Record<string, string>;
   }
   | {
     type: 'extrinsic';
-    trigger: string;
+    fork: string;
+    hinge: string;
+    question: string;
     claims: string[];
+    yes_means?: string;
+    no_means?: string;
   };
 
 export interface UnifiedMapperOutput {
@@ -157,7 +159,6 @@ export interface PeakPairRelationship {
   conflicts: boolean;
   tradesOff: boolean;
   supports: boolean;
-  prerequisites: boolean;
 }
 
 export interface ShapeClassification {
@@ -249,7 +250,7 @@ export interface MapperArtifact extends MapperOutput {
 
 export interface TraversalGate {
   id: string;
-  type: 'conditional' | 'prerequisite';
+  type: 'conditional';
   condition: string;
   question: string;
   blockedClaims: string[];
@@ -282,14 +283,6 @@ export interface SerializedConditionalGate {
   sourceStatementIds: string[];
 }
 
-export interface SerializedPrerequisiteGate {
-  id: string;
-  claimId: string;
-  condition: string;
-  question: string;
-  sourceStatementIds: string[];
-}
-
 export interface SerializedConflictEdge {
   claimId: string;
   question: string;
@@ -305,7 +298,6 @@ export interface SerializedAssembledClaim {
 
   gates: {
     conditionals: SerializedConditionalGate[];
-    prerequisites: SerializedPrerequisiteGate[];
   };
 
   enables: string[];
@@ -333,7 +325,7 @@ export interface SerializedTraversalGraph {
   cycles: string[][];
 }
 
-export type ForcingPointType = 'conditional' | 'prerequisite' | 'conflict';
+export type ForcingPointType = 'conditional' | 'conflict';
 
 export interface ConflictOption {
   claimId: string;
@@ -362,7 +354,6 @@ export interface TraversalState {
   claimStatuses: Map<string, ClaimStatus>;
   unavailableReasons: Map<string, string>;
   conditionalAnswers: Map<string, 'yes' | 'no' | 'unsure'>;
-  prerequisiteStatuses: Map<string, 'has' | 'lacks' | 'unknown'>;
   conflictResolutions: Map<string, string>;
 }
 
@@ -372,16 +363,6 @@ export interface ConditionalForcingPoint {
   type: 'conditional';
   question: string;
   affectedClaims: string[];
-}
-
-export interface PrerequisiteForcingPoint {
-  id: string;
-  tier: 1;
-  type: 'prerequisite';
-  claimId: string;
-  claimLabel: string;
-  question: string;
-  requiredBy: string[];
 }
 
 export interface ConflictForcingPoint {
@@ -395,7 +376,7 @@ export interface ConflictForcingPoint {
   autoResolvedTo?: string;
 }
 
-export type UnifiedForcingPoint = ConditionalForcingPoint | PrerequisiteForcingPoint | ConflictForcingPoint;
+export type UnifiedForcingPoint = ConditionalForcingPoint | ConflictForcingPoint;
 export type ForcingPoint = UnifiedForcingPoint | SerializedForcingPoint;
 
 export type PipelineStatus = 'in_progress' | 'awaiting_traversal' | 'complete' | 'error';
@@ -1368,14 +1349,6 @@ export interface TradeoffPair {
   claimA: { id: string; label: string; supporterCount: number };
   claimB: { id: string; label: string; supporterCount: number };
   symmetry: "both_consensus" | "both_singular" | "asymmetric";
-}
-
-export interface ConvergencePoint {
-  targetId: string;
-  targetLabel: string;
-  sourceIds: string[];
-  sourceLabels: string[];
-  edgeType: "prerequisite" | "supports";
 }
 
 export type ShadowStance =

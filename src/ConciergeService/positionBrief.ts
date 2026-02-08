@@ -99,29 +99,6 @@ function buildTensionPairs(
     return pairs;
 }
 
-function getCascadeFromPrerequisites(
-    claimId: string,
-    graph: TraversalGraph
-): string[] {
-    const visited = new Set<string>();
-    const queue: string[] = [claimId];
-
-    while (queue.length > 0) {
-        const current = queue.shift()!;
-        if (visited.has(current)) continue;
-        visited.add(current);
-
-        for (const e of graph.edges || []) {
-            if (e?.type !== 'prerequisite') continue;
-            if (e.from !== current) continue;
-            if (!visited.has(e.to)) queue.push(e.to);
-        }
-    }
-
-    visited.delete(claimId);
-    return Array.from(visited);
-}
-
 // NEW: Targeted structural analysis for active/path-specific concerns
 export interface TargetedAnalysis {
     keystones: Array<{
@@ -160,14 +137,7 @@ export function computeTargetedAnalysis(
     );
 
     // 1) Keystones: active claims that many others depend on (cascade size)
-    const keystones = activeClaims
-        .map(c => ({
-            claim: c,
-            dependentCount: getCascadeFromPrerequisites(c.id, graph).length,
-            userConfirmed: selectedClaimIds.has(c.id),
-        }))
-        .filter(k => k.dependentCount > 0)
-        .sort((a, b) => b.dependentCount - a.dependentCount);
+    const keystones: TargetedAnalysis['keystones'] = [];
 
     // 2) Dissent: active claims that conflict with something the user has chosen
     const dissent: Array<{ claim: EnrichedClaim; contrastingWith: string }> = [];

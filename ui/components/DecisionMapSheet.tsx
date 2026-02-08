@@ -1,6 +1,6 @@
 import React, { useMemo, useCallback, useEffect, useRef, useState, Suspense } from "react";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
-import { isDecisionMapOpenAtom, turnByIdAtom, mappingProviderAtom, activeSplitPanelAtom, providerAuthStatusAtom, toastAtom } from "../state/atoms";
+import { isDecisionMapOpenAtom, turnByIdAtom, mappingProviderAtom, activeSplitPanelAtom, providerAuthStatusAtom, toastAtom, providerContextsAtom } from "../state/atoms";
 import { useClipActions } from "../hooks/useClipActions";
 import { m, AnimatePresence, LazyMotion, domAnimation } from "framer-motion";
 import { safeLazy } from "../utils/safeLazy";
@@ -763,17 +763,24 @@ export const DecisionMapSheet = React.memo(() => {
 
   const mappingArtifact = (aiTurn as any)?.mapping?.artifact || null;
 
-  const semanticMapperPrompt = useMemo(() => {
-    const v = (aiTurn as any)?.meta?.semanticMapperPrompt;
-    if (typeof v !== 'string') return null;
-    const trimmed = v.trim();
-    return trimmed ? trimmed : null;
-  }, [aiTurn?.meta]);
+  const providerContexts = useAtomValue(providerContextsAtom);
 
   const rawMappingText = useMemo(() => {
-    const v = (aiTurn as any)?.meta?.rawMappingText;
-    return typeof v === 'string' ? v : '';
-  }, [aiTurn?.meta]);
+    const pid = activeMappingPid ? String(activeMappingPid) : null;
+    const ctx = pid ? providerContexts?.[pid] : null;
+    const v = ctx?.rawMappingText;
+    if (typeof v === 'string' && v.trim()) return v;
+    const narrative = (mappingArtifact as any)?.semantic?.narrative;
+    if (typeof narrative === 'string') return narrative;
+    if (narrative && typeof narrative === 'object') {
+      try {
+        return JSON.stringify(narrative, null, 2);
+      } catch {
+        return String(narrative);
+      }
+    }
+    return '';
+  }, [activeMappingPid, providerContexts, mappingArtifact]);
 
   const parsedMapping = useMemo(() => {
     const claims = Array.isArray(mappingArtifact?.semantic?.claims)
@@ -1097,6 +1104,7 @@ export const DecisionMapSheet = React.memo(() => {
     const singularityPrompt = (aiTurn as any)?.singularity?.prompt || null;
     const ghosts = mappingArtifact?.semantic?.ghosts || (parsedMapping as any)?.ghosts || null;
     const conditionals = mappingArtifact?.semantic?.conditionals || (parsedMapping as any)?.conditionals || null;
+    const determinants = (mappingArtifact as any)?.semantic?.determinants || (parsedMapping as any)?.determinants || null;
     const embeddingStatus = mappingArtifact?.geometry?.embeddingStatus || null;
     const artifactMeta = mappingArtifact?.meta || null;
 
@@ -1112,10 +1120,10 @@ export const DecisionMapSheet = React.memo(() => {
       { key: 'narrative', label: 'Narrative', kind: 'text' as const, value: narrative || '' },
       { key: 'ghosts', label: 'Ghost Claims', kind: 'json' as const, value: ghosts },
       { key: 'conditionals', label: 'Conditionals', kind: 'json' as const, value: conditionals },
+      { key: 'determinants', label: 'Determinants', kind: 'json' as const, value: determinants },
       { key: 'embedding_status', label: 'Embedding Status', kind: 'text' as const, value: embeddingStatus || '' },
       { key: 'artifact_meta', label: 'Artifact Meta', kind: 'json' as const, value: artifactMeta },
 
-      { key: 'mapper_prompt', label: 'Mapper Prompt', kind: 'text' as const, value: semanticMapperPrompt || '' },
       { key: 'raw_mapping', label: 'Raw Mapping Text', kind: 'text' as const, value: rawMappingText || '' },
       { key: 'singularity_prompt', label: 'Semantic Prompt', kind: 'text' as const, value: singularityPrompt || '' },
 
@@ -1128,7 +1136,7 @@ export const DecisionMapSheet = React.memo(() => {
       { key: 'singularity_output', label: 'Singularity Output', kind: 'json' as const, value: singularityOutput },
       { key: 'cognitive_artifact', label: 'Cognitive Artifact', kind: 'json' as const, value: mappingArtifact },
     ];
-  }, [aiTurn, derivedMapperArtifact, parsedMapping, graphData, singularityState.output, mappingArtifact, semanticMapperPrompt, rawMappingText, paragraphProjection, structuralAnalysis]);
+  }, [aiTurn, derivedMapperArtifact, parsedMapping, graphData, singularityState.output, mappingArtifact, rawMappingText, paragraphProjection, structuralAnalysis]);
 
   const [openJsonKeys, setOpenJsonKeys] = useState<Set<string>>(() => new Set());
 
