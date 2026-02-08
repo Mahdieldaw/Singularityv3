@@ -598,11 +598,15 @@ const DecisionMapGraph: React.FC<Props> = ({
                         const coords = getEdgeCoords(edge);
                         if (!coords) return null;
 
-                        const baseColor =
-                            edge.type === 'supports' ? '#9ca3af' :
-                                edge.type === 'conflicts' ? '#ef4444' :
-                                    edge.type === 'tradeoff' ? '#f97316' :
-                                        '#9ca3af';
+                        const getEdgeColor = (type?: string) => {
+                            switch (type) {
+                                case 'supports': return '#9ca3af';
+                                case 'conflicts': return '#ef4444';
+                                case 'tradeoff': return '#f97316';
+                                default: return '#9ca3af';
+                            }
+                        };
+                        const baseColor = getEdgeColor(edge.type);
                         const dash =
                             edge.type === 'conflicts' ? '6,4' :
                                 edge.type === 'tradeoff' ? '2,2' :
@@ -704,8 +708,8 @@ const DecisionMapGraph: React.FC<Props> = ({
                                     isFragile ? '#f97316' :           // Orange for fragile
                                         isPeak ? '#3b82f6' :              // Blue for peaks
                                             enriched?.isChallenger ? '#f59e0b' :
-                                                    enriched?.isHighSupport ? '#10b981' :
-                                                        getRoleColor(node.role);
+                                                enriched?.isHighSupport ? '#10b981' :
+                                                    getRoleColor(node.role);
 
                         const isSelected = Array.isArray(selectedClaimIds) && selectedClaimIds.includes(node.id);
                         const showWarning = isFragile;
@@ -961,7 +965,7 @@ const DecisionMapGraph: React.FC<Props> = ({
                                 <div
                                     style={{
                                         background: 'rgba(0,0,0,0.95)',
-                        border: `1px solid ${hoveredEdge.edge.type === 'supports' ? '#9ca3af' : hoveredEdge.edge.type === 'conflicts' ? '#ef4444' : hoveredEdge.edge.type === 'tradeoff' ? '#f97316' : '#9ca3af'}`,
+                                        border: `1px solid ${hoveredEdge.edge.type === 'supports' ? '#9ca3af' : hoveredEdge.edge.type === 'conflicts' ? '#ef4444' : hoveredEdge.edge.type === 'tradeoff' ? '#f97316' : '#9ca3af'}`,
                                         borderRadius: 6,
                                         padding: '6px 10px',
                                         fontSize: 11,

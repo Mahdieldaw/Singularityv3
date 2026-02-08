@@ -51,9 +51,7 @@ export function buildSemanticMapperPrompt(
 Where their perspectives fork — where one path structurally excludes another — that's a question only the user can resolve. Where their advice assumes something about the user's situation that may not be true — that's a question too. Most landscapes contain few of these. Some contain none. Your job is to find exactly as many as exist, then deliver them inside a narrative that makes the terrain walkable and a map that makes it mechanically navigable.
  
 Input payload:
- 
-text
- 
+
 <query> ${userQuery} </query>
 <model_outputs> ${modelOutputs} </model_outputs>
 
@@ -118,8 +116,6 @@ Walk the reader through the terrain as if you simply know it. Use [Label|claim_i
 
 Map
 Wrap in <map> tags. Output structured JSON with this shape:
-
-JSON
 
 {
   "claims": [

@@ -994,7 +994,6 @@ export class StepExecutor {
                   enrichedClaims.map((c) => [c.id, c.label]),
                 );
 
-                const enablesById = new Map();
                 const conflictsById = new Map();
 
                 for (const e of unifiedEdges) {
@@ -1022,7 +1021,6 @@ export class StepExecutor {
                     : [];
 
                   const tier = tierByClaimId.get(id) ?? 0;
-                  const enables = enablesById.has(id) ? Array.from(enablesById.get(id)) : [];
                   const conflicts = conflictsById.has(id) ? conflictsById.get(id) : [];
 
                   return {
@@ -1032,7 +1030,6 @@ export class StepExecutor {
                     gates: {
                       conditionals: [],
                     },
-                    enables,
                     conflicts,
                     sourceStatementIds,
                     supporterModels: supporters,
@@ -1633,7 +1630,7 @@ export class StepExecutor {
       ConciergeService = null;
     }
 
-	    let singularityPrompt;
+    let singularityPrompt;
 
     if (!ConciergeService) {
       throw new Error("ConciergeService is not available. Cannot execute Singularity step.");

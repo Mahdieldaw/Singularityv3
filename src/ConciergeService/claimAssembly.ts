@@ -81,7 +81,7 @@ export async function reconstructProvenance(
             if (supportDeltaRatio >= 0.15) {
                 const highId = aRatio >= bRatio ? a : b;
                 const lowId = aRatio >= bRatio ? b : a;
-                const highIsStable = (supportCountById.get(highId) || 0) / denom >= 0.25;
+                const highIsStable = highId === a ? aIsHighSupport : bIsHighSupport;
                 if (highIsStable) {
                     byId.set(lowId, 'challenger');
                 }
@@ -385,7 +385,6 @@ export function assembleClaims(
         };
     });
 
-    // Second pass: compute inverse relationships (enables)
     for (const claim of claims) {
         claim.enables = Array.from(new Set(claim.enables));
     }

@@ -220,6 +220,22 @@ export function buildConciergePrompt(
         ? `<EVIDENCE_SUBSTRATE>\n${options.evidenceSubstrate}\n</EVIDENCE_SUBSTRATE>\n\n`
         : '';
 
+    const contextBlock = priorContextSection
+        ? `<CONTEXT non_authoritative="true">\n${priorContextSection}${historySection}</CONTEXT>\n\n`
+        : historySection;
+    const workflowBlock = workflowSection ? `${workflowSection}\n` : '';
+
+    // Actually, looking at the original logic:
+    // ${priorContextSection ? `<CONTEXT non_authoritative="true">\n${priorContextSection}${historySection}</CONTEXT>\n\n` : historySection}
+    // and
+    // ${workflowSection ? `${workflowSection}\n` : ''}${evidenceSubstrateSection}
+
+    const parts = [
+        contextBlock,
+        workflowBlock,
+        evidenceSubstrateSection
+    ];
+
     return `Singularity Prompt 
 You are about to answer someone's question. 
 
@@ -234,10 +250,10 @@ The agreements that held up. The advice that still applies. The tensions that ar
 You are not synthesizing six opinions. You are reading a landscape that has already been walked and filtered by the person standing in it. Your job is the simplest and hardest thing: answer their query like it's the only question that matters. 
 
 <query> 
-${userMessage} 
+${escapeUserMessage(userMessage)} 
 </query> 
 
-${priorContextSection ? `<CONTEXT non_authoritative="true">\n${priorContextSection}${historySection}</CONTEXT>\n\n` : historySection}${workflowSection ? `${workflowSection}\n` : ''}${evidenceSubstrateSection}
+${parts.filter(Boolean).join('')}
 
 Answer. 
 

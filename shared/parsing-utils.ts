@@ -1218,8 +1218,6 @@ export function parseSemanticMapperOutput(
         const derivedEdges: any[] = [];
         const derivedConditionals: any[] = [];
 
-        normalizedDeterminants = [];
-
         for (let i = 0; i < determinants.length; i++) {
             const d = determinants[i];
             const ctx = `determinants[${i}]`;
@@ -1234,9 +1232,9 @@ export function parseSemanticMapperOutput(
             const hinge = String(((d as any).hinge ?? '') || '').trim();
             const question = String(((d as any).question ?? '') || '').trim();
             const rawClaims = Array.isArray((d as any).claims) ? (d as any).claims : [];
-            const paths = (d as any).paths && typeof (d as any).paths === 'object' ? (d as any).paths : null;
+            const paths = (d as any).paths && typeof (d as any).paths === 'object' && !Array.isArray((d as any).paths) ? (d as any).paths : null;
             const pathClaimIds = paths ? Object.keys(paths).map((k) => String(k || '').trim()).filter(Boolean) : [];
-            const claimIds = (pathClaimIds.length > 0 ? pathClaimIds : rawClaims.map((c: any) => String(c || '').trim()).filter(Boolean));
+            const detClaimIds = (pathClaimIds.length > 0 ? pathClaimIds : rawClaims.map((c: any) => String(c || '').trim()).filter(Boolean));
             const yesMeans = String(((d as any).yes_means ?? '') || '').trim();
             const noMeans = String(((d as any).no_means ?? '') || '').trim();
 
@@ -1248,7 +1246,7 @@ export function parseSemanticMapperOutput(
                 warnings.push(`${ctx}.question is empty; skipping`);
                 continue;
             }
-            if (claimIds.length === 0) {
+            if (detClaimIds.length === 0) {
                 warnings.push(`${ctx}.claims is empty; skipping`);
                 continue;
             }
@@ -1261,7 +1259,7 @@ export function parseSemanticMapperOutput(
                 fork,
                 hinge,
                 question,
-                claims: claimIds,
+                claims: detClaimIds,
             };
             if (paths) normalized.paths = paths;
             if (type === 'extrinsic') {
@@ -1271,15 +1269,15 @@ export function parseSemanticMapperOutput(
             normalizedDeterminants.push(normalized);
 
             if (type === 'intrinsic') {
-                if (claimIds.length < 2) {
+                if (detClaimIds.length < 2) {
                     warnings.push(`${ctx}.claims has <2 items; no conflict edges derived`);
                     continue;
                 }
-                for (let a = 0; a < claimIds.length; a++) {
-                    for (let b = a + 1; b < claimIds.length; b++) {
+                for (let a = 0; a < detClaimIds.length; a++) {
+                    for (let b = a + 1; b < detClaimIds.length; b++) {
                         derivedEdges.push({
-                            from: claimIds[a],
-                            to: claimIds[b],
+                            from: detClaimIds[a],
+                            to: detClaimIds[b],
                             type: 'conflict',
                             question,
                         });
@@ -1292,7 +1290,7 @@ export function parseSemanticMapperOutput(
                 derivedConditionals.push({
                     id,
                     question,
-                    affectedClaims: claimIds,
+                    affectedClaims: detClaimIds,
                 });
             }
         }

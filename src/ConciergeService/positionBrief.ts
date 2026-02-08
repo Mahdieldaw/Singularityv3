@@ -101,11 +101,6 @@ function buildTensionPairs(
 
 // NEW: Targeted structural analysis for active/path-specific concerns
 export interface TargetedAnalysis {
-    keystones: Array<{
-        claim: EnrichedClaim;
-        dependentCount: number;
-        userConfirmed: boolean;  // Did user confirm this?
-    }>;
     dissent: Array<{
         claim: EnrichedClaim;
         contrastingWith: string; // User's preference
@@ -136,8 +131,6 @@ export function computeTargetedAnalysis(
             .map(r => String(r.selectedClaimId))
     );
 
-    // 1) Keystones: active claims that many others depend on (cascade size)
-    const keystones: TargetedAnalysis['keystones'] = [];
 
     // 2) Dissent: active claims that conflict with something the user has chosen
     const dissent: Array<{ claim: EnrichedClaim; contrastingWith: string }> = [];
@@ -187,9 +180,8 @@ export function computeTargetedAnalysis(
     }
 
     return {
-        keystones,
         dissent: dedupedDissent,
-        fragilePaths,
+        fragilePaths: fragilePaths,
     };
 }
 
@@ -202,11 +194,6 @@ export function formatTargetedInsights(
 ): string {
     const notes: string[] = [];
 
-    for (const ks of analysis.keystones) {
-        if (ks.userConfirmed) {
-            notes.push(`⚠️ The "${ks.claim.label}" you confirmed is a keystone — ${ks.dependentCount} claims depend on it`);
-        }
-    }
 
     for (const d of analysis.dissent) {
         notes.push(`📊 Dissent exists on "${d.claim.label}" despite your preference for "${d.contrastingWith}"`);

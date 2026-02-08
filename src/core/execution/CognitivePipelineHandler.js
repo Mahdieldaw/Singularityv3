@@ -102,7 +102,9 @@ export class CognitivePipelineHandler {
                 ),
               }
               : undefined;
-          } catch (_) { }
+          } catch (err) {
+            console.warn("[CognitiveHandler] Batch phase reconstruction error:", err?.message || err, err?.stack);
+          }
 
           const safeCognitiveArtifact =
             this.sessionManager && typeof this.sessionManager._safeArtifact === "function"
@@ -959,7 +961,7 @@ export class CognitivePipelineHandler {
           }
         } catch (_) { }
 
-        this.port?.postMessage({
+        this.port.postMessage({
           type: "TURN_FINALIZED",
           sessionId: effectiveSessionId,
           userTurnId: userTurnId,

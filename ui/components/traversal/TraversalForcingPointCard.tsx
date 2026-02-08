@@ -73,11 +73,12 @@ export const TraversalForcingPointCard: React.FC<TraversalForcingPointCardProps>
       typeIcon = '🔀';
       typeLabel = 'Conditional';
       break;
-    default:
-      typeIcon = '🔀';
-      typeLabel = 'Decision';
-      break;
   }
+  // Fix for TS exhaustiveness: marking the switch as definitive
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const _exhaustive: never = forcingPoint.type as never;
+  void _exhaustive;
+
   const normalizedQuestion = String(forcingPoint.question || '').trim();
   const normalizedCondition = String(forcingPoint.condition || '').trim();
   const showCondition = normalizedCondition.length > 0 && normalizedCondition !== normalizedQuestion;
@@ -123,7 +124,7 @@ export const TraversalForcingPointCard: React.FC<TraversalForcingPointCardProps>
         {!isResolved && !disabled && (
           <div className="mt-4">
             <button
-              onClick={() => !disabled && setExpanded(!expanded)}
+              onClick={() => setExpanded(!expanded)}
               disabled={disabled}
               className="px-3 py-1.5 rounded-lg bg-surface-highlight hover:bg-surface-raised border border-border-subtle text-xs font-medium transition-colors"
             >
@@ -151,7 +152,6 @@ export const TraversalForcingPointCard: React.FC<TraversalForcingPointCardProps>
             <div className="flex gap-2">
               <button
                 onClick={() => {
-                  if (disabled) return;
                   onResolveGate(forcingPoint.id, true, userInput.trim() || undefined);
                   setExpanded(false);
                 }}
@@ -162,7 +162,6 @@ export const TraversalForcingPointCard: React.FC<TraversalForcingPointCardProps>
               </button>
               <button
                 onClick={() => {
-                  if (disabled) return;
                   onResolveGate(forcingPoint.id, false, userInput.trim() || undefined);
                   setExpanded(false);
                 }}
@@ -173,7 +172,7 @@ export const TraversalForcingPointCard: React.FC<TraversalForcingPointCardProps>
               </button>
             </div>
             <button
-              onClick={() => !disabled && setExpanded(false)}
+              onClick={() => setExpanded(false)}
               disabled={disabled}
               className="w-full px-4 py-2 rounded-lg bg-surface-highlight hover:bg-surface-raised border border-border-subtle text-text-secondary font-medium text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
@@ -221,7 +220,7 @@ export const TraversalForcingPointCard: React.FC<TraversalForcingPointCardProps>
           return (
             <button
               key={option.claimId}
-              onClick={() => !isResolved && !disabled && setSelectedOption(option.claimId)}
+              onClick={() => !isResolved && setSelectedOption(option.claimId)}
               disabled={isResolved || disabled}
               className={`w-full h-full p-4 rounded-lg border-2 text-left transition-all ${isThisResolved
                 ? 'border-green-500 bg-green-500/10'

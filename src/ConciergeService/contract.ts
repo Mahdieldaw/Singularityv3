@@ -54,7 +54,7 @@ export interface Claim {
     };
 
     // Relationships (minimal, provenance-required)
-    enables?: string[];            // Claim IDs this enables (beyond dependencies)
+    enables?: string[];            // Claim IDs this enables (beyond supports)
     conflicts?: ConflictEdge[];    // Conflicts with provenance (REQUIRED)
 
     // Provenance (non-negotiable)

@@ -544,9 +544,16 @@ function formatBridge(matched: MatchedClaim[], edges: RelevantEdge[]): string {
   if (edges.length > 0) {
     lines.push('');
     for (const e of edges) {
-      const verb = e.type === 'conflicts' ? '↔ conflicts' :
-        e.type === 'supports' ? '→ supports' :
-          e.type === 'tradeoff' ? '⇄ tradeoff' : '—';
+      let verb = '—';
+      if (e.type === 'conflicts') {
+        verb = '↔ conflicts';
+      } else if (e.type === 'supports') {
+        verb = '→ supports';
+      } else if (e.type === 'tradeoff') {
+        verb = '⇄ tradeoff';
+      } else {
+        console.warn(`[ReactiveBridge] Unknown edge type "${e.type}" between ${e.fromLabel} and ${e.toLabel}`);
+      }
       lines.push(`  ${e.fromLabel} ${verb} ${e.toLabel}`);
     }
   }

@@ -91,13 +91,12 @@ export interface MapperClaim {
   supporters: number[];
 }
 
-export type MapperEdge =
-  | {
-    from: string;
-    to: string;
-    type: 'conflict';
-    question?: string | null;
-  };
+export interface MapperEdge {
+  from: string;
+  to: string;
+  type: 'conflict';
+  question?: string | null;
+}
 
 export interface ConditionalPruner {
   id: string;
